@@ -267,6 +267,86 @@ pub(crate) fn is_compiled_twin(path: &Path) -> bool {
     }
 }
 
+/// A fingerprint of the source files of one language family under `root`, for a cache whose
+/// entries depend on files they do not name: a `callers` result depends on every file that might
+/// call the symbol, and a file with no call of it yet is in none of the cached edges (bug
+/// `489e013ddfd6c3fc`).
+///
+/// A SHA-256 over the sorted `(path below root, length, mtime in nanoseconds)` of every file that
+/// [`scan_walk`] reaches and whose language is in the family of `seed_lang` (an AST language
+/// name). An added, removed, resized or touched file changes it, and so does a file replaced with
+/// an OLDER mtime (`cp -p`, `rsync -t`), which "the newest mtime" would not see. Files of other
+/// languages do not enter it. Compiled twins are not skipped: they are files of the family too.
+///
+/// `None` means the fingerprint cannot vouch for the tree: the walk was cut short by `cap`, or an
+/// entry could not be produced. A caller must then not reuse a cached result, because a file it
+/// did not see may have changed.
+pub(crate) fn language_epoch(root: &Path, seed_lang: &str, cap: usize) -> Option<String> {
+    use sha2::{Digest, Sha256};
+
+    let family = crate::ast::language_family(seed_lang);
+    let mut budget = ScanBudget::new(cap);
+    let mut files: Vec<(String, u64, u128)> = Vec::new();
+    for item in scan_walk(root) {
+        let Some(entry) = budget.entry(item) else {
+            continue;
+        };
+        let path = entry.path();
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        let Some(file_lang) = crate::ast::detect_language(path) else {
+            continue;
+        };
+        if crate::ast::language_family(file_lang) != family {
+            continue;
+        }
+        if !budget.admit() {
+            return None;
+        }
+        let (len, nanos) = match entry.metadata() {
+            Ok(meta) => (
+                meta.len(),
+                meta.modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |d| d.as_nanos()),
+            ),
+            // A file the walk found and cannot stat is part of the tree: a mark that no real
+            // length takes, so it differs from the same file once it can be read.
+            Err(_) => (u64::MAX, 0),
+        };
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        files.push((rel, len, nanos));
+    }
+    if budget.coverage().walk_errors > 0 {
+        return None;
+    }
+    files.sort();
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"language-epoch-v1\0");
+    hasher.update(family.as_bytes());
+    hasher.update(b"\0");
+    for (rel, len, nanos) in &files {
+        hasher.update(rel.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(len.to_le_bytes());
+        hasher.update(nanos.to_le_bytes());
+    }
+    Some(
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect(),
+    )
+}
+
 /// Fixture support for tests that need a directory the process cannot enter.
 #[cfg(all(test, unix))]
 pub(crate) mod test_support {
@@ -528,6 +608,109 @@ mod tests {
             2,
             "the outward file link and the outward directory link; not the inward link, \
              not the dangling one"
+        );
+    }
+
+    // ── language_epoch: the fingerprint of the source files of one language family ──
+
+    fn write_pinned(path: &Path, text: &str, secs: i64) {
+        std::fs::write(path, text).unwrap();
+        filetime::set_file_mtime(path, filetime::FileTime::from_unix_time(secs, 0)).unwrap();
+    }
+
+    fn rust_epoch(dir: &Path) -> Option<String> {
+        language_epoch(dir, "rust", 100)
+    }
+
+    #[test]
+    fn the_epoch_changes_when_a_source_file_is_added_touched_or_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.rs");
+        let b = dir.path().join("b.rs");
+        write_pinned(&a, "fn a() {}\n", 1_600_000_000);
+        let base = rust_epoch(dir.path()).unwrap();
+        assert_eq!(
+            rust_epoch(dir.path()).unwrap(),
+            base,
+            "stable while nothing changes"
+        );
+
+        write_pinned(&b, "fn b() {}\n", 1_600_000_000);
+        let with_b = rust_epoch(dir.path()).unwrap();
+        assert_ne!(with_b, base, "a file added");
+
+        // Same length, new mtime: only the mtime tells.
+        write_pinned(&b, "fn c() {}\n", 1_600_000_060);
+        let touched = rust_epoch(dir.path()).unwrap();
+        assert_ne!(touched, with_b, "a file touched");
+
+        std::fs::remove_file(&b).unwrap();
+        assert_eq!(
+            rust_epoch(dir.path()).unwrap(),
+            base,
+            "a file removed brings the first tree back"
+        );
+    }
+
+    /// `cp -p` and `rsync -t` give a replaced file its OLD mtime. "The newest mtime" would not move;
+    /// the hash over every file does.
+    #[test]
+    fn a_file_replaced_with_an_older_mtime_still_changes_the_epoch() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.rs");
+        write_pinned(&a, "fn a() {}\n", 1_600_000_100);
+        let before = rust_epoch(dir.path()).unwrap();
+        write_pinned(&a, "fn b() {}\n", 1_500_000_000);
+        assert_ne!(rust_epoch(dir.path()).unwrap(), before);
+    }
+
+    #[test]
+    fn the_epoch_ignores_files_of_other_languages() {
+        let dir = tempfile::tempdir().unwrap();
+        write_pinned(&dir.path().join("a.rs"), "fn a() {}\n", 1_600_000_000);
+        let before = rust_epoch(dir.path()).unwrap();
+        write_pinned(&dir.path().join("README.md"), "# one\n", 1_600_000_000);
+        write_pinned(&dir.path().join("tool.py"), "x = 1\n", 1_600_000_000);
+        assert_eq!(rust_epoch(dir.path()).unwrap(), before);
+        write_pinned(&dir.path().join("README.md"), "# two!\n", 1_600_000_500);
+        assert_eq!(
+            rust_epoch(dir.path()).unwrap(),
+            before,
+            "a change in another language is not a change of the Rust tree"
+        );
+    }
+
+    #[test]
+    fn the_epoch_is_unknown_when_the_walk_is_cut_short_by_its_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            write_pinned(&dir.path().join(name), "fn f() {}\n", 1_600_000_000);
+        }
+        assert!(
+            language_epoch(dir.path(), "rust", 3).is_some(),
+            "ends exactly on its cap"
+        );
+        assert!(
+            language_epoch(dir.path(), "rust", 2).is_none(),
+            "a tree the walk could not cover cannot be vouched for"
+        );
+    }
+
+    /// TypeScript, TSX, JavaScript and JSX are one population (`ast::language_family`): a
+    /// `.js` caller of a `.ts` symbol is a file of the family.
+    #[test]
+    fn the_epoch_of_a_typescript_seed_covers_javascript_files() {
+        let dir = tempfile::tempdir().unwrap();
+        write_pinned(
+            &dir.path().join("lib.ts"),
+            "export function f() {}\n",
+            1_600_000_000,
+        );
+        let before = language_epoch(dir.path(), "typescript", 100).unwrap();
+        write_pinned(&dir.path().join("use.js"), "f();\n", 1_600_000_000);
+        assert_ne!(
+            language_epoch(dir.path(), "typescript", 100).unwrap(),
+            before
         );
     }
 }

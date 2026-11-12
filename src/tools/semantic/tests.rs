@@ -1229,13 +1229,13 @@ async fn a_focused_member_does_not_double_the_prefix() {
     assert!(focused.join(&paths[0]).is_file());
 }
 
-/// Pins a CURRENT LIMITATION, not a wanted behaviour: a session focused on member `alpha` that
-/// passes an explicit `project_id` naming a sibling member `beta`. `beta`'s directory is not under
-/// the focused root (`crates/alpha`), so `strip_prefix` fails and the hits stay as the store
-/// returned them (`src/lib.rs`, relative to `crates/beta`). Those paths do not resolve against
-/// the root `read_file` uses. If this is ever fixed, this test must change with it.
+/// A session focused on member `alpha` that passes an explicit `project_id` naming a sibling member
+/// `beta`. `beta`'s directory is not under the focused root (`crates/alpha`), so the prefix is the
+/// path from the focused root to it: `../beta`. The hit then opens with `read_file`, which resolves
+/// a relative path against the focused root, as the tool's documentation says.
+/// BUG docs/issues/2026-11-08-semantic-search-sibling-member-project-id-returns-member-relative-paths-and-the-call-site-is-untested.md
 #[tokio::test]
-async fn pins_current_limitation_sibling_member_hits_stay_member_relative() {
+async fn sibling_member_hits_resolve_against_the_focused_root() {
     let (_host, root) = two_member_workspace();
     let agent = Agent::new(Some(root.clone())).await.unwrap();
     agent
@@ -1254,9 +1254,31 @@ async fn pins_current_limitation_sibling_member_hits_stay_member_relative() {
     super::semantic_search::lift_explicit_member_hits(&ctx, "beta", Some(&focused), &mut hits)
         .await;
 
-    assert_eq!(hits[0].file_path, "src/lib.rs");
+    assert_eq!(hits[0].file_path, "../beta/src/lib.rs");
     assert!(
-        !focused.join(&hits[0].file_path).is_file(),
-        "the unlifted path does not resolve against the focused root"
+        focused.join(&hits[0].file_path).is_file(),
+        "the lifted path resolves against the focused root"
     );
+}
+/// The prefix `lift_explicit_member_hits` builds: down into a member, up out of one, across to a
+/// sibling, and nothing when the focused root is the member itself.
+#[test]
+fn relative_path_between_climbs_out_of_the_first_directory_and_descends_into_the_second() {
+    use super::semantic_search::relative_path_between as between;
+    use std::path::Path;
+    let cases = [
+        ("/w/crates/alpha", "/w/crates/alpha", Some("")),
+        ("/w", "/w/crates/beta", Some("crates/beta")),
+        ("/w/crates/alpha", "/w/crates/beta", Some("../beta")),
+        ("/w/crates/alpha/src", "/w/crates/beta", Some("../../beta")),
+        ("/w/crates/beta/sub", "/w/crates/beta", Some("..")),
+    ];
+    for (from, to, expected) in cases {
+        assert_eq!(
+            between(Path::new(from), Path::new(to)),
+            expected.map(std::path::PathBuf::from),
+            "from {from} to {to}"
+        );
+    }
+    assert_eq!(between(Path::new("rel"), Path::new("/abs")), None);
 }

@@ -1167,6 +1167,14 @@ pub(crate) fn summarize_test_output_within(
 
     result
 }
+/// Whether a test summary (from [`summarize_test_output_within`]) states a verdict: a counted pass,
+/// a counted failure, or a failures section. A summary without one says `passed: 0` about text
+/// that held no libtest result at all, which is not the same as a run of no tests.
+pub(crate) fn states_a_test_verdict(summary: &Value) -> bool {
+    summary["passed"].as_u64().is_some_and(|n| n > 0)
+        || summary.get("failed").is_some()
+        || summary.get("failures").is_some()
+}
 
 /// Produce a structured summary of compiler / build-tool output.
 ///
@@ -2063,6 +2071,26 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
     fn summarize_test_output_omits_empty_stderr() {
         let summary = summarize_test_output("running 0 tests\n", "", 0);
         assert!(summary.get("stderr").is_none() || summary["stderr"].is_null());
+    }
+    /// A summary states a verdict when it counted a pass or a failure, or carries a failures
+    /// section. Text with no libtest result line does not, and neither does a result line of zeros.
+    #[test]
+    fn a_test_summary_states_a_verdict_only_when_it_counted_something() {
+        let budget = SummaryBudget::default();
+        let summarize = |text: &str| summarize_test_output_within(text, "", 0, &budget);
+        assert!(!states_a_test_verdict(&summarize("")));
+        assert!(!states_a_test_verdict(&summarize(
+            "error: could not compile `repro` (lib test) due to 1 previous error\n"
+        )));
+        assert!(!states_a_test_verdict(&summarize(
+            "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured\n"
+        )));
+        assert!(states_a_test_verdict(&summarize(
+            "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured\n"
+        )));
+        assert!(states_a_test_verdict(&summarize(
+            "test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured\n"
+        )));
     }
 
     #[test]

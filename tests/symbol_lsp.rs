@@ -4221,6 +4221,128 @@ async fn replace_force_never_bypasses_name_or_syntax_checks() {
         );
     }
 }
+// ── replace: the target-gone guards on a method inside a Rust impl block ─────
+
+/// A Rust `impl` block as rust-analyzer reports it: an `impl Agent` container with the method
+/// as its child, named `impl Agent/old`. The tree-sitter AST that `do_replace` re-reads to
+/// verify the edit names the same method `Agent/old` and emits no impl symbol, so the two
+/// dialects of one method differ. Bug 6c65843c8018bffa.
+const IMPL_METHOD_FIXTURE: &str =
+    "struct Agent;\n\nimpl Agent {\n    fn old(&self) -> u32 {\n        1\n    }\n}\n\nfn keeper() {}\n";
+
+fn impl_method_symbols(file: &std::path::Path) -> Vec<SymbolInfo> {
+    let method = SymbolInfo {
+        name: "old".to_string(),
+        name_path: "impl Agent/old".to_string(),
+        kind: SymbolKind::Method,
+        file: file.to_path_buf(),
+        start_line: 3,
+        end_line: 5,
+        start_col: 4,
+        children: vec![],
+        range_start_line: None,
+        detail: None,
+    };
+    let block = SymbolInfo {
+        name: "impl Agent".to_string(),
+        name_path: "impl Agent".to_string(),
+        kind: SymbolKind::Object,
+        file: file.to_path_buf(),
+        start_line: 2,
+        end_line: 6,
+        start_col: 0,
+        children: vec![method],
+        range_start_line: None,
+        detail: None,
+    };
+    vec![sym("Agent", 0, 0, file), block, sym("keeper", 8, 8, file)]
+}
+
+/// `replace` on `impl Agent/old` with `body`. Returns the project dir (so the caller can read
+/// the file back) and the call's result.
+async fn replace_impl_method(body: &str) -> (tempfile::TempDir, anyhow::Result<serde_json::Value>) {
+    let (dir, ctx) = ctx_with_mock(&[("src/lib.rs", IMPL_METHOD_FIXTURE)], |root| {
+        let file = root.join("src/lib.rs");
+        MockLspClient::new().with_symbols(file.clone(), impl_method_symbols(&file))
+    })
+    .await;
+    let result = EditCode
+        .call(
+            json!({
+                "path": "src/lib.rs",
+                "symbol": "impl Agent/old",
+                "action": "replace",
+                "body": body,
+            }),
+            &ctx,
+        )
+        .await;
+    (dir, result)
+}
+
+/// The rename refusal must fire for a method inside an impl block as it does for a free
+/// function. Before the fix `do_replace` counted the target in the AST under the LSP's name
+/// (`impl Agent/old`), found 0, and `corruption_verdict`'s `pre_count > 0` gate switched every
+/// target-gone verdict off: the file was rewritten and the call answered `ok`.
+///
+/// Asserts the hint's second call too, because that call must address the renamed method in the
+/// caller's own form (`impl Agent/fresh`), not in the AST's (`Agent/fresh`).
+#[tokio::test]
+async fn replace_of_an_impl_method_by_a_differently_named_declaration_is_refused() {
+    let (dir, result) = replace_impl_method("fn fresh(&self) -> u32 {\n    5\n}").await;
+    let err = result
+        .expect_err("replace must refuse to rename a method inside an impl block")
+        .to_string();
+    assert!(err.contains("cannot rename"), "wrong refusal: {err}");
+    assert!(
+        err.contains(
+            r#"edit_code(action="rename", symbol="impl Agent/old", path="src/lib.rs", new_name="fresh")"#
+        ),
+        "the hint's first call must be sendable as it stands; got: {err}"
+    );
+    assert!(
+        err.contains(r#"symbol="impl Agent/fresh""#),
+        "the hint's second call keeps the caller's name-path form; got: {err}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(),
+        IMPL_METHOD_FIXTURE,
+        "a refused replace must restore the original bytes"
+    );
+}
+
+/// The sibling verdict, same cause: a body of several declarations and none under the target's
+/// name.
+#[tokio::test]
+async fn replace_of_an_impl_method_by_several_declarations_is_refused() {
+    let (dir, result) =
+        replace_impl_method("fn a(&self) -> u32 {\n    1\n}\n\nfn b(&self) -> u32 {\n    2\n}")
+            .await;
+    let err = result
+        .expect_err("replace must refuse a body that never declares the target")
+        .to_string();
+    assert!(err.contains("declares 2 symbols"), "wrong refusal: {err}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(),
+        IMPL_METHOD_FIXTURE,
+        "a refused replace must restore the original bytes"
+    );
+}
+
+/// The allow control, and the one that matters: counting in the AST's dialect must not make
+/// the guard refuse a legitimate edit. A body that keeps the method's name is replaced as
+/// before. An unconditional refusal would pass the two tests above and fail this one.
+#[tokio::test]
+async fn replace_of_an_impl_method_that_keeps_its_name_still_succeeds() {
+    let (dir, result) = replace_impl_method("fn old(&self) -> u32 {\n    7\n}").await;
+    let value = result.expect("a same-name body is an ordinary replace");
+    assert_eq!(value["status"], "ok");
+    let content = std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap();
+    assert!(
+        content.contains("fn old(&self) -> u32 {\n        7\n    }") && !content.contains("fresh"),
+        "the method body must be replaced in place; got:\n{content}"
+    );
+}
 
 #[tokio::test]
 async fn replace_stays_silent_when_the_new_body_is_proportionate() {

@@ -54,7 +54,7 @@ ranked chunks with file path and line range.
 | `scope` | string | no | `"project"` | `"project"`, `"libraries"` for all libraries, `"lib:<name>"` for one, `"all"` for everything |
 | `include_memories` | boolean | no | `false` | Also search semantic memories |
 | `mode` | string | no | `"code"` | `"code"` **excludes markdown chunks** — best for finding implementations. `"full"` includes all indexed content (code + docs). |
-| `project_id` | string | no | — | Filter to a workspace sub-project id. Result `file_path`s are relative to the workspace root, not the sub-project, so they feed `read_file` unchanged; they stay member-relative when the call is pinned to the member (`workspace=<member root>`) or the session is focused on it. |
+| `project_id` | string | no | — | Filter to a workspace sub-project id. Result `file_path`s are relative to the root `read_file` resolves against, not the sub-project, so they feed `read_file` unchanged: workspace-root-relative from the workspace root, `../<member>/...` from a sibling member, and member-relative when the call is pinned to the member (`workspace=<member root>`) or the session is focused on it. |
 
 Two parameter names are easy to get wrong:
 

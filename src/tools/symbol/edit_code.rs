@@ -423,6 +423,79 @@ pub(super) fn renamed_name_path(name_path: &str, new_name: &str) -> String {
         None => new_name.to_string(),
     }
 }
+/// Rollback message for a `replace` whose body declares a DIFFERENT symbol than the target.
+///
+/// `appeared` is the name path the post-edit AST gained (`CorruptionVerdict::TargetRenamed`),
+/// which is a full path for a nested symbol (`Agent/new`), not a bare name.
+///
+/// Wording of the message is load-bearing for telemetry: `usage::db::normalize_err_family`
+/// files a message that starts `edit_code replace(` and contains `) was given a complete
+/// declaration, but it declares ` under `replace_would_rename`.
+pub(crate) fn replace_would_rename_reason(
+    name_path: &str,
+    rel_path: &str,
+    appeared: &str,
+) -> (String, String) {
+    // `appeared` is a name path for a nested symbol: `rename` takes its last segment only,
+    // and the new symbol is addressed in the caller's own form, not the AST's.
+    let new_leaf = appeared.rsplit('/').next().unwrap_or(appeared);
+    let new_name_path = renamed_name_path(name_path, new_leaf);
+    (
+        format!(
+            "edit_code replace('{name_path}') was given a complete declaration, but it \
+             declares `{appeared}` instead of `{name_path}`. `replace` cannot rename — \
+             applying this would have removed `{name_path}` and added a different \
+             symbol. File restored."
+        ),
+        format!(
+            "To rename and change the body, send two calls in order: (1) \
+             edit_code(action=\"rename\", symbol=\"{name_path}\", path=\"{rel_path}\", \
+             new_name=\"{new_leaf}\"), then (2) edit_code(action=\"replace\", \
+             symbol=\"{new_name_path}\", path=\"{rel_path}\", body=<the declaration you \
+             just sent>). To replace only the body, keep the declared name identical \
+             to `symbol`."
+        ),
+    )
+}
+/// Rollback message for a `replace` whose body declares SEVERAL symbols and none of them is the
+/// target (`CorruptionVerdict::TargetReplacedBySeveral`).
+///
+/// Wording of the message is load-bearing for telemetry: `usage::db::normalize_err_family` reads
+/// it. The hint is built per call so the caller can send its calls as they stand.
+pub(crate) fn replace_by_several_reason(
+    name_path: &str,
+    rel_path: &str,
+    new_names: &[String],
+) -> (String, String) {
+    (
+        format!(
+            "edit_code replace('{name_path}') was given a body that declares {} \
+             symbols ({}) and none of them is `{name_path}`. `replace` swaps one \
+             symbol for one symbol and keeps its name. File restored.",
+            new_names.len(),
+            new_names
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        format!(
+            "To keep `{name_path}`, send two calls in order: (1) \
+             edit_code(action=\"replace\", symbol=\"{name_path}\", path=\"{rel_path}\", \
+             body=<only the declaration of `{name_path}`, under its own name>), then (2) \
+             edit_code(action=\"insert\", symbol=\"{name_path}\", path=\"{rel_path}\", \
+             position=\"after\", body=<the other declarations>). To rename it instead, \
+             use edit_code(action=\"rename\", symbol=\"{name_path}\", path=\"{rel_path}\", \
+             new_name=<the new name>)."
+        ),
+    )
+}
+
+/// A rollback reason with the hint owned: lets the arms that return a `&'static str` hint
+/// share a `match` with `replace_would_rename_reason`, whose hint is built per call.
+fn owned_hint((message, hint): (String, &'static str)) -> (String, String) {
+    (message, hint.to_string())
+}
 
 /// Rollback message for a `replace` whose re-parse lost sibling symbols.
 ///
@@ -1407,14 +1480,22 @@ impl EditCode {
         )?;
 
         let pre_ast = crate::ast::extract_symbols(&full_path).ok();
-        let pre_count = pre_ast
-            .as_ref()
-            .map(|syms| count_symbols_by_name_path(syms, &sym.name_path))
-            .unwrap_or(0);
         let pre_set = pre_ast.as_ref().map(|s| collect_all_name_paths(s));
         let target_ast_name_path = pre_ast
             .as_ref()
             .and_then(|s| find_ast_name_path(s, &sym.name, sym.start_line));
+        // Count the target in the AST's own dialect. `sym.name_path` is the LSP's, and the two
+        // differ for a method inside a Rust `impl` block (LSP `impl Agent/old`, AST `Agent/old`),
+        // so counting by it gave 0 and switched off every target-gone verdict behind
+        // `pre_count > 0`: such a method could be renamed or replaced by several declarations
+        // under `status: ok`. Falls back to the LSP path when the AST has no match (a
+        // backtick-quoted Kotlin name, a range the AST places elsewhere), which is the old
+        // behaviour. Bug 6c65843c8018bffa.
+        let counted_name_path: &str = target_ast_name_path.as_deref().unwrap_or(&sym.name_path);
+        let pre_count = pre_ast
+            .as_ref()
+            .map(|syms| count_symbols_by_name_path(syms, counted_name_path))
+            .unwrap_or(0);
 
         // bug 7dc6ea026d9881e6: `replace` overwrites the symbol's WHOLE range, so a
         // caller who supplied a partial body — having read only the top of the
@@ -1493,62 +1574,42 @@ impl EditCode {
             pre_count,
             pre_set.as_ref(),
             target_ast_name_path.as_deref(),
-            &sym.name_path,
+            counted_name_path,
             post_ast.as_deref(),
             syntax_regressed,
         );
 
         // Both corrupting verdicts roll the file back identically; only the message differs.
-        let rollback_reason =
-            match &verdict {
-                CorruptionVerdict::TargetRenamed(new_name) => Some((
-                    format!(
-                        "edit_code replace('{name_path}') was given a complete declaration, but it \
-                     declares `{new_name}` instead of `{name_path}`. `replace` cannot rename — \
-                     applying this would have removed `{name_path}` and added a different \
-                     symbol. File restored."
-                    ),
-                    "To rename: edit_code(action=\"rename\", symbol=..., new_name=...) — then \
-                 replace the body in a second call if it also changed. To replace only the \
-                 body, keep the declared name identical to `symbol`.",
-                )),
-                CorruptionVerdict::TargetReplacedBySeveral(new_names) => Some((
-                    format!(
-                        "edit_code replace('{name_path}') was given a body that declares {} \
-                     symbols ({}) and none of them is `{name_path}`. `replace` swaps one \
-                     symbol for one symbol and keeps its name. File restored.",
-                        new_names.len(),
-                        new_names
-                            .iter()
-                            .map(|n| format!("`{n}`"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                    "Replace `symbol` with a body that declares only that symbol, under its own \
-                 name, then add the others with edit_code(action=\"insert\", symbol=..., \
-                 position=\"after\", body=...). To rename it, use edit_code(action=\"rename\", \
-                 symbol=..., new_name=...).",
-                )),
-                CorruptionVerdict::TargetDropped => Some((
-                    format!(
-                        "edit_code replace('{name_path}') dropped the symbol definition — \
+        let rollback_reason: Option<(String, String)> = match &verdict {
+            CorruptionVerdict::TargetRenamed(appeared) => {
+                Some(replace_would_rename_reason(name_path, rel_path, appeared))
+            }
+            CorruptionVerdict::TargetReplacedBySeveral(new_names) => {
+                Some(replace_by_several_reason(name_path, rel_path, new_names))
+            }
+            CorruptionVerdict::TargetDropped => Some((
+                format!(
+                    "edit_code replace('{name_path}') dropped the symbol definition — \
                      body must be the complete declaration (attributes, doc comments, \
                      signature, and body), not just body statements. File restored."
-                    ),
-                    "Use symbols(symbol=..., include_body=true) to see the expected format.",
-                )),
-                CorruptionVerdict::SiblingsDropped(dropped) => Some(
-                    replace_siblings_dropped_reason(name_path, dropped, syntax_regressed),
                 ),
-                // The verdict the name-set checks structurally cannot reach: an edit that
-                // drops a closing delimiter loses no symbol name, so it used to land here as
-                // `Clean` with `status: "ok"` and no rollback, leaving the file invalid.
-                // Reported once, on a removal whose AST-repaired range overshot the start by
-                // two lines and took the previous function's `)` and `}` with it.
-                // See docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
-                CorruptionVerdict::SyntaxBroken => Some(replace_syntax_broken_reason(name_path)),
-                CorruptionVerdict::Clean | CorruptionVerdict::Unverified => None,
-            };
+                "Use symbols(symbol=..., include_body=true) to see the expected format."
+                    .to_string(),
+            )),
+            CorruptionVerdict::SiblingsDropped(dropped) => Some(owned_hint(
+                replace_siblings_dropped_reason(name_path, dropped, syntax_regressed),
+            )),
+            // The verdict the name-set checks structurally cannot reach: an edit that
+            // drops a closing delimiter loses no symbol name, so it used to land here as
+            // `Clean` with `status: "ok"` and no rollback, leaving the file invalid.
+            // Reported once, on a removal whose AST-repaired range overshot the start by
+            // two lines and took the previous function's `)` and `}` with it.
+            // See docs/issues/archive/2026-08-07-edit-code-remove-ast-repair-over-deletes.md.
+            CorruptionVerdict::SyntaxBroken => {
+                Some(owned_hint(replace_syntax_broken_reason(name_path)))
+            }
+            CorruptionVerdict::Clean | CorruptionVerdict::Unverified => None,
+        };
 
         if let Some((msg, hint)) = rollback_reason {
             write_lines(&full_path, &lines, content.ends_with('\n'))?;

@@ -324,11 +324,11 @@ into a new entry.
 |---|---|
 | `entry_invalid` | an entry breaks its collection's rules: a status, kind or field the readme does not declare, a field of the wrong type, a blocked or deferred entry with no `revisit_by`, a terminal entry with no `closed`, a non-terminal entry that carries `closed`, or a non-terminal entry that sits in `archive/` |
 | `revisit_due` | a blocked or deferred entry's `revisit_by` has passed |
-| `cited_target_closed` | an open entry has a relation line to a target whose `closed` date is after the entry's `status_since` |
+| `cited_target_closed` | a non-terminal entry has a relation line to a target whose `closed` date is after the entry's `status_since` |
 | `stream_all_terminal` | every entry of a stream is terminal but the stream is not archived |
 | `collection_invalid` | a collection's readme breaks the rules: a schema that does not parse or lacks a required key, `exit_when` missing under `streams/` or `temp/` or present under `ledgers/`, a nested collection, a non-Markdown file in the collection, a file whose frontmatter block does not parse, or a file name that is no key |
 | `ledger_quiet` | a ledger with `review_every` has had no entry created or closed in that period |
-| `terminal_in_live_dir` | a terminal entry has stayed outside `archive/` past a grace period |
+| `terminal_in_live_dir` | a terminal entry of a ledger has stayed outside `archive/` for more than 30 days after its `closed` date (the default grace; a stream is archived whole, see § D3, and `stream_all_terminal` covers it) |
 | `orphan_entry` | a file under a lifecycle folder has no collection readme above it |
 
 Every check reads frontmatter dates and statuses. None reads git commit dates (anti-goal 2).
@@ -342,7 +342,7 @@ parses but breaks the entry rules is reported by `entry_invalid`; a file whose f
 does not parse is reported by `collection_invalid`, by path. Either way it counts as non-terminal
 for `stream_all_terminal`.
 
-Only forward relation labels (`Rests on:`, `Depends on:`) feed `cited_target_closed`. Backward
+Only forward relation labels (`Rests on:`, `Depends on:`) feed `cited_target_closed`. A blocked or deferred entry counts: a closed target is the signal to unblock it. Backward
 labels (`Promoted from:`, `Supersedes:`) record history, so a closed target there is expected
 and never fires. The label vocabulary belongs to the builder; this rule fixes only which
 direction counts.
@@ -459,7 +459,9 @@ Order:
 
 ## What is left to the builder
 
-- The grace period for `terminal_in_live_dir` and the default `review_every`.
+- The default `review_every`. The grace period for `terminal_in_live_dir` is 30 days, measured on
+  `docs/issues` (2026-11-11): of 212 terminal entries outside `archive/`, 69 were older than 14
+  days and 1 older than 30.
 - Whether `doc(create)` for entries is a new action or a mode of `create`.
 - Where the three lifecycle constants live, and the classify/indexer change that marks a
   file under a lifecycle folder as an entry or a collection.

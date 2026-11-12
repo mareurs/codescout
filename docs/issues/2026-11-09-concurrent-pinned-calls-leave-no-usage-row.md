@@ -121,7 +121,17 @@ What this does NOT show: that the sweep was the lock holder for the dropped rows
 ## Tests added
 `usage::db::tests::the_retention_sweeps_are_served_by_the_called_at_index` (2026-11-11). It plans both sweep statements, with and without a `pika_observations` table, on a fresh database and again after dropping the index and reopening. It was red first: `plan: SCAN tool_calls`. It is green with the index. `cargo test --lib -- usage::` passes (114 tests).
 
-Still missing: the regression test for the dropped rows themselves. It should issue N concurrent pinned calls through `dispatch_tool_call` and assert N rows.
+Not added, on purpose: the regression test for the dropped rows themselves (N concurrent pinned calls through `dispatch_tool_call`, asserting N rows). Hypothesis 7 shows that such a test passed in the broken world, and hypothesis 9 shows the loss comes from several server processes contending for one file, which one in-process test cannot create. A green result would not be evidence.
+
+**Measured 2026-11-11, the check the Fix section names** (`usage-lock-holds.log` and `usage-dropped-rows.log`, builds split by whether they contain `043ba4d06`, via `git merge-base --is-ancestor`; 19 builds, 6 with the index):
+
+| | builds without the index | builds with the index |
+|---|---|---|
+| calls since the log began (2026-11-09 20:21 UTC) | 22,224 | 3,371 |
+| `retention_sweep` holds of 250 ms or more | 1,093 (4.9% of calls; median 2,631 ms; 95 of 5 s or more) | 1 (0.03% of calls; 429 ms) |
+| dropped rows | 139, last 2026-11-10 23:07 UTC (and 72 from older binaries that name no build) | 0 |
+
+The slow sweeps are gone on builds with the index. That part of the fix is shown. NOT shown: that the index prevented any drop. Since the last recorded drop (2026-11-10 23:07 UTC), builds without the index served 11,489 more calls with 0 drops, and builds with it 3,378 with 0, so drops stopped on every build in that period. The holder of the lock is still not named. A hold line of 250 ms or more is a logged threshold, so a smaller count can also mean fewer sweeps; the per-call rate above removes that doubt only in part, because builds differ in other ways too. The bug stays `investigating`.
 
 ## Workarounds
 Do not pass `workspace=` on concurrent read calls when the usage rows matter. Treat per-tool counts from pinned subagent sessions as lower bounds.

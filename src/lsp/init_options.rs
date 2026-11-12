@@ -47,6 +47,19 @@ pub(crate) fn wants_progress(server_command: &str) -> bool {
     is_rust_analyzer(server_command)
 }
 
+/// Whether codescout declares `textDocument.callHierarchy` to `server_command`.
+/// `typescript-language-server` leaves `callHierarchyProvider` out of its capabilities until the
+/// client declares it, and `LspClient::prepare_call_hierarchy` returns `None` without the provider,
+/// so `call_graph` never reached the server for TypeScript or JavaScript. pyright, gopls and
+/// rust-analyzer advertise the provider either way (probed). kotlin-lsp and jdtls were not probed,
+/// and an advertised capability can change what a server sends, so they keep the capabilities
+/// they have always seen.
+pub(crate) fn wants_call_hierarchy(server_command: &str) -> bool {
+    Path::new(server_command)
+        .file_stem()
+        .is_some_and(|stem| stem == "typescript-language-server")
+}
+
 /// The `initializationOptions` for `server_command` in `workspace_root`, given the linked
 /// worktrees of the repository (`worktrees`, absolute roots) and the local-evidence directories
 /// that exist under the root (`local_evidence`, absolute, see [`local_evidence_dirs`]). `None`
@@ -297,6 +310,26 @@ mod tests {
             "my-rust-analyzer-wrapper",
         ] {
             assert!(!wants_progress(command), "{command}");
+        }
+    }
+    /// `typescript-language-server` advertises `callHierarchyProvider` only to a client that declares
+    /// `textDocument.callHierarchy` (checked with an `initialize` probe: absent without it, `true`
+    /// with it). pyright, gopls and rust-analyzer advertise it either way, and kotlin-lsp and jdtls
+    /// were not probed, so only the verified server is sent it.
+    #[test]
+    fn only_typescript_language_server_is_sent_the_call_hierarchy_capability() {
+        assert!(wants_call_hierarchy("typescript-language-server"));
+        assert!(wants_call_hierarchy(
+            "/home/u/.local/bin/typescript-language-server"
+        ));
+        for command in [
+            "rust-analyzer",
+            "kotlin-lsp",
+            "pyright-langserver",
+            "gopls",
+            "my-typescript-language-server-wrapper",
+        ] {
+            assert!(!wants_call_hierarchy(command), "{command}");
         }
     }
 

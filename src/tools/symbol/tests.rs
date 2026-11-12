@@ -7560,6 +7560,135 @@ async fn a_replace_whose_body_renames_is_told_to_use_rename() {
         "a refused replace must restore the file; got:\n{content}"
     );
 }
+/// The hint of the rename refusal is two calls the caller can send as they stand, with
+/// this call's `path`, `symbol` and `new_name` filled in. `symbol=..., new_name=...` made the
+/// caller work out the arguments it had just sent; 18 of the 46 refusals in the 2026-10-13
+/// to 2026-11-11 `usage.db` were followed by `edit_code rename` within 73 seconds.
+///
+/// Asserts the WHOLE call, not the word `rename`: a hint that kept the placeholders still
+/// contains `action="rename"` (the lesson of the test above).
+#[test]
+fn the_rename_refusal_hint_carries_both_calls_ready_to_send() {
+    use super::edit_code::replace_would_rename_reason;
+
+    let (_message, hint) = replace_would_rename_reason("foo", "src/lib.rs", "bar");
+    assert!(
+        hint.contains(
+            r#"edit_code(action="rename", symbol="foo", path="src/lib.rs", new_name="bar")"#
+        ),
+        "the first call must be sendable as it stands; got: {hint}"
+    );
+    assert!(
+        hint.contains(r#"edit_code(action="replace", symbol="bar", path="src/lib.rs", body="#),
+        "the second call must target the NEW name; got: {hint}"
+    );
+    assert!(
+        !hint.contains("symbol=..."),
+        "a placeholder left in the hint makes the caller rebuild the call; got: {hint}"
+    );
+}
+
+/// `CorruptionVerdict::TargetRenamed` carries a NAME PATH for a nested symbol
+/// (`collect_all_name_paths`): `Agent/new`, not `new`. `rename` wants the last segment only,
+/// and the second call's `symbol` must not gain the parent twice (`Agent/Agent/new`).
+/// Found by scouting before the edit — see `bug-fix-session-log` W-159.
+#[test]
+fn the_rename_refusal_hint_for_a_nested_symbol_does_not_double_the_parent() {
+    use super::edit_code::replace_would_rename_reason;
+
+    let (_message, hint) = replace_would_rename_reason("Agent/old", "src/agent.rs", "Agent/new");
+    assert!(
+        hint.contains(
+            r#"edit_code(action="rename", symbol="Agent/old", path="src/agent.rs", new_name="new")"#
+        ),
+        "`new_name` is the last segment only; got: {hint}"
+    );
+    assert!(
+        hint.contains(
+            r#"edit_code(action="replace", symbol="Agent/new", path="src/agent.rs", body="#
+        ),
+        "the second call addresses the renamed symbol; got: {hint}"
+    );
+    assert!(
+        !hint.contains("Agent/Agent"),
+        "the parent segment must appear once; got: {hint}"
+    );
+
+    // The caller's own addressing is kept: the second `symbol` is the caller's name path
+    // with its last segment swapped, whatever form the post-edit AST gave the new path.
+    let (_message, hint) =
+        replace_would_rename_reason("impl Agent/old", "src/agent.rs", "Agent/new");
+    assert!(
+        hint.contains(
+            r#"edit_code(action="rename", symbol="impl Agent/old", path="src/agent.rs", new_name="new")"#
+        ) && hint.contains(r#"symbol="impl Agent/new""#),
+        "the caller's name-path form must survive into the second call; got: {hint}"
+    );
+}
+
+/// The usage log files a refusal by its stored text, which is the message plus its hint.
+/// A hint that carries the call's own arguments puts data in that text: a symbol or path
+/// that contains another family's phrase must not move the refusal out of
+/// `replace_would_rename`.
+#[test]
+fn the_rename_refusal_stays_in_its_telemetry_family_whatever_the_names_say() {
+    use super::edit_code::replace_would_rename_reason;
+
+    let (message, hint) = replace_would_rename_reason(
+        "symbol not found",
+        "src/index is locked.rs",
+        "index is locked",
+    );
+    let stored = format!("{message} — hint: {hint}");
+    assert_eq!(
+        crate::usage::db::normalize_err_family("edit_code", &stored),
+        Some("replace_would_rename"),
+        "stored text: {stored}"
+    );
+}
+/// The hint of the several-symbols refusal is also calls the caller can send as they stand.
+/// It kept `symbol=...` placeholders after the rename refusal's hint lost its own
+/// (`the_rename_refusal_hint_carries_both_calls_ready_to_send`), so one file spoke two styles.
+///
+/// Three calls, in the order the caller needs them: `replace` the target with only its own
+/// declaration, `insert` the other declarations after it, or `rename` it. The data the tool
+/// cannot know (the declaration text, the new name) stays a `<...>` slot; `symbol` and `path`
+/// are this call's own and are filled in.
+#[test]
+fn the_several_symbols_refusal_hint_carries_its_calls_ready_to_send() {
+    use super::edit_code::replace_by_several_reason;
+
+    let names = vec!["a".to_string(), "b".to_string()];
+    let (_message, hint) = replace_by_several_reason("foo", "src/lib.rs", &names);
+    assert!(
+        hint.contains(r#"edit_code(action="replace", symbol="foo", path="src/lib.rs", body="#),
+        "the first call keeps the target's own name; got: {hint}"
+    );
+    assert!(
+        hint.contains(
+            r#"edit_code(action="insert", symbol="foo", path="src/lib.rs", position="after", body="#
+        ),
+        "the other declarations go after the target; got: {hint}"
+    );
+    assert!(
+        hint.contains(r#"edit_code(action="rename", symbol="foo", path="src/lib.rs", new_name="#),
+        "a rename of the target stays reachable; got: {hint}"
+    );
+    assert!(
+        !hint.contains("symbol=..."),
+        "a placeholder left in the hint makes the caller rebuild the call; got: {hint}"
+    );
+
+    // A nested target is addressed as the caller addressed it, in all three calls.
+    let (_message, hint) = replace_by_several_reason("Agent/old", "src/agent.rs", &names);
+    assert_eq!(
+        hint.matches(r#"symbol="Agent/old", path="src/agent.rs""#)
+            .count(),
+        3,
+        "all three calls address the caller's own name path; got: {hint}"
+    );
+}
+
 /// FR-13: one Python METHOD replaced by a body that holds SEVERAL methods, none under the
 /// target's name. Two rows (2026-10-28 and 2026-10-29) were told "dropped the symbol
 /// definition ... not just body statements", which is false: the body was all declarations.

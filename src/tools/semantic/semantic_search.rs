@@ -589,9 +589,10 @@ impl Tool for SemanticSearch {
                  - `scope`: `\"project\"` (default), `\"libraries\"`, `\"all\"`, or `\"lib:<name>\"`.\n\
                  - `include_memories=true`: also search semantic memories.\n\
                  - `project_id`: filter to a specific workspace sub-project. Result `file_path`s are\n\
-                   relative to the workspace root, not the sub-project, so they feed `read_file`\n\
-                   unchanged. (When the call is pinned to the member itself with `workspace=<member root>`,\n\
-                   the root is the member, so they stay member-relative.)\n\
+                   relative to the root `read_file` resolves against, not the sub-project, so they feed\n\
+                   `read_file` unchanged: workspace-root-relative from the workspace root, `../<member>/...`\n\
+                   from a sibling member, and member-relative when the call is pinned to the member itself\n\
+                   with `workspace=<member root>` or the session is focused on it.\n\
                  - `mode`: `\"code\"` (default) excludes markdown chunks — best for finding implementations.\n\
                            `\"full\"` includes all indexed content.\n\
                  \n\
@@ -1071,8 +1072,10 @@ pub(crate) fn lift_member_paths(hits: &mut [crate::retrieval::search::Hit], rela
 /// directory relative to `focused_root`, not the raw `relative_root`: when the session already
 /// stands in the member (pinned `workspace=<member>`, or `activate_within_workspace`), the
 /// store's paths are already relative to the root `read_file` resolves against, and prefixing
-/// again would double the member directory. A root project, an id that names no member, and a
-/// member outside `focused_root` are left untouched.
+/// again would double the member directory. A member outside `focused_root` (a sibling) gets a
+/// prefix that climbs out of it, `../beta`; `read_file` opens such a path, but the write tools
+/// refuse it as outside the project root. A root project and an id that names no member are left
+/// untouched.
 pub(crate) async fn lift_explicit_member_hits(
     ctx: &ToolContext,
     project_id: &str,
@@ -1101,9 +1104,32 @@ pub(crate) async fn lift_explicit_member_hits(
     let canon = |p: std::path::PathBuf| std::fs::canonicalize(&p).unwrap_or(p);
     let member_root = canon(workspace_root.join(&member.relative_root));
     let focused_root = canon(focused_root.to_path_buf());
-    if let Ok(rel) = member_root.strip_prefix(&focused_root) {
-        lift_member_paths(hits, &crate::util::fs::to_forward_slash(rel));
+    if let Some(rel) = relative_path_between(&focused_root, &member_root) {
+        lift_member_paths(hits, &crate::util::fs::to_forward_slash(&rel));
     }
+}
+
+/// The path that leads from the directory `from` to `to`, both absolute: `..` for each component of
+/// `from` below their common ancestor, then the rest of `to`. Empty when they are the same
+/// directory. `None` when they share no root (two Windows drives), where no relative path exists.
+pub(crate) fn relative_path_between(
+    from: &std::path::Path,
+    to: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let from: Vec<_> = from.components().collect();
+    let to: Vec<_> = to.components().collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    if common == 0 {
+        return None;
+    }
+    let mut rel = std::path::PathBuf::new();
+    for _ in common..from.len() {
+        rel.push("..");
+    }
+    for component in &to[common..] {
+        rel.push(component.as_os_str());
+    }
+    Some(rel)
 }
 
 /// The durable code-index skip marker, rendered as a one-line note, or `None`

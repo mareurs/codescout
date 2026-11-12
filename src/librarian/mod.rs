@@ -25,6 +25,7 @@ pub mod entry_token;
 pub mod freshness;
 pub mod identity;
 pub mod indexer;
+pub mod lifecycle;
 pub mod preview;
 pub(crate) mod read_door;
 pub mod reindex_progress;

@@ -433,6 +433,9 @@ impl Tool for RunCommand {
             let (timeout_secs, timeout_hint) = parse_timeout_input(&input);
             let acknowledge_risk = parse_bool_param(&input["acknowledge_risk"]);
             let run_in_background = parse_bool_param(&input["run_in_background"]);
+            // A detached job applies no timeout: its supervisor waits on the child with no deadline.
+            // A hint on how `timeout_secs` was read would name a duration nothing used.
+            let timeout_hint = timeout_hint.filter(|_| !run_in_background);
             let interactive = parse_bool_param(&input["interactive"]);
             let cwd_param = input["cwd"].as_str();
             let root = ctx
