@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 236
+entry_high_water_F: 237
 entry_high_water_W: 159
 ---
 
@@ -90,6 +90,7 @@ entry_high_water_W: 159
 | F-209 | 2026-11-01 | low | claim-vs-state | mitigated | **"Leaving these two directories costs nothing" was said before the directory counts were read** — I counted symlinks, the watcher counts directories; one remaining directory holds 1,808. |
 | F-208 | 2026-11-01 | low | plan-drift | fixed-verified | **A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again** — `581b05bbe41134f3`: the remedy's reset then add makes the row `retained`, and a named add clears a `retained` row and runs the file-level write lookup again on an unchanged record; fixed in `300cb29ea`. |
 |----|------|---------:|----------|--------|-------|
+| F-237 | 2026-11-12 | med | measurement | promoted-to-bug-tracker | **A load job I ran on the shared host overlapped the timeouts that a later decision counted** — all three timed_out rows of 2026-11-12 fall in my burn.py windows, two more beside other sessions' gates; coincidence, not shown as cause; bug 20927ccfe293c34e. |
 | F-218 | 2026-11-08 | med | process | mitigated | **A chained fast-forward merge exited 1 with no message, twice, because a peer held a dirty file and then committed to the base** - recovered by messaging the peer, then merging in the isolated worktree and gating the identical tree after the fast-forward. |
 | F-206 | 2026-11-01 | med | plan-drift | open | **"Owners only" holds for the red hint but not for `file-provenance.py`, which the gate and the pre-edit hook also run** — a floor on operations would change the CLI's MINE/SHARED verdicts; the hook's "~7s" is now 16 to 23 s warm. |
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
@@ -18387,6 +18388,34 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Fix direction:** Take the last `/` segment of the payload as `new_name` for the `rename` call. Build the `symbol=` of the `replace` call from the caller's own `name_path` with `renamed_name_path`, so the caller's addressing dialect is kept.
 
 **What this entry does not show:** No test was run. The measured 2.4% rate and the recovery times (0 to 73 s) come from one checkout's `usage.db` and cover all agents.
+
+## F-237 — A load job I ran on the shared host overlapped the timeouts that a later decision counted
+
+**Valid:** dated 2026-11-12
+
+**Observed:** 2026-11-12, session `5f715d8f`, read at 12:30 UTC, tree at `e610be3a2` plus peers' later commits. Reading `.codescout/usage.db` by session and hour for bug `20927ccfe293c34e`, the read its previous section asked for, after the operator had raised `ATTRIBUTION_TIMEOUT_DEFAULT` from 30 s to 60 s (`31d138b1a8ef797d735cfee7cf1df3bb22a2d259`).
+
+**When:** that decision rested on a read that counted six `timed_out` attribution rows. Earlier the same day I had run `scratchpad/burn.py` (64 busy processes, one per core) four times, 280 s, 420 s, 400 s and 1500 s (stopped after 5 min 14 s), to reproduce a load-sensitive flake in my own LSP tests.
+
+**Expected:** the `timed_out` rows measure the attribution scan under ordinary host load, so six rows in eight days say the 30 s ceiling is too low.
+
+**Got:** all three `timed_out` rows of 2026-11-12 (08:18:21, 08:21:38, 09:28:17, all session `e4a747a2`) fall inside a `burn.py` window of mine (08:17:11 to 08:24:11 and 09:26:03 to 09:32:43). The two of 2026-11-11 (22:08:19, 22:12:05) coincide with at least four concurrent `gate.sh` runs of other sessions. At least five of the six rows were taken while the host ran a known heavy job; the sixth (2026-11-04) I did not check. The proposition this proves is a coincidence in time. It does not prove my load caused the timeouts: I did not re-run those scans without it.
+
+**Probable cause:** the `usage.db` row carries no load figure and no binary id, and no query joins it with the background-job records. I found the windows only by reading this session's transcript, and then confirmed them in the records of the background jobs (`~/.cache/cc-tmp/codescout-bg/*.json`, fields `started_at`, `finished_at`, `command`), which match to the second. So my instrument wrote into what it measured: `burn.py` lengthened the latency of other sessions' calls, and those calls are the data. A foreground command leaves no record at all.
+
+**Workaround:** before a read of `usage.db` latencies counts a slow or timed-out row, list the background-job records that overlap its `called_at` minus `attribution_ms`; the query is in the bug record (`20927ccfe293c34e`, the section "Read of usage.db by session and hour"). Run a deliberate load job with `run_in_background=true`, so that it leaves a record.
+
+**Counterfactual:** a read that counted the six rows without the overlay would have read my load as evidence that the ceiling was the limit, which is what the 60 s decision did. I cannot say the decision is wrong: the scan is slow without load too (8 to 14 s alone, 20 to 25 s for an hour on 2026-11-12 that I could not explain).
+
+**Severity:** med
+
+**Status:** promoted-to-bug-tracker
+
+**Limits:** one machine, one `usage.db`, read at 12:30 UTC. The overlay uses the time the row was recorded, taken as the end of the call (checked: each timed-out call started 30 s earlier, inside the window). The load of other sessions was read from background-job records only, so a foreground job is invisible. The scans were not re-run without load. The cost to others is also unmeasured: my four runs, 5 to 7 minutes each, slowed the red hints of whoever scanned then.
+
+**Fix idea / Pointer:** bug `20927ccfe293c34e` (the section records this and corrects its first wording, which said a load job should write its window somewhere; the record already exists). Not done, and the operator's choice: join `usage.db` rows with background-job records in the read query, or store a load figure per row. Related: the seam class "instruments that write into what they measure" in the reconnaissance skill; `5f715d8f`'s earlier flake work in `a73c49456056fb92`.
+
+---
 
 ## Template for new entries
 
