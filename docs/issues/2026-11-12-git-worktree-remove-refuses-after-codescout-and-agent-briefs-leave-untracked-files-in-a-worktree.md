@@ -1,14 +1,16 @@
 ---
 id: '3dde1548c3e5c310'
 kind: bug
-status: open
+status: mitigated
 title: git worktree remove refuses after codescout and agent briefs leave untracked files in a worktree
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-11-12
 opened: 2026-11-12
 severity: medium
+unverified: The --stop path has had no real use (no mux was running at first use). Fix 2 (superpowers brief templates) is open and the .codescout/embeddings symlink rule is not fixed. macOS and Windows CI lanes are not checked.
 ---
 
 # BUG: git worktree remove refuses after codescout and agent briefs leave untracked files in a worktree
@@ -45,10 +47,12 @@ Observed three times in one session (2026-11-11 and 2026-11-12); the minimal tri
 Two causes, both verified by the probes in Hypotheses tried.
 
 - **Refusal (fixed):** the first write tool call in a checkout creates `.codescout/native-provenance-v1.counter` and `.lock`, and no `.gitignore` rule covered them. Fix 1 covers them.
-- **Leftover directory (not fixed):** the first `symbols` call on a Rust file starts a `codescout mux … rust-analyzer` process with `--cwd` set to the worktree, and rust-analyzer runs `cargo check` with `target/` inside the worktree. Neither process stops when another project is activated or when the worktree is removed. `git worktree remove` deregisters the worktree and then fails on `Directory not empty` because `cargo check` writes `target/` again.
-- **Second trap (not fixed):** after the active project's worktree is removed, `workspace(action="activate")` fails for every path, the main checkout included, with `No such file or directory (os error 2)`. Creating an empty directory at the old path lets activation succeed again.
+- **Leftover directory (mitigated by `scripts/worktree-remove.sh`, 2026-11-12; codescout still does not stop the mux itself):** the first `symbols` call on a Rust file starts a `codescout mux … rust-analyzer` process with `--cwd` set to the worktree, and rust-analyzer runs `cargo check` with `target/` inside the worktree. Neither process stops when another project is activated or when the worktree is removed. `git worktree remove` deregisters the worktree and then fails on `Directory not empty` because `cargo check` writes `target/` again.
+- **Second trap (fixed, bug `d291b97d9e69edef`):** after the active project's worktree is removed, `workspace(action="activate")` fails for every path, the main checkout included, with `No such file or directory (os error 2)`. Creating an empty directory at the old path lets activation succeed again.
 
 Other verified facts:
+
+- The untracked `.codescout/embeddings` entry is a symlink to the main checkout's `.codescout/embeddings` directory (seen 2026-11-12 in the worktree of this fix: `embeddings -> /home/marius/work/claude/codescout/.codescout/embeddings`, created at the same minute as `cc_session_id`). The rule `.codescout/embeddings/` (`.gitignore:88`) has a trailing slash and matches only a directory, so git lists the symlink as untracked and refuses a plain removal. What creates the symlink is not identified.
 
 - Before fix 1, `.gitignore` had no rule for `.codescout/native-provenance-v1.counter` or `.codescout/native-provenance-v1.lock`. The lock name is defined in `src/tools/native_provenance_fence.rs` (`LOCK_NAME`). Both files appeared untracked in all three worktrees.
 - Not a cause: `.superpowers/`, `.codescout/write.lock`, `.codescout/write.lock.holder`, `.codescout/private-memories/`, `scripts/__pycache__/` and `target/` are all ignored, so they do not block removal.
@@ -68,29 +72,59 @@ Three probes on 2026-11-12, each on a fresh worktree of `experiments`, each foll
 2. **Activated with `read_only=false`.** Activation added the ignored `.codescout/libraries.json`. A plain removal while this worktree was the active project succeeded and left nothing. A later read call did not recreate the directory, and `create_file` failed with `No such file or directory`.
 3. **Activated, then `symbols` on a `.rs` file.** This started `codescout mux --cwd <worktree> --idle-timeout 180 -- rust-analyzer` and a `cargo check --manifest-path <worktree>/Cargo.toml`, and `target/` filled up (52 009 bytes of ignored paths). Both processes were still running after I activated the main checkout. A plain `git worktree remove` then exited 255: `failed to delete '<path>': Directory not empty`. `git worktree list` no longer named it, and the directory held a fresh `target/` that the running `cargo check` had written.
 
-Not reproduced: the untracked `.codescout/embeddings` entry of plan-a, and a recreated `.codescout` in plan-b (probe 3 recreated only `target/`).
+Not reproduced: a recreated `.codescout` in plan-b (probe 3 recreated only `target/`). The untracked `.codescout/embeddings` entry of plan-a is explained: see Root cause.
 
 ## Fix
 
-Proposals; item 1 is applied, items 2 and 3 are not:
+Item 1 and item 3 are applied; item 2 is open:
 
-1. **Applied 2026-11-12:** `/.codescout/native-provenance-v1.counter` and `/.codescout/native-provenance-v1.lock` are in `.gitignore`, with the `crates/*/` twin rules that the gate `every_root_codescout_ignore_rule_has_its_crates_twin` requires (find the commit with `git log -S native-provenance-v1 -- .gitignore`). `git check-ignore -v` matches all three paths, and `tests/hook_config.rs` passes (12 of 12). This removes the refusal caused by those two files. It does not cover `.codescout/embeddings` (untracked in plan-a, cause unverified), a scratch file named outside `.superpowers/`, or the leftover directory after a forced removal, so the bug stays open.
-2. Brief templates for subagents must name scratch files only under `.superpowers/` (git-ignored). Applies to the superpowers workflow, not to this repo.
-3. Consider a documented safe-removal recipe or a helper that checks `git status --porcelain --ignored`, removes only regenerable files, and then runs `git worktree remove`.
+1. **Applied 2026-11-12:** `/.codescout/native-provenance-v1.counter` and `/.codescout/native-provenance-v1.lock` are in `.gitignore`, with the `crates/*/` twin rules that the gate `every_root_codescout_ignore_rule_has_its_crates_twin` requires (find the commit with `git log -S native-provenance-v1 -- .gitignore`). This removes the refusal caused by those two files.
+2. **Open:** brief templates for subagents must name scratch files only under `.superpowers/` (git-ignored). Applies to the superpowers plugin, not to this repo.
+3. **Applied 2026-11-12 (approach A of `docs/superpowers/specs/2026-11-12-worktree-removal-helper-design.md`):** `scripts/worktree-remove.sh` lists the holders of a worktree, stops the stoppable ones only with `--stop`, runs a plain `git worktree remove`, prunes, and verifies that the directory is gone. The operator page is `docs/conventions/removing-a-worktree.md`. The second trap (activation after removal) is fixed under bug `d291b97d9e69edef`.
+
+First real use, 2026-11-12, on the worktree of this fix: the first run listed one holder, the `claude` process of the session itself (kind `other`, a blocker), exit 3. After the session left the worktree the script found no holders, git refused, and the script exited 6 and listed one untracked entry, the `.codescout/embeddings` symlink. After I deleted that symlink (not its target) the script exited 0. The directory, the registration and the branch were then gone, and `pgrep` found no process that names the path. The mux was not running at that time, so the `--stop` path had no real use.
 
 ## Tests added
 
-N/A — not fixed. A regression check would be a test that creates a worktree, runs a codescout write tool in it, and asserts `git status --porcelain` is empty.
+- `tests/worktree-remove.sh`: a shell suite of 180 cases (fixture `/proc`, real-process cases, `git` shims). `tests/worktree_remove_script.rs` (`the_worktree_remove_suite_passes`, Linux only) runs it under `cargo nextest`.
+- For the activation part: see bug `d291b97d9e69edef`.
+- Not covered: a test that runs a codescout write tool in a worktree and asserts that `git status --porcelain` is empty; the `.codescout/embeddings` symlink would make it fail today.
+
+## Fix provenance
+
+- **SHA:** `5044debcb` (`experiments`)
+- **patch-id:** `9264d93dd2b6`
+- **SHA:** `16ea63f80` (`experiments`)
+- **patch-id:** `754e565f9d31`
+- **SHA:** `1f78b5462` (`experiments`)
+- **patch-id:** `bcab0fc94cc6`
+- **SHA:** `0ed026ea4` (`experiments`)
+- **patch-id:** `7d99a1d84bcb`
+- **SHA:** `5edd2280b` (`experiments`)
+- **patch-id:** `5a31db54a63c`
+- **SHA:** `221aba482` (`experiments`)
+- **patch-id:** `8a910dd3890a`
+- **SHA:** `bbf491003` (`experiments`)
+- **patch-id:** `bbbe54aabedd`
+- **SHA:** `60f3b6e05` (`experiments`)
+- **patch-id:** `c49c5fc00f7b`
+- **SHA:** `2cd58c6d5` (`experiments`)
+- **patch-id:** `617325cce9ec`
 
 ## Workarounds
 
-Before removing a worktree that ever served `symbols`, `references` or a cargo run: activate the main checkout, run `pgrep -af <worktree path>`, and stop the listed processes by PID. Then run a plain `git worktree remove <path>`. If you removed the active project's worktree first and activation now fails, `mkdir` the old path, activate the main checkout, and delete the empty directory.
-
-For forced removal: `git worktree remove --force <path>` after `git status --porcelain --ignored -uall` shows only regenerable files. If git answers "Directory not empty", confirm with `git worktree list` that git deregistered it, then `rm -rf` the exact path and run `git worktree prune`.
+Run `scripts/worktree-remove.sh <path>` from outside the worktree and from a session whose cwd is not inside it. Without `--stop` it only lists holders. Ask the occupant before `--stop`. If git refuses, the script lists the untracked files and never forces; for the `.codescout/embeddings` symlink, delete the link itself (`rm <worktree>/.codescout/embeddings`, no trailing slash) and run the script again. Details: `docs/conventions/removing-a-worktree.md`.
 
 ## Resume
 
-Fix 1 is done and the leftover-directory cause is verified. Next: fix 3 as code, not only a recipe. Candidates: a codescout action that stops the mux and its cargo children for a path (or does so when the active project changes away from a worktree), and `workspace(activate)` that no longer fails when the current project's directory is gone. Fix 2 (brief templates, in the superpowers plugin) is still open. Still unexplained: the untracked `.codescout/embeddings` entry in plan-a and the recreated `.codescout` in plan-b.
+Open items:
+
+- Fix 2: subagent brief templates in the superpowers plugin (ask the operator before looking there).
+- The `.gitignore` rule for `.codescout/embeddings` has a trailing slash and misses the symlink. Candidate: add `.codescout/embeddings` without the slash, with its `crates/*/` twin rule, and find what creates the symlink.
+- The recreated `.codescout` in plan-b is unexplained.
+- Parked script follow-ups: scrub UTF-8 C1 control characters (U+0080 to U+009F) from printed command lines (one-line fix `cmd=${cmd//$'\xc2'[$'\x80'-$'\x9f']/ }`); a very large `--wait` overflows the deadline arithmetic (the safe direction); the exit-7 `ls -A` listing prints raw file names; the survivor message says "SIGKILL is never used".
+- Check that CI is green on the macOS and Windows lanes (the Rust wrapper is Linux-only; not run locally).
+- Use the `--stop` path on a worktree that has a live mux, and record what happened.
 
 ## References
 

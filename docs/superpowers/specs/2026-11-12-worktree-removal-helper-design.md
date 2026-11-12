@@ -1,7 +1,7 @@
 ---
 id: '9189852e75f80f08'
 kind: spec
-status: draft
+status: active
 title: Worktree removal helper and the activation-after-removal fix — design
 owners:
 - marius
@@ -54,19 +54,19 @@ The operator chose A on 2026-11-12.
 
 1. Resolve the path against `git worktree list --porcelain`. Refuse the main checkout, an unregistered path, and a path that contains the caller's current directory.
 2. Scan `/proc/<pid>` for holders: a process whose `cwd` is under the path, or whose command line contains the path as a whole path component (not as a substring of a longer name).
-3. Classify each holder. Stoppable: `codescout mux`, `rust-analyzer`, `cargo`, `rustc`, `sccache`, and any executable under `<path>/target/`. Anything else is a blocker.
+3. Classify each holder by the basename of `argv[0]` from `/proc/<pid>/cmdline`, never by `comm`. Stoppable: `codescout` when `argv[1]` is exactly `mux`; any `rust-analyzer*` (a prefix match); `cargo`; `rustc`; `sccache`; and any other executable under `<path>/target/` (kind `build-output`). Anything else is a blocker, and so is a `codescout` that is not a mux (an MCP server), even under `<path>/target/`: stopping it would break a session. A listed parent of the script is a blocker too, because the script never signals itself, its subshells or its parent.
 4. Without `--stop`: print a table (pid, kind, command line) and the occupancy warning, then exit 3 if there is any holder.
-5. With `--stop`: if a blocker exists, print it and exit 4 without signalling anything. Otherwise SIGTERM the mux first, then the other stoppable holders; wait up to `--wait` seconds (default 30); re-scan, at most three rounds, because a dying `cargo` can start children. A survivor is a failure (exit 5); there is no SIGKILL.
-6. Run `git worktree remove <path>` without `--force`. If git refuses because of untracked files, print `git status --porcelain --ignored -uall` for the path and exit 6; do not force.
+5. With `--stop`: if a blocker exists, print it and exit 4 without signalling anything. Otherwise SIGTERM the mux first, then the other stoppable holders; wait up to `--wait` seconds (default 30), re-scanning about every 0.5 s. The script signals new holders in at most three rounds, because a dying `cargo` can start children. A blocker found by the first scan of the stop loop (one that appeared after the first scan) ends the run with exit 4 before any signal. A survivor, or a rescan that timed out, is a failure (exit 5); there is no SIGKILL to a holder. Every scan is bounded by `WORKTREE_REMOVE_SCAN_TIMEOUT` (default 10 s), and a scan that fails means the holders are unknown, never none.
+6. Run `git worktree remove <path>` without `--force`. If git fails, ask `git worktree list` whether the worktree is still registered. Still listed (untracked files, a lock): print git's message and `git status --porcelain -uall`, capped at 50 lines, and exit 6; do not force. Ignored files are not listed, because they never block git; git deletes them with the worktree. No longer listed: git removed the work tree and then failed (the live `cargo check` case), so go on to step 7.
 7. Run `git worktree prune`. Verify that the directory is gone. If it is not, print its contents and exit 7; do not delete it.
 
-**Activation fix.** Suspected cause (not yet verified): `Fence::try_mode` in `src/tools/native_provenance_fence.rs` calls `root.canonicalize()?` on the active root, so every write-class tool, `workspace(activate)` included, fails with `No such file or directory (os error 2)` once that root is gone. The first plan task verifies this with a reproducing test. The fix lets activation proceed without the old root's fence. The builder decides the exact seam after the test shows where the error starts.
+**Activation fix.** Verified cause: `workspace(action="activate")` is a write (`Workspace::is_write`), so `scope_root` in `src/tools/provenance_fence_context.rs` fences it on the active root, and `canonical_checkout(root).or_else(|_| root.canonicalize())?` (line 183) fails with `No such file or directory (os error 2)` once that root is gone. The suspect `Fence::try_mode` named earlier was wrong. The fix: `scope_root` runs a call unfenced when it is a write, the tool is `workspace`, `action` is `activate`, and `root.try_exists()` is `Ok(false)`. Any other write on a missing root is still refused.
 
 ## Tests
 
-- Script: a test that builds a temporary git repo with a linked worktree and fake holders (a `sleep` process with its cwd in the worktree as a blocker; a renamed copy of `sleep` named `rust-analyzer` as a stoppable holder). It asserts exit codes 3, 4 and 0, that the directory is gone, and that no process was signalled in the blocker case.
-- Activation: a test that removes the active project's directory and then activates the main checkout. It must fail before the fix and pass after.
-- Mutation check on the script's classification and on the re-scan loop, per `docs/PROBES.md`.
+- Script: `tests/worktree-remove.sh`, a shell suite of 180 cases. It uses a fixture `/proc` (`WORKTREE_REMOVE_PROC`, with pids above `pid_max`), real-process cases, and `git` shims. It asserts exit codes 0 to 7, that the directory is gone, and which processes were signalled. `tests/worktree_remove_script.rs` runs the suite from `cargo nextest` and is `#![cfg(target_os = "linux")]`, because the suite reads `/proc` and needs GNU `realpath` and `timeout`. The signal check in the first-round blocker case cannot observe a signal sent to a fixture pid.
+- Activation: `activation_proceeds_after_the_default_root_was_deleted` (`src/server/workspace_pin_tests.rs`) and three tests in `src/tools/provenance_fence_context_tests.rs`. The unit test `a_workspace_write_on_a_missing_root_runs_unfenced` and the dispatch test failed with `os error 2` before the fix and pass after it; the two "still refused" tests are controls that pass both before and after.
+- Mutation sweeps on the classification and the re-scan loop were run by hand during review. No row was added to `docs/PROBES.md`.
 
 ## Left to the builder
 
