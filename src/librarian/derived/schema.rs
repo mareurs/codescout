@@ -1,0 +1,512 @@
+//! The derived index's SQLite file: its schema, how it is opened, and a canonical dump.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use rusqlite::Connection;
+
+/// The schema version stored in `PRAGMA user_version`.
+pub const SCHEMA_VERSION: i64 = 1;
+
+/// Milliseconds a connection waits on a lock held by another process.
+const BUSY_TIMEOUT_MS: i64 = 5000;
+
+/// Every table of schema version 1. All rows are deterministic: no default is a clock or a random
+/// value, and a natural key (not a generated id) names each row.
+///
+/// `skipped` is keyed on `(rel_path, reason)`: a lossy `not_utf8` path (U+FFFD is valid UTF-8) can
+/// equal a real path's `rel_path`, so `rel_path` alone is not unique.
+const SCHEMA_SQL: &str = r#"
+CREATE TABLE checkout (
+    root         TEXT NOT NULL,
+    repo_name    TEXT NOT NULL,
+    name_source  TEXT NOT NULL,
+    rules_source TEXT NOT NULL,
+    commit_sha   TEXT NOT NULL
+);
+CREATE TABLE document (
+    rel_path   TEXT NOT NULL PRIMARY KEY,
+    "key"      TEXT,
+    key_error  TEXT,
+    kind       TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    title      TEXT,
+    owners     TEXT NOT NULL,
+    tags       TEXT NOT NULL,
+    topic      TEXT,
+    time_scope TEXT,
+    confidence REAL NOT NULL,
+    sha256     TEXT NOT NULL,
+    owner_key  TEXT,
+    parse_note TEXT
+) WITHOUT ROWID;
+CREATE TABLE entry (
+    rel_path     TEXT NOT NULL,
+    token        TEXT NOT NULL,
+    level        INTEGER NOT NULL,
+    heading_line INTEGER NOT NULL,
+    end_line     INTEGER NOT NULL,
+    PRIMARY KEY (rel_path, token, heading_line)
+) WITHOUT ROWID;
+CREATE TABLE edge (
+    src_rel_path TEXT NOT NULL,
+    ord          INTEGER NOT NULL,
+    line         INTEGER NOT NULL,
+    kind         TEXT NOT NULL,
+    target_repo  TEXT,
+    target_key   TEXT,
+    target_token TEXT,
+    PRIMARY KEY (src_rel_path, ord)
+) WITHOUT ROWID;
+CREATE TABLE chunk (
+    chunk_id     TEXT NOT NULL PRIMARY KEY,
+    rel_path     TEXT NOT NULL,
+    chunk_ix     INTEGER NOT NULL,
+    start_line   INTEGER NOT NULL,
+    end_line     INTEGER NOT NULL,
+    entry_token  TEXT,
+    entry_part   INTEGER,
+    entry_parts  INTEGER,
+    content      TEXT NOT NULL,
+    content_hash TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE problem (
+    kind      TEXT NOT NULL,
+    "key"     TEXT,
+    rel_paths TEXT NOT NULL
+);
+CREATE TABLE skipped (
+    rel_path TEXT NOT NULL,
+    reason   TEXT NOT NULL,
+    PRIMARY KEY (rel_path, reason)
+) WITHOUT ROWID;
+CREATE TABLE parse_cache (
+    sha256         TEXT NOT NULL,
+    rel_path       TEXT NOT NULL,
+    rules_hash     TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    parse_note     TEXT,
+    entries_json   TEXT NOT NULL,
+    citations_json TEXT NOT NULL,
+    chunks_json    TEXT NOT NULL,
+    PRIMARY KEY (sha256, rel_path, rules_hash, parser_version)
+) WITHOUT ROWID;
+"#;
+
+/// Columns the dump leaves out: a path and a sha identify the clone, not the content.
+const DUMP_EXCLUDED_COLUMNS: [(&str, &str); 2] = [("checkout", "root"), ("checkout", "commit_sha")];
+
+/// The one table the dump leaves out: a cache of parse products, not an answer.
+const DUMP_EXCLUDED_TABLE: &str = "parse_cache";
+
+/// Open (creating the file and its parent directories) the derived index at `path`, with WAL, a
+/// busy timeout and foreign keys on, its schema applied when the file is new and refused when the
+/// file carries a newer `user_version`.
+pub fn open(path: &Path) -> rusqlite::Result<Connection> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            failure(
+                rusqlite::ffi::SQLITE_CANTOPEN,
+                format!("create_dir_all({}): {e}", parent.display()),
+            )
+        })?;
+    }
+    let conn = Connection::open(path)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    configure_and_init(conn)
+}
+
+fn failure(code: i32, message: String) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(code), Some(message))
+}
+
+fn configure_and_init(conn: Connection) -> rusqlite::Result<Connection> {
+    conn.pragma_update(None, "busy_timeout", BUSY_TIMEOUT_MS)?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    init_schema(&conn)?;
+    Ok(conn)
+}
+
+fn user_version(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.pragma_query_value(None, "user_version", |r| r.get(0))
+}
+
+fn refuse_if_newer(found: i64) -> rusqlite::Result<()> {
+    if found > SCHEMA_VERSION {
+        return Err(failure(
+            rusqlite::ffi::SQLITE_SCHEMA,
+            format!(
+                "derived index has user_version {found}, newer than schema {SCHEMA_VERSION} \
+                 this build understands; refusing to open it"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Apply the schema when `user_version` is 0; refuse a newer one; leave a current one alone.
+///
+/// The check is repeated inside an immediate transaction, so two processes opening a new file
+/// cannot both create the tables.
+fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
+    let found = user_version(conn)?;
+    refuse_if_newer(found)?;
+    if found == SCHEMA_VERSION {
+        return Ok(());
+    }
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let found = user_version(&tx)?;
+    refuse_if_newer(found)?;
+    if found == 0 {
+        tx.execute_batch(SCHEMA_SQL)?;
+        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    }
+    tx.commit()
+}
+
+/// An in-memory derived index with the same schema, for tests.
+pub fn open_in_memory() -> rusqlite::Result<Connection> {
+    configure_and_init(Connection::open_in_memory()?)
+}
+
+/// Every table but `parse_cache`, one entry per table, rows rendered as strings and sorted.
+pub fn dump_all(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> {
+    let tables: Vec<String> = conn
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
+             ORDER BY name",
+        )
+        .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
+        .expect("list the derived index's tables");
+    let mut dump = BTreeMap::new();
+    for table in tables.into_iter().filter(|t| t != DUMP_EXCLUDED_TABLE) {
+        let columns: Vec<String> = conn
+            .prepare(&format!(
+                "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
+            ))
+            .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
+            .expect("list a derived table's columns");
+        let columns: Vec<String> = columns
+            .into_iter()
+            .filter(|c| !DUMP_EXCLUDED_COLUMNS.contains(&(table.as_str(), c.as_str())))
+            .collect();
+        let select = columns
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = conn
+            .prepare(&format!("SELECT {select} FROM \"{table}\""))
+            .expect("prepare a derived table's dump");
+        let mut rows: Vec<Vec<String>> = stmt
+            .query_map([], |row| {
+                (0..columns.len())
+                    .map(|i| row.get_ref(i).map(render))
+                    .collect()
+            })
+            .and_then(|mapped| mapped.collect())
+            .expect("read a derived table");
+        rows.sort();
+        dump.insert(table, rows);
+    }
+    dump
+}
+
+/// Render one SQLite value as text; `NULL` is rendered as the word `NULL`.
+fn render(value: rusqlite::types::ValueRef<'_>) -> String {
+    use rusqlite::types::ValueRef;
+    match value {
+        ValueRef::Null => "NULL".to_owned(),
+        ValueRef::Integer(i) => i.to_string(),
+        ValueRef::Real(f) => format!("{f:?}"),
+        ValueRef::Text(t) => String::from_utf8_lossy(t).into_owned(),
+        ValueRef::Blob(b) => b.iter().map(|byte| format!("{byte:02x}")).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::params;
+
+    fn table_names(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    fn user_version(conn: &Connection) -> i64 {
+        conn.pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap()
+    }
+
+    /// Every `sqlite_master` row, as `(type, name, sql)`, in a fixed order.
+    fn master_snapshot(conn: &Connection) -> Vec<(String, String, Option<String>)> {
+        let mut stmt = conn
+            .prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name")
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    fn insert_document(conn: &Connection, rel_path: &str, key: &str) {
+        conn.execute(
+            "INSERT INTO document (rel_path, \"key\", key_error, kind, status, title, owners, \
+             tags, topic, time_scope, confidence, sha256, owner_key, parse_note) \
+             VALUES (?1, ?2, NULL, 'spec', 'draft', ?3, '[\"a\",\"b\"]', '[\"t\"]', NULL, NULL, \
+             0.5, 'abc', NULL, NULL)",
+            params![rel_path, key, format!("title of {rel_path}")],
+        )
+        .unwrap();
+    }
+
+    fn insert_edge(conn: &Connection, src: &str, ord: i64, line: i64) {
+        conn.execute(
+            "INSERT INTO edge (src_rel_path, ord, line, kind, target_repo, target_key, \
+             target_token) VALUES (?1, ?2, ?3, 'file', NULL, 'k', NULL)",
+            params![src, ord, line],
+        )
+        .unwrap();
+    }
+
+    fn insert_problem(conn: &Connection, kind: &str, key: &str) {
+        conn.execute(
+            "INSERT INTO problem (kind, key, rel_paths) VALUES (?1, ?2, '[\"x.md\",\"y.md\"]')",
+            params![kind, key],
+        )
+        .unwrap();
+    }
+
+    fn insert_skipped(conn: &Connection, rel_path: &str, reason: &str) -> rusqlite::Result<usize> {
+        conn.execute(
+            "INSERT INTO skipped (rel_path, reason) VALUES (?1, ?2)",
+            params![rel_path, reason],
+        )
+    }
+
+    #[test]
+    fn open_creates_the_schema_once_and_a_second_open_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        // The parent directories do not exist yet: `open` must create them.
+        let path = dir.path().join("a").join("b").join("derived.db");
+
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn), SCHEMA_VERSION);
+        assert_eq!(
+            table_names(&conn),
+            [
+                "checkout",
+                "chunk",
+                "document",
+                "edge",
+                "entry",
+                "parse_cache",
+                "problem",
+                "skipped"
+            ]
+        );
+        insert_document(&conn, "docs/a.md", "k-a");
+        let before = master_snapshot(&conn);
+        drop(conn);
+
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn), SCHEMA_VERSION);
+        assert_eq!(
+            master_snapshot(&conn),
+            before,
+            "a second open must not touch the schema"
+        );
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM document", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "a second open must keep the data");
+    }
+
+    #[test]
+    fn open_sets_the_pragmas() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open(&dir.path().join("derived.db")).unwrap();
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+        let busy: i64 = conn
+            .pragma_query_value(None, "busy_timeout", |r| r.get(0))
+            .unwrap();
+        assert_eq!(busy, 5000);
+        let fk: i64 = conn
+            .pragma_query_value(None, "foreign_keys", |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
+        let mem = open_in_memory().unwrap();
+        assert_eq!(user_version(&mem), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn a_newer_user_version_is_refused_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("derived.db");
+        drop(open(&path).unwrap());
+        let newer = SCHEMA_VERSION + 6;
+        {
+            let raw = Connection::open(&path).unwrap();
+            raw.pragma_update(None, "user_version", newer).unwrap();
+        }
+
+        let err = open(&path).expect_err("a newer schema must be refused");
+        let text = err.to_string();
+        assert!(
+            text.contains(&format!("user_version {newer}"))
+                && text.contains(&format!("schema {SCHEMA_VERSION}")),
+            "the refusal names both versions: {text}"
+        );
+        let raw = Connection::open(&path).unwrap();
+        assert_eq!(
+            user_version(&raw),
+            newer,
+            "the refused file is left as it was"
+        );
+    }
+
+    #[test]
+    fn dump_all_is_sorted_and_stable_across_insert_order() {
+        let fill = |conn: &Connection, reverse: bool| {
+            let mut docs = vec![
+                ("docs/b.md", "k-b"),
+                ("docs/a.md", "k-a"),
+                ("docs/c.md", "k-c"),
+            ];
+            let mut edges = vec![
+                ("docs/a.md", 1_i64, 7_i64),
+                ("docs/a.md", 0, 3),
+                ("docs/b.md", 0, 9),
+            ];
+            let mut problems = vec![("key_collision", "k-a"), ("key_collision", "k-b")];
+            if reverse {
+                docs.reverse();
+                edges.reverse();
+                problems.reverse();
+            }
+            for (p, k) in docs {
+                insert_document(conn, p, k);
+            }
+            for (s, o, l) in edges {
+                insert_edge(conn, s, o, l);
+            }
+            for (k, key) in problems {
+                insert_problem(conn, k, key);
+            }
+            insert_skipped(conn, "z.md", "symlink").unwrap();
+            insert_skipped(conn, "y.md", "not_utf8").unwrap();
+        };
+        let forward = open_in_memory().unwrap();
+        fill(&forward, false);
+        let backward = open_in_memory().unwrap();
+        fill(&backward, true);
+
+        let (a, b) = (dump_all(&forward), dump_all(&backward));
+        assert_eq!(a, b, "the dump must not depend on insert order or rowids");
+
+        // Sorted: document rows by their rendered text, edge rows likewise.
+        let docs: Vec<&str> = a["document"].iter().map(|r| r[0].as_str()).collect();
+        assert_eq!(docs, ["docs/a.md", "docs/b.md", "docs/c.md"]);
+        let mut sorted = a["edge"].clone();
+        sorted.sort();
+        assert_eq!(a["edge"], sorted);
+        assert_eq!(a["edge"][0][..3], ["docs/a.md", "0", "3"]);
+        // Every table but parse_cache is present, empty ones included.
+        let tables: Vec<&str> = a.keys().map(String::as_str).collect();
+        assert_eq!(
+            tables,
+            ["checkout", "chunk", "document", "edge", "entry", "problem", "skipped"]
+        );
+        assert!(a["checkout"].is_empty() && a["chunk"].is_empty());
+    }
+
+    #[test]
+    fn the_dump_leaves_out_the_clone_identity_columns() {
+        let make = |root: &str, sha: &str| {
+            let conn = open_in_memory().unwrap();
+            conn.execute(
+                "INSERT INTO checkout (root, repo_name, name_source, rules_source, commit_sha) \
+                 VALUES (?1, 'repo-x', 'committed', 'committed+builtin', ?2)",
+                params![root, sha],
+            )
+            .unwrap();
+            conn
+        };
+        let one = dump_all(&make("/clone/one", "1111"));
+        let two = dump_all(&make("/clone/two", "2222"));
+        assert_eq!(
+            one, two,
+            "root and commit_sha identify the clone, not the content"
+        );
+        assert_eq!(
+            one["checkout"],
+            [["repo-x", "committed", "committed+builtin"]]
+        );
+    }
+
+    #[test]
+    fn no_table_has_a_timestamp_or_random_default() {
+        let conn = open_in_memory().unwrap();
+        let banned = ["datetime", "random", "uuid", "current_timestamp"];
+        let mut found = Vec::new();
+
+        // Column defaults, table by table.
+        for table in table_names(&conn) {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT name, dflt_value FROM pragma_table_info('{table}')"
+                ))
+                .unwrap();
+            let cols: Vec<(String, Option<String>)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            for (col, dflt) in cols {
+                let Some(dflt) = dflt else { continue };
+                if banned.iter().any(|b| dflt.to_lowercase().contains(b)) {
+                    found.push(format!("{table}.{col} DEFAULT {dflt}"));
+                }
+            }
+        }
+        // Trigger bodies.
+        let mut stmt = conn
+            .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'")
+            .unwrap();
+        let triggers: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        for (name, sql) in triggers {
+            if banned.iter().any(|b| sql.to_lowercase().contains(b)) {
+                found.push(format!("trigger {name}"));
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "a derived row must be deterministic: {found:?}"
+        );
+    }
+
+    #[test]
+    fn skipped_is_keyed_on_path_and_reason() {
+        let conn = open_in_memory().unwrap();
+        // A lossy `not_utf8` path (U+FFFD) can equal a real path: both rows must fit.
+        insert_skipped(&conn, "docs/a\u{FFFD}.md", "not_utf8").unwrap();
+        insert_skipped(&conn, "docs/a\u{FFFD}.md", "outside_key_space").unwrap();
+        let err = insert_skipped(&conn, "docs/a\u{FFFD}.md", "not_utf8")
+            .expect_err("the same (rel_path, reason) twice is a duplicate");
+        assert!(err.to_string().contains("UNIQUE"), "{err}");
+        assert_eq!(dump_all(&conn)["skipped"].len(), 2);
+    }
+}
