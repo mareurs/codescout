@@ -1,6 +1,12 @@
 //! Cooperative provenance fence, separate from Codescout's ordinary write lock.
 //! Close descriptors on drop; never explicitly unlock an inherited open-file
 //! description while its formatter process may still hold a duplicate.
+//
+// The implementation is Unix-only by design; `not(unix)` keeps stub arms that return
+// `Unsupported`. The helpers only the Unix arms call have no reader on that target, so
+// the Windows build sees them as dead code (bug 17fa244491a90b49). The allow is scoped to
+// this module and to `not(unix)`: dead code on Unix is still an error.
+#![cfg_attr(not(unix), allow(dead_code))]
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
