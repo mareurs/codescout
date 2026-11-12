@@ -1,7 +1,7 @@
 ---
 id: ee030095cae1cf76
 kind: bug
-status: open
+status: mitigated
 title: is_worktree_shadow guards worktree sessions only, so other callers can still allocate an entry id on a worktree shadow
 owners:
 - marius
@@ -9,12 +9,13 @@ tags:
 - cluster/guard-narrower-than-its-name
 - librarian
 - worktree
+closed: 2026-11-12
 opened: 2026-11-08
 owner: marius
 related:
 - docs/issues/archive/2026-11-05-append-entry-worktree-override-bypasses-main-only-rule.md
 severity: low-medium
-unverified: Cases (i) and (ii) measured 2026-11-12 with probe tests that were not committed. Case (iii) and the params-ledger branch were not run. The probes ran on the lean build only.
+unverified: Case (iii) has no test. The params-ledger branch was read, not run. Only the lean build was tested; the default-feature suite and the mutation probe were not run.
 ---
 
 # BUG: is_worktree_shadow guards worktree sessions only, so other callers can still allocate an entry id on a worktree shadow
@@ -80,13 +81,27 @@ Origin of the concern: the originally observed allocation (archived bug `8b466b2
 
 ## Fix
 
-Open; no decision taken. Suggested direction, recorded as an option only: refuse prose-ledger allocation whenever the named row has an outgoing `worktree_of` link (the lineage test already inside `is_worktree_shadow`, `worktree.rs:71`), whatever the session type, and drop the `cp.main_root.is_none()` early return and the `under(&row_s, &wt_s)` precondition for that check. That one rule would cover cases (i), (ii) (if the check is also moved out of the `if let Some(cp)` block, which needs the catalog but not `cp`) and (iii). Costs and questions to settle first: the `worktree_fork` event half of the predicate needs no `cp`, so it can move too, but a legacy shadow with neither record cannot be recognised by any variant; the guard sits inside a block that needs `cp` today, so the signature of `is_worktree_shadow` changes; the refusal hint says "Reserve the id from the main checkout" and would need rewording for a main-checkout caller who named a shadow; and the params-ledger branch needs its own decision after reading the `merge_worktree` renumber.
+Implemented 2026-11-12 for the prose-ledger branch (option from the earlier text, with the `under(row, worktree root)` precondition dropped):
+- New `has_fork_record(cat, row)` in `src/librarian/tools/worktree.rs`: true when the row has an outgoing `worktree_of` link or a `worktree_fork` event. It needs no session.
+- `is_worktree_shadow` keeps its session and path tests, then calls `has_fork_record`.
+- `append_entry` asks `has_fork_record` after the `current_project` block, so a call with no project, from a main-checkout session, or from another worktree is refused with its own message.
 
-No fix SHA or patch-id exists.
+The params-ledger branch is unchanged. Reading `graft::fold_entries` (`src/librarian/catalog/graft.rs`, near line 403) shows `merge_worktree` renumbers a colliding id on merge-back, and `graft.rs` has tests for it. This was read, not measured on a shadow-named call.
+
+Not covered: case (iii) has no test of its own; the new check does not depend on the session, so by code it is caught. A legacy shadow with neither record cannot be recognised.
 
 ## Tests added
 
-None yet. Justification: open bug; reproduction is a plan only (see Reproduction). The existing tests cover the worktree-session shapes only: `prose_allocation_is_refused_on_a_worktree_shadow_of_a_main_ledger` (`append_entry.rs:1379`), `prose_allocation_is_allowed_on_a_worktree_born_ledger`, and one test per half (lineage link, fork event) of the shadow check.
+In `src/librarian/tools/append_entry.rs`:
+- `prose_allocation_is_refused_on_a_shadow_with_no_current_project` (case ii)
+- `prose_allocation_is_refused_on_a_shadow_from_a_main_checkout_session` (case i)
+
+Both were red before the change: the same bodies, run as probes, returned `Ok` with `HY-11`. After the change, `cargo test --lib --no-default-features librarian::tools::` passes (1656 passed, 0 failed, 1 ignored). Clippy lean exits 0. No mutation probe was run on `has_fork_record`.
+
+## Fix provenance
+
+- **SHA:** `86e15c9888e2f850b09cbaf279401a028a6fa5c3` (`experiments`)
+- **patch-id:** `c396eeb2c5db6028d4fcdd110055ba86b9e36f18`
 
 ## Workarounds
 
@@ -94,15 +109,7 @@ Allocate entry ids from the main checkout against the main row's id, never again
 
 ## Resume
 
-**Measured 2026-11-12.** Two probe tests were added next to `prose_allocation_is_refused_on_a_worktree_shadow_of_a_main_ledger`, run with `scripts/with-slot.sh cargo test --lib --no-default-features probe_prose_allocation`, and then removed. Both failed, so both allocate on a shadow today:
-- Case (ii), no current project: `append_entry` on the shadow's id returned `Ok` with id `HY-11` and `section_written: true`.
-- Case (i), main-checkout session (`main_root: None`): the call also returned `Ok`; the test panicked at its `is_err()` assertion. The printed result line was interleaved with the other test's output, so the id was not read.
-
-The probes use a fork through `resolve_write_target`, then set `ctx.current_project` (a public field) to `None` or to a project with `main_root: None`. Their source is not in the repo. The patch is in the session scratchpad only.
-
-Not run: case (iii) and the params-ledger branch. The fix is still undecided; see Fix. When the fix lands, the two probes become the regression tests: they already assert `is_err()`.
-
-Next: read the `merge_worktree` renumber near `merge_worktree.rs:452` for the params branch, then choose the fix option with the owner.
+Mitigated in `86e15c988`. To move to `fixed`: add a test for case (iii) (worktree A names worktree B's shadow, B outside `main_root`), and run the default-feature suite.
 
 ## References
 
