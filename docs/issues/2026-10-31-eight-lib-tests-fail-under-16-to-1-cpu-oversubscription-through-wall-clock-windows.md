@@ -179,5 +179,20 @@ So the reopen trigger is no longer a single row. On 11-11 and 11-12, 58 of 174 `
 
 The choice among the options (a lean red-only path, a higher default, leaving it) is still the operator's. A higher default lengthens the wait of a red whose scan is already slow. Next read, to separate the causes: group the `hinted` rows above 15,000 ms and the `timed_out` rows by `session_id` and by hour, and compare with the load at those times.
 
+## Decision of 2026-11-12: the ceiling is 60 s
+
+The operator chose the higher ceiling, against the recommendation above to keep 30 s and read the slow rows by session and hour first. `ATTRIBUTION_TIMEOUT_DEFAULT` is now 60 s (`src/tools/run_command/attribution.rs`).
+
+- Fix SHA (on `experiments`): `31d138b1a8ef797d735cfee7cf1df3bb22a2d259`
+- patch-id: `f6297dfb5d5926be4764a22f4eaf8a74143c0d6f`
+
+What it does: a scan that took 30 to 60 s now returns its hint, where it returned `timed_out` and no hint. The longest answered scan so far took 28.4 s, so 60 s is about twice that.
+
+What it costs: the scan blocks the red's response, so a red whose scan is slow can now wait up to 60 s before the answer comes back. Nothing makes the scan faster, and the cause of the slow scans on 11-11 and 11-12 is still unknown.
+
+Checked: `cargo test --lib --no-default-features tools::run_command::` passed (499 passed, 0 failed). No test pins the default value. Not checked: the default-feature suite, whether a 60 s response exceeds a client-side tool timeout, and the companion hook text, which says the scan takes about 20 s (plugin repo, not read here).
+
+Still open: why the scans are slow, and a distribution after the change. Re-read the same query after a few days: `timed_out` rows should fall to zero if the ceiling was the only limit. A `hinted` row above 45,000 ms, or any `timed_out` row at the 60 s ceiling, reopens the choice of a lean red-only path.
+
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`
