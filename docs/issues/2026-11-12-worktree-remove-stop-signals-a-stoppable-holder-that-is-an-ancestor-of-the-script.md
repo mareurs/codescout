@@ -1,16 +1,17 @@
 ---
 id: '786b1826bab82b18'
 kind: bug
-status: open
+status: fixed
 title: worktree-remove.sh --stop signals a stoppable holder that is an ancestor of the script itself
 tags:
 - cluster/unclassified
+closed: 2026-11-12
 opened: 2026-11-12
 owner: marius
 related:
 - '3dde1548c3e5c310'
 severity: low
-unverified: Read from the code and one fixture run by a reviewer; never run against a real process tree. No test covers an ancestor holder when no other blocker exists.
+unverified: Tested on fixture /proc trees only; never run against a real process tree in which a stoppable holder is an ancestor of the script. The ancestry is known only as far as /proc/<pid>/status can be read along the chain. The ancestor skips in send_term and in the stop_holders collection loop have no test.
 ---
 
 # BUG: worktree-remove.sh --stop signals a stoppable holder that is an ancestor of the script itself
@@ -53,19 +54,30 @@ None beyond reading the code.
 
 ## Fix
 
-Not made. Direction: make a holder whose pid is an ancestor of the script a blocker (exit 4 before any signal, printed like the parent, with the note "an ancestor of this script"), and make `send_term` refuse it as well. `list_holders` already computes the ancestry set; expose it to `blockers_of` and `stop_holders` and add the test the code lacks: a stoppable ancestor with no other blocker, expecting exit 4 and no signal line.
+Applied 2026-11-12 (commits in Fix provenance). `ancestry_of START` builds the set of the script's ancestors: the start, then each ancestor found through `PPid:` in `/proc/<pid>/status`, at most 64 steps, with a seen set. The walk ends at pid 1 or 0, a repeated pid, a `status` it cannot read, and a `PPid:` that is not a number or has 11 or more digits. `main` computes the set once, from the script's parent. `blockers_of` makes a listed holder in that set a blocker whatever its kind, printed as `(an ancestor of this script)`; the parent keeps `(the parent of this script)`. `send_term` and the collection loop of `stop_holders` skip such a pid. `list_holders` uses the same function for the `child` pass, so there is one walk.
+
+A review of the first commit found that it computed the set lazily and trusted any non-empty `ANCESTRY` in the environment, so an inherited variable of that name turned the guard off and the script signalled the grandparent again (reproduced on a fixture). The second commit computes the set in `main` before any use.
 
 ## Tests added
 
-N/A: the bug is open.
+`tests/worktree-remove.sh` (passed=266 failed=0 on 2026-11-12): `case_a_stoppable_grandparent_of_the_script_is_a_blocker`, `case_a_stoppable_ancestor_three_levels_up_is_a_blocker`, `case_an_ancestor_blocks_the_whole_stop`, `case_without_stop_an_ancestor_is_listed_unchanged`, `case_a_holder_that_is_not_an_ancestor_is_still_stopped`, `case_a_mux_ancestor_of_the_script_is_a_blocker`, `case_an_inherited_ancestry_variable_does_not_disable_the_guard`, and an assertion in the older parent case that the parent keeps its own text. Before the fix the first three exited 5 instead of 4; the inherited-variable case exited 5 on the first commit.
+
+Not covered: the ancestor skips in `send_term` and in the collection loop of `stop_holders` (no realistic path makes an ancestor appear after the first scan), and the check `lacks "worktree-remove: signalled "` in the mux case cannot fail with fixture pids; the exit-4 assertion pins that case.
+
+## Fix provenance
+
+- **SHA:** `2e3bdbb30` (`experiments`)
+- **patch-id:** `65e62ea427a3`
+- **SHA:** `2740f4798` (`experiments`)
+- **patch-id:** `501ff47461ef`
 
 ## Workarounds
 
-Run the script from a shell that is not a descendant of a process that holds the worktree.
+Not needed once the fix is in. Before it: run the script from a shell that is not a descendant of a process that holds the worktree.
 
 ## Resume
 
-Decide whether the narrow case justifies the change (it adds a blocker class), then add the failing test first.
+Fixed. Open: nothing was run against a real process tree (fixtures only); the ancestry is known only as far as `/proc/<pid>/status` can be read along the chain; the two skips named under Tests added have no test.
 
 ## References
 

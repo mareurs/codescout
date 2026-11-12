@@ -10,7 +10,7 @@ tags:
 closed: 2026-11-12
 opened: 2026-11-12
 severity: medium
-unverified: 'The --stop path has been used on three real trees (2026-11-12). Not observed: a SIGTERM sent to a live child or cargo tree, and the survivor exit (5). A holder that is an ancestor of the script is still signalled (bug 786b1826bab82b18). The .codescout/embeddings symlink is created by two codescout-companion hooks; stopping that is the claude-plugins issue. macOS and Windows CI lanes are not checked.'
+unverified: 'The --stop path has been used on three real trees (2026-11-12). Not observed: a SIGTERM sent to a live child or cargo tree, and the survivor exit (5). The ancestor blocker (bug 786b1826bab82b18) is tested on fixtures only. The .codescout/embeddings symlink is created by two codescout-companion hooks; stopping that is the claude-plugins issue. macOS and Windows CI lanes are not checked.'
 ---
 
 # BUG: git worktree remove refuses after codescout and agent briefs leave untracked files in a worktree
@@ -95,11 +95,11 @@ Both follow-ups were made on 2026-11-12 (commits in Fix provenance). First, `--s
 
 Third use, 2026-11-12, on a fresh probe worktree with a cold build: the row `sh .../tikv-jemalloc-sys/.../configure`, which was `other` in the second use, was listed as `child`, and the first `--stop` run exited 0 in 8.2 s with the line `signalled <pid> mux with SIGTERM`. A scan took 2.45 s without a `child` row and 3.72 s with one, on a busy machine during the build (the scan timeout is 10 s). Only the mux was signalled in that run: no signal sent to a `child`, and no survivor exit (5), was observed.
 
-A holder that is an ancestor of the script is still signalled when no `other` blocker exists. That gap predates the `child` work and is bug `786b1826bab82b18`.
+A holder that is an ancestor of the script is a blocker too, whatever its kind: `--stop` exits 4 before any signal (bug `786b1826bab82b18`, fixed 2026-11-12, commits in Fix provenance).
 
 ## Tests added
 
-- `tests/worktree-remove.sh`: a shell suite (passed=235 assertions on 2026-11-12; fixture `/proc` trees with `cwd`, `cmdline` and `status` files, real-process cases, `git` shims). `tests/worktree_remove_script.rs` (`the_worktree_remove_suite_passes`, Linux only) runs it under `cargo nextest`.
+- `tests/worktree-remove.sh`: a shell suite (passed=266 assertions on 2026-11-12, with the cases for the ancestor blocker listed in bug `786b1826bab82b18`; fixture `/proc` trees with `cwd`, `cmdline` and `status` files, real-process cases, `git` shims). `tests/worktree_remove_script.rs` (`the_worktree_remove_suite_passes`, Linux only) runs it under `cargo nextest`.
 - For the signal lines and the `child` kind: `case_stop_prints_each_signal_it_sends`, `case_a_descendant_of_a_stoppable_holder_is_a_child`, `case_without_a_status_file_a_descendant_stays_other`, `case_an_ancestor_walk_that_cannot_finish_leaves_other`, `case_the_script_parent_never_makes_a_child`, `case_a_stoppable_ancestor_of_the_script_makes_no_child`, `case_a_codescout_server_under_a_stoppable_holder_stays_a_blocker`, `case_the_ancestor_walk_cap_is_exactly_64`, `case_a_descendant_that_is_not_a_holder_is_not_listed` and `case_stop_ends_a_c_compile_child_and_removes` (real processes). The two cases for the script's ancestry and for a non-mux `codescout` failed before their fix (exit 5 and kinds `cargo,child,child` and `cargo,child`).
 - For the activation part: see bug `d291b97d9e69edef`.
 - Not covered: a test that runs a codescout write tool in a worktree and asserts that `git status --porcelain` is empty; the `.codescout/embeddings` symlink would make it fail today.
@@ -135,6 +135,10 @@ A holder that is an ancestor of the script is still signalled when no `other` bl
 - **patch-id:** `d4065dca2d7c`
 - **SHA:** `a1a0b28d2` (`experiments`)
 - **patch-id:** `591b08f8c84f`
+- **SHA:** `2e3bdbb30` (`experiments`)
+- **patch-id:** `65e62ea427a3`
+- **SHA:** `2740f4798` (`experiments`)
+- **patch-id:** `501ff47461ef`
 
 ## Workarounds
 
@@ -149,7 +153,7 @@ Open items:
 - The recreated `.codescout` in plan-b is unexplained. A possible cause, not checked: `session-start.mjs` creates `.codescout` as a symlink to the main checkout's directory when a session starts in a worktree that lacks it.
 - Parked script follow-ups: scrub UTF-8 C1 control characters (U+0080 to U+009F) from printed command lines (one-line fix `cmd=${cmd//$'\xc2'[$'\x80'-$'\x9f']/ }`); a very large `--wait` overflows the deadline arithmetic (the safe direction); the exit-7 `ls -A` listing prints raw file names; the survivor message says "SIGKILL is never used".
 - Check that CI is green on the macOS and Windows lanes (the Rust wrapper is Linux-only; not run locally).
-- Open after the `child` work: a SIGTERM sent to a live `child` or `cargo` tree and the survivor exit (5) have not been observed on a real tree; a holder that is an ancestor of the script is still signalled (bug `786b1826bab82b18`); no mutation probe covers the `seen` set or the parent exclusion of the ancestry walk; the `lacks` assertions on the signal lines were never seen failing; the ancestry set stops after 64 steps.
+- Open after the `child` work: a SIGTERM sent to a live `child` or `cargo` tree and the survivor exit (5) have not been observed on a real tree; no mutation probe covers the `seen` set or the parent exclusion of the ancestry walk; the `lacks` assertions on the signal lines were never seen failing; the ancestry set stops after 64 steps.
 
 ## References
 
