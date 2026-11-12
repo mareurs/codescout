@@ -66,7 +66,6 @@ pub enum TreeProblem {
     /// A collection readme whose schema fails; the collection and its entries are left out.
     /// `rel_path` is the readme's repo-relative path.
     Schema {
-        collection: Key,
         rel_path: String,
         errors: Vec<SchemaError>,
     },
@@ -196,7 +195,6 @@ impl LifecycleTree {
                     }
                     Err(errors) => {
                         problems.push(TreeProblem::Schema {
-                            collection: placement.collection,
                             rel_path: doc.rel_path.clone(),
                             errors,
                         });
@@ -459,7 +457,6 @@ mod tests {
         assert_eq!(
             t.problems,
             [TreeProblem::Schema {
-                collection: k("s"),
                 rel_path: "docs/trackers/streams/s/readme.md".into(),
                 errors: vec![SchemaError::ExitRequired]
             }]

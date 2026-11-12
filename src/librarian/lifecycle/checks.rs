@@ -435,9 +435,7 @@ pub fn check(tree: &LifecycleTree, today: NaiveDate, policy: &CheckPolicy) -> Ve
                 rel_path,
                 CollectionProblem::Frontmatter(detail.clone()),
             )),
-            TreeProblem::Schema {
-                rel_path, errors, ..
-            } => {
+            TreeProblem::Schema { rel_path, errors } => {
                 for error in errors {
                     out.push(collection_invalid(
                         rel_path,
