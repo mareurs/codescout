@@ -9,8 +9,8 @@ topic: tracker organization
 entry_prefix:
 - F
 - W
-entry_high_water_F: 1
-entry_high_water_W: 3
+entry_high_water_F: 2
+entry_high_water_W: 4
 ---
 # Session Log — Tracker Organization
 
@@ -111,6 +111,7 @@ entry_high_water_W: 3
 | ID | Date | Severity | Category | Status | Title |
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-11-11 | med | stale-claim | open | **frictions/ is not one-file-per-entry** — FR-N are defined in index.md; only issue-clusters/ has the shape |
+| F-2 | 2026-11-12 | med | stale-claim | mitigated | **A plan and its spec claimed three things the code contradicts** — "as it does today", a one-finding expectation, and "cannot be shown failing" |
 | F-<n> | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
 
 ## Wins Index
@@ -120,6 +121,7 @@ entry_high_water_W: 3
 | W-1 | 2026-11-11 | med | read the gate before writing the surface | guide naming docs/templates/ would fail no_guide_names_a_path_or_field_only_this_repo_has | validated |
 | W-2 | 2026-11-11 | med | measure the repo under the new model with an ignored census test before building tools on it | a migration sized from the estimate of about 76 trackers would have missed 81 flat files plus 261 in subfolders, and the loose temp tracker would surface only at migration time | validated |
 | W-3 | 2026-11-11 | med | measure the ledger before ruling on two spec ambiguities | a 14-day default grace would have made doctor report 69 stale terminal entries on day one against a ledger swept about monthly | validated |
+| W-4 | 2026-11-12 | med | an Opus plan review with the code open, before the first dispatch | a correct implementation would have failed the plan's own first check test, and a behaviour change of an existing check would have shipped unannounced | validated |
 | W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
 
 ---
@@ -383,6 +385,32 @@ be reshaped after the plan was written.
 **Counterfactual:** keeping the 14-day default would have made `doctor` report 69 stale terminal entries on day one against a ledger that is already swept about monthly, and the first migration would have trained everyone to ignore the check.
 
 **Limits:** one corpus, one date, and a status-word mapping chosen by hand. The two spec rulings rest on the spec text, not on data.
+
+## F-2 — A plan and its spec claimed three things the code contradicts
+
+**Valid:** dated 2026-11-12
+
+**Observed:** I wrote the lifecycle-cleanup spec (`f01327c4f92f9a72`) and plan (`011a4f5022eea4c0`) after reading `LifecycleTree::build`. An Opus plan review then found three places where the text disagreed with the code. I checked each one myself.
+
+- The spec said that when the first readme of a folder is broken, "the collection fails as it does today". It does not. A broken first readme pushes a `Frontmatter` or `Schema` problem and inserts the folder into `failed`, but a later good readme still reaches `collections.entry(dir).or_insert(..)`, builds the collection, and its entries get every entry check. The change in Task 1 therefore alters existing output.
+- The plan's first check test expected one `CollectionInvalid` finding for two good ledger readmes. `testkit::LEDGER` declares `review_every: 30d` and the kept collection has no entry, so `check_collection` also emits `LedgerQuiet` (`(None, _) => true`). A correct implementation would have failed that test.
+- Task 4 said the locale test "cannot be shown failing against a German git". On this machine git's German catalog is installed: `LANGUAGE=de LANG=en_US.UTF-8 git -C / rev-parse --show-toplevel` prints `Schwerwiegend: Kein Git-Repository ...`, and `LC_ALL=C` makes git ignore `LANGUAGE`.
+
+**Cost:** each would have cost at least one implementer retry; the first would also have shipped an undisclosed behaviour change.
+
+**Resolution:** spec and plan rewritten and committed as `a8475d2a9`. Ruling R1 in the SDD ledger names the behaviour change for the operator.
+
+**Cause:** I described what `build` does for the usual case (a good first readme) and did not trace the broken-first path I had already read.
+
+## W-4 — An Opus plan review before dispatch caught three false claims in the plan and spec
+
+**Valid:** dated 2026-11-12
+
+**Observed:** Before dispatching the five-task lifecycle-cleanup plan, an Opus reviewer read the spec, the plan and the code it touches, and checked each claim of the plan against the code. It reported 1 critical, 5 important and 7 minor findings. I verified the critical one and two of the important ones by running the code or the command (F-2 lists them). The plan was rewritten before any implementer started.
+
+**Counterfactual:** the first implementer would have met a plan test that a correct implementation fails (`LedgerQuiet` is also emitted), and would have had to retry or bend the test. The spec's false "as it does today" would have shipped a changed behaviour of an existing check with no mention to the operator. The locale test would have been pinned by a probe that falls back to C and prints English, which suggests git is unaffected when it is not.
+
+**Limits:** one plan, one reviewer, five tasks. The reviewer's other findings (a missing test of the duplicate key, the gate step, a three-readme case) were not verified one by one; they were taken as plan text and will meet their own reviewers at task time.
 
 ## Template for new entries
 
