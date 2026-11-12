@@ -1,7 +1,7 @@
 ---
 id: '011a4f5022eea4c0'
 kind: plan
-status: draft
+status: done
 title: Tracker Lifecycle Cleanup — Implementation Plan
 tags:
 - trackers
