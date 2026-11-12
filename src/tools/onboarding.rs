@@ -1183,9 +1183,12 @@ fn write_workspace_config_if_needed(
 }
 
 /// Probe the semantic index (Qdrant) for readiness. Best-effort: returns a
-/// `{ ready, files, chunks }` envelope, with `ready: false` when the retrieval
-/// stack is offline.
+/// `{ ready, files, chunks }` envelope. When the probe could not look at the index (no project,
+/// no retrieval client, a failed statistics call) `ready` is `false` and the envelope also
+/// carries `unchecked`, the reason. `ready: false` without it is an answer: the index is empty.
 async fn probe_index_status(ctx: &ToolContext) -> Value {
+    let unchecked =
+        |reason: &str| json!({ "ready": false, "files": 0, "chunks": 0, "unchecked": reason });
     let project_id = ctx
         .agent
         .with_project_at(ctx.workspace_override.as_deref(), |p| {
@@ -1194,7 +1197,7 @@ async fn probe_index_status(ctx: &ToolContext) -> Value {
         .await
         .unwrap_or_else(|_| String::new());
     if project_id.is_empty() {
-        return json!({ "ready": false, "files": 0, "chunks": 0 });
+        return unchecked("no project to check");
     }
     let root = ctx
         .agent
@@ -1209,10 +1212,10 @@ async fn probe_index_status(ctx: &ToolContext) -> Value {
                     "files": files,
                     "chunks": chunks,
                 }),
-                Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
+                Err(_) => unchecked("the retrieval store did not answer the statistics call"),
             }
         }
-        Err(_) => json!({ "ready": false, "files": 0, "chunks": 0 }),
+        Err(_) => unchecked("the retrieval client could not be created"),
     }
 }
 
@@ -1445,6 +1448,7 @@ async fn perform_full_onboarding(
         index_ready: index_status["ready"].as_bool().unwrap_or(false),
         index_files: index_status["files"].as_u64().unwrap_or(0) as usize,
         index_chunks: index_status["chunks"].as_u64().unwrap_or(0) as usize,
+        index_unchecked: index_status["unchecked"].as_str(),
         projects: &gathered.projects,
         is_workspace,
     });
@@ -1802,6 +1806,34 @@ mod tests {
             &s,
         );
         assert!(matches!(out, RepoNameOutcome::Unreadable(m) if m.contains("repo.toml")));
+    }
+    /// With no project to look at, the probe did not look at any index: its answer is "unknown",
+    /// which `ready: false` alone cannot say. The envelope carries `unchecked` with the reason.
+    /// BUG docs/issues/2026-11-11-onboarding-probe-failure-is-reported-as-index-not-built.md
+    #[tokio::test]
+    async fn a_probe_with_no_project_says_it_did_not_check_the_index() {
+        let agent = crate::agent::Agent::new(None).await.unwrap();
+        let ctx = ToolContext {
+            agent,
+            lsp: crate::lsp::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        };
+        let status = probe_index_status(&ctx).await;
+        assert_eq!(status["ready"], json!(false), "{status}");
+        assert_eq!(status["chunks"], json!(0), "{status}");
+        assert!(
+            status["unchecked"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("no project")),
+            "{status}"
+        );
     }
 
     async fn ctx_over(root: &std::path::Path) -> ToolContext {

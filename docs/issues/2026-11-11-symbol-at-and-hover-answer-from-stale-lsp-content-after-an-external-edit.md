@@ -14,7 +14,7 @@ related:
 - '58a45860b802a477'
 - '489e013ddfd6c3fc'
 severity: medium
-unverified: 'Measured on two tiny crates (one per transport), rust-analyzer only, one run per case. The automated tests cover stdio only; the mux transport was verified once end to end with a driver script that is not in the repo. Not done or not measured: hover / goto_definition on the changed file have no client-level test; prepare_call_hierarchy with a raw position was not run; the cost of the per-request stat and how often a rename after a resync is cancelled by the server are not measured; whether the server can notice a changed file by itself was not examined; a language other than Rust. The call_graph omission of other.rs::use_it that I saw is a different defect (call_graph serves a stale edge cache), filed as 489e013ddfd6c3fc.'
+unverified: 'Measured on two tiny crates (one per transport), rust-analyzer only, one run per case. The automated tests cover stdio only; the mux transport was verified once end to end with a driver script that is not in the repo. The hover and goto_definition tests (2026-11-12) were run once each on the fixed code and once each with the resync disabled; they cover the changed file on stdio only. Not done or not measured: prepare_call_hierarchy with a raw position was not run; the cost of the per-request stat and how often a rename after a resync is cancelled by the server are not measured; whether the server can notice a changed file by itself was not examined; a language other than Rust. The call_graph omission of other.rs::use_it that I saw is a different defect (call_graph serves a stale edge cache), filed as 489e013ddfd6c3fc.'
 ---
 
 # BUG: a file changed outside codescout stays stale in the LSP server unless a documentSymbol call resyncs that same file (symbol_at, and references into other open files)
@@ -151,7 +151,11 @@ Verified 2026-11-11: `cargo test --lib -- lsp::` 259 passed, 0 failed; the group
 
 **Mux transport, verified outside the unit tests.** The tests cover stdio only. I built the new binary, ran it over MCP stdio against a fresh crate on the default transport (process tree: `rust-analyzer` under `codescout-new mux --socket …`) with a driver script, and replayed steps 9 and C: after the external write `references` reports `other.rs:4` (correct); after the external write `edit_code rename` leaves the comment intact and renames the real call. The same driver on the previous release binary shows the defect (`// abcdefg nn_fn here`, real call not renamed). The driver is in the session scratchpad and is not in the repo.
 
-Not covered: `hover` / `goto_definition` on the changed file itself have no client-level test (they pass through the same `request`); the socket transport has no automated test.
+Not covered: the socket transport has no automated test.
+
+**`hover` and `goto_definition` on the changed file, 2026-11-12.** In `src/lsp/client.rs`, stdio transport, real `rust-analyzer`: `goto_definition_follows_a_write_made_outside_codescout` and `hover_follows_a_write_made_outside_codescout`. Each reads a baseline at the call's line 1, prepends three lines to `other.rs` outside codescout, then asks ONCE at the new position (line 4), with no intermediate `document_symbols` and no polling, because rust-analyzer watches files itself and polling could let it mask a stale answer. Only an error is retried (`retrying_on_error`), never an empty answer. Both pass on the fixed code. With the resync in `request` disabled (`if false && ...`, restored afterwards and checked) both fail, each after ten tries, with `LSP error (code -32603): Invalid offset LineCol { line: 4, col: 11 } (line index length: 51)`: the server still held the old 51-byte file. So the stale state shows as an error here and not as an empty answer. One run each, on this machine.
+
+Verified 2026-11-12 on the shared tree: `./scripts/gate.sh` FMT 0, CLIPPY 0, LEAN 0 (9538 passed), DEFAULT 0 (9632 passed), Python light lane 1836 passed.
 
 ## Workarounds
 
@@ -161,9 +165,9 @@ Call `symbols(path)` on the file after any edit made outside codescout, then use
 
 Fixed by `43c4ca9df` (see `## Fix provenance`). Archive after the owner confirms, with the fix verified on `experiments`: the gate was green at that tree and the tests above are the regression tests.
 
-Decide with the owner whether `4e7ec7bfc047ac7b` (the `symbols` report, never reproduced for `symbols` itself) can be closed as not reproducible.
+`4e7ec7bfc047ac7b` (the `symbols` report, never reproduced for `symbols` itself) is now `zombie`, with a re-open trigger.
 
-Open questions, none blocking: the cost of the per-request `stat` on a large session; how often a rename right after an external edit is cancelled by the server; `prepare_call_hierarchy` with a raw position was not run; a language other than Rust; `hover` / `goto_definition` on the changed file have no client-level test.
+Open questions, none blocking: the cost of the per-request `stat` on a large session; how often a rename right after an external edit is cancelled by the server; `prepare_call_hierarchy` with a raw position was not run; a language other than Rust.
 
 Link: `58a45860b802a477`, `bug-fix-session-log:F-235`.
 

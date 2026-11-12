@@ -4189,6 +4189,131 @@ struct Point {
     async fn rename_edit_does_not_land_on_another_callee_after_a_same_size_write_once_resynced() {
         rename_after_an_external_write(ExternalWrite::SwapForASameLengthCallee, true).await;
     }
+    /// Ask until the server answers without an error. A server that was just told a file changed may
+    /// answer a request with `ContentModified` while it re-reads it; that is a retry. Only an error is
+    /// retried, never an empty answer, because an empty answer after a write outside codescout would
+    /// be a stale result. The stale state under test also shows as an error that does NOT go away:
+    /// measured with the resync disabled, every one of the ten tries failed with `Invalid offset
+    /// LineCol { line: 4, col: 11 } (line index length: 51)`, the server still holding the old file.
+    async fn retrying_on_error<T, F, Fut>(mut ask: F) -> T
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        let mut last = None;
+        for _ in 0..10 {
+            match ask().await {
+                Ok(value) => return value,
+                Err(e) => {
+                    last = Some(e);
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                }
+            }
+        }
+        panic!("the server kept answering with an error: {last:?}");
+    }
+
+    /// `goto_definition` on the call in `other.rs`, re-asked for up to 20 s until the server answers
+    /// with a location. Used only for the baseline, while the server may still be loading the crate.
+    async fn definition_until_found(
+        client: &LspClient,
+        other_rs: &Path,
+        line: u32,
+    ) -> Vec<lsp_types::Location> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let found = client
+                .goto_definition(other_rs, line, 11, "rust")
+                .await
+                .unwrap();
+            if !found.is_empty() || std::time::Instant::now() >= deadline {
+                return found;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
+
+    /// After three lines are prepended to `other.rs` outside codescout, `goto_definition` on the call
+    /// at its NEW position must reach `target_fn` in `lib.rs`. The call is asked once and not polled:
+    /// rust-analyzer watches files itself and would, given time, mask a stale answer. Before the
+    /// resync in `request`, the server still held the three-line file and answered every try with
+    /// `Invalid offset LineCol { line: 4, col: 11 } (line index length: 51)` (bug
+    /// `a73c49456056fb92`).
+    #[tokio::test]
+    async fn goto_definition_follows_a_write_made_outside_codescout() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        create_two_file_project(dir.path());
+        let (client, lib_rs, other_rs) = synced_two_file_client(dir.path()).await;
+
+        // Baseline: the call is on line 1 and resolves to `target_fn` in `lib.rs`, so a failure
+        // below is the stale step and not the fixture.
+        let before = definition_until_found(&client, &other_rs, 1).await;
+        assert_eq!(before.len(), 1, "baseline: one definition, got {before:?}");
+        assert_eq!(disk_text_at(&lib_rs, &before[0].range), "target_fn");
+
+        let original = std::fs::read_to_string(&other_rs).unwrap();
+        std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
+
+        let after = retrying_on_error(|| client.goto_definition(&other_rs, 4, 11, "rust")).await;
+        assert_eq!(
+            after.len(),
+            1,
+            "the call is on line 4 now and must still resolve: {after:?}"
+        );
+        assert!(
+            after[0].uri.as_str().ends_with("/src/lib.rs"),
+            "the definition is in lib.rs: {after:?}"
+        );
+        assert_eq!(
+            disk_text_at(&lib_rs, &after[0].range),
+            "target_fn",
+            "the definition must cover `target_fn` on disk, range {:?}",
+            after[0].range
+        );
+        client.shutdown().await.unwrap();
+    }
+
+    /// The same write, asked with `hover`: at the call's new position the answer must describe
+    /// `target_fn`. Before the resync in `request`, the position lay past the end of the file the
+    /// server still held, and `hover` failed with the same `Invalid offset` error.
+    #[tokio::test]
+    async fn hover_follows_a_write_made_outside_codescout() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        create_two_file_project(dir.path());
+        let (client, _lib_rs, other_rs) = synced_two_file_client(dir.path()).await;
+
+        // Baseline, polled while the server may still be loading the crate.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let before = loop {
+            let text = client.hover(&other_rs, 1, 11, "rust").await.unwrap();
+            if text.is_some() || std::time::Instant::now() >= deadline {
+                break text;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        };
+        assert!(
+            before.as_deref().is_some_and(|t| t.contains("target_fn")),
+            "baseline: hover on the call describes target_fn, got {before:?}"
+        );
+
+        let original = std::fs::read_to_string(&other_rs).unwrap();
+        std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
+
+        let after = retrying_on_error(|| client.hover(&other_rs, 4, 11, "rust")).await;
+        assert!(
+            after.as_deref().is_some_and(|t| t.contains("target_fn")),
+            "hover at the call's new position must describe target_fn, got {after:?}"
+        );
+        client.shutdown().await.unwrap();
+    }
 
     /// Verify that prepare_call_hierarchy returns a CallHierarchyItem for a known function.
     ///

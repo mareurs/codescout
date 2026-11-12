@@ -1109,6 +1109,9 @@ pub struct OnboardingContext<'a> {
     pub index_ready: bool,
     pub index_files: usize,
     pub index_chunks: usize,
+    /// Why the probe could not look at the semantic index. Then its state is unknown, not
+    /// absent, and `index_ready` says nothing. `None` when the probe got an answer.
+    pub index_unchecked: Option<&'a str>,
     pub projects: &'a [crate::workspace::DiscoveredProject],
     pub is_workspace: bool,
 }
@@ -1181,6 +1184,12 @@ pub fn build_onboarding_prompt(ctx: &OnboardingContext) -> String {
         prompt.push_str(&format!(
             "**Semantic index:** built ({} files, {} chunks)\n\n",
             ctx.index_files, ctx.index_chunks
+        ));
+    } else if let Some(reason) = ctx.index_unchecked {
+        // The probe did not look, so "not built" would be a claim about an index it never saw.
+        prompt.push_str(&format!(
+            "**Semantic index:** could not be checked ({reason}). Run `index(action='status')` \
+             before offering to build one, and offer it only if that reports no index.\n\n"
         ));
     } else {
         prompt.push_str("**Semantic index:** not built\n\n");
@@ -1445,6 +1454,7 @@ mod tests {
             index_ready: false,
             index_files: 0,
             index_chunks: 0,
+            index_unchecked: None,
             projects: &[],
             is_workspace: false,
         });
@@ -1464,6 +1474,7 @@ mod tests {
             index_ready: false,
             index_files: 0,
             index_chunks: 0,
+            index_unchecked: None,
             projects: &[],
             is_workspace: false,
         });
@@ -1483,6 +1494,7 @@ mod tests {
             index_ready: false,
             index_files: 0,
             index_chunks: 0,
+            index_unchecked: None,
             projects: &[],
             is_workspace: false,
         });
@@ -1827,6 +1839,7 @@ mod tests {
             index_ready: true,
             index_files: 42,
             index_chunks: 350,
+            index_unchecked: None,
             projects: &[],
             is_workspace: false,
         });
@@ -1855,10 +1868,50 @@ mod tests {
             index_ready: false,
             index_files: 0,
             index_chunks: 0,
+            index_unchecked: None,
             projects: &[],
             is_workspace: false,
         });
         assert!(result.contains("Semantic index:** not built"));
+    }
+    /// A probe that could not look (no retrieval client, a failed statistics call) knows nothing
+    /// about the index, so the prompt must not say "not built": Phase 1 then offers to build an
+    /// index that may exist. The line names why the check failed and routes to `index(action='status')`.
+    /// BUG docs/issues/2026-11-11-onboarding-probe-failure-is-reported-as-index-not-built.md
+    #[test]
+    fn build_onboarding_does_not_call_an_unchecked_index_not_built() {
+        let render = |ready: bool, unchecked: Option<&str>| {
+            build_onboarding_prompt(&OnboardingContext {
+                languages: &["rust".into()],
+                top_level: &[],
+                key_files: &[],
+                ci_files: &[],
+                entry_points: &[],
+                test_dirs: &[],
+                index_ready: ready,
+                index_files: 0,
+                index_chunks: 0,
+                index_unchecked: unchecked,
+                projects: &[],
+                is_workspace: false,
+            })
+        };
+        let unchecked = render(false, Some("the retrieval client could not be created"));
+        assert!(
+            unchecked.contains(
+                "**Semantic index:** could not be checked (the retrieval client could not be created)"
+            ),
+            "{unchecked}"
+        );
+        assert!(unchecked.contains("index(action='status')"), "{unchecked}");
+        assert!(
+            !unchecked.contains("Semantic index:** not built"),
+            "{unchecked}"
+        );
+
+        // The two answers the probe can get keep their wording.
+        assert!(render(false, None).contains("Semantic index:** not built"));
+        assert!(!render(false, None).contains("could not be checked"));
     }
 
     #[test]
@@ -1888,6 +1941,7 @@ mod tests {
             index_ready: false,
             index_files: 0,
             index_chunks: 0,
+            index_unchecked: None,
             projects: &projects,
             is_workspace: true,
         };

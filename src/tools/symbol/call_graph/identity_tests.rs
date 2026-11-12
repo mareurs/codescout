@@ -504,5 +504,41 @@ async fn a_tree_above_the_workspace_scan_cap_still_stores_its_resolutions_under_
         super::MAX_WORKSPACE_FILES_SCAN
     );
 }
+/// The write tools reach the cache through `Agent::invalidate_call_edges_for`. A write to a
+/// file that cannot hold a call must leave the stored resolutions in place, and a write to a
+/// source file must still delete them (bug `489e013ddfd6c3fc`).
+#[tokio::test]
+async fn a_codescout_write_to_a_markdown_file_keeps_the_stored_resolutions() {
+    let dir = write_project(&[(
+        "src/lib.rs",
+        "pub fn entry() {\n    first();\n}\npub fn first() {}\n",
+    )]);
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let ask = json!({"symbol":"entry","path":"src/lib.rs",
+        "direction":"callees","max_depth":1,"detail_level":"full"});
+    let ctx = context(&root, &["src/lib.rs"]).await;
+    CallGraph.call(ask, &ctx).await.unwrap();
+
+    let stored = || -> i64 {
+        rusqlite::Connection::open(root.join(".codescout/call_edges.db"))
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM call_edge_resolutions", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    };
+    assert!(stored() > 0, "the call must have stored a resolution");
+    let before = stored();
+
+    ctx.agent
+        .invalidate_call_edges_for(None, &root.join("NOTES.md"))
+        .await;
+    assert_eq!(stored(), before, "a write to NOTES.md must keep them");
+
+    ctx.agent
+        .invalidate_call_edges_for(None, &root.join("src/lib.rs"))
+        .await;
+    assert_eq!(stored(), 0, "a write to src/lib.rs must delete them");
+}
 
 mod review;
