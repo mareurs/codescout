@@ -40,9 +40,11 @@ The gate is healthy by the project's own test: the median calls-to-recovery is 1
 
 `docs/trackers/friction-deep-dive-2026-10.md` (the `il1` diagnosis).
 
-## Idea (hypothesis, not tested)
+## Idea — checked 2026-11-12, already in the code
 
-Name the symbol that overlaps the requested range in the refusal text, so the agent can copy the call.
+The idea was to name the overlapping symbol in the refusal text. The refusal already does that: a gated read on 2026-11-12 returned `source range overlaps named symbol(s): 'tests', 'tests/verify_does_not_count_files_the_indexer_cannot_represent_as_missing', ... and 1 more`, with a hint that names `force=true` and the line count it would read. `git log -S'overlaps named symbol' -- src` shows the gate and its symbol list from `9692161ce` (2026-05-05), and `c4a7b1ddc` (2026-08-16) ordered the hint by requested extent. So all 354 refusals in the 2026-10-12 to 2026-11-10 window were issued with the names in the text, and naming cannot explain the 75 plain repeats.
+
+What this does not settle: why an agent repeats a plain read after seeing the names. That needs the intent behind the repeats (see Not verified). No change made.
 
 ## Not verified
 
