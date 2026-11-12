@@ -1824,9 +1824,12 @@ pub fn allocate_entry_id(
     // * write fails → `?` returns, the transaction rolls back, no id was handed out.
     //   Refusing is right: an id whose committed mark did not advance is precisely
     //   the reissue this exists to prevent, so a silent fallback would reintroduce it.
-    // * write succeeds, commit fails → frontmatter runs ahead of the database. Safe,
-    //   because `next` takes the max: the following call reads the higher mark and
-    //   simply skips an integer.
+    // * write succeeds, commit fails → the commit goes through `commit_after_file_write`,
+    //   which puts the file back (mark included) whenever it still holds our bytes. Only
+    //   when that restore cannot run (a peer rewrote the file, or the restore itself
+    //   failed) does the mark stay ahead of the database, and that is still safe: `next`
+    //   takes the max, so the following call reads the higher mark and simply skips an
+    //   integer.
     //
     // Concurrency on one machine is handled by the enclosing IMMEDIATE transaction —
     // a second session blocks on the write lock, so it cannot interleave here.

@@ -27,6 +27,9 @@ pub(crate) struct FileWrite {
     pub path: std::path::PathBuf,
     pub before: String,
     pub after: String,
+    /// Whether `after` carries an entry section. `false` means the write put only the committed
+    /// high-water mark on disk, so a failed commit has no section for the caller to delete.
+    pub section_written: bool,
 }
 
 /// Bring an artifact row's content columns up to bytes this transaction just wrote to its
@@ -173,6 +176,7 @@ pub(crate) fn write_entry_into_ledger(
         path: path.to_path_buf(),
         before: doc.to_string(),
         after: text,
+        section_written: section.is_some(),
     })
 }
 
@@ -257,6 +261,10 @@ fn restore_section_after_failed_commit(
 /// Note the two branches are not a wording difference. When the rollback succeeded there
 /// is nothing to clean up and a retry is simply correct; when it did not, telling the
 /// caller to retry produces exactly the duplicate this whole path exists to prevent.
+///
+/// That holds only when a SECTION was written ([`FileWrite::section_written`]). A write that
+/// carried only the high-water mark leaves no section behind, so its remedy is always "safe to
+/// retry": the mark running ahead of the catalog costs one skipped integer.
 fn commit_failed_after_section_write(
     e: rusqlite::Error,
     token: &str,
@@ -273,6 +281,45 @@ fn commit_failed_after_section_write(
         );
     };
     let label = document_label(&w.path);
+    if !w.section_written {
+        // Only the committed high-water mark reached disk: there is no section to delete, and a
+        // mark left ahead of the catalog is safe because the next allocation takes the max and
+        // skips one integer. So every branch says the retry is safe.
+        return match restore_section_after_failed_commit(&w.path, &w.before, &w.after) {
+            SectionRollback::Restored => LibrarianRecoverableError::with_hint(
+                format!("{caller}: the catalog write failed; the high-water mark was rolled back"),
+                format!(
+                    "The high-water mark for `{token}` had already been written to {label} when \
+                     the catalog COMMIT failed, so its id was never persisted — the mark has been \
+                     restored and the file is byte-for-byte what it was before this call. Nothing \
+                     to clean up: the call is safe to retry as-is. Underlying error: {e}"
+                ),
+            ),
+            SectionRollback::ForeignChange => LibrarianRecoverableError::with_hint(
+                format!("{caller}: the catalog write failed; the high-water mark is still on disk"),
+                format!(
+                    "The high-water mark for `{token}` was written to {label} and the catalog \
+                     COMMIT then failed, so its id was never persisted. The mark could NOT be \
+                     restored: the file no longer holds the bytes this call wrote, so another \
+                     writer has changed it since and restoring would discard their edit. No \
+                     section was written, so there is nothing to delete; a mark ahead of the \
+                     catalog is safe, and the next allocation skips one integer. The call is \
+                     safe to retry as-is. Underlying error: {e}"
+                ),
+            ),
+            SectionRollback::Failed(io) => LibrarianRecoverableError::with_hint(
+                format!("{caller}: the catalog write failed; the high-water mark is still on disk"),
+                format!(
+                    "The high-water mark for `{token}` was written to {label} and the catalog \
+                     COMMIT then failed, so its id was never persisted. Restoring the file also \
+                     failed ({io}), so the mark is still on disk. No section was written, so \
+                     there is nothing to delete; a mark ahead of the catalog is safe, and the \
+                     next allocation skips one integer. The call is safe to retry as-is. \
+                     Underlying error: {e}"
+                ),
+            ),
+        };
+    }
     match restore_section_after_failed_commit(&w.path, &w.before, &w.after) {
         SectionRollback::Restored => LibrarianRecoverableError::with_hint(
             format!("{caller}: the catalog write failed; the section was rolled back"),
@@ -568,6 +615,7 @@ mod tests {
             "Bad_Name.md"
         );
     }
+    // mutation: return the absolute path.
 
     // ---- the failed-commit compensation, moved here with the code it tests -------------------
 
@@ -670,6 +718,7 @@ mod tests {
             path: md.clone(),
             before: "before\n".to_string(),
             after: "before\n\n## F-1 — x\n\nprose\n".to_string(),
+            section_written: true,
         };
 
         // Rolled back: the file still held our bytes, so it was restored.
@@ -708,5 +757,111 @@ mod tests {
         );
     }
 
-    // mutation: return the absolute path.
+    fn busy() -> rusqlite::Error {
+        rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            Some("database is locked".to_string()),
+        )
+    }
+
+    /// An allocation that writes only the mark (no section supplied) leaves nothing for the
+    /// caller to delete, so no branch may send the caller to delete a section or forbid the
+    /// retry. A mark left ahead of the catalog is safe: the next allocation takes the max and
+    /// skips one integer.
+    #[test]
+    fn a_mark_only_commit_failure_never_sends_the_caller_to_delete_a_section() {
+        // The real path: an allocation with `section = None` whose COMMIT fails.
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = fixture(dir.path(), &cat, LEDGER);
+        cat.conn
+            .execute_batch(
+                "CREATE TABLE commit_tripwire(
+                     missing TEXT REFERENCES artifact(id) DEFERRABLE INITIALLY DEFERRED
+                 );
+                 CREATE TRIGGER commit_tripwire_trg AFTER INSERT ON entry_reservation
+                 BEGIN
+                     INSERT INTO commit_tripwire(missing) VALUES ('no-such-artifact');
+                 END;",
+            )
+            .unwrap();
+        let err =
+            crate::librarian::catalog::augmentation::allocate_entry_id(&mut cat, "art1", "F", None)
+                .unwrap_err();
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            LEDGER,
+            "the mark is restored"
+        );
+        let restored = hint_of(err);
+        assert!(restored.contains("high-water mark"), "{restored}");
+        assert!(
+            !restored.contains("section"),
+            "no section was written: {restored}"
+        );
+        assert!(restored.contains("safe to retry"), "{restored}");
+
+        // The two branches the real path cannot reach deterministically: a peer rewrote the
+        // file, or the restore itself failed.
+        let write = FileWrite {
+            path: md.clone(),
+            before: LEDGER.to_string(),
+            after: LEDGER.replace("entry_prefix: F", "entry_prefix: F\nentry_high_water_F: 1"),
+            section_written: false,
+        };
+        std::fs::write(&md, "a peer's rewrite\n").unwrap();
+        let foreign = hint_of(commit_failed_after_section_write(
+            busy(),
+            "F-1",
+            Some(&write),
+            "allocate_entry_id",
+        ));
+        let missing = FileWrite {
+            path: dir.path().join("never-created.md"),
+            ..write
+        };
+        let failed = hint_of(commit_failed_after_section_write(
+            busy(),
+            "F-1",
+            Some(&missing),
+            "allocate_entry_id",
+        ));
+        for hint in [&foreign, &failed] {
+            assert!(
+                !hint.contains("Delete the") && !hint.contains("Do NOT retry"),
+                "there is no section to delete and a retry is safe: {hint}"
+            );
+            assert!(hint.contains("safe to retry"), "{hint}");
+            assert!(hint.contains("high-water mark"), "{hint}");
+        }
+    }
+    // mutation: ignore `FileWrite::section_written` in `commit_failed_after_section_write`.
+
+    /// A hint names the document by its label and never by an absolute path (spec G6).
+    #[test]
+    fn a_commit_failure_hint_names_the_document_by_label_and_holds_no_absolute_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::create_dir(dir.path().join("docs")).unwrap();
+        let md = dir.path().join("docs/ledger.md");
+        std::fs::write(&md, "a peer's rewrite\n").unwrap();
+        let write = FileWrite {
+            path: md,
+            before: "before\n".to_string(),
+            after: "before\n\n## F-1 — x\n\nprose\n".to_string(),
+            section_written: true,
+        };
+
+        let hint = hint_of(commit_failed_after_section_write(
+            busy(),
+            "F-1",
+            Some(&write),
+            "append_entry",
+        ));
+
+        assert!(hint.contains("`[[ledger]]`"), "{hint}");
+        let root = dir.path().to_string_lossy().into_owned();
+        assert!(!hint.contains(&root), "no absolute path in a hint: {hint}");
+    }
+    // mutation: name `w.path.display()` instead of `document_label(&w.path)`.
 }
