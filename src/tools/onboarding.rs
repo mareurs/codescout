@@ -1029,6 +1029,7 @@ fn forget_decline(project_toml: &std::path::Path) {
 }
 
 /// How many entries of one list the `checkouts` block shows; the rest are counted.
+// cap-class: RESULT_CAP onboarding.checkouts_listed — probed
 const CHECKOUTS_LISTED_MAX: usize = 10;
 
 /// `items`, at most [`CHECKOUTS_LISTED_MAX`] of them, then a count of the rest.
@@ -3149,6 +3150,37 @@ mod tests {
             "~/work/locked: opening the repository at ~/work/locked: denied"
         );
         assert!(!c.to_string().contains("/home/ma"), "{c}");
+    }
+
+    /// The cap is probed through the block `onboarding` builds, from a real scan: twelve
+    /// unrelated repositories use the name, ten are listed and the remaining two are counted.
+    #[test]
+    fn a_long_collision_list_is_capped_and_the_remainder_is_counted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_checkout(&this, None, "this");
+        let work = tmp.path().join("work");
+        for i in 0..CHECKOUTS_LISTED_MAX + 2 {
+            make_checkout(
+                &work.join(format!("r{i:02}")),
+                Some("alpha"),
+                &format!("m{i}"),
+            );
+        }
+        let edge = scanning(&[&work], Some(tmp.path()), &this);
+        let block = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("alpha"),
+            &edge,
+        );
+        let listed = block["checkouts"]["collisions"].as_array().unwrap();
+        assert_eq!(listed.len(), CHECKOUTS_LISTED_MAX + 1, "{block}");
+        assert_eq!(listed[0], "~/work/r00", "the first entries are real paths");
+        assert_eq!(listed[CHECKOUTS_LISTED_MAX], "... and 2 more", "{block}");
+        // The instruction still fires: the cap hides entries, not the collision.
+        assert!(block["checkouts"]["instruction"].is_string(), "{block}");
     }
 
     #[test]

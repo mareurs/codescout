@@ -1525,4 +1525,21 @@ pub(crate) const PROBE_ROWS: &[ProbeRow] = &[
             cited_test: "describe_says_and_more_when_more_processes_hold_the_file_than_it_lists",
         },
     },
+    // -- src/tools/onboarding.rs --
+    ProbeRow {
+        // BOUND (the condition `probed_rows_cite_a_real_test` cannot check): the cited test scans
+        // a folder of `CHECKOUTS_LISTED_MAX + 2` (12) unrelated repositories that use the name,
+        // through `repo_name_block_for`, the function `onboarding` builds its `repo_name` block
+        // with. The `checkouts.collisions` list must hold 10 paths and then the entry
+        // "... and 2 more". Marker written by production in `capped`.
+        // MUTATION (2026-11-12): removing the `items.push(format!("... and {more} more"))` in
+        // `capped` turned the cited test red (10 entries listed, 11 expected) and the sibling
+        // unit test of `render_checkouts` red as well.
+        id: "onboarding.checkouts_listed",
+        coverage: Coverage::Probed {
+            marker: Marker::TextContains("... and 2 more"),
+            mutation: Mutation::Killed,
+            cited_test: "a_long_collision_list_is_capped_and_the_remainder_is_counted",
+        },
+    },
 ];
