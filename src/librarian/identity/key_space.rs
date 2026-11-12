@@ -10,8 +10,8 @@
 //! it, so `contrib` and `contrib/**` both exclude `contrib/pi/AGENTS.md`. Paths are
 //! git-root-relative; a backslash path is judged like its forward-slash form.
 //!
-//! The file is new, so it is read strictly: an unknown key is an error. A missing file is the
-//! empty rule (nothing is outside the key space).
+//! Read strictly: an unknown key is an error. A missing file is the empty rule (nothing is
+//! outside the key space).
 
 use std::path::Path;
 

@@ -226,7 +226,7 @@ jobs:
   # deliberate rather than a shortcut, because a case that skips itself for a missing
   # toolchain reports success while testing nothing.
   dead-artifact-id-tests:
-    name: dead-artifact-id check discriminators
+    name: dead-artifact-id and key-space check discriminators
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

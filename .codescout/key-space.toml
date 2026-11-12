@@ -6,6 +6,9 @@
 # otherwise). The rule and its parser: src/librarian/identity/key_space.rs. The pre-commit
 # check: scripts/pre-commit-key-space.sh.
 #
+# Glob semantics: `*` matches across `/`, patterns are anchored at the git root and are
+# case-sensitive, and a bare directory name excludes its whole subtree.
+#
 # The principle: exclude a subtree whose file names are dictated from outside this repo or
 # that is recorded evidence or fixture material, because the key migration cannot rename
 # those files and every future sibling would otherwise be refused at commit time. Narrow an
