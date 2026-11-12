@@ -13,7 +13,7 @@ opened: 2026-11-12
 related:
 - a73c49456056fb92
 severity: low
-unverified: The `#[ignore]` reason names a CI job and no workflow under .github was found that runs it (grep of the .yml files only). The 'no mux socket' probe computed the socket path from the fixture path; whether the manager hashes a canonicalised root was not checked. The fallback branch was read in manager.rs and the 0.07 s run time fits it, but its warning log was not read in that run. The two-client test added later the same day does not detect two mux mutations I tried (see a73c49456056fb92).
+unverified: 'Set after the second round of measurements (section above). The fallback was shown at the process level (strace), but its warning log was not read in a run. The ''nothing runs it'' claim covers the files of this repository only: .github (hidden files included), scripts/, tools/ was not searched, and a runner-side job or another repository cannot be excluded. The mutation table is one build per row and 3 runs each; the third row combines three mutations in one build, so each alone was not run. The test was run on one machine, 6 passing runs. The two-client test added the same day does not detect a `disconnect` that closes every file (three unit tests in mux/protocol.rs do); the didChange version rewrite it also missed is now pinned by a unit test (commit 068973305), end-to-end effect on rust-analyzer not measured. Whether nextest archive extraction keeps the `deps` directory name was not checked.'
 ---
 
 # BUG: the ignored mux coherence test asserted a contract that was removed, and in a test runner it never runs the mux
@@ -53,6 +53,26 @@ Two separate causes.
 - Mutation: with the resync in `LspClient::request` disabled (`if false && …`), the updated test still passed in 0.07 s. `document_symbols` calls the resync itself.
 - `.github/workflows/ci.yml`: a grep for `ignored|coherence|rust-analyzer` finds comments about language-server lanes and no line that runs this test.
 
+## Second round of measurements, 2026-11-12 (session `5f715d8f`)
+
+Method: the lib test binary built from the tree at `e610be3a2`, copied to a directory named `deps` (see 5 below, the name matters), run with `--ignored lsp::mux::coherence_rust::two_agents_coherent_after_edit`. Mutants were built from a scratch copy of HEAD, each with a different binary hash, and run 3 times each.
+
+1. **The test passes on the fixed code: 6 of 6 runs, 0.07 to 0.20 s** (four sampled runs, two under `strace`). Two language servers are started, not one.
+2. **It never runs a mux, shown at the process level.** `strace -f -e trace=execve,exit_group` on one run: the test binary re-executes itself as `<test binary> mux --socket …` (pid 711019), that child ends with `exit_group(101)`, and then `rust-analyzer` starts (pid 711023). The same pair follows for the second manager (re-exec pid 711149 ends with 101, `rust-analyzer` pid 711187). Both language servers end with status 0 after `shutdown_all`. So for each manager the mux start is tried, fails at once (libtest does not know `--socket`), and the manager falls back to a direct server. A and B are two independent `rust-analyzer` processes. This is stronger than the socket probe above, which only showed that one path did not exist.
+3. **What each step detects**, by mutation (scratch copy, 3 runs each):
+
+| Mutant | Result |
+|---|---|
+| resync in `LspClient::request` removed (`if false && …`) | green 3 of 3 |
+| the resync removed in `request` AND in `document_symbols` | red 3 of 3, at step 4 (`coherence_rust.rs:71`): B sees only `original_symbol` |
+| `LspManager::notify_file_changed` made a no-op, plus the two `did_change` calls of step 1 deleted, plus A's `notify_file_changed` call of step 5 deleted (one build) | green 3 of 3 |
+
+So the test detects a drift check that is missing everywhere, and nothing narrower. Step 1 and step 5 do not matter to the result: B's own `document_symbols` finds the change in step 4, and `notify_file_changed` only reaches the clients of its own manager, which in this setup is a server that B does not use. Step 5 asserts the same thing as step 4. The three mutations were run together, so each alone was not run.
+4. **No leaked `codescout-*` file.** `ls /run/user/1000` before and after 4 runs shows no `codescout-*` name added or removed. The only change was a directory `cs-tmux-<pid>` named after the test process. It is codescout's own test mux scratch directory (`TEST_MUX_PREFIX`, `src/lsp/mux/mod.rs:75`): the test process creates it the first time it asks for a socket path, and the next test process removes those of dead processes (`sweep_dead_test_mux_dirs`); the one of run 648732 was gone when I looked later. The archived bug `2026-07-28-index-lock-tests-pollute-runtime-dir.md` rejected this test as the producer only because it "cannot account for 16 files" and left the producer unnamed; this measurement finds no `codescout-*` file from this test. It does not name the producer. (I first wrote that this directory belonged to the shell wrapper; that was wrong, and I checked it in the source before correcting it.)
+5. **The fallback depends on where the binary is.** My first run copied the test binary to a plain scratch directory: the test failed in 0.04 s with `mux startup failed for rust: … Unrecognized option: 'socket' … will not fall back to a direct LSP`. `is_test_runner_exe` (`manager.rs`) classifies by location: the parent directory must be named `deps`. Copied into `target/debug/deps/` the same binary passed. So the test passes only when run from cargo's `deps` directory; a harness that runs a copied or extracted test binary elsewhere gets a hard failure, not a skip.
+6. **Nothing runs it, and the wording spreads.** No file under `.github` (hidden files included), no script in `scripts/`, no nextest configuration (there is none) and no other file outside `src`, `tests`, `docs`, `tools` and `.codescout` contains `--ignored`, `--run-ignored` or `--include-ignored`, except one line in `CHANGELOG.md`. Three other ignored tests in `src/lsp/manager.rs` (`posix_write_lock_is_held_true_when_another_process_holds_it`, `get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent`, `reap_holders_of_lock_kills_an_orphan_holder`) say they are "gated like" this test or like each other, so the claim of a CI gate rests on this one reason string, which no job backs. I did not read CI configuration outside this repository.
+7. **What a test of the manager's mux path has today.** The only test that drives `get_or_start` to a mux that exists is `get_or_start_mux_success_records_lsp_event` (`manager.rs`), ignored, for Kotlin, and it starts a real `codescout` binary first and skips silently when `target/debug/codescout` is absent. The two mux tests in `src/lsp/client.rs` use an in-process mux and a socket client and do not go through `LspManager`.
+
 ## Hypotheses tried
 
 That the 0.07 s run time meant a warm shared mux: refuted by the socket probe. That the test was red before 43c4ca9df too: not checked.
@@ -78,7 +98,7 @@ None needed. Do not read `two_agents_coherent_after_edit` as evidence about the 
 
 ## Resume
 
-Decide with the owner whether `coherence_rust.rs` should be removed or rewritten as a real mux test now that `two_clients_on_one_mux_follow_a_write_made_outside_codescout` exists in `src/lsp/client.rs`. Until then it is an ignored test that covers `document_symbols` after an outside write on a direct server.
+Decide with the owner whether `coherence_rust.rs` should be removed or rewritten as a real mux test now that `two_clients_on_one_mux_follow_a_write_made_outside_codescout` exists in `src/lsp/client.rs`. The second round of measurements shows what the test covers today: `get_or_start` with the mux attempt and its direct fallback, and `document_symbols` resyncing after an outside write when no other resync exists. It does not cover the request-level resync, `notify_file_changed` or a mux. What a rewrite would add over the in-process tests is the `LspManager` layer (`get_or_start_via_mux`, the ownership lock, the ready line, `notify_file_changed` through the manager, `shutdown_all` with mux clients). Two patterns exist for that: `mux::process::run` in the test process, as the `client.rs` tests do, which skips `LspManager`; or a real `codescout` binary started first, as the ignored Kotlin test does, which needs that binary built and skips silently without it. Until the owner decides, it is an ignored test that covers `document_symbols` after an outside write on a direct server.
 
 ## References
 
