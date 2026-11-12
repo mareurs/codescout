@@ -1,5 +1,6 @@
 //! The shadow diff: how far the derived index is from the machine's old catalog, measured
-//! without writing anything.
+//! without writing to the catalog or its `-wal` (SQLite itself updates read marks in an
+//! existing `-shm`, see "The read-only open" below).
 //!
 //! [`open_old_read_only`] opens the old `catalog.db` with `SQLITE_OPEN_READ_ONLY` (never through
 //! `Catalog::open`, which migrates; never `apply_schema`, `run_migrations` or `audit::install`)
@@ -405,7 +406,8 @@ pub fn diff_with_rules(
     rules: &[CompiledRule],
 ) -> anyhow::Result<ShadowDiff> {
     // One read snapshot, so the four queries below see one state of a catalog that other
-    // processes keep writing. It is dropped without a commit: nothing is written.
+    // processes keep writing. It is dropped without a commit: no row is written (SQLite's read
+    // marks in a WAL catalog's `-shm` are not ours to avoid).
     let snapshot = old
         .conn
         .unchecked_transaction()

@@ -1,5 +1,6 @@
 //! `codescout derive-shadow` — measure how far a derived index of one commit is from the old
-//! catalog, writing nothing to the catalog and nothing to the repository.
+//! catalog. Nothing is written to the old catalog or its `-wal`, and nothing to the repository;
+//! SQLite itself updates read marks in an existing `-shm` (see `derived::diff`).
 //!
 //! The command resolves the git root (`lookup_git_root`; no `open_ctx`, which would open and
 //! migrate the catalog), opens the old catalog read-only, builds the derived index of `--rev`
@@ -8,11 +9,25 @@
 //! [`MAX_PRINTED_ROWS_PER_CAUSE`] rows of each cause (`--json`: the whole diff).
 //!
 //! Exit codes: `0` whenever the comparison ran, whatever it found; `2` and `NOT COMPARED —
-//! <reason>` on stdout when it could not run: no old catalog, one that cannot be read, one with
-//! rows of which none lies under the git root (a root spelled differently on the two sides),
-//! no git repository, a revision that names no commit. The old catalog is never created,
-//! migrated or written; see `derived::diff` for what SQLite does beside a WAL database, and
-//! [`refuse_if_open_would_write`] for the case this command refuses.
+//! <reason>` on stdout when it could not run (every error `compare` returns becomes one):
+//!
+//! - the old catalog: no `--old-db` and no local data directory to look for
+//!   `librarian/catalog.db` in; a file that does not exist (it is never created) or cannot be
+//!   opened or read (not a database, a table or column the diff reads is missing, a query
+//!   fails); a WAL catalog with no `-wal` and `-shm` beside it, the usual case when no codescout
+//!   server has it open ([`refuse_if_open_would_write`]); a catalog with rows of which none lies
+//!   under the git root (a root spelled differently on the two sides);
+//! - the repository: a `--project` that cannot be resolved; no git repository at or above it, or
+//!   one that cannot be opened; a `--rev` that names no commit; a `.codescout/librarian.toml` or
+//!   `.codescout/key-space.toml` in that commit that does not parse or is a symlink;
+//! - the scratch index: a temporary directory that cannot be resolved or created, or that would
+//!   lie inside the repository (point `TMPDIR` elsewhere); a derived index that cannot be
+//!   created or built (a `.codescout/repo.toml` in the commit that does not parse or is a
+//!   symlink, for one);
+//! - the report: it cannot be serialised for `--json`.
+//!
+//! The old catalog is never created or migrated; see `derived::diff` for what SQLite does beside
+//! a WAL database.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
