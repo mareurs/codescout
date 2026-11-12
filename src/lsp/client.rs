@@ -4189,12 +4189,8 @@ struct Point {
     async fn rename_edit_does_not_land_on_another_callee_after_a_same_size_write_once_resynced() {
         rename_after_an_external_write(ExternalWrite::SwapForASameLengthCallee, true).await;
     }
-    /// Ask until the server answers without an error. A server that was just told a file changed may
-    /// answer a request with `ContentModified` while it re-reads it; that is a retry. Only an error is
-    /// retried, never an empty answer, because an empty answer after a write outside codescout would
-    /// be a stale result. The stale state under test also shows as an error that does NOT go away:
-    /// measured with the resync disabled, every one of the ten tries failed with `Invalid offset
-    /// LineCol { line: 4, col: 11 } (line index length: 51)`, the server still holding the old file.
+    /// Ask until the call answers without an error. Used for `connect`, where the first tries can
+    /// fail while the mux finishes its handshake.
     async fn retrying_on_error<T, F, Fut>(mut ask: F) -> T
     where
         F: FnMut() -> Fut,
@@ -4211,6 +4207,47 @@ struct Point {
             }
         }
         panic!("the server kept answering with an error: {last:?}");
+    }
+
+    /// Ask until the server answers with something, for up to 20 s: an error is retried, and so is
+    /// an answer `is_empty` calls empty. Right after a write outside codescout the server may
+    /// answer a request with `ContentModified`, or with nothing while it analyzes the new text.
+    /// Measured 2026-11-12 under one busy process per core: the first ask after the write came
+    /// back empty in 5 test runs spread over 4 of 20 stress iterations of the stdio tests (hover,
+    /// goto_definition and prepare_call_hierarchy, run together), and in none of 20 iterations
+    /// with the CPU idle. The mux test passed all 20 loaded iterations.
+    ///
+    /// This does not let the defect under test through. With the resync in `request` disabled the
+    /// answer does not turn empty and then correct: it stays `Invalid offset LineCol { line: 4,
+    /// col: 11 } (line index length: 51)`, because the server keeps the content of an open file
+    /// from the last `didOpen`/`didChange` and ignores the disk. The tests were re-run under that
+    /// mutation after this helper was written, to check it.
+    ///
+    /// On the deadline it returns the last answer, so the caller's assertion shows an empty
+    /// result; if every try was an error it panics with the last error.
+    async fn answered_after_a_write<T, F, Fut>(mut ask: F, is_empty: impl Fn(&T) -> bool) -> T
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut last_answer = None;
+        let mut last_error = None;
+        loop {
+            match ask().await {
+                Ok(value) if !is_empty(&value) => return value,
+                Ok(value) => last_answer = Some(value),
+                Err(e) => last_error = Some(e),
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+        match last_answer {
+            Some(value) => value,
+            None => panic!("the server kept answering with an error: {last_error:?}"),
+        }
     }
 
     /// `goto_definition` on the call in `other.rs`, re-asked for up to 20 s until the server answers
@@ -4258,7 +4295,11 @@ struct Point {
         let original = std::fs::read_to_string(&other_rs).unwrap();
         std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
 
-        let after = retrying_on_error(|| client.goto_definition(&other_rs, 4, 11, "rust")).await;
+        let after = answered_after_a_write(
+            || client.goto_definition(&other_rs, 4, 11, "rust"),
+            |locations| locations.is_empty(),
+        )
+        .await;
         assert_eq!(
             after.len(),
             1,
@@ -4307,7 +4348,11 @@ struct Point {
         let original = std::fs::read_to_string(&other_rs).unwrap();
         std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
 
-        let after = retrying_on_error(|| client.hover(&other_rs, 4, 11, "rust")).await;
+        let after = answered_after_a_write(
+            || client.hover(&other_rs, 4, 11, "rust"),
+            |text| text.is_none(),
+        )
+        .await;
         assert!(
             after.as_deref().is_some_and(|t| t.contains("target_fn")),
             "hover at the call's new position must describe target_fn, got {after:?}"
@@ -4349,14 +4394,90 @@ struct Point {
         let original = std::fs::read_to_string(&other_rs).unwrap();
         std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
 
-        let after =
-            retrying_on_error(|| client.prepare_call_hierarchy(&other_rs, 4, 11, "rust")).await;
+        let after = answered_after_a_write(
+            || client.prepare_call_hierarchy(&other_rs, 4, 11, "rust"),
+            |item| item.is_none(),
+        )
+        .await;
         assert_eq!(
             after.as_ref().map(|i| i.name.as_str()),
             Some("target_fn"),
             "the call's new position must resolve to target_fn, got {after:?}"
         );
         client.shutdown().await.unwrap();
+    }
+
+    /// The same write, with the client on the SOCKET transport: `mux::process::run` runs in this
+    /// process with a real rust-analyzer behind it, and the client connects to its socket the way
+    /// the codescout server does by default. A test cannot go through `LspManager::get_or_start`
+    /// for this: in a test runner it cannot spawn the mux (the test binary has no `mux`
+    /// subcommand) and falls back to a direct server, which is a stdio client again.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn hover_follows_a_write_made_outside_codescout_through_the_mux() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        create_two_file_project(dir.path());
+        let sock_dir = tempdir().unwrap();
+        let socket = sock_dir.path().join("mux.sock");
+        let lock = sock_dir.path().join("mux.lock");
+        let root = dir.path().to_path_buf();
+        let mux = {
+            let (socket, lock, root) = (socket.clone(), lock.clone(), root.clone());
+            tokio::spawn(async move {
+                crate::lsp::mux::process::run(&socket, &lock, &root, 120, "rust-analyzer", &[], &[])
+                    .await
+            })
+        };
+
+        // The mux binds its socket after it has started the server; connect once it is there.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !socket.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the mux did not bind {} within 30 s",
+                socket.display()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let client = retrying_on_error(|| LspClient::connect(&socket, root.clone())).await;
+        let lib_rs = root.join("src/lib.rs");
+        let other_rs = root.join("src/other.rs");
+        client.document_symbols(&lib_rs, "rust").await.unwrap();
+        client.document_symbols(&other_rs, "rust").await.unwrap();
+
+        // Baseline, polled while the server may still be loading the crate.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let before = loop {
+            let text = client.hover(&other_rs, 1, 11, "rust").await.unwrap();
+            if text.is_some() || std::time::Instant::now() >= deadline {
+                break text;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        };
+        assert!(
+            before.as_deref().is_some_and(|t| t.contains("target_fn")),
+            "baseline: hover on the call describes target_fn, got {before:?}"
+        );
+
+        let original = std::fs::read_to_string(&other_rs).unwrap();
+        std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
+
+        let after = answered_after_a_write(
+            || client.hover(&other_rs, 4, 11, "rust"),
+            |text| text.is_none(),
+        )
+        .await;
+        assert!(
+            after.as_deref().is_some_and(|t| t.contains("target_fn")),
+            "hover through the mux at the call's new position must describe target_fn, got {after:?}"
+        );
+        client.shutdown().await.unwrap();
+        // Dropping the mux's future drops its server child (`kill_on_drop`).
+        mux.abort();
     }
 
     /// Verify that prepare_call_hierarchy returns a CallHierarchyItem for a known function.

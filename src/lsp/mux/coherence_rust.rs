@@ -50,20 +50,31 @@ async fn two_agents_coherent_after_edit() {
                    pub fn fresh_symbol() -> &'static str { \"fresh\" }\n";
     std::fs::write(&target, updated).unwrap();
 
-    // 4. Before notifying: B's view must still be stale (three-query sandwich —
-    //    proves we are not observing eager re-indexing rather than mux coherence).
-    let syms_stale = cb
+    // 4. No notification has been sent. B's own request must already show fresh_symbol:
+    //    `document_symbols` re-sends the files that changed on disk since the client last
+    //    sent them. This step used to assert the opposite, that B stays stale until A
+    //    notifies; that was the defect fixed in 43c4ca9df (bug a73c49456056fb92), and the
+    //    test was ignored, so it went red unseen.
+    //
+    //    NOT a mux test: in a test runner `LspManager::get_or_start` cannot spawn the mux
+    //    (the test binary has no `mux` subcommand) and falls back to a direct server, so
+    //    A and B here are two separate rust-analyzer processes. Measured 2026-11-12: the
+    //    mux socket for this workspace did not exist while the test ran. Disabling the
+    //    resync in `LspClient::request` leaves this step green, because `document_symbols`
+    //    resyncs on its own. The mux path is covered by
+    //    `lsp::client::tests::hover_follows_a_write_made_outside_codescout_through_the_mux`.
+    let syms_unnotified = cb
         .document_symbols(&target, "rust")
         .await
-        .expect("B document_symbols stale");
-    let names_stale: Vec<_> = syms_stale.iter().map(|s| s.name.clone()).collect();
+        .expect("B document_symbols unnotified");
+    let names_unnotified: Vec<_> = syms_unnotified.iter().map(|s| s.name.clone()).collect();
     assert!(
-        !names_stale.iter().any(|n| n == "fresh_symbol"),
-        "B should not see fresh_symbol before notification: {:?}",
-        names_stale
+        names_unnotified.iter().any(|n| n == "fresh_symbol"),
+        "B must see fresh_symbol without any notification: {:?}",
+        names_unnotified
     );
 
-    // 5. A notifies the mux; B must now see fresh_symbol.
+    // 5. A notification afterwards must leave B coherent too.
     //    A's didChange reaches the shared rust-analyzer, and B's documentSymbol
     //    request reflects the updated index.
     mgr_a.notify_file_changed(&target).await;
