@@ -3,7 +3,7 @@
 
 [[anchors]]
 path = "Cargo.toml"
-hash = "f3ed3d1b56f16e11720fbe0da4d3cbc7e4c44462ec93048dc910a8f548e37f21"
+hash = "e7dd79a8adc030e72a71f97c34b21d2aa7b63ce611ee8391fb8656952a523e87"
 
 [[anchors]]
 path = "src/tools/progress.rs"
@@ -11,7 +11,7 @@ hash = "d8430752d7a990667cfef66e6008f67af497d91db88805026046650ad858379b"
 
 [[anchors]]
 path = "src/server.rs"
-hash = "a04f9e9f31705dffc1fbbd0cc3ad85c5678c993e5a83c5b8e62ce58e7e531784"
+hash = "cce80cadc38211a6736729eb6d9d488364ec27e382fda4b726f65ee25068007a"
 
 [[anchors]]
 path = "docs/issues/archive/2026-06-14-progress-notifications-unsolicited-token.md"
@@ -31,4 +31,4 @@ hash = "d54a729e4da84d441bbedb021acb1587e0c05a017910ea24c1d225d5a9a7a648"
 
 [[anchors]]
 path = "src/tools/onboarding.rs"
-hash = "be2750f558a0052c91e8a141ae60514d2d447395d487272eaa80b8fa25c23042"
+hash = "d618e8dc4fb5aab6ee61d8b9a36db4321159002d4387458526e92bcc8a413cfc"

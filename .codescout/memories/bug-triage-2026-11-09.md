@@ -54,3 +54,10 @@ The fix lives in resident or /tmp helper scripts or in a private scratch root; n
 
 ## Gate state seen 2026-11-09 (not mine)
 Full gate red on FMT (src/prompts/mod.rs), CLIPPY (dead code in src/tools/core/guide_emit.rs) and DEFAULT (3 server::guide_hint_tests::*subagent* tests). src/server.rs and guide_emit.rs were staged by session 732f1c09, which was building the subagent short-bootstrap feature. That names the writer, not the cause. LEAN (6318) and Python (1764) green. verified
+
+## Status update 2026-11-12
+The statuses below were read from the bug files that day. The rest of this note is the 2026-11-09 triage and was not re-checked.
+- `2026-11-09-run-command-test-summary-shows-exit-0-passed-0-after-a-failed-build`: `status: fixed`.
+- `2026-11-09-windows-gnu-clippy-red-on-unix-only-items-in-the-native-provenance-fence`: `status: mitigated`.
+- `2026-11-08-semantic-search-sibling-member-project-id-returns-member-relative-paths-and-the-call-site-is-untested`: `status: mitigated`.
+- The line that says the owning session closes the peers' records is stale for at least `native-index-verify-empty-files-missing` and `shared-gate-lean-holder-cap-observation`: a reviewer found them still open or investigating. This update did not read their status.

@@ -12,8 +12,9 @@ slot with `scripts/with-slot.sh cargo test …`
 
 1. `./scripts/fmt-mine.sh` — NOT bare `cargo fmt`, which rewrites every peer's
    uncommitted Rust on a shared checkout. Formats only what this session wrote and
-   refuses the rest, naming the owner. Outside a Claude session it exits 2 and points
-   you at `cargo fmt`, which is right for a solo checkout.
+   refuses the rest, naming the owner. Without a resolvable session context it exits 2 and asks
+   for `--context <absolute file>` or an operator-declared `--exclusive-checkout <absolute Git
+   root>`; `--check` is read-only and needs no identity.
 2. `cargo clippy --workspace --all-targets --features local-embed -- -D warnings`, then the same
    with `--no-default-features` instead of the feature (the lean set; same lane, either red fails it)
 3. `cargo nextest run --workspace --no-default-features` — the **LEAN** lane, runs **THIRD**
@@ -27,8 +28,8 @@ All four must pass. No exceptions.
 
 **The bare `cargo clippy -- -D warnings` is not a gate step.** It lints only the root
 package's non-test targets with default features, so it passes trees CI fails. CI runs both
-forms (`ci.yml:369` narrow, `:380` wide — reverified 2026-10-19; the line numbers have moved twice,
-from `:50`/`:61` to `:94`/`:105` to these); only the wide one reaches `#[test]` code and
+forms (the `clippy` job in `ci.yml`: narrow at `:374`, wide at `:385`, and a lean line at `:391` — reverified 2026-11-12; the line numbers have moved several times,
+from `:50`/`:61` to `:94`/`:105` to `:369`/`:380` to these); only the wide one reaches `#[test]` code and
 `codescout-embed`'s feature-gated `local` module. Running the narrow one locally buys
 nothing the wide one does not already cover.
 

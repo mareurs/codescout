@@ -3,7 +3,7 @@
 
 [[anchors]]
 path = "docs/superpowers/specs/2026-11-04-harness-delivered-hints-design.md"
-hash = "4a842ebe5c144d8e2f5023e5183a417451e971ab472d74b313b21adce22e4b73"
+hash = "2c590507c6f4bb7018935738e09a77c9205d41de3ec37be7c6b991386a34dfa8"
 
 [[anchors]]
 path = "src/symbol/declaration.rs"
@@ -15,7 +15,7 @@ hash = "71f188b0685d476ead98d3741ba963a315327cd7dbaed7478dfbd42cf4424e3e"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "75c509f35eb65c3d5420e59bf1149f94121f51e562a51092ce4a52d1ef256077"
+hash = "c07ee404f54a66f0e254df079f1133c27262eacf8fba68dafb44acfd555eb89b"
 
 [[anchors]]
 path = "docs/conventions/shared-checkout-commit-sequence.md"

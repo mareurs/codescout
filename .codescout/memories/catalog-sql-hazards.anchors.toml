@@ -3,11 +3,11 @@
 
 [[anchors]]
 path = "src/librarian/catalog/migrate_v6.rs"
-hash = "eea6a51ec8bac386e39fe4d7e9c5617a8a2a59d564803e3d8860eae3a7b2471e"
+hash = "fbeef65c9a7cf36b957da7cf90b1466bdafead5edbfad345ceb6e6a6d5206a0f"
 
 [[anchors]]
 path = "src/librarian/catalog/mod.rs"
-hash = "ca69e38608a368649d2b8fb1b30ea5b805d3039e53db5a4fb35a401c34d658f5"
+hash = "8f4cd07d6b68a193e9f8129ff3994d593936c05a4e33438eba673f9d21c38d3b"
 
 [[anchors]]
 path = "src/librarian/filter.rs"
@@ -15,7 +15,7 @@ hash = "b85e226f1786e3ffeb9f4acb0529ac1f66b4949fdcd4db591cb67999e31d02d9"
 
 [[anchors]]
 path = "src/librarian/catalog/augmentation.rs"
-hash = "87eea47a01a2595f4780a90a9c226ffd898f5874f7846550004672c55e8649ad"
+hash = "9320b13fe917d747f5ff5e272d3de139c12b458a1bd2b29719524aa478045be2"
 
 [[anchors]]
 path = "src/librarian/catalog/gc.rs"
@@ -35,15 +35,15 @@ hash = "e43ce8270c30af676b838cbb6987981687822a97fb3e3e938fe9b548c6d82a87"
 
 [[anchors]]
 path = "src/librarian/tools/merge_worktree.rs"
-hash = "0017012576701f566d560d49513d0ce2b599df5ac024d5e659bad2e636d0a2d6"
+hash = "06b12f43d7d3745efcf9dff319d4bd8362000025e7e025a458af20081dfe8dce"
 
 [[anchors]]
 path = "src/librarian/tools/worktree.rs"
-hash = "6f95ad7839a400aaa8c6c0a46599be8671d9c548ae5308aa5d5a9530b87aea45"
+hash = "4bf197851cf3b5cdc58f41fb97e0b9683b43eb6145eb8b1e33a224794d99a54c"
 
 [[anchors]]
 path = "src/librarian/util.rs"
-hash = "213754a85fc9a3220dd000b0d12799710eafcb3fb4c17e864886a7e35b5366fd"
+hash = "97c6c4f8cd654640de965e3bb80fabd791065002eb308e6c162948b2b76d0e81"
 
 [[anchors]]
 path = "docs/trackers/structural-debt-refactor.md"

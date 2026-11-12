@@ -3,11 +3,11 @@
 
 [[anchors]]
 path = "docs/evals/harness-channel-hint-authority-preregistration.md"
-hash = "793073e9b739e7620475fb2f40d1ac5279e177758a0ee019d7d011ac8ae7e3c1"
+hash = "b8e1fdcae33f79d39034f8ef775886616a61a4abdb7ffed57675b94a0a6adf2f"
 
 [[anchors]]
 path = "CLAUDE.md"
-hash = "75c509f35eb65c3d5420e59bf1149f94121f51e562a51092ce4a52d1ef256077"
+hash = "c07ee404f54a66f0e254df079f1133c27262eacf8fba68dafb44acfd555eb89b"
 
 [[anchors]]
 path = "src/tools/hint_probe.rs"

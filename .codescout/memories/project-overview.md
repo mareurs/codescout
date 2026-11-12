@@ -3,8 +3,7 @@
 ## Purpose
 
 codescout is a Rust MCP server (v0.15.0) that gives AI coding agents IDE-grade code intelligence.
-It exposes tools for: symbol navigation (LSP + tree-sitter), semantic search (Qdrant + dense
-embedder + cross-encoder reranker), persistent per-project memory (markdown on disk), and an
+It exposes tools for: symbol navigation (LSP + tree-sitter), semantic search (embedder-backed; in-process sqlite-vec by default, Qdrant only with `--features server-stack`), persistent per-project memory (markdown on disk), and an
 embedded workspace artifact registry ("librarian") that indexes markdown docs into SQLite.
 
 ## Tech Stack
@@ -12,7 +11,7 @@ embedded workspace artifact registry ("librarian") that indexes markdown docs in
 - Language: Rust (edition 2021, cargo workspace)
 - MCP transports: stdio + HTTP
 - LSP: rust-analyzer, pyright-langserver, typescript-language-server, gopls, jdtls, kotlin-lsp, clangd, OmniSharp, solargraph, vscode-html/css-language-server, bash-language-server (defaults in `src/lsp/servers/mod.rs::default_config`)
-- Semantic search: Qdrant + codescout-embed (local ONNX via fastembed or remote HTTP)
+- Semantic search: sqlite-vec by default, Qdrant with `--features server-stack` (`VectorBackend::resolve`, `src/retrieval/code_store.rs`); codescout-embed with remote HTTP embeddings by default, local ONNX (fastembed) only with `--features local-embed`
 - Artifact registry: SQLite (librarian)
 - Primary MCP client: Claude Code; also Gemini CLI, Cursor, custom agents
 
@@ -62,7 +61,9 @@ folded into `read_file` / `edit_file`, and `artifact` / `artifact_event` / `arti
 **21 is a CEILING, not what every session sees**, and both directions of that have burned
 someone. `call_graph`, `references` and `symbol_at` are `Availability::RequiresLsp` and are
 filtered out of `tools/list` when no language server is available — a bare session
-advertises **18**. Going the other way, two tools are **opt-in and sit outside the 21**:
+advertises **18**. `run_command` is `RequiresShell`, and `semantic_search` and `index` are
+`RequiresEmbeddings`, so those are filtered too when the shell is off or no embedding backend
+is available. Going the other way, two tools are **opt-in and sit outside the 21**:
 `peer` (Unix-only, gated by `peer_enabled_at_runtime`, `src/server.rs`) and `probe`
 (`CODESCOUT_PROBE=1`, debug-only, the `env.probe` branch of the same constructor). Counting either into the total, or reporting 18
 as the surface, is the standing error this paragraph exists to prevent.
