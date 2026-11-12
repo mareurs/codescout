@@ -10,7 +10,7 @@ entry_prefix:
 - F
 - W
 entry_high_water_F: 15
-entry_high_water_W: 8
+entry_high_water_W: 9
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -128,6 +128,7 @@ entry_high_water_W: 8
 | W-6 | 2026-11-11 | high | independent Opus review of a scout report | a split built on "retire catalog_audit ships alone", a two-signal guard and four missed consumers | validated |
 | W-7 | 2026-11-11 | high | independent Opus review of a plan before execution | a gate that refuses every commit editing a file already in a collision; a cache that diverges from a rebuild after a rename | validated |
 | W-8 | 2026-11-12 | high | whole-branch Opus review after per-task reviews | a hook that refuses pure moves of colliding files; a dismissed dialog stored as a permanent decline; a nudge on read-only activations | validated |
+| W-9 | 2026-11-12 | high | independent Opus review of a scout report before planning | a flock the CLI never takes; a vector table that breaks the schema's determinism rule; a cache key that ignores model, budget and dimension; four missed writers | validated |
 
 ---
 
@@ -823,6 +824,26 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 - Plan D: the migration must emit `[[entry-key]]` for each token that becomes an entry, and must size the 3406 plus 1364 rewrites. Compare W-4 (144 `[[F-16]]` rewrites).
 - 26 duplicate-key groups and 17 invalid-key documents exclude those documents from key resolution (see F-14).
 - Resolve the six suspected items above before Plan E reads from the derived index.
+
+## W-9 — Independent Opus review of the Plan C scout before any plan was written
+
+**Valid:** dated 2026-11-12
+
+**Pattern:** Before writing Plan C, a Sonnet scout read the code the plan touches and wrote a report with each claim tagged verified or reported. A separate Opus reviewer then opened the code again for the load-bearing claims and ran its own sweeps for writers and readers. The plan writer builds from the corrected facts, not from the scout alone.
+
+**What it caught.**
+- The scout said every doc write takes the project flock. The reviewer found that the CLI write commands call tool bodies with no lock. I re-checked this: `acquire_write_guard` has one production caller, `src/server.rs:1138`, and no file under `src/cli` uses it.
+- The scout proposed a plain blob table in the derived file for the vector cache. The reviewer showed it passes the determinism test but breaks the schema's own rule that every stored row is deterministic, because an embedding is not a pure function of its input.
+- The scout's cache key (`embed_input_hash`) ignores the model, the budget and the dimension. The reviewer found that the code index already treats a remote model name as untrustworthy.
+- The writer inventory missed `sources`, `event_edges` (the `resolves` edge has readers), `commit_refresh`, and the renumbering of params ids in graft and merge. The renumbering would make params and markdown disagree once entries are dual-written.
+- The scout never stated the file-versus-catalog write order, and the four write tools disagree: create writes the catalog first, update and append write the file first.
+- The scout said the vector and git-history caches can start now. They have no persistent derived file, no build trigger and no consumer.
+
+**Counterfactual.** A plan built from the scout alone would have assumed a lock that the CLI does not take, specified a vector table that violates the schema invariant, keyed it on a name that can lie, and left a params-versus-markdown disagreement in graft and merge. Each would have surfaced in an implementer's retry or in a final review, not at planning time. The cost of the pattern was one reviewer run (about 490 s).
+
+**Evidence:** the scout report and the condensed review are session-scratch files; the corrected facts are in the Plan C1 file when it lands.
+
+**Status:** validated
 
 ## Template for new entries
 
