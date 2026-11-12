@@ -10,7 +10,7 @@ tags:
 - testing
 opened: 2026-11-12
 severity: medium
-unverified: Mechanism not measured for the rename test; it did not fail in 26 runs (18 loaded, 8 full-suite lean). The goto_definition and hover result is the other session's measurement in b398b53d2, which I read but did not re-run on the old code. The original rate was 2 of 6 lane runs on the branch and 1 of 6 on experiments.
+unverified: Mechanism not measured for the rename test; it did not fail in 26 + 12 runs (18 loaded, 8 full-suite lean, then 12 loaded module-parallel iterations, below). The goto_definition and hover result is the measurement in b398b53d2, which session 5f715d8f made and which another session read but did not re-run on the old code. The original rate was 2 of 6 lane runs on the branch and 1 of 6 on experiments. The load of the 12-iteration run was measured only as the 5-minute load average (61 on 64 cores) at the end of it.
 ---
 
 # BUG: The LSP external-write tests fail intermittently in the full suite
@@ -78,10 +78,11 @@ The branch failed in 2 of 6 lane runs and `experiments` in 1 of 6. This sample s
 2. **Hypothesis:** The failures come from load, because the tests pass alone. **Test:** commit `b398b53d2` (session `5f715d8f`, 2026-11-12) ran hover, goto_definition and prepare_call_hierarchy under one busy process per core: 4 of 20 iterations failed with an EMPTY answer within 1.5 s of the write, 0 of 20 with the CPU idle. **Verdict:** supported for those three tests. Their asks now retry errors and empty answers for up to 20 s (`answered_after_a_write`), and 20 of 20 loaded iterations pass. The retry does not hide the defect: with the resync in `request` disabled they still fail after about 24 s.
 3. **Hypothesis:** the rename test fails the same way under load. **Test (2026-11-12, session `5566e8a8`, tree with `b398b53d2`):** the four `rename_edit_(for|does_not_land)_…` tests, 20 iterations under 64 busy processes (one per core). **Verdict:** not reproduced. 18 iterations compiled and passed; 2 iterations (2 and 3) failed to COMPILE because of another session's uncommitted edit in the shared checkout (`MakeWriter` bound on `Arc<Mutex<Vec<u8>>>`), so they say nothing about the tests.
 4. **Hypothesis:** the rename test fails only when the whole suite runs. **Test:** `cargo nextest run --no-default-features --no-fail-fast`, 8 iterations, same tree, no extra load. **Verdict:** not reproduced. 8 of 8 green.
+5. **Hypothesis:** the rename test fails when many rust-analyzer instances start at once AND the CPU is oversubscribed, a combination attempts 3 and 4 did not have. **Test (2026-11-12, session `5f715d8f`, tree at `e610be3a2`):** `cargo nextest run --no-fail-fast --stress-count 12 -E 'test(/lsp::client::tests/)'`, so 71 tests per iteration in parallel, with `burn.py` (one busy process per core, 64 cores) running beside it; `/proc/loadavg` read after the run: 82.97 / 61.01 / 34.61, 66 busy processes. **Verdict:** not reproduced. 12 of 12 iterations passed (852 test runs, the rename test among them 12 times; in the last iteration it took 6.4 s, the only per-test times I read). The whole workspace suite (9,700 tests) was not run under load: that remains the one untried condition.
 
 ## Fix
 
-Not fixed for the rename test. For `goto_definition_follows_…`, `hover_follows_…` and `prepare_call_hierarchy_follows_…`, `b398b53d2` (another session) made the post-write asks retry empty answers; that commit is that session's, and its patch-id is not recorded here.
+Not fixed for the rename test. For `goto_definition_follows_…`, `hover_follows_…` and `prepare_call_hierarchy_follows_…`, `b398b53d2` made the post-write asks retry empty answers; that commit is session `5f715d8f`'s, patch-id `20afb87a74c8` (`git show b398b53d2 | git patch-id --stable`).
 
 ## Tests added
 
@@ -93,7 +94,7 @@ Rerun the gate. A failure in only these tests, with a pass on the rerun, is this
 
 ## Resume
 
-The failing rename test is `rename_edit_does_not_land_on_another_callee_after_a_same_size_write_outside_codescout` (`resync_other = false`). Its panic text was never captured and 26 runs did not produce it. Do not guess a fix. Next: when it fails in a gate run, keep the log of that run and read the panic text first. `rename_after_an_external_write` asserts three different things, and each points at a different cause: the rename must edit `lib.rs`; `other.rs` must be edited for a prepend; every `other.rs` range must read `target_fn` on disk. A failure on the first is an empty or partial answer, like the three fixed tests; a failure on the third is a stale-copy defect in `resync_all_drifted`. `rename_retrying_when_cancelled` retries only the cancelled error, not an empty edit.
+The failing rename test is `rename_edit_does_not_land_on_another_callee_after_a_same_size_write_outside_codescout` (`resync_other = false`). Its panic text was never captured and 26 runs did not produce it. Do not guess a fix. Read in `src/lsp/client.rs` on 2026-11-12: `rename_retrying_when_cancelled` retries only the message `cancelled non-idempotent request`, which `LspClient::request` builds from a `-32800` or `-32801` answer; any other server error panics at once with `rename failed: <error>`, and each assertion prints the edit, so the next failure carries its own evidence. Next: when it fails in a gate run, keep the log of that run and read the panic text first. `rename_after_an_external_write` asserts three different things, and each points at a different cause: the rename must edit `lib.rs`; `other.rs` must be edited for a prepend; every `other.rs` range must read `target_fn` on disk. A failure on the first is an empty or partial answer, like the three fixed tests; a failure on the third is a stale-copy defect in `resync_all_drifted`. `rename_retrying_when_cancelled` retries only the cancelled error, not an empty edit.
 
 ## References
 
