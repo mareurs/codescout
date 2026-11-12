@@ -1,3 +1,6 @@
+use crate::librarian::catalog::dual_write::{
+    commit_after_file_write, record_written_file, write_entry_into_ledger, FileWrite,
+};
 use crate::librarian::catalog::Catalog;
 use crate::librarian::tools::{schema_validate, LibrarianRecoverableError};
 use anyhow::Result;
@@ -1008,8 +1011,8 @@ pub fn append_entry(
     let mut snapshot_missing = snapshot_missing;
     // What the section write put on disk, kept so a FAILED COMMIT can be compensated: the
     // transaction rolls back and the id is never persisted, but these bytes are already
-    // written. `(path, pre-call bytes, bytes we wrote)`.
-    let mut written_section: Option<(String, String, String)> = None;
+    // written.
+    let mut written_section: Option<FileWrite> = None;
     let section_written = match section {
         None => false,
         Some(s) => {
@@ -1031,26 +1034,22 @@ pub fn append_entry(
                         ))
                     }
                 })?;
-            // Same observation rule as the prose path: the ledger's own heading level when
-            // it has one, `2` only as a declared default.
-            let level = body_entry_heading_level(&doc, id_prefix).unwrap_or(2);
-            let updated = splice_pending_section(&doc, &new_id, level, s, "append_entry")?;
-            // `write_catalogued_file` refuses a link: a catalogued row can be an in-root link to a
-            // file outside the repository. Refused with the transaction still open, so no id is
-            // consumed and the params row rolls back.
-            crate::librarian::util::write_catalogued_file(
+            // The splice, the guarded write and the row's `record_written_file` are the
+            // dual-write contract's one function. A link or a path outside the roots is refused
+            // with the transaction still open, so no id is consumed and the params row rolls
+            // back. `write_mark: false`: this path folds no frontmatter mark into the write.
+            written_section = Some(write_entry_into_ledger(
+                &tx,
                 &roots,
+                artifact_id,
                 std::path::Path::new(path),
-                &updated,
-            )
-            .map_err(|e| {
-                LibrarianRecoverableError::new(format!(
-                    "append_entry: cannot write the section into `{path}`: {e:#} — no id was \
-                         allocated"
-                ))
-            })?;
-            record_written_file(&tx, artifact_id, path, &updated)?;
-            written_section = Some((path.to_string(), doc, updated));
+                &doc,
+                id_prefix,
+                next,
+                Some(s),
+                false,
+                "append_entry",
+            )?);
             // `snapshot_missing` was derived from a body read taken BEFORE this write, so
             // it still lists the id whose row was just added. Reporting it would ask the
             // caller to do by hand the exact thing this call just did — the defect this
@@ -1062,17 +1061,9 @@ pub fn append_entry(
         }
     };
 
-    // NOT `tx.commit()?`. The commit is the one failure that lands AFTER the section is
-    // already on disk, and the bare error it used to propagate answers "did anything
-    // happen?" with silence — inviting the retry that duplicates the section.
-    // docs/issues/archive/2026-09-11-doc-update-writes-the-file-then-fails-the-catalog-and-reports-only-the-failure.md
-    if let Err(e) = tx.commit() {
-        return Err(commit_failed_after_section_write(
-            e,
-            &new_id,
-            written_section.as_ref(),
-        ));
-    }
+    // NOT a bare `tx.commit()?`: see `commit_after_file_write` for what the commit does when it
+    // fails after the section is already on disk.
+    commit_after_file_write(tx, written_section.as_ref(), &new_id, "append_entry")?;
     // After the commit, deliberately: this reads the body off disk and must never be
     // able to fail a write that already succeeded.
     let undefined_in_body = undefined_in_body_note(cat, artifact_id, &new_id);
@@ -1083,120 +1074,6 @@ pub fn append_entry(
         undefined_in_body,
         section_written,
     })
-}
-
-/// What became of a section that was already on disk when the catalog `COMMIT` failed.
-#[derive(Debug)]
-enum SectionRollback {
-    /// The bytes this call wrote were still there, and the file is back to its pre-call
-    /// state.
-    Restored,
-    /// The file no longer holds what this call wrote — another writer has touched it
-    /// since, so putting the old bytes back would discard their edit. Left as found.
-    ForeignChange,
-    /// The rollback itself failed; the section is still on disk.
-    Failed(std::io::Error),
-}
-
-/// Put `path` back to `original`, but ONLY if it still holds exactly `written`.
-///
-/// **The comparison is the point, not a nicety.** Between the section write and this call
-/// the file is protected by nothing — the `IMMEDIATE` transaction locks the catalog, never
-/// the markdown — and a peer session editing the same ledger is the ordinary case on a
-/// shared checkout. An unconditional restore would silently discard their edit in order to
-/// repair ours, turning a recoverable failure into someone else's data loss.
-fn restore_section_after_failed_commit(
-    path: &str,
-    original: &str,
-    written: &str,
-) -> SectionRollback {
-    // Through the read door with no roots: the bytes are compared with what this same call just
-    // wrote, never returned (see the write below for why the roots are empty).
-    match crate::librarian::read_door::ReadDoor::new(Vec::new())
-        .text_for_write(std::path::Path::new(path))
-    {
-        // The write that put `written` there was guarded; the check is repeated because the
-        // file is protected by nothing between the two (see the comment above), and a link
-        // planted in that window would turn this restore into a write through it.
-        Ok(current) if current == written => {
-            match crate::librarian::util::write_catalogued_file(
-                // Empty on purpose: this restores a path the SAME call just wrote through the door
-                // (leaf and containment already passed), so the only thing left to defend is a link
-                // planted in between, which the leaf rule and the spelled-repo fallback cover.
-                &[],
-                std::path::Path::new(path),
-                original,
-            ) {
-                Ok(()) => SectionRollback::Restored,
-                Err(e) => SectionRollback::Failed(std::io::Error::other(format!("{e:#}"))),
-            }
-        }
-        Ok(_) => SectionRollback::ForeignChange,
-        Err(e) => SectionRollback::Failed(std::io::Error::other(e.to_string())),
-    }
-}
-
-/// `append_entry`'s catalog `COMMIT` failed. Returns a `RecoverableError` naming both
-/// halves — what reached disk and what did not — and, load-bearing, WHICH REMEDY APPLIES.
-///
-/// The transaction rolls back, so the id is never persisted. A section left on disk
-/// therefore pushes the next allocation up by one, because the allocator folds the body's
-/// claimed ids in on purpose (`append_entry_skips_ids_already_claimed_by_the_body`) — so a
-/// blind retry mints a NEW id and writes a SECOND section. That makes "safe to retry" and
-/// "clean up first" opposite instructions, and the bare `rusqlite` error this replaces
-/// distinguishes them not at all: it reports the lock and stays silent about the file.
-///
-/// Note the two branches are not a wording difference. When the rollback succeeded there
-/// is nothing to clean up and a retry is simply correct; when it did not, telling the
-/// caller to retry produces exactly the duplicate this whole path exists to prevent.
-fn commit_failed_after_section_write(
-    e: rusqlite::Error,
-    new_id: &str,
-    written: Option<&(String, String, String)>,
-) -> anyhow::Error {
-    let Some((path, original, updated)) = written else {
-        return LibrarianRecoverableError::with_hint(
-            "append_entry: the catalog write failed",
-            format!(
-                "The transaction rolled back and no file was touched, so no id was allocated \
-                 and nothing was written. The call is safe to retry as-is. Underlying error: {e}"
-            ),
-        );
-    };
-    match restore_section_after_failed_commit(path, original, updated) {
-        SectionRollback::Restored => LibrarianRecoverableError::with_hint(
-            "append_entry: the catalog write failed; the section was rolled back",
-            format!(
-                "The section for `{new_id}` had already been written to {path} when the catalog \
-                 COMMIT failed, so its id was never persisted — it has been removed again and \
-                 the file is byte-for-byte what it was before this call. Nothing to clean up: \
-                 the call is safe to retry as-is. Underlying error: {e}"
-            ),
-        ),
-        SectionRollback::ForeignChange => LibrarianRecoverableError::with_hint(
-            "append_entry: the catalog write failed and the section is still on disk",
-            format!(
-                "The section for `{new_id}` was written to {path} and the catalog COMMIT then \
-                 failed, so its id was never persisted. It could NOT be rolled back: the file no \
-                 longer holds the bytes this call wrote, so another writer has changed it since \
-                 and restoring would discard their edit. Do NOT retry blind — the next \
-                 allocation counts the ids already in the body, so a retry writes a SECOND \
-                 section under a NEW id. Delete the `{new_id}` section (and its index row, if \
-                 one was written) first, then retry. Underlying error: {e}"
-            ),
-        ),
-        SectionRollback::Failed(io) => LibrarianRecoverableError::with_hint(
-            "append_entry: the catalog write failed and the section could not be rolled back",
-            format!(
-                "The section for `{new_id}` was written to {path} and the catalog COMMIT then \
-                 failed, so its id was never persisted. Rolling the file back also failed \
-                 ({io}), so the section is still on disk. Do NOT retry blind — the next \
-                 allocation counts the ids already in the body, so a retry writes a SECOND \
-                 section under a NEW id. Delete the `{new_id}` section (and its index row, if \
-                 one was written) first, then retry. Underlying error: {e}"
-            ),
-        ),
-    }
 }
 
 /// What a prose-ledger allocation assigned, and what it was derived from.
@@ -1908,15 +1785,8 @@ pub fn allocate_entry_id(
     // archive companion). Accepts a number or a string, because a hand-written
     // or previously-quoted value should still be honoured rather than silently
     // read as absent — reading it as absent is exactly the reissue.
-    let hw_key = entry_high_water_key(id_prefix);
     let frontmatter_max: Option<u64> =
-        fm.as_ref()
-            .and_then(|f| f.extra.get(&hw_key))
-            .and_then(|v| match v {
-                Value::Number(n) => n.as_u64(),
-                Value::String(s) => s.trim().parse().ok(),
-                _ => None,
-            });
+        crate::librarian::catalog::dual_write::frontmatter_mark(&doc, id_prefix);
 
     // SQLite has no unsigned integers and rusqlite does not implement FromSql for
     // u64, so the column round-trips as i64. Clamping at 0 keeps a hand-edited
@@ -1960,59 +1830,43 @@ pub fn allocate_entry_id(
     //
     // Concurrency on one machine is handled by the enclosing IMMEDIATE transaction —
     // a second session blocks on the write lock, so it cannot interleave here.
-    let updated =
-        crate::librarian::frontmatter::upsert_int_line(&doc, &hw_key, next).ok_or_else(|| {
-            LibrarianRecoverableError::with_hint(
-                format!(
-                    "allocate_entry_id: `{abs_path}` has no frontmatter block to record \
-                     `{hw_key}` in"
-                ),
-                "A ledger's high-water mark is COMMITTED state, so the file needs a \
-                 frontmatter block to hold it. Add one — the same block already carries \
-                 the `entry_prefix` declaration that made this a ledger."
-                    .to_string(),
-            )
-        })?;
-    // The entry section, spliced into the SAME string the mark went into, so one
-    // `fs::write` carries both. See `PendingSection` for why this cannot be a second
-    // write by the caller.
     //
-    // The heading is formatted here and nowhere else: `<level> <ID> — <title>` is
+    // The mark and the entry section are written by `write_entry_into_ledger` in ONE file
+    // write; see `PendingSection` for why this cannot be a second write by the caller.
+    //
+    // The heading is formatted there and nowhere else: `<level> <ID> — <title>` is
     // exactly `link_scan`'s `def_re` (`^\s*([A-Z]{1,3}-\d+)\s+[—–-]\s+`), so an entry
     // written through this path cannot be born undefined. Callers used to receive the
     // id plus a hint asking them to format it, and a heading missing its
     // dash-and-title defines no token — the mechanism behind ~30 of 39 sampled
     // dangling tokens in this repo. CAP-5 defect class 2.
-    // Kept as two values on purpose. `observed_level` is an OBSERVATION and stays
-    // `None` when the body heads nothing, because the caller phrases its hint
-    // differently for a default than for a convention — collapsing them is U-40 in
+    // `observed_level` is an OBSERVATION and stays `None` when the body heads nothing,
+    // because the caller phrases its hint differently for a default than for a
+    // convention — collapsing it with the formatting default is U-40 in
     // `docs/trackers/codescout-usage-frictions.md`, where a hard-coded `##` told a
     // `###` ledger the wrong level while claiming it was the ledger's own.
-    // `level` is only the formatting choice made here.
     let observed_level = body_entry_heading_level(body, id_prefix);
-    let level = observed_level.unwrap_or(2);
     let id = format!("{id_prefix}-{next}");
-    let updated = match section {
-        None => updated,
-        Some(s) => splice_pending_section(&updated, &id, level, s, "allocate_entry_id")?,
-    };
     // `abs_path` is the catalog's, and a row can be an in-root link to a file outside the
-    // repository; `write_catalogued_file` refuses a link. Before `tx.commit()`, so the
-    // reservation inserted above rolls back with the transaction.
-    crate::librarian::util::write_catalogued_file(
+    // repository; the write refuses a link. Before the commit, so the reservation
+    // inserted above rolls back with the transaction.
+    let written = write_entry_into_ledger(
+        &tx,
         &roots,
+        artifact_id,
         std::path::Path::new(&abs_path),
-        &updated,
-    )
-    .map_err(|e| {
-        LibrarianRecoverableError::new(format!(
-            "allocate_entry_id: cannot record the high-water mark in `{abs_path}`: {e:#} — no \
-                 id was allocated"
-        ))
-    })?;
-    record_written_file(&tx, artifact_id, &abs_path, &updated)?;
+        &doc,
+        id_prefix,
+        next,
+        section,
+        true,
+        "allocate_entry_id",
+    )?;
 
-    tx.commit()?;
+    // A commit that fails after the file write restores the file (when it still holds our
+    // bytes) and says which remedy applies, instead of leaving the section behind an id that
+    // was never persisted.
+    commit_after_file_write(tx, Some(&written), &id, "allocate_entry_id")?;
 
     Ok(AllocateOutcome {
         id,
@@ -2294,41 +2148,6 @@ fn resync_snapshot_row(
     Ok(SnapshotRow::Rewritten)
 }
 
-/// Bring an artifact row's content columns up to bytes this transaction just wrote to its
-/// file, so the catalog does not fall behind the file it describes.
-///
-/// Three writers here edit such a file: `allocate_entry_id` (the high-water mark, plus a
-/// section and its index row), `append_entry` (a section) and `resync_snapshot_row` (one
-/// table row). `doc(action="update")` refreshes `file_sha256` and `file_mtime` when it
-/// writes; these three did not, so every write left `doctor` reporting `row_behind_file`
-/// until a `reindex`. It runs inside the caller's transaction, so a rollback takes the
-/// refresh with it and the row keeps describing whatever a failed commit restores.
-/// docs/issues/archive/2026-09-28-update-entry-snapshot-resync-leaves-the-catalog-row-behind-its-file.md
-fn record_written_file(
-    tx: &rusqlite::Transaction<'_>,
-    artifact_id: &str,
-    path: &str,
-    written: &str,
-) -> Result<()> {
-    // Same derivation as `doc(action="update")`: the file's own mtime in milliseconds,
-    // falling back to now only when the filesystem cannot report one.
-    let file_mtime = std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-    tx.execute(
-        "UPDATE artifact SET file_sha256 = ?1, file_mtime = ?2 WHERE id = ?3",
-        rusqlite::params![
-            crate::librarian::util::sha_of_bytes(written.as_bytes()),
-            file_mtime,
-            artifact_id
-        ],
-    )?;
-    Ok(())
-}
-
 /// Splice a [`PendingSection`] — and its optional index row — into `doc`, returning the
 /// whole document so the caller writes it in ONE `fs::write`.
 ///
@@ -2342,7 +2161,7 @@ fn record_written_file(
 /// `caller` names the function in the refusal text. Both callers abort BEFORE any write,
 /// so both can honestly say nothing was written — see each call site for the ordering that
 /// makes that true.
-fn splice_pending_section(
+pub(crate) fn splice_pending_section(
     doc: &str,
     id: &str,
     level: usize,
@@ -3214,43 +3033,6 @@ mod tests {
             "the params change is rolled back with the refused write: {}",
             row.params
         );
-    }
-
-    /// The restore after a failed commit writes the pre-call bytes back, but only when the file
-    /// still holds exactly what this call wrote. A link whose TARGET holds those bytes passes
-    /// that comparison (`read_to_string` follows it), which is the case the guard exists for.
-    #[cfg(unix)]
-    #[test]
-    fn restoring_a_section_never_writes_through_a_link() {
-        let outside = tempfile::tempdir().unwrap();
-        let victim = outside.path().join("victim.md");
-        std::fs::write(&victim, "WRITTEN").unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let link = dir.path().join("ledger.md");
-        std::os::unix::fs::symlink(&victim, &link).unwrap();
-
-        let outcome =
-            restore_section_after_failed_commit(link.to_str().unwrap(), "ORIGINAL", "WRITTEN");
-
-        assert!(
-            matches!(outcome, SectionRollback::Failed(_)),
-            "a link must not be written through: {outcome:?}"
-        );
-        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "WRITTEN");
-    }
-
-    /// Control for the four above: an ordinary file takes the same restore.
-    #[test]
-    fn restoring_a_section_still_restores_a_regular_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ledger.md");
-        std::fs::write(&path, "WRITTEN").unwrap();
-
-        let outcome =
-            restore_section_after_failed_commit(path.to_str().unwrap(), "ORIGINAL", "WRITTEN");
-
-        assert!(matches!(outcome, SectionRollback::Restored), "{outcome:?}");
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "ORIGINAL");
     }
 
     #[test]
@@ -5964,118 +5746,6 @@ mod tests {
             1,
             "exactly one section for one logical append; a count, not a `contains`, \
              because the defect is a SECOND section and `contains` is satisfied by both: {text}"
-        );
-    }
-
-    /// The rollback is CONDITIONAL, and this is the condition. Nothing locks the markdown
-    /// file between the section write and the rollback — the `IMMEDIATE` transaction locks
-    /// the catalog, not the file — so a peer session editing the same ledger is the
-    /// ordinary case here. An unconditional restore would repair our failed call by
-    /// discarding their edit.
-    #[test]
-    fn a_file_changed_by_another_writer_is_left_alone_rather_than_restored() {
-        let dir = tempfile::tempdir().unwrap();
-        let md = dir.path().join("ledger.md");
-        let peers_bytes = "a peer rewrote this file after our write\n";
-        std::fs::write(&md, peers_bytes).unwrap();
-
-        let outcome = restore_section_after_failed_commit(
-            md.to_str().unwrap(),
-            "the original\n",
-            "what we wrote\n",
-        );
-
-        assert!(
-            matches!(outcome, SectionRollback::ForeignChange),
-            "a file that no longer holds our bytes must not be restored: {outcome:?}"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&md).unwrap(),
-            peers_bytes,
-            "the peer's bytes must survive untouched"
-        );
-    }
-
-    /// A rollback that could not run must say so rather than report the file clean. The
-    /// caller's remedy differs between the two — "safe to retry" against "delete the
-    /// section first" — so a failure reported as a restore is the duplicate-section bug
-    /// with a reassuring message on top.
-    #[test]
-    fn an_unreadable_path_reports_failed_not_restored() {
-        let dir = tempfile::tempdir().unwrap();
-        let missing = dir.path().join("never-created.md");
-
-        let outcome = restore_section_after_failed_commit(
-            missing.to_str().unwrap(),
-            "the original\n",
-            "what we wrote\n",
-        );
-
-        assert!(
-            matches!(outcome, SectionRollback::Failed(_)),
-            "an unreadable path cannot be restored and must not be reported clean: {outcome:?}"
-        );
-    }
-
-    /// The two remedies are OPPOSITE INSTRUCTIONS, not two wordings of one. A retry after a
-    /// successful rollback is correct; the same retry with the section still on disk writes
-    /// a second one under a new id — the defect itself. So this asserts each branch both
-    /// says its own remedy and does NOT say the other's: a suite that only checks the
-    /// predicate leaves the remedy text untested by construction, which is the half that
-    /// sent four sessions the wrong way in this repo's own measured history.
-    /// CLAUDE.md § *Testing Discipline*, the remedy-text law.
-    #[test]
-    fn the_rolled_back_and_still_on_disk_remedies_point_in_opposite_directions() {
-        let busy = || {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
-                Some("database is locked".to_string()),
-            )
-        };
-        let hint_of = |e: anyhow::Error| {
-            e.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
-                .expect("must be the librarian RecoverableError, so this routes isError:false")
-                .hint
-                .clone()
-                .unwrap_or_default()
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let md = dir.path().join("ledger.md");
-        let original = "before\n";
-        let written = "before\n\n## F-1 — x\n\nprose\n";
-        let path = md.to_str().unwrap().to_string();
-
-        // Rolled back: the file still held our bytes, so it was restored.
-        std::fs::write(&md, written).unwrap();
-        let restored = hint_of(commit_failed_after_section_write(
-            busy(),
-            "F-1",
-            Some(&(path.clone(), original.to_string(), written.to_string())),
-        ));
-
-        // Still on disk: a third party changed the file, so it was left alone.
-        std::fs::write(&md, "a peer's rewrite\n").unwrap();
-        let still_there = hint_of(commit_failed_after_section_write(
-            busy(),
-            "F-1",
-            Some(&(path, original.to_string(), written.to_string())),
-        ));
-
-        assert!(
-            restored.contains("safe to retry") && !restored.contains("Do NOT retry"),
-            "a rolled-back section leaves nothing to clean up, so the hint must invite the \
-             retry and must not forbid it: {restored}"
-        );
-        assert!(
-            still_there.contains("Do NOT retry") && !still_there.contains("safe to retry"),
-            "a section still on disk makes a retry duplicate it, so the hint must forbid \
-             the retry and must not invite it: {still_there}"
-        );
-        assert!(
-            still_there.contains("F-1"),
-            "the hint must name the section the caller has to delete, not merely that one \
-             exists — an addressee who cannot act on the message is an untested remedy: \
-             {still_there}"
         );
     }
 

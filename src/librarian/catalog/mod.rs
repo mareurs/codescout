@@ -9,6 +9,7 @@ pub(crate) mod audit;
 pub mod augmentation;
 pub mod chunk;
 pub mod commits;
+pub(crate) mod dual_write;
 pub mod entry_cite;
 pub mod event_edges;
 pub mod events;
