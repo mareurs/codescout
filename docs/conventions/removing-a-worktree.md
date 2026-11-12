@@ -31,12 +31,16 @@ when another project is activated or when the worktree is removed (bug `3dde1548
 3. A mux is shared by every session working in that checkout, and the script cannot see which
    session is a client. Ask the occupant first
    ([`reaching-a-peer-session.md`](reaching-a-peer-session.md), Step 4 of its skill).
-4. If the holders are the expected mux, rust-analyzer and cargo, run
-   `scripts/worktree-remove.sh --stop <path>`. It sends SIGTERM, rescans, removes the worktree
-   and checks that the directory is gone.
+4. If every holder is one of the stoppable kinds (`mux`, `rust-analyzer`, `cargo`, `rustc`,
+   `sccache`, `build-output`), run `scripts/worktree-remove.sh --stop <path>`. It sends SIGTERM,
+   rescans, removes the worktree and checks that the directory is gone.
 5. Delete the branch yourself afterwards with `git branch -d`.
 
-The script never uses `--force`, never `rm`, never SIGKILL, and never deletes the branch.
+Git deletes the worktree's ignored files with it (`target/`, `.superpowers/`, `.codescout/`,
+`.buddy/`): copy out anything you keep, for example `.superpowers/`, before the removal.
+
+The script never uses `--force`, never runs `rm`, never sends SIGKILL to a holder, and never
+deletes the branch. (Its own scan child runs under `timeout -k 1`, which may SIGKILL that child.)
 
 ## If the active worktree is already gone
 
@@ -46,30 +50,40 @@ path, the main checkout included. The fix is in `scope_root`
 (`src/tools/provenance_fence_context.rs`): an activation whose active root no longer exists runs
 without the provenance fence. A server binary built before that fix still shows the symptom until
 it is rebuilt and reconnected (`./scripts/rb.sh`, then `/mcp`). On such a server, `mkdir` the
-removed path, activate the main checkout, then delete that empty directory yourself. That stub is
-the one directory removal this page advises. Activating the main checkout first (step 1) avoids
-the case.
+removed path, activate the main checkout, then delete the stub with `rmdir <path>`, which refuses a
+non-empty directory. If `rmdir` reports "Directory not empty", list it and remove only
+`<path>/.codescout` (a server built before the fix may create fence files there when the stub is
+outside any git checkout; a stub under `.worktrees/` resolves to the main checkout and stays
+empty), then `rmdir` again. That stub is the one directory you delete by hand. Activating the main
+checkout first (step 1) avoids the case.
 
 ## A blocker is not stoppable
 
 A `codescout` process that is not a mux (for example `codescout start`, a live session's MCP
 server) has kind `other`, even when it runs from `<worktree>/target/`. So has any editor, shell or
-test run, and so has the script's own parent when its cwd is inside the worktree. With `--stop`, a
-blocker makes the script exit 4 and signal nothing. Stop that session by hand.
+test run. The script's own parent is a blocker too when its cwd is inside the worktree: its kind
+comes from the command line like any row (it can be `cargo` or `rust-analyzer`), and it is a
+blocker because the script compares each row's pid with its own parent's, whatever the kind. With
+`--stop`, a blocker makes the script exit 4 and signal nothing, whether it was there at the first
+scan or appeared before the stop loop's first scan. Stop that session by hand.
 
 ## Exit codes
 
 | code | meaning |
 |---|---|
-| 0 | the worktree is removed and verified gone |
+| 0 | the worktree is removed and verified gone (also with `-h`/`--help`, which prints the usage and removes nothing) |
 | 2 | refused: usage, unregistered path, main checkout, caller's cwd inside, no `/proc`, or the first scan timed out; nothing changed |
 | 3 | holders exist and `--stop` was not given |
 | 4 | `--stop`, but a blocker exists; nothing was signalled |
-| 5 | `--stop`, but a holder survived, or a rescan timed out; nothing was removed |
-| 6 | git refused (untracked files, a lock); never forced |
-| 7 | git removed it but the directory is still there; listed, never deleted |
+| 5 | `--stop`, but a holder survived, or a rescan timed out; nothing was removed, but SIGTERM may already have been sent |
+| 6 | git refused and still lists the worktree (untracked files, a lock); never forced. Git's message and `git status --porcelain -uall` (first 50 lines, then `... and N more`) are printed; ignored files are not listed |
+| 7 | the directory is still there, though git removed the worktree (it may have exited non-zero after deregistering it, the bug itself); its contents are listed, never deleted |
 
-Knobs: `--wait SECS` (default 30) bounds the rescan after SIGTERM.
+When git fails but no longer lists the worktree, the script prunes, then checks the path as after
+a success: exit 7 if the directory remains, exit 0 only if it is absent.
+
+Knobs: `--wait SECS` (a whole number without leading zeros, default 30) bounds the rescan after
+SIGTERM; the pause after the mux signal (up to about 5 s on a busy `/proc`) is not counted in it.
 `WORKTREE_REMOVE_SCAN_TIMEOUT` (whole seconds, default 10) bounds each scan; a scan that times out
 means the holders are unknown, never none.
 
@@ -80,7 +94,9 @@ Its own header lists the limits. A green run is not proof that nothing holds the
 - a process that holds a file descriptor only, with its cwd elsewhere and no path in argv;
 - processes owned by another user, whose `/proc` entries it cannot read;
 - a command line that spells the worktree through a symlink;
-- a process that starts after the last scan (it shows up as exit 6 or 7).
+- a process that starts after the last scan (it may show up as exit 6 or 7, or not at all: a
+  late process that writes nothing lets git succeed, and exit 0 leaves a process whose cwd is
+  deleted).
 
 The suite uses fixture `/proc` trees plus real processes inside its own temp worktrees. It cannot
 say whether a listed mux has a live client, so the occupancy question stays with you.
