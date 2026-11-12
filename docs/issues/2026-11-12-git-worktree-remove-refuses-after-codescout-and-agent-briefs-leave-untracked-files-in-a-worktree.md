@@ -10,7 +10,7 @@ tags:
 closed: 2026-11-12
 opened: 2026-11-12
 severity: medium
-unverified: The --stop path has had no real use (no mux was running at first use). Fix 2 (superpowers brief templates) is open. The .codescout/embeddings symlink is created by two codescout-companion hooks (worktree-activate.mjs, session-start.mjs); removing that creation is a change in the claude-plugins repo and is not made. macOS and Windows CI lanes are not checked.
+unverified: The --stop path has had one real use (2026-11-12, a probe worktree, see Fix). It refused once and then removed the worktree. A SIGTERM to a live cargo or rustc tree and the survivor exit (5) were not exercised, and the script does not print which processes it signalled. Fix 2 (superpowers brief templates) is open. The .codescout/embeddings symlink is created by two codescout-companion hooks (worktree-activate.mjs, session-start.mjs); removing that creation is a change in the claude-plugins repo and is not made. macOS and Windows CI lanes are not checked.
 ---
 
 # BUG: git worktree remove refuses after codescout and agent briefs leave untracked files in a worktree
@@ -82,7 +82,16 @@ Item 1 and item 3 are applied; item 2 is open. A fourth change, applied 2026-11-
 2. **Open:** brief templates for subagents must name scratch files only under `.superpowers/` (git-ignored). Applies to the superpowers plugin, not to this repo.
 3. **Applied 2026-11-12 (approach A of `docs/superpowers/specs/2026-11-12-worktree-removal-helper-design.md`):** `scripts/worktree-remove.sh` lists the holders of a worktree, stops the stoppable ones only with `--stop`, runs a plain `git worktree remove`, prunes, and verifies that the directory is gone. The operator page is `docs/conventions/removing-a-worktree.md`. The second trap (activation after removal) is fixed under bug `d291b97d9e69edef`.
 
-First real use, 2026-11-12, on the worktree of this fix: the first run listed one holder, the `claude` process of the session itself (kind `other`, a blocker), exit 3. After the session left the worktree the script found no holders, git refused, and the script exited 6 and listed one untracked entry, the `.codescout/embeddings` symlink. After I deleted that symlink (not its target) the script exited 0. The directory, the registration and the branch were then gone, and `pgrep` found no process that names the path. The mux was not running at that time, so the `--stop` path had no real use.
+First real use, 2026-11-12, on the worktree of this fix: the first run listed one holder, the `claude` process of the session itself (kind `other`, a blocker), exit 3. After the session left the worktree the script found no holders, git refused, and the script exited 6 and listed one untracked entry, the `.codescout/embeddings` symlink. After I deleted that symlink (not its target) the script exited 0. The directory, the registration and the branch were then gone, and `pgrep` found no process that names the path. The mux was not running at that time, so the `--stop` path had no real use then.
+
+Second use, 2026-11-12, on a probe worktree (`.worktrees/stop-probe`, branch `probe/worktree-stop-20261112`, created from `experiments` for this test and deleted after it). A `symbols` call pinned to the worktree (`workspace=<path>`) started a mux (`--cwd` the worktree), rust-analyzer, and a `cargo check` with its `rustc`, `sccache` and build-script children. Results:
+
+- Without `--stop`: exit 3 and 15 holders listed. The two mux processes of the main checkout (`--cwd` the parent directory of the worktree) were not listed.
+- With `--stop`, first run: exit 4, nothing signalled. The blockers were `make`, `cc`, `cc1` and `as` (kind `other`), the C compile of a build script (`tikv-jemalloc-sys`). An earlier scan had also listed an `sh .../configure` as `other`. So a worktree in the middle of a cold build that compiles C code cannot be stopped in one run; the refusal has no side effect and the run can be repeated.
+- With `--stop`, second run: four holders (the mux and three rust-analyzer processes; the `cargo check` had ended by then), exit 0. The directory and the registration were gone, no process named the path, and both main-checkout mux processes kept their PIDs (`765668`, `3018812`). I did not observe the signals: the script prints no line per signalled process, and the mux had an idle timeout of 180 s, so I cannot rule out that it ended by itself in that window.
+- Not exercised: a SIGTERM to a live `cargo`/`rustc` tree, and the survivor exit (5).
+
+Open choice, not made: the script could treat a child of a stoppable holder as part of that holder (process tree), or add `make`, `cc`, `cc1`, `as`, `ld` and `sh` to its kinds. Either one changes the safety rule that an unknown process blocks `--stop`, so it needs a decision.
 
 ## Tests added
 
@@ -127,7 +136,7 @@ Open items:
 - The recreated `.codescout` in plan-b is unexplained.
 - Parked script follow-ups: scrub UTF-8 C1 control characters (U+0080 to U+009F) from printed command lines (one-line fix `cmd=${cmd//$'\xc2'[$'\x80'-$'\x9f']/ }`); a very large `--wait` overflows the deadline arithmetic (the safe direction); the exit-7 `ls -A` listing prints raw file names; the survivor message says "SIGKILL is never used".
 - Check that CI is green on the macOS and Windows lanes (the Rust wrapper is Linux-only; not run locally).
-- Use the `--stop` path on a worktree that has a live mux, and record what happened.
+- `--stop` was used on a live mux on 2026-11-12 (see Fix). Still open: the script should say which processes it signals; decide how to treat the C build tools (`make`, `cc`, `cc1`, `as`) that block `--stop` during a cold build; exercise the signal path on a live `cargo` tree and the survivor exit (5).
 
 ## References
 
