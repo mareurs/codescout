@@ -3908,3 +3908,197 @@ fn the_compact_line_shows_counts_for_every_populated_index_state() {
         );
     }
 }
+
+// ---- the repo-name note on activation ----
+
+/// A `ToolContext` over a fresh agent, as the activation tests above build one.
+async fn note_ctx() -> ToolContext {
+    ToolContext {
+        agent: Agent::new(None).await.unwrap(),
+        lsp: lsp(),
+        output_buffer: Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+        progress: None,
+        peer: None,
+        section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+            crate::tools::section_coverage::SectionCoverage::new(),
+        )),
+        guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+        workspace_override: None,
+    }
+}
+
+/// A project root named `my-repo` (so the suggested name is known) with a `.codescout` folder,
+/// under a temp dir that outlives the call.
+fn repo_named_my_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap().join("my-repo");
+    std::fs::create_dir_all(root.join(".codescout")).unwrap();
+    (dir, root)
+}
+
+/// Activate `root` read-write or read-only and return the response JSON.
+async fn activate_json(root: &std::path::Path, read_only: bool) -> Value {
+    ActivateProject
+        .call(
+            json!({ "path": root.to_str().unwrap(), "read_only": read_only }),
+            &note_ctx().await,
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn activation_notes_an_unconfirmed_repo_name() {
+    let (_dir, root) = repo_named_my_repo();
+    let result = activate_json(&root, false).await;
+    let note = &result["repo_name_unconfirmed"];
+    assert!(note.is_object(), "no repo_name_unconfirmed; got: {result}");
+    assert_eq!(note["suggested"], "my-repo", "{result}");
+    assert_eq!(
+        note["action"], "onboarding(repo_name=\"my-repo\")",
+        "a read-write activation offers the call as it is: {result}"
+    );
+    assert!(
+        result.get("repo_name_error").is_none(),
+        "an absent file is not an error: {result}"
+    );
+    assert!(
+        !root.join(".codescout/repo.toml").exists(),
+        "activation must not write a name"
+    );
+}
+
+#[tokio::test]
+async fn activation_omits_the_note_when_a_name_exists() {
+    let (_dir, root) = repo_named_my_repo();
+    crate::librarian::identity::repo_name::write(
+        &root,
+        &crate::librarian::identity::repo_name::RepoName::parse("codescout").unwrap(),
+    )
+    .unwrap();
+    let result = activate_json(&root, false).await;
+    assert!(
+        result.get("repo_name_unconfirmed").is_none(),
+        "a confirmed name needs no note; got: {result}"
+    );
+    assert!(result.get("repo_name_error").is_none(), "{result}");
+}
+
+#[tokio::test]
+async fn activation_omits_the_note_after_a_decline() {
+    // Control: the same shape of project without the marker is noted.
+    let (_dir_a, undeclined) = repo_named_my_repo();
+    let control = activate_json(&undeclined, false).await;
+    assert!(
+        control["repo_name_unconfirmed"].is_object(),
+        "control must be noted: {control}"
+    );
+
+    let (_dir_b, declined) = repo_named_my_repo();
+    std::fs::write(
+        declined.join(".codescout/project.toml"),
+        "[project]\nname = \"t\"\nrepo_name_declined = true\n",
+    )
+    .unwrap();
+    let result = activate_json(&declined, false).await;
+    assert!(
+        result.get("repo_name_unconfirmed").is_none(),
+        "a declined dialog is not nagged about again; got: {result}"
+    );
+    assert!(result.get("repo_name_error").is_none(), "{result}");
+}
+
+#[tokio::test]
+async fn a_read_only_activation_does_not_offer_a_refused_call() {
+    // `Onboarding::is_write` is always true, so a read-only activation refuses the call.
+    assert!(crate::tools::Tool::is_write(
+        &crate::tools::onboarding::Onboarding,
+        &json!({"repo_name": "my-repo"})
+    ));
+    let (_dir, root) = repo_named_my_repo();
+    let result = activate_json(&root, true).await;
+    assert_eq!(result["read_only"], true, "{result}");
+    let note = &result["repo_name_unconfirmed"];
+    assert_eq!(note["suggested"], "my-repo", "{result}");
+    let action = note["action"].as_str().expect("an action string");
+    assert!(
+        !action.starts_with("onboarding("),
+        "the first call offered must not be the one a read-only activation refuses: {action}"
+    );
+    let writable = action
+        .find("read_only=false")
+        .unwrap_or_else(|| panic!("the action must say to activate read-write first: {action}"));
+    let call = action
+        .find("onboarding(repo_name=\"my-repo\")")
+        .unwrap_or_else(|| panic!("the action must still name the call: {action}"));
+    assert!(writable < call, "read-write comes first: {action}");
+}
+
+#[tokio::test]
+async fn the_compact_form_carries_the_note() {
+    let (_dir, root) = repo_named_my_repo();
+    let result = activate_json(&root, false).await;
+    let compact = format_activate_project(&result);
+    let banner: Vec<&str> = compact
+        .lines()
+        .filter(|l| l.contains("onboarding(repo_name=\"my-repo\")"))
+        .collect();
+    assert_eq!(banner.len(), 1, "exactly one banner line: {compact}");
+    assert!(
+        compact.contains("activated · my-repo (rw)"),
+        "the summary line stays: {compact}"
+    );
+
+    // Read-only: the banner carries the read-write step too.
+    let ro = format_activate_project(&activate_json(&root, true).await);
+    assert!(ro.contains("read_only=false"), "{ro}");
+    assert!(ro.contains("onboarding(repo_name=\"my-repo\")"), "{ro}");
+
+    // Without the block there is no banner.
+    let plain = format_activate_project(&json!({
+        "project": "p", "read_only": false, "memories": [], "index": {"status": "indexed"}
+    }));
+    assert!(!plain.contains("repo_name"), "{plain}");
+    assert!(!plain.contains("REPO NAME"), "{plain}");
+}
+
+#[tokio::test]
+async fn a_malformed_repo_toml_is_reported_not_treated_as_unconfirmed() {
+    for (label, text) in [
+        ("not toml", "name = \n[[["),
+        ("non-canonical name", "name = \"Not A Name\"\n"),
+    ] {
+        let (_dir, root) = repo_named_my_repo();
+        std::fs::write(root.join(".codescout/repo.toml"), text).unwrap();
+        let result = activate_json(&root, false).await;
+        assert!(
+            result.get("repo_name_unconfirmed").is_none(),
+            "{label}: an unreadable name must not read as unconfirmed, nor suggest a write: {result}"
+        );
+        let error = result["repo_name_error"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{label}: no repo_name_error; got: {result}"));
+        assert!(error.contains("repo.toml"), "{label}: {error}");
+        assert!(!error.contains('\n'), "{label}: one line: {error:?}");
+        assert!(
+            !error.contains("onboarding(repo_name"),
+            "{label}: no write is offered: {error}"
+        );
+        // The compact form reports it too, once, and offers no write.
+        let compact = format_activate_project(&result);
+        assert_eq!(
+            compact.lines().filter(|l| l.contains("repo.toml")).count(),
+            1,
+            "{label}: {compact}"
+        );
+        assert!(
+            !compact.contains("onboarding(repo_name"),
+            "{label}: {compact}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".codescout/repo.toml")).unwrap(),
+            text,
+            "{label}: activation must not touch the file"
+        );
+    }
+}

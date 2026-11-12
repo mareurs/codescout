@@ -954,6 +954,64 @@ pub(crate) async fn check_has_index_cached(
     resolve_first_probe(project_id, probe)
 }
 
+/// What the activation says about the repo name: the one field to add to the response, if any.
+///
+/// * `repo_name_unconfirmed: {suggested, action}` when no `.codescout/repo.toml` exists at the
+///   repo root and the user has not declined the dialog. A read-only activation refuses
+///   `onboarding` (`Onboarding::is_write` is always true), so there `action` leads with the
+///   read-write activation.
+/// * `repo_name_error: "<one line>"` when the file exists and cannot be read: a name that cannot
+///   be read is not an unconfirmed one, so no write is suggested over it.
+/// * nothing when a name exists, or the user declined.
+///
+/// Two small reads (`repo.toml`, then `project.toml` only when no name exists) and the suggestion;
+/// no scan of other checkouts, no `elicit`, and a failure reports itself instead of failing the
+/// activation. The decline marker is read raw from disk, as `onboarding` reads it.
+fn repo_name_note(
+    project_root: &std::path::Path,
+    read_only: bool,
+) -> Option<(&'static str, Value)> {
+    use crate::librarian::identity::repo_name;
+
+    // Keys are repo-relative paths: the name file lives at the repo root, not the project root.
+    let repo_root = crate::tools::onboarding::repo_root_of(project_root);
+    match repo_name::read(&repo_root) {
+        Ok(Some(_)) => None,
+        Ok(None) if crate::tools::onboarding::repo_name_declined_at(project_root) => None,
+        Ok(None) => {
+            let suggested = repo_name::suggest(&repo_root);
+            let call = format!("onboarding(repo_name=\"{suggested}\")");
+            let action = if read_only {
+                format!(
+                    "this activation is read-only and refuses onboarding: activate read-write \
+                     first with {}, then call {call}",
+                    crate::util::path_security::activate_writable_call(&to_forward_slash(
+                        project_root
+                    )),
+                )
+            } else {
+                call
+            };
+            Some((
+                "repo_name_unconfirmed",
+                json!({"suggested": suggested.as_str(), "action": action}),
+            ))
+        }
+        Err(e) => {
+            // The chain of a TOML error carries a multi-line snippet; its first line names the
+            // file and the position.
+            let chain = format!("{e:#}");
+            let line = chain.lines().next().unwrap_or_default();
+            Some((
+                "repo_name_error",
+                json!(format!(
+                    "{line} (no repo name is suggested while the file cannot be read)"
+                )),
+            ))
+        }
+    }
+}
+
 /// Build the activation response JSON for both full-activation and focus-switch paths.
 async fn build_activation_response(
     ctx: &ToolContext,
@@ -1252,6 +1310,12 @@ async fn build_activation_response(
         });
     }
 
+    // A repo whose name was never confirmed, or whose name file cannot be read. Named block, not
+    // a second `hint`; see `repo_name_note` for what it reads and when it stays silent.
+    if let Some((key, note)) = repo_name_note(&project_root_path, read_only) {
+        result[key] = note;
+    }
+
     timer.finish();
     Ok(result)
 }
@@ -1314,6 +1378,26 @@ fn format_activate_project(result: &Value) -> String {
     } else {
         None
     };
+    // The repo-name banner, when the response carries `repo_name_unconfirmed` or
+    // `repo_name_error`. Like the stale banner below it is the only place a caller on the
+    // buffered-overflow path reads the remedy, so the action is spelled out in it.
+    let repo_name_banner = if let Some(note) = result["repo_name_unconfirmed"].as_object() {
+        let suggested = note.get("suggested").and_then(|v| v.as_str()).unwrap_or("");
+        let action = note.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        Some(format!(
+            "⚠ REPO NAME UNCONFIRMED (suggested `{suggested}`; confirm it with the user): {action}"
+        ))
+    } else {
+        result["repo_name_error"]
+            .as_str()
+            .map(|e| format!("⚠ REPO NAME UNREADABLE: {e}"))
+    };
+    // Everything below the stale warning, in order: legacy index, then repo name.
+    let banners = [legacy_banner.map(str::to_string), repo_name_banner]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let lower_banners = (!banners.is_empty()).then(|| banners.join("\n"));
 
     if let Some(stale) = result["system_prompt_stale"].as_object() {
         let stored_label = match stale.get("stored_version").and_then(|v| v.as_u64()) {
@@ -1341,14 +1425,14 @@ fn format_activate_project(result: &Value) -> String {
         let mut out = format!(
             "⚠ SYSTEM PROMPT STALE ({stored_label} → v{current}): run onboarding(refresh_prompt=true) now."
         );
-        if let Some(b) = legacy_banner {
+        if let Some(b) = &lower_banners {
             out.push('\n');
             out.push_str(b);
         }
         out.push('\n');
         out.push_str(&body);
         out
-    } else if let Some(b) = legacy_banner {
+    } else if let Some(b) = lower_banners {
         format!("{b}\n{body}")
     } else {
         body

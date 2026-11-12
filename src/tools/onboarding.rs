@@ -969,6 +969,14 @@ fn read_decline_marker(project_toml: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the project at `project_root` carries the decline marker, read raw from its
+/// `.codescout/project.toml` exactly as `onboarding` reads it (the in-memory config is not reloaded
+/// after the marker is written, so it is not consulted). `workspace(action="activate")` asks the same
+/// question through this, so the two cannot disagree.
+pub(crate) fn repo_name_declined_at(project_root: &std::path::Path) -> bool {
+    read_decline_marker(&project_root.join(PROJECT_TOML_REL))
+}
+
 /// Remember the decline in `project_toml`. `Ok(false)`: the file does not exist, so nothing is
 /// written and the dialog may ask again.
 fn remember_decline(project_toml: &std::path::Path) -> anyhow::Result<bool> {
