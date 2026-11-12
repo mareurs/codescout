@@ -1194,6 +1194,10 @@ async fn repo_name_block(
 /// is being chosen the block also reports the other checkouts that use it. A user who declined
 /// to name the repo is not asked again and nothing is scanned: the block says so and returns
 /// without a `checkouts` field.
+///
+/// The dialog is asked before the scan, so a collision with another checkout is reported only after
+/// the typed name has been written; the instruction then asks for a different name, and
+/// `onboarding(repo_name=...)` replaces the file. That order is deliberate: the scan needs the name.
 fn repo_name_block_for(
     root: &std::path::Path,
     existing: anyhow::Result<Option<RepoName>>,

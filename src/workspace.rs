@@ -261,6 +261,18 @@ pub fn merge_declared_projects(
             );
         };
 
+        // The workspace root itself, declared as `root = "."`. Onboarding snapshots the root
+        // project this way, and the walk already supplies it as the first member, so when it
+        // found one the entry is the expected snapshot: nothing to merge, nothing to report.
+        // A root the walk did NOT find is still refused below, and still logged.
+        if names_the_workspace_root(&entry.root)
+            && discovered
+                .iter()
+                .any(|p| p.relative_root == std::path::Path::new("."))
+        {
+            continue;
+        }
+
         let Some(relative_root) = declared_relative_root(&entry.root) else {
             skip("its root is not a relative path below the workspace root");
             continue;
@@ -329,6 +341,18 @@ fn declared_relative_root(raw: &str) -> Option<PathBuf> {
         clean.push(part);
     }
     (!clean.as_os_str().is_empty()).then_some(clean)
+}
+/// Does a declared root name the workspace root itself: non-empty, relative, and nothing but `.`
+/// components (`.`, `./`, `.\`)? An empty string, an absolute path and anything with a real
+/// component do not. Kept apart from [`declared_relative_root`], which answers a different
+/// question (a directory BELOW the root) and returns `None` for all of these.
+fn names_the_workspace_root(raw: &str) -> bool {
+    let unified = raw.replace('\\', "/");
+    !unified.is_empty()
+        && !unified.starts_with('/')
+        && unified
+            .split('/')
+            .all(|part| part.is_empty() || part == ".")
 }
 
 /// Source languages in `dir`, ordered by file-count dominance (most files
@@ -1158,6 +1182,112 @@ mod tests {
                 merged.is_empty(),
                 "{label} root {root:?} became a member: {merged:?}"
             );
+        }
+    }
+    /// Run `f` and return everything it logged at WARN or above, as text. The callsite interest
+    /// cache is rebuilt when a new dispatcher is registered, so a callsite another test already hit
+    /// without a subscriber is still seen here. The control test below fails if that ever stops
+    /// holding, so a silent capture cannot make a "no warning" assertion pass.
+    fn warnings_logged_by(f: impl FnOnce()) -> String {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct SharedBuf(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for SharedBuf {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedBuf {
+            type Writer = SharedBuf;
+            fn make_writer(&'a self) -> SharedBuf {
+                self.clone()
+            }
+        }
+
+        let buf = SharedBuf(Arc::new(Mutex::new(Vec::new())));
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(buf.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let bytes = buf.0.lock().unwrap().clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    /// Onboarding writes every discovered project back into `workspace.toml`, the workspace root
+    /// included, as `root = "."`. The walk already supplies that project, so the entry is the
+    /// expected snapshot and changes nothing. It used to be logged as "not a member: its root is not a
+    /// relative path below the workspace root" on every load of an onboarded project.
+    #[test]
+    fn a_declared_entry_for_the_discovered_workspace_root_is_not_reported_as_a_mistake() {
+        let dir = tempdir().unwrap();
+        let found = vec![make_project("codescout", ".")];
+
+        let mut merged = Vec::new();
+        let logged = warnings_logged_by(|| {
+            merged = merge_declared_projects(
+                dir.path(),
+                found,
+                &[declared("codescout", ".", &["rust"])],
+                &[],
+            );
+        });
+
+        let ids: Vec<&str> = merged.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["codescout"], "the snapshot changed the members");
+        assert!(
+            !logged.contains("is not a member"),
+            "the root snapshot was reported as a mistake: {logged}"
+        );
+    }
+
+    /// The control. Without it, "never warn about a `.` entry" passes the test above, and so does a
+    /// capture that records nothing. A `.` entry for a root the walk did NOT find is still skipped and
+    /// still logged: it names no member, and a user who wrote it should be told.
+    #[test]
+    fn a_declared_workspace_root_the_walk_did_not_find_is_still_reported() {
+        let dir = tempdir().unwrap();
+
+        let mut merged = Vec::new();
+        let logged = warnings_logged_by(|| {
+            merged = merge_declared_projects(
+                dir.path(),
+                vec![],
+                &[declared("codescout", ".", &["rust"])],
+                &[],
+            );
+        });
+
+        assert!(merged.is_empty(), "became a member: {merged:?}");
+        assert!(
+            logged.contains("is not a member"),
+            "an unexplained root entry was not reported (or the capture saw nothing): {logged:?}"
+        );
+    }
+    /// The helper's edges. `""` and `"/"` must NOT count as the workspace root: the first is the
+    /// "empty" skip, the second an absolute path that would name the filesystem root. A real
+    /// component, even behind a `.`, is a directory below the root and goes the normal route.
+    #[test]
+    fn only_dot_components_name_the_workspace_root() {
+        for (raw, want) in [
+            (".", true),
+            ("./", true),
+            ("./.", true),
+            (".\\", true),
+            ("", false),
+            ("/", false),
+            ("..", false),
+            ("./sub", false),
+            ("sub/.", false),
+            ("../x", false),
+        ] {
+            assert_eq!(names_the_workspace_root(raw), want, "root {raw:?}");
         }
     }
 

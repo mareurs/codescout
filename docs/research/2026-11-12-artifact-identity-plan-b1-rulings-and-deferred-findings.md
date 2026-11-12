@@ -83,7 +83,7 @@ Each row was a deferred Minor finding that no later commit had closed when the r
 
 ## Triage of 2026-11-12
 
-Every row of § Open findings was read against the code that day by four read-only reviewers, and the claims that mattered most were read again at the source. Row numbers below are the Task column of that table.
+Every row of § Open findings was read against the code that day by four read-only reviewers, and the claims that mattered most were read again at the source. Row numbers below are the Task column of that table. Two commits closed most of it: `6292766cf` and `a6f8712dd`.
 
 **Fixed in `6292766cf`, each behaviour change with a test that failed first:**
 - Task 5: a project with no `.git` inside the scan is judged as itself, not as an ancestor repository above the scan root (`visit_project` now stops at the scan root). This was the only row that could give a wrong verdict in production.
@@ -94,19 +94,25 @@ Every row of § Open findings was read against the code that day by four read-on
 - Task 1: tests for glob semantics and for a `.codescout` directory linked outward. Doc lines for the no-dotdot contract and for the backslash.
 - Task 5: the module doc states that `same_repo` is not proof. `render_scope` says "1 directory visited" and its test asserts the "not exhaustive" wording.
 
+**Fixed in `a6f8712dd`:**
+- Final R15 (a) and (b): `new_since` counts a folder index under its folder's name, and a refusal names the file that was added, not an older one that sorts later. Both tests failed first.
+- Task 5: a scan does not enter `node_modules` or `target`, and `inspect` opens the repository once. The unborn-HEAD case is tested through a scan. The skip test failed first.
+- Task 1: a parse error from `load` names the file once. The test failed first.
+- Task 7: a linked worktree offers its main checkout's `repo.toml` name ahead of a guess. The test failed first. The compact `REPO NAME UNCONFIRMED` banner says the call writes the committed file, and the manual page lists the repo-name fields.
+- Task 3: the JSON NOT CHECKED object has a `mode`; a malformed `key-space.toml` at HEAD says how to go on; `head_exists` is asked once; the doc names the `GIT_INDEX_FILE` caveat for `--project`. The `mode` and HEAD-message tests were written together with the fix and were not run red first.
+- Task 4: a case with two live candidates asserts the probe order.
+- Task 6: a doc line says the dialog is asked before the scan, which is why a collision is reported after the name is written.
+
 **Found already fixed, no change needed:** the blank-pattern and trailing-slash tests (Task 1); the revwalk-timeout path and the per-directory deadline check (Task 5); duplicated unmerged paths (Task 3 and 4), which `check_tree` collapses in a `BTreeSet`. `repo_name_note` no longer recomputes `to_forward_slash` (Task 7).
 
 **Still open:**
-- Task 1: the load error names the file twice.
 - Task 2: `render` of `InvalidKey(NotMarkdown)` has no remedy text (probably not worth fixing, the case is unreachable). The partial-exclusion warning for two readmes is accepted.
-- Task 3: `head_exists` runs twice; an inherited `GIT_INDEX_FILE` with `--project` on another repo is undocumented; the JSON exit-2 object has no `mode`; the HEAD-malformed message gives no remedy.
-- Task 4: the probe order has no case with two live candidates. The hook is dormant until a binary is built, by design.
-- Task 5: an unborn HEAD is tested only on `first_commits`, not through a scan; `inspect` opens the repo twice; `node_modules`, `target` and linked worktrees outside `.worktrees` are still entered; the Depth bound wording; the "a repo counts once" assertion cannot fail.
-- Task 6: no test drives the live dialog with a peer present; the dialog runs before the scan, so a collision is reported after the name is written (by design today, undocumented).
-- Task 7: a worktree gets `suggest()` from the main checkout's `workspace.toml` or folder name, not from its `repo.toml`. `docs/manual/src/concepts/activate-project-output-optimization.md` does not list the new output fields. The compact banner does not say that the call writes a committed file.
-- Final: R15 (a) and (b), and whether `ScanLimits::default()` needs a `RESULT_CAP` row.
+- Task 4: the hook is dormant until a binary is built, by design.
+- Task 5: linked worktrees outside `.worktrees` are still entered; the Depth bound wording; the "a repo counts once" assertion cannot fail, because the report is deduplicated at the end.
+- Task 6: no test drives the live dialog with a peer present (an in-process duplex harness exists at `src/server/native_context_tests.rs`).
+- Final: whether `ScanLimits::default()` needs a `RESULT_CAP` row. That is a decision, not a fix.
 
-The reviewers read the code; they did not run it. The fixes above were run: see the commit message for the gate.
+The reviewers read the code; they did not run it. The fixes above were run: see the commit messages for the gate.
 
 ## Closed by a later commit
 

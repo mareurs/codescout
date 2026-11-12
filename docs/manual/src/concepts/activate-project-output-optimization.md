@@ -51,6 +51,19 @@
 | Switching away (RO) | `"Browsing {name} (read-only). CWD: … — remember to workspace(action: activate, path: ...)"` |
 | Switching away (RW) | `"Switched project (read-write). CWD: … — remember to workspace(action: activate, path: ...)"` |
 
+## Repo name fields
+
+The card may carry one more field about the repo's name, which lives in the committed file
+`.codescout/repo.toml` at the repo root.
+
+| Field | When | Meaning |
+|-------|------|---------|
+| `repo_name_unconfirmed: {suggested, action, instruction}` | No `repo.toml` exists, the user has not declined the dialog, and the activation is read-write | Ask the user to confirm or edit `suggested`, then call `onboarding(repo_name=…)`. That call writes the committed file. |
+| `repo_name_error: "<one line>"` | `repo.toml` exists and cannot be read, in either mode | The file is reported, not treated as unconfirmed, so no write is suggested over it. |
+
+A read-only activation carries no `repo_name_unconfirmed`, because it only browses the repo. The compact
+form shows each field as one banner line, `⚠ REPO NAME UNCONFIRMED` or `⚠ REPO NAME UNREADABLE`.
+
 ## `workspace(action: status)` for full details
 
 The orientation card is intentionally compact. For detailed health checks, memory staleness

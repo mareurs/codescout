@@ -13,7 +13,7 @@ opened: 2026-11-12
 related:
 - a73c49456056fb92
 severity: low
-unverified: A second client on the same mux is untested. The `#[ignore]` reason names a CI job and no workflow under .github was found that runs it (grep of the .yml files only). The 'no mux socket' probe computed the socket path from the fixture path; whether the manager hashes a canonicalised root was not checked. The fallback branch was read in manager.rs and the 0.07 s run time fits it, but its warning log was not read in that run.
+unverified: The `#[ignore]` reason names a CI job and no workflow under .github was found that runs it (grep of the .yml files only). The 'no mux socket' probe computed the socket path from the fixture path; whether the manager hashes a canonicalised root was not checked. The fallback branch was read in manager.rs and the 0.07 s run time fits it, but its warning log was not read in that run. The two-client test added later the same day does not detect two mux mutations I tried (see a73c49456056fb92).
 ---
 
 # BUG: the ignored mux coherence test asserted a contract that was removed, and in a test runner it never runs the mux
@@ -61,7 +61,7 @@ That the 0.07 s run time meant a warm shared mux: refuted by the socket probe. T
 
 In `src/lsp/mux/coherence_rust.rs`, step 4 now asserts the current contract (B sees `fresh_symbol` with no notification), and its comment says the test is not a mux test and why. The mux transport is covered by a new test in `src/lsp/client.rs`, `hover_follows_a_write_made_outside_codescout_through_the_mux`, which runs `mux::process::run` in the test process and connects `LspClient::connect` to its socket. Mutation: red with the resync disabled, green with it.
 
-Not fixed: a real two-client mux test, and the `#[ignore]` reason.
+Added later the same day: `two_clients_on_one_mux_follow_a_write_made_outside_codescout` (two clients on one in-process mux). Not fixed: the `#[ignore]` reason, and `coherence_rust.rs` itself is still not a mux test.
 
 ## Fix provenance
 
@@ -78,7 +78,7 @@ None needed. Do not read `two_agents_coherent_after_edit` as evidence about the 
 
 ## Resume
 
-Decide with the owner whether `coherence_rust.rs` should become a real two-client mux test (spawn `mux::process::run` twice-connected, as the new client test does) or be removed. Until then it is an ignored test that covers `document_symbols` after an outside write on a direct server.
+Decide with the owner whether `coherence_rust.rs` should be removed or rewritten as a real mux test now that `two_clients_on_one_mux_follow_a_write_made_outside_codescout` exists in `src/lsp/client.rs`. Until then it is an ignored test that covers `document_symbols` after an outside write on a direct server.
 
 ## References
 

@@ -4072,6 +4072,13 @@ async fn the_compact_form_carries_the_note() {
         .filter(|l| l.contains("onboarding(repo_name=\"my-repo\")"))
         .collect();
     assert_eq!(banner.len(), 1, "exactly one banner line: {compact}");
+    // The banner is the only place a caller on the overflow path reads the remedy, so it must say
+    // that the call writes a committed file, as the JSON `instruction` does.
+    assert!(
+        banner[0].contains(".codescout/repo.toml"),
+        "the banner does not say the call writes a committed file: {}",
+        banner[0]
+    );
     assert!(
         compact.contains("activated · my-repo (rw)"),
         "the summary line stays: {compact}"
