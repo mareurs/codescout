@@ -46,27 +46,20 @@ pub enum GateProblem {
     PartialFolderExclusion { folder: String },
 }
 
-/// What makes two problems the same problem across two reports, for the problems that one
-/// value identifies. A collision is not one of them: see [`GateReport::new_since`].
-#[derive(PartialEq, Eq, Hash)]
-enum Identity<'a> {
-    /// An invalid key is identified by its path; the path fixes the error.
-    Invalid(&'a str),
-    /// A partial exclusion is identified by its folder.
-    Folder(&'a str),
-}
-
 impl GateProblem {
-    fn identity(&self) -> Option<Identity<'_>> {
+    /// For an invalid key, the file name it is counted under in [`GateReport::new_since`]: the
+    /// last component of the offending path, normalised as `key::components` reads a path.
+    fn invalid_file_name(&self) -> Option<String> {
         match self {
-            GateProblem::InvalidKey(e) => Some(Identity::Invalid(match e {
-                KeyError::NotMarkdown(p) => p,
-                KeyError::NonCanonical { rel_path, .. } | KeyError::HexShaped { rel_path, .. } => {
-                    rel_path
-                }
-            })),
-            GateProblem::DuplicateKey { .. } => None,
-            GateProblem::PartialFolderExclusion { folder } => Some(Identity::Folder(folder)),
+            GateProblem::InvalidKey(e) => {
+                let path = match e {
+                    KeyError::NotMarkdown(p) => p,
+                    KeyError::NonCanonical { rel_path, .. }
+                    | KeyError::HexShaped { rel_path, .. } => rel_path,
+                };
+                components(path).pop()
+            }
+            GateProblem::DuplicateKey { .. } | GateProblem::PartialFolderExclusion { .. } => None,
         }
     }
 
@@ -107,34 +100,55 @@ impl From<IndexProblem> for GateProblem {
 }
 
 impl GateReport {
-    /// The problems in `self` that `before` does not have.
+    /// The problems in `self` that `before` does not have. Identity is by count, so a commit
+    /// that only moves a file that already has a problem introduces none.
     ///
-    /// An invalid key is the same problem when it is the same path; a partial exclusion, when
-    /// it is the same folder. A collision is not new when every path it lists already collided
-    /// under that key in `before`, so a collision that is equal or smaller (a member deleted or
-    /// renamed away) is unchanged. It is new when it lists a path that was not in that
-    /// collision before: a collision that gains a member, or swaps one in, or appears.
+    /// - A collision is new when its key does not collide in `before`, or when it has more
+    ///   members than that collision had. Equal or fewer (a member deleted, renamed away,
+    ///   swapped for another, or moved) is unchanged.
+    /// - An invalid key is counted under its file name (the last path component). It is new
+    ///   only when `self` has more invalid keys with that file name than `before` has: a pure
+    ///   move keeps the count, a second file of that name raises it, and a different file name
+    ///   is a different problem. When the count grows, the later problems in report order
+    ///   are the new ones.
+    /// - A partial exclusion is the same problem when it is the same folder.
     pub fn new_since(&self, before: &GateReport) -> Vec<&GateProblem> {
-        let mut known: HashSet<Identity<'_>> = HashSet::new();
-        let mut collided: HashMap<&Key, HashSet<&str>> = HashMap::new();
+        let mut members_before: HashMap<&Key, usize> = HashMap::new();
+        let mut invalid_before: HashMap<String, usize> = HashMap::new();
+        let mut folders_before: HashSet<&str> = HashSet::new();
         for p in &before.problems {
             match p {
                 GateProblem::DuplicateKey { key, rel_paths } => {
-                    collided
-                        .entry(key)
-                        .or_default()
-                        .extend(rel_paths.iter().map(String::as_str));
+                    members_before.insert(key, rel_paths.len());
                 }
-                other => known.extend(other.identity()),
+                GateProblem::PartialFolderExclusion { folder } => {
+                    folders_before.insert(folder);
+                }
+                GateProblem::InvalidKey(_) => {
+                    if let Some(name) = p.invalid_file_name() {
+                        *invalid_before.entry(name).or_default() += 1;
+                    }
+                }
             }
         }
+        let mut invalid_seen: HashMap<String, usize> = HashMap::new();
         self.problems
             .iter()
             .filter(|p| match p {
-                GateProblem::DuplicateKey { key, rel_paths } => !collided
+                GateProblem::DuplicateKey { key, rel_paths } => members_before
                     .get(key)
-                    .is_some_and(|was| rel_paths.iter().all(|path| was.contains(path.as_str()))),
-                other => other.identity().is_none_or(|id| !known.contains(&id)),
+                    .is_none_or(|was| rel_paths.len() > *was),
+                GateProblem::PartialFolderExclusion { folder } => {
+                    !folders_before.contains(folder.as_str())
+                }
+                GateProblem::InvalidKey(_) => match p.invalid_file_name() {
+                    Some(name) => {
+                        let seen = invalid_seen.entry(name.clone()).or_default();
+                        *seen += 1;
+                        *seen > invalid_before.get(&name).copied().unwrap_or(0)
+                    }
+                    None => true,
+                },
             })
             .collect()
     }
@@ -374,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn new_since_compares_invalid_keys_by_path_and_folders_by_name() {
+    fn new_since_compares_invalid_keys_by_file_name_and_folders_by_name() {
         let paths = ["docs/Bad Name.md", "docs/x/readme.md", "docs/x/a.md"];
         let before = check(&["docs/x/readme.md"], &paths);
         assert_eq!(before.problems.len(), 2);
@@ -420,13 +434,43 @@ mod tests {
     }
 
     #[test]
-    fn new_since_reports_a_collision_that_swaps_in_a_new_path() {
+    fn new_since_ignores_a_collision_that_swaps_a_member_for_another() {
+        // Equal member count: a delete plus an add of the same key is unchanged (R11).
         let before = check(&[], &["a/x.md", "b/x.md"]);
         let after = check(&[], &["a/x.md", "c/x.md"]);
-        assert_eq!(
-            after.new_since(&before),
-            vec![&dup("x", &["a/x.md", "c/x.md"])]
-        );
+        assert_eq!(after.problems.len(), 1, "still a collision of two");
+        assert_eq!(after.new_since(&before), Vec::<&GateProblem>::new());
+    }
+    #[test]
+    fn a_pure_move_of_a_colliding_file_is_not_a_new_problem() {
+        let before = check(&[], &["a/x.md", "b/x.md", "c/x.md"]);
+        let after = check(&[], &["a/x.md", "b/x.md", "d/x.md"]);
+        assert_eq!(after.problems.len(), 1);
+        assert_eq!(after.new_since(&before), Vec::<&GateProblem>::new());
+    }
+    #[test]
+    fn a_pure_move_of_an_invalid_name_file_is_not_a_new_problem() {
+        let before = check(&[], &["a/Bad Name.md"]);
+        let after = check(&[], &["b/Bad Name.md"]);
+        assert_eq!(before.problems.len(), 1);
+        assert_eq!(after.problems.len(), 1);
+        assert_eq!(after.new_since(&before), Vec::<&GateProblem>::new());
+    }
+    #[test]
+    fn a_second_file_with_an_existing_invalid_name_is_new() {
+        let before = check(&[], &["a/Bad Name.md"]);
+        let after = check(&[], &["a/Bad Name.md", "b/Bad Name.md"]);
+        let new = after.new_since(&before);
+        assert_eq!(new.len(), 1, "{new:?}");
+        assert!(new[0].render().contains("b/Bad Name.md"), "{new:?}");
+    }
+    #[test]
+    fn a_different_invalid_name_is_new() {
+        let before = check(&[], &["a/Bad Name.md"]);
+        let after = check(&[], &["a/Bad Name.md", "a/Other Bad.md"]);
+        let new = after.new_since(&before);
+        assert_eq!(new.len(), 1, "{new:?}");
+        assert!(new[0].render().contains("Other Bad.md"), "{new:?}");
     }
 
     #[test]

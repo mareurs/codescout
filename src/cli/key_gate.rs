@@ -730,6 +730,24 @@ mod tests {
         assert!(clash.stdout.contains("keep/bar.md"), "{clash:?}");
         assert!(!clash.stdout.contains("a/foo.md"), "{clash:?}");
     }
+    #[test]
+    fn a_git_mv_of_a_file_in_an_existing_collision_exits_0_in_staged_mode() {
+        let r = Repo::new();
+        r.stage(&[
+            ("a/x.md", "# a\n"),
+            ("b/x.md", "# b\n"),
+            ("c/x.md", "# c\n"),
+        ]);
+        r.commit();
+        std::fs::create_dir_all(r.path().join("d")).unwrap();
+        r.git(&["mv", "c/x.md", "d/x.md"]);
+        let moved = r.staged();
+        assert_eq!(moved.code, 0, "a pure move creates no problem: {moved:?}");
+        // Control: the collision is real, and full mode still reports it with the new path.
+        let full = r.full();
+        assert_eq!(full.code, 1, "{full:?}");
+        assert!(full.stdout.contains("d/x.md"), "{full:?}");
+    }
 
     #[test]
     fn a_malformed_key_space_file_exits_2_and_says_not_checked() {
