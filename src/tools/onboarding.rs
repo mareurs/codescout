@@ -12,7 +12,7 @@ use crate::prompts::builders::{
 };
 use serde_json::{json, Value};
 
-use super::core::types::{ELICIT_CANCELLED_MSG, ELICIT_DECLINED_MSG};
+use super::core::types::ELICIT_DECLINED_MSG;
 use super::{parse_bool_param, Tool, ToolContext};
 
 /// Bump when the `onboarding_prompt` surface (in `src/prompts/source.md`) or
@@ -482,13 +482,18 @@ impl Tool for Onboarding {
         // The name file belongs to the repo, so it lives at the repo root, found once per call.
         let repo_root = repo_root_of(&root);
         // Everything the name block needs from the machine is resolved here, once: the decline
-        // marker, and (only when a name is being chosen and a client that can ask is connected)
-        // the folders to scan for other checkouts.
+        // marker, and (only when a name is being chosen, a client that can ask is connected and
+        // the user has not declined) the folders to scan for other checkouts.
         let requested = input["repo_name"].as_str().map(str::to_owned);
         let existing = repo_name::read(&repo_root);
         let choosing = requested.is_some() || matches!(existing, Ok(None));
         let edge = name_edge(
-            choosing && ctx.peer.is_some(),
+            scan_wanted(
+                choosing,
+                ctx.peer.is_some(),
+                requested.is_some(),
+                repo_name_declined_at(&root),
+            ),
             &root,
             &repo_root,
             machine_workspace,
@@ -781,23 +786,24 @@ rmcp::elicit_safe!(RepoNameInput);
 enum ElicitAnswer {
     /// The user filled the dialog in (the text is not validated yet).
     Answer(String),
-    /// The user declined or cancelled the dialog: a decision, remembered in `project.toml`.
+    /// The user explicitly declined the dialog: a decision, remembered in `project.toml`.
     Declined,
-    /// Nobody answered: no client, no elicitation support, a timeout, an empty form, or a
-    /// failure of the exchange. Not a decision, so nothing is remembered.
+    /// Nobody answered: no client, no elicitation support, a cancelled or closed dialog, a
+    /// timeout, an empty form, or a failure of the exchange. Not a decision, so nothing is
+    /// remembered and the dialog is asked again next time.
     Unavailable,
 }
 
-/// The [`ElicitAnswer`] for what `elicit_with_timeout` returned. The decline and cancel errors
-/// are told apart from every other failure by the messages [`ToolContext`] builds them with.
+/// The [`ElicitAnswer`] for what `elicit_with_timeout` returned. The decline error is told apart
+/// from every other failure by the message [`ToolContext`] builds it with. A cancelled dialog
+/// (closed, or dismissed with no choice) is no decision: it is `Unavailable`, so the dialog is
+/// asked again.
 fn elicit_answer(result: anyhow::Result<Option<RepoNameInput>>) -> ElicitAnswer {
     match result {
         Ok(Some(input)) => ElicitAnswer::Answer(input.name),
         Ok(None) => ElicitAnswer::Unavailable,
         Err(e) => match e.downcast_ref::<super::RecoverableError>() {
-            Some(r) if r.message == ELICIT_DECLINED_MSG || r.message == ELICIT_CANCELLED_MSG => {
-                ElicitAnswer::Declined
-            }
+            Some(r) if r.message == ELICIT_DECLINED_MSG => ElicitAnswer::Declined,
             _ => ElicitAnswer::Unavailable,
         },
     }
@@ -862,6 +868,17 @@ const PROJECT_TOML_REL: &str = ".codescout/project.toml";
 
 /// The `[project]` key that holds the remembered decline (`ProjectSection::repo_name_declined`).
 const REPO_NAME_DECLINED_KEY: &str = "repo_name_declined";
+
+/// What the `repo_name` block tells the agent when the user declined to name the repo and the
+/// decline is on record in `project.toml`.
+const DECLINED_REMEMBERED_INSTRUCTION: &str = "The user declined to name this repo; do not ask \
+    again unless they raise it. Call onboarding(repo_name=\"<name>\") to set a name, or remove \
+    repo_name_declined from .codescout/project.toml to be asked again.";
+
+/// The same, when the decline could not be put on record (no `project.toml`, or a failed write):
+/// there is no marker to remove, and the dialog may open again on the next call.
+const DECLINED_INSTRUCTION: &str = "The user declined to name this repo; do not ask again unless \
+    they raise it. Call onboarding(repo_name=\"<name>\") to set a name.";
 
 /// What `checkouts` says when nothing was scanned.
 const NOT_SCANNED_NO_CLIENT: &str = "not scanned: no interactive client";
@@ -934,8 +951,16 @@ fn machine_workspace() -> Option<crate::librarian::workspace::WorkspaceConfig> {
     crate::librarian::workspace::load(&path).ok()
 }
 
-/// Resolve what the pure builders need from the machine. `scan` is true when a name is being
-/// chosen and a client that can ask is connected; only then is `workspace` called.
+/// Whether the machine is scanned for other checkouts that use the name: a name is being chosen
+/// (`choosing`) and a client that can ask is connected (`can_ask`), and the user has not
+/// declined to name the repo. A caller that supplied a name (`requested`) has raised the
+/// question again, so a standing decline does not stop the scan for that name.
+fn scan_wanted(choosing: bool, can_ask: bool, requested: bool, declined: bool) -> bool {
+    choosing && can_ask && (requested || !declined)
+}
+
+/// Resolve what the pure builders need from the machine. `scan` is true when [`scan_wanted`]
+/// says the machine is to be scanned; only then is `workspace` called.
 fn name_edge(
     scan: bool,
     project_root: &std::path::Path,
@@ -1068,7 +1093,8 @@ fn render_checkouts(
     if !report.collisions.is_empty() {
         block["instruction"] = json!(format!(
             "Another repository on this machine already uses the name `{name}` (collisions). \
-             Pick a different name and call onboarding(repo_name=\"<name>\")."
+             Suggest a different name to the user, and call onboarding(repo_name=\"<name>\") \
+             with the name they confirm."
         ));
     }
     block
@@ -1130,7 +1156,9 @@ async fn repo_name_block(
 
 /// The block for what `read` found and what the user answered: writes a valid answer to an
 /// absent file, remembers a decline, and maps every outcome to its response shape. While a name
-/// is being chosen the block also reports the other checkouts that use it.
+/// is being chosen the block also reports the other checkouts that use it. A user who declined
+/// to name the repo is not asked again and nothing is scanned: the block says so and returns
+/// without a `checkouts` field.
 fn repo_name_block_for(
     root: &std::path::Path,
     existing: anyhow::Result<Option<RepoName>>,
@@ -1146,6 +1174,14 @@ fn repo_name_block_for(
                 "Ask the user to confirm or edit the repo name `{s}`, then call \
                  onboarding(repo_name=\"<name>\")."
             ),
+        })
+    };
+    let declined = |s: &RepoName, remembered: bool| {
+        json!({
+            "suggested": s.as_str(),
+            "confirmed": false,
+            "declined": true,
+            "instruction": if remembered { DECLINED_REMEMBERED_INSTRUCTION } else { DECLINED_INSTRUCTION },
         })
     };
     // The block, and the name it is about when one is being chosen.
@@ -1166,24 +1202,22 @@ fn repo_name_block_for(
                 return json!({"error": names_repo_file(format!("{e:#}")), "confirmed": false})
             }
         },
-        RepoNameOutcome::Unconfirmed(s) => {
-            let mut block = unconfirmed(&s);
-            if edge.declined {
-                block["declined"] = json!(true);
-            }
-            (block, s)
-        }
+        RepoNameOutcome::Unconfirmed(s) if edge.declined => return declined(&s, true),
+        RepoNameOutcome::Unconfirmed(s) => (unconfirmed(&s), s),
         RepoNameOutcome::Declined(s) => {
-            let mut block = unconfirmed(&s);
-            block["declined"] = json!(true);
-            match remember_decline(&edge.project_toml) {
-                Ok(remembered) => block["remembered"] = json!(remembered),
+            return match remember_decline(&edge.project_toml) {
+                Ok(remembered) => {
+                    let mut block = declined(&s, remembered);
+                    block["remembered"] = json!(remembered);
+                    block
+                }
                 Err(e) => {
+                    let mut block = declined(&s, false);
                     block["remembered"] = json!(false);
                     block["remember_error"] = json!(format!("{e:#}"));
+                    block
                 }
-            }
-            (block, s)
+            };
         }
         RepoNameOutcome::Invalid { input, error } => {
             let mut block = unconfirmed(suggestion);
@@ -2158,6 +2192,8 @@ mod tests {
         }
     }
 
+    /// A project root with a `.codescout` folder and no `.git`: a test that needs the repo root
+    /// pinned creates its own `.git` directory.
     async fn repo_name_ctx() -> (tempfile::TempDir, ToolContext) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
@@ -2326,6 +2362,9 @@ mod tests {
     #[tokio::test]
     async fn a_malformed_repo_toml_is_reported_by_onboarding_and_left_alone() {
         let (dir, ctx) = repo_name_ctx().await;
+        // Pin the repo root at the fixture root: `repo_root_of` walks up to the nearest `.git`,
+        // so without one the file would be looked for wherever the temp dir happens to sit.
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         let file = dir.path().join(REPO_FILE_REL);
         std::fs::write(&file, "name = [not toml").unwrap();
         let out = Onboarding.call(json!({}), &ctx).await.unwrap();
@@ -2512,18 +2551,19 @@ mod tests {
     }
 
     #[test]
-    fn declined_and_cancelled_and_timeout_are_three_different_answers() {
+    fn only_an_explicit_decline_is_a_decision_every_other_outcome_is_unavailable() {
         use crate::tools::core::types::{ELICIT_CANCELLED_MSG, ELICIT_DECLINED_MSG};
         let typed = |name: &str| Ok(Some(RepoNameInput { name: name.into() }));
         assert!(matches!(elicit_answer(typed("x")), ElicitAnswer::Answer(n) if n == "x"));
-        // The user said no, or closed the dialog: a decision, remembered.
+        // The user said no: a decision, remembered.
         assert!(matches!(
             elicit_answer(Err(recoverable(ELICIT_DECLINED_MSG))),
             ElicitAnswer::Declined
         ));
+        // The user closed the dialog with no choice: not a decision, the dialog asks again.
         assert!(matches!(
             elicit_answer(Err(recoverable(ELICIT_CANCELLED_MSG))),
-            ElicitAnswer::Declined
+            ElicitAnswer::Unavailable
         ));
         // Nobody answered (timeout, no elicitation support, empty content): not a decision.
         assert!(matches!(elicit_answer(Ok(None)), ElicitAnswer::Unavailable));
@@ -2574,10 +2614,176 @@ mod tests {
         );
         assert_eq!(again["declined"], true, "{again}");
         assert_eq!(again["confirmed"], false, "{again}");
-        assert!(again["instruction"]
-            .as_str()
-            .unwrap()
-            .contains("`suggested`"));
+        assert_eq!(again["suggested"], "suggested", "{again}");
+        assert_eq!(again["instruction"], DECLINED_REMEMBERED_INSTRUCTION);
+    }
+    #[test]
+    fn a_declined_block_does_not_tell_the_agent_to_ask_again() {
+        let dir = tempfile::tempdir().unwrap();
+        write_project_toml(dir.path(), "[project]\nname = \"t\"\n");
+        let edge = edge_for(dir.path());
+        let suggestion = sname("suggested");
+        let fresh = repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Declined,
+            &suggestion,
+            &edge,
+        );
+        // The next call reads the marker from disk.
+        let next = name_edge(false, dir.path(), dir.path(), || None, None);
+        let remembered = repo_name_block_for(
+            dir.path(),
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &suggestion,
+            &next,
+        );
+        for block in [&fresh, &remembered] {
+            let text = block["instruction"].as_str().unwrap();
+            for needle in [
+                "declined",
+                "do not ask again",
+                "onboarding(repo_name=",
+                "repo_name_declined",
+            ] {
+                assert!(text.contains(needle), "{needle:?} missing: {block}");
+            }
+            assert!(!text.contains("Ask the user to confirm"), "{block}");
+            assert_eq!(block["declined"], true, "{block}");
+        }
+        // Control: a name nobody declined still tells the agent to ask.
+        let asking = for_block(dir.path(), None);
+        assert!(
+            asking["instruction"]
+                .as_str()
+                .unwrap()
+                .contains("Ask the user to confirm"),
+            "{asking}"
+        );
+        // A decline that could not be put on record has no marker to remove, so the text does
+        // not name one.
+        let bare = tempfile::tempdir().unwrap();
+        let unrecorded = repo_name_block_for(
+            bare.path(),
+            Ok(None),
+            ElicitAnswer::Declined,
+            &suggestion,
+            &edge_for(bare.path()),
+        );
+        let text = unrecorded["instruction"].as_str().unwrap();
+        assert!(text.contains("do not ask again"), "{unrecorded}");
+        assert!(!text.contains("repo_name_declined"), "{unrecorded}");
+    }
+
+    #[test]
+    fn a_declined_block_skips_the_scan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_checkout(&this, None, "a");
+        let work = tmp.path().join("work");
+        make_checkout(&work.join("other"), Some("suggested"), "b");
+        let scanning_edge = scanning(&[&work], Some(tmp.path()), &this);
+        let suggestion = sname("suggested");
+
+        // Control: this edge and name do find a collision when the user has not declined.
+        let asking = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &suggestion,
+            &scanning_edge,
+        );
+        assert_eq!(
+            asking["checkouts"]["collisions"],
+            json!(["~/work/other"]),
+            "{asking}"
+        );
+
+        // A decline made in this call: nothing is scanned, so no `checkouts` field.
+        let fresh = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Declined,
+            &suggestion,
+            &scanning_edge,
+        );
+        assert!(fresh.get("checkouts").is_none(), "{fresh}");
+
+        // A decline on record from an earlier call.
+        let marked = NameEdge {
+            declined: true,
+            ..scanning_edge
+        };
+        let remembered = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &suggestion,
+            &marked,
+        );
+        assert!(remembered.get("checkouts").is_none(), "{remembered}");
+        assert_eq!(remembered["declined"], true, "{remembered}");
+    }
+
+    #[test]
+    fn a_standing_decline_stops_the_scan_unless_the_caller_names_a_repo() {
+        // (choosing, can_ask, requested, declined)
+        assert!(scan_wanted(true, true, false, false));
+        assert!(!scan_wanted(true, true, false, true), "declined: no scan");
+        assert!(
+            scan_wanted(true, true, true, true),
+            "a name the caller supplied is checked for collisions"
+        );
+        assert!(!scan_wanted(false, true, false, false), "no name is chosen");
+        assert!(!scan_wanted(true, false, true, false), "nobody can ask");
+    }
+
+    #[test]
+    fn a_cancelled_dialog_is_not_remembered() {
+        use crate::tools::core::types::ELICIT_CANCELLED_MSG;
+        let dir = tempfile::tempdir().unwrap();
+        let text = "[project]\nname = \"t\"\n";
+        write_project_toml(dir.path(), text);
+        let edge = edge_for(dir.path());
+        let answer = elicit_answer(Err(recoverable(ELICIT_CANCELLED_MSG)));
+        let block = repo_name_block_for(dir.path(), Ok(None), answer, &sname("suggested"), &edge);
+        assert!(block.get("declined").is_none(), "{block}");
+        assert!(block.get("remembered").is_none(), "{block}");
+        assert_eq!(block["confirmed"], false, "{block}");
+        assert!(!read_decline_marker(&dir.path().join(PROJECT_TOML_REL)));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(PROJECT_TOML_REL)).unwrap(),
+            text,
+            "project.toml untouched"
+        );
+        // The next call opens the dialog again.
+        let next = name_edge(true, dir.path(), dir.path(), || None, None);
+        assert!(!next.declined);
+        assert!(dialog_wanted(&Ok(None), &next));
+    }
+
+    #[test]
+    fn the_collision_instruction_suggests_a_name_to_the_user() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_checkout(&this, None, "a");
+        let work = tmp.path().join("work");
+        make_checkout(&work.join("other"), Some("alpha"), "b");
+        let edge = scanning(&[&work], Some(tmp.path()), &this);
+        let block = repo_name_block_for(
+            &this,
+            Ok(None),
+            ElicitAnswer::Unavailable,
+            &sname("alpha"),
+            &edge,
+        );
+        let instruction = block["checkouts"]["instruction"].as_str().unwrap();
+        assert!(
+            instruction.contains("Suggest a different name to the user"),
+            "{instruction}"
+        );
+        assert!(!instruction.contains("Pick"), "{instruction}");
     }
 
     #[test]
