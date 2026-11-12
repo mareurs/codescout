@@ -4218,10 +4218,12 @@ struct Point {
     /// with the CPU idle. The mux test passed all 20 loaded iterations.
     ///
     /// This does not let the defect under test through. With the resync in `request` disabled the
-    /// answer does not turn empty and then correct: it stays `Invalid offset LineCol { line: 4,
-    /// col: 11 } (line index length: 51)`, because the server keeps the content of an open file
-    /// from the last `didOpen`/`didChange` and ignores the disk. The tests were re-run under that
-    /// mutation after this helper was written, to check it.
+    /// answer does not turn correct after a while. Measured, it stays `Invalid offset LineCol {
+    /// line: 4, col: 11 } (line index length: 51)` on rust-analyzer, `column is beyond end of file`
+    /// on gopls, and empty on pyright and typescript-language-server, for the whole window,
+    /// because the server keeps the content of an open file from the last `didOpen`/`didChange`
+    /// and ignores the disk. The tests were re-run under that mutation after this helper was
+    /// written, to check it.
     ///
     /// On the deadline it returns the last answer, so the caller's assertion shows an empty
     /// result; if every try was an error it panics with the last error.
@@ -4422,27 +4424,8 @@ struct Point {
         let dir = tempdir().unwrap();
         create_two_file_project(dir.path());
         let sock_dir = tempdir().unwrap();
-        let socket = sock_dir.path().join("mux.sock");
-        let lock = sock_dir.path().join("mux.lock");
         let root = dir.path().to_path_buf();
-        let mux = {
-            let (socket, lock, root) = (socket.clone(), lock.clone(), root.clone());
-            tokio::spawn(async move {
-                crate::lsp::mux::process::run(&socket, &lock, &root, 120, "rust-analyzer", &[], &[])
-                    .await
-            })
-        };
-
-        // The mux binds its socket after it has started the server; connect once it is there.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while !socket.exists() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the mux did not bind {} within 30 s",
-                socket.display()
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
+        let (mux, socket) = in_process_mux(&root, sock_dir.path()).await;
         let client = retrying_on_error(|| LspClient::connect(&socket, root.clone())).await;
         let lib_rs = root.join("src/lib.rs");
         let other_rs = root.join("src/other.rs");
@@ -4478,6 +4461,270 @@ struct Point {
         client.shutdown().await.unwrap();
         // Dropping the mux's future drops its server child (`kill_on_drop`).
         mux.abort();
+    }
+
+    /// Start `mux::process::run` in this process, with a real rust-analyzer behind it, and wait until
+    /// it has bound its socket. Aborting the returned task drops the server child (`kill_on_drop`).
+    #[cfg(unix)]
+    async fn in_process_mux(
+        root: &Path,
+        sock_dir: &Path,
+    ) -> (tokio::task::JoinHandle<Result<()>>, std::path::PathBuf) {
+        let socket = sock_dir.join("mux.sock");
+        let lock = sock_dir.join("mux.lock");
+        let handle = {
+            let (socket, lock, root) = (socket.clone(), lock.clone(), root.to_path_buf());
+            tokio::spawn(async move {
+                crate::lsp::mux::process::run(&socket, &lock, &root, 120, "rust-analyzer", &[], &[])
+                    .await
+            })
+        };
+        // The mux binds its socket after it has started the server.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !socket.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the mux did not bind {} within 30 s",
+                socket.display()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        (handle, socket)
+    }
+
+    /// Two clients on ONE mux, the way two sessions share a workspace. A write outside codescout
+    /// drifts both clients' view of `other.rs`. B asks first, so B's resync reaches the server
+    /// before A has asked at all. Then A asks: its own resync re-sends content the mux already
+    /// forwarded for B. Last, B disconnects and a second write is made, and A must still follow it.
+    ///
+    /// What it detects: the client no longer resyncing before a request (measured: red, `Invalid
+    /// offset … (line index length: 51)`). What it does NOT detect, both measured by mutating the
+    /// mux in a scratch copy and running this test: `DocumentState::disconnect` closing every file
+    /// B had open, and `handle_client_message` no longer rewriting the `didChange` version. Both
+    /// leave it green, the first probably because rust-analyzer reads a closed file from disk
+    /// (not measured). The first is pinned by the unit tests in `mux/protocol.rs`; the second by
+    /// nothing found.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn two_clients_on_one_mux_follow_a_write_made_outside_codescout() {
+        if !rust_analyzer_available() {
+            eprintln!("Skipping: rust-analyzer not installed");
+            return;
+        }
+        let dir = tempdir().unwrap();
+        create_two_file_project(dir.path());
+        let sock_dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let (mux, socket) = in_process_mux(&root, sock_dir.path()).await;
+        let a = retrying_on_error(|| LspClient::connect(&socket, root.clone())).await;
+        let b = retrying_on_error(|| LspClient::connect(&socket, root.clone())).await;
+        let lib_rs = root.join("src/lib.rs");
+        let other_rs = root.join("src/other.rs");
+        for client in [&a, &b] {
+            client.document_symbols(&lib_rs, "rust").await.unwrap();
+            client.document_symbols(&other_rs, "rust").await.unwrap();
+        }
+
+        // Baseline through A, polled while the server may still be loading the crate.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let before = loop {
+            let text = a.hover(&other_rs, 1, 11, "rust").await.unwrap();
+            if text.is_some() || std::time::Instant::now() >= deadline {
+                break text;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        };
+        assert!(
+            before.as_deref().is_some_and(|t| t.contains("target_fn")),
+            "baseline: hover on the call describes target_fn, got {before:?}"
+        );
+
+        let original = std::fs::read_to_string(&other_rs).unwrap();
+        std::fs::write(&other_rs, format!("// a\n// b\n// c\n{original}")).unwrap();
+
+        let by_b =
+            answered_after_a_write(|| b.hover(&other_rs, 4, 11, "rust"), |text| text.is_none())
+                .await;
+        assert!(
+            by_b.as_deref().is_some_and(|t| t.contains("target_fn")),
+            "B, asking first after the write, must get target_fn, got {by_b:?}"
+        );
+        let by_a =
+            answered_after_a_write(|| a.hover(&other_rs, 4, 11, "rust"), |text| text.is_none())
+                .await;
+        assert!(
+            by_a.as_deref().is_some_and(|t| t.contains("target_fn")),
+            "A, asking second after the write, must get target_fn, got {by_a:?}"
+        );
+
+        b.shutdown().await.unwrap();
+        let once_written = std::fs::read_to_string(&other_rs).unwrap();
+        std::fs::write(&other_rs, format!("// d\n// e\n// f\n{once_written}")).unwrap();
+        let after_b_left =
+            answered_after_a_write(|| a.hover(&other_rs, 7, 11, "rust"), |text| text.is_none())
+                .await;
+        assert!(
+            after_b_left
+                .as_deref()
+                .is_some_and(|t| t.contains("target_fn")),
+            "A, after B left and a second write, must get target_fn, got {after_b_left:?}"
+        );
+        a.shutdown().await.unwrap();
+        mux.abort();
+    }
+
+    /// True when an executable called `name` is in a `PATH` directory.
+    fn on_path(name: &str) -> bool {
+        std::env::var_os("PATH")
+            .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
+    }
+
+    /// One language's fixture for the "write made outside codescout" hover test on stdio. `caller`
+    /// calls the function `needle` names, at `(call_line, call_col)`; `comment` starts a one-line
+    /// comment in that language.
+    struct OutsideWriteCase {
+        language: &'static str,
+        server_binary: &'static str,
+        files: &'static [(&'static str, &'static str)],
+        caller: &'static str,
+        call_line: u32,
+        call_col: u32,
+        comment: &'static str,
+        needle: &'static str,
+    }
+
+    /// Start the language's default server, ask `hover` on the call, prepend three comment lines to
+    /// the caller from outside codescout, and ask once more at the call's new position (three lines
+    /// lower). The hover must still describe `needle`. The first hover waits for the server to load
+    /// the project (up to 60 s); the second goes through `answered_after_a_write`.
+    async fn hover_follows_a_write_made_outside_codescout_for(case: OutsideWriteCase) {
+        if !on_path(case.server_binary) {
+            eprintln!("Skipping: {} not installed", case.server_binary);
+            return;
+        }
+        let dir = tempdir().unwrap();
+        for (rel, text) in case.files {
+            std::fs::write(dir.path().join(rel), text).unwrap();
+        }
+        let mut config = crate::lsp::servers::default_config(case.language, dir.path()).unwrap();
+        config.mux = false;
+        let client = LspClient::start(config).await.unwrap();
+        let caller = dir.path().join(case.caller);
+        for (rel, _) in case.files {
+            let path = dir.path().join(rel);
+            if path.extension() == caller.extension() {
+                client.document_symbols(&path, case.language).await.unwrap();
+            }
+        }
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let before = loop {
+            let text = client
+                .hover(&caller, case.call_line, case.call_col, case.language)
+                .await
+                .unwrap();
+            if text.is_some() || std::time::Instant::now() >= deadline {
+                break text;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        };
+        assert!(
+            before.as_deref().is_some_and(|t| t.contains(case.needle)),
+            "baseline ({}): hover on the call describes {}, got {before:?}",
+            case.language,
+            case.needle
+        );
+
+        let original = std::fs::read_to_string(&caller).unwrap();
+        let c = case.comment;
+        std::fs::write(&caller, format!("{c}a\n{c}b\n{c}c\n{original}")).unwrap();
+
+        let after = answered_after_a_write(
+            || client.hover(&caller, case.call_line + 3, case.call_col, case.language),
+            |text| text.is_none(),
+        )
+        .await;
+        assert!(
+            after.as_deref().is_some_and(|t| t.contains(case.needle)),
+            "({}) hover at the call's new position must describe {}, got {after:?}",
+            case.language,
+            case.needle
+        );
+        client.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn python_hover_follows_a_write_made_outside_codescout() {
+        hover_follows_a_write_made_outside_codescout_for(OutsideWriteCase {
+            language: "python",
+            server_binary: "pyright-langserver",
+            files: &[
+                ("lib.py", "def target_fn(x: int) -> int:\n    return x + 1\n"),
+                (
+                    "other.py",
+                    "from lib import target_fn\n\n\ndef use_it() -> int:\n    return target_fn(5)\n",
+                ),
+            ],
+            caller: "other.py",
+            call_line: 4,
+            call_col: 11,
+            comment: "# ",
+            needle: "target_fn",
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn typescript_hover_follows_a_write_made_outside_codescout() {
+        hover_follows_a_write_made_outside_codescout_for(OutsideWriteCase {
+            language: "typescript",
+            server_binary: "typescript-language-server",
+            files: &[
+                (
+                    "tsconfig.json",
+                    "{\"compilerOptions\":{\"strict\":true,\"module\":\"esnext\",\"moduleResolution\":\"node\",\"target\":\"es2020\"},\"include\":[\"*.ts\"]}\n",
+                ),
+                (
+                    "lib.ts",
+                    "export function target_fn(x: number): number {\n  return x + 1;\n}\n",
+                ),
+                (
+                    "other.ts",
+                    "import { target_fn } from \"./lib\";\n\nexport function useIt(): number {\n  return target_fn(5);\n}\n",
+                ),
+            ],
+            caller: "other.ts",
+            call_line: 3,
+            call_col: 9,
+            comment: "// ",
+            needle: "target_fn",
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn go_hover_follows_a_write_made_outside_codescout() {
+        hover_follows_a_write_made_outside_codescout_for(OutsideWriteCase {
+            language: "go",
+            server_binary: "gopls",
+            files: &[
+                ("go.mod", "module example.com/twofiles\n\ngo 1.21\n"),
+                (
+                    "lib.go",
+                    "package twofiles\n\nfunc TargetFn(x int) int {\n\treturn x + 1\n}\n",
+                ),
+                (
+                    "other.go",
+                    "package twofiles\n\nfunc UseIt() int {\n\treturn TargetFn(5)\n}\n",
+                ),
+            ],
+            caller: "other.go",
+            call_line: 3,
+            call_col: 8,
+            comment: "// ",
+            needle: "TargetFn",
+        })
+        .await;
     }
 
     /// Verify that prepare_call_hierarchy returns a CallHierarchyItem for a known function.
