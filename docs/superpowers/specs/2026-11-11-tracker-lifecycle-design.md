@@ -1,7 +1,7 @@
 ---
 id: '6d16009652c88e57'
 kind: spec
-status: draft
+status: active
 title: 'Tracker lifecycle: entries as files, collections as folders, three lifecycle folders'
 tags:
 - trackers
@@ -12,7 +12,9 @@ tags:
 
 # Tracker lifecycle: entries as files, collections as folders, three lifecycle folders (design)
 
-**Status:** draft 2026-11-11. Approach and decisions D1–D5 approved by the operator in the
+**Status:** active since 2026-11-12. Plans L-A (core) and L-B (core completion) are merged into
+`experiments`; Plan L-B2 (tools) waits for identity Plan C, and Plan L-E (migration) is not
+written. Drafted 2026-11-11. Approach and decisions D1–D5 approved by the operator in the
 brainstorm; leaf archives and three lifecycle folders approved after the builder check;
 repo scope (§ Repo scope) taken as option a, the recommended one. Work-stream log:
 `docs/trackers/tracker-organization-session-log.md`. Measurements:

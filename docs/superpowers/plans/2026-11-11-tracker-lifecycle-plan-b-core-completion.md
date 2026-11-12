@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust, `chrono`, `serde`, `thiserror` 2, `tempfile` for tests, `git` on `PATH` for the scan.
 
-**Spec:** `docs/superpowers/specs/2026-11-11-tracker-lifecycle-design.md` (§ D4 Doctor checks, § Tools). It builds on Plan L-A, `docs/superpowers/plans/2026-11-11-tracker-lifecycle-plan-a-core.md`, branch `feat/tracker-lifecycle-plan-a-20261111` (tip `ef08c5dae`, not merged; stacked on identity head `be094b671`).
+**Spec:** `docs/superpowers/specs/2026-11-11-tracker-lifecycle-design.md` (§ D4 Doctor checks, § Tools). It builds on Plan L-A, `docs/superpowers/plans/2026-11-11-tracker-lifecycle-plan-a-core.md`, branch `feat/tracker-lifecycle-plan-a-20261111` (tip `ef08c5dae`, merged into `experiments`; it was stacked on identity head `be094b671` when this plan was written).
 
 **Why this is "core completion" and not the tools:** the tools (`doc(create/update/move/get)`, `doctor` wiring, legacy mode) sit on identity Plan B (derived catalog) and Plan C (writes go to files). Neither is written yet. Those tasks become Plan L-B2, written once B and C exist. This plan needs only identity Plan A.
 

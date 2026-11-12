@@ -1,7 +1,7 @@
 ---
 id: '5f4d250e4bc826b5'
 kind: plan
-status: draft
+status: done
 title: Tracker Lifecycle Plan L-A — Lifecycle Core
 tags:
 - trackers
