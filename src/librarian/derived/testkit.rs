@@ -22,8 +22,21 @@ pub(crate) fn fixed_sig() -> git2::Signature<'static> {
 /// the index and an explicit signature: no working tree, no global git config.
 pub(crate) fn repo_with(dir: &std::path::Path, entries: &[(&str, u32, &[u8])]) -> git2::Repository {
     let repo = git2::Repository::init(dir).unwrap();
+    let tree_id = tree_of(&repo, entries);
+    {
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = fixed_sig();
+        repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+            .unwrap();
+    }
+    repo
+}
+
+/// The tree holding `entries` (`path`, `mode`, `bytes`), written to `repo`'s object database.
+fn tree_of(repo: &git2::Repository, entries: &[(&str, u32, &[u8])]) -> git2::Oid {
     // The repository's own index, used only to assemble a tree: it is never written to disk.
     let mut index = repo.index().unwrap();
+    index.clear().unwrap();
     for &(path, mode, bytes) in entries {
         let entry = git2::IndexEntry {
             ctime: git2::IndexTime::new(0, 0),
@@ -41,14 +54,26 @@ pub(crate) fn repo_with(dir: &std::path::Path, entries: &[(&str, u32, &[u8])]) -
         };
         index.add_frombuffer(&entry, bytes).unwrap();
     }
-    let tree_id = index.write_tree().unwrap();
-    {
-        let tree = repo.find_tree(tree_id).unwrap();
-        let sig = fixed_sig();
-        repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
-            .unwrap();
-    }
-    repo
+    index.write_tree().unwrap()
+}
+
+/// A commit of `repo` holding exactly `files` (regular files), on top of `parents` (none for a
+/// root commit that shares no history with the others). It moves no ref: the caller keeps the
+/// id and opens the commit by it.
+pub(crate) fn commit_files(
+    repo: &git2::Repository,
+    files: &[(&str, &[u8])],
+    parents: &[&git2::Commit],
+    message: &str,
+) -> git2::Oid {
+    let entries: Vec<(&str, u32, &[u8])> = files
+        .iter()
+        .map(|&(path, bytes)| (path, FILE, bytes))
+        .collect();
+    let tree = repo.find_tree(tree_of(repo, &entries)).unwrap();
+    let sig = fixed_sig();
+    repo.commit(None, &sig, &sig, message, &tree, parents)
+        .unwrap()
 }
 
 /// A repo whose root tree is built by hand, so an entry name can be raw bytes.

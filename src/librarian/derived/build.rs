@@ -12,7 +12,9 @@
 //!   a gap. `kind` is the resolution (`file`, `entry`, `local`, `unknown_key`, `key_collision`,
 //!   `undefined_token`, `ambiguous_token`, `cross_repo`, `malformed`). `target_repo`,
 //!   `target_key` and `target_token` are what the citation says as written; a malformed target's
-//!   raw text is kept in `target_key`.
+//!   raw text is kept in `target_key`, so a reader must filter on `kind != 'malformed'` before it
+//!   treats `target_key` as a key. `dst_key` is the key of the document a `file` or `entry`
+//!   citation resolved to (NULL for every other kind).
 //! - `problem`: `invalid_key` (`key` is the key the path gave, when it gave one, and `rel_paths`
 //!   the one path) and `duplicate_key` (`rel_paths` every holder, sorted).
 //! - `skipped`: one row per `(rel_path, reason)`; a repeated pair is stored once.
@@ -24,6 +26,7 @@ use anyhow::Context;
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
+use super::incremental::{self, CacheKey, Parsed};
 use super::scan::{blob_text, scan_commit};
 use crate::librarian::catalog::chunk::{build_chunks, ChunkRow};
 use crate::librarian::classify::{
@@ -37,6 +40,15 @@ use crate::librarian::identity::key_space::{KeySpace, KEY_SPACE_FILE_REL};
 use crate::librarian::identity::repo_name::{self, RepoName, REPO_FILE_REL};
 use crate::librarian::indexer::first_h1;
 use crate::librarian::tools::link_scan::extract::entry_sections;
+
+/// Names the version of the parse logic: [`parse_document`] and everything it calls
+/// (frontmatter, entry sections, the citation grammar, chunking, metadata derivation) and the
+/// shape the parse cache stores. It is part of the parse cache's key, so a cached row from another
+/// version is never read.
+///
+/// Bump it whenever the parse of some text changes. The test
+/// `the_parse_of_a_pinned_corpus_is_tied_to_parser_version` fails when it should have been.
+pub const PARSER_VERSION: &str = "1";
 
 /// The chunk grain, fixed: 2048 characters (512 tokens), the old indexer's `CHUNK_CHARS`. It is
 /// not read from `.codescout/project.toml`, which is not committed.
@@ -78,6 +90,20 @@ pub struct BuildReport {
     pub chunks: usize,
     pub skipped: usize,
     pub problems: usize,
+    /// What git says changed between the commit an update started from and the one it indexed;
+    /// `None` for a full build, and for an update whose diff could not be taken. Nothing stored
+    /// depends on it.
+    pub changes: Option<ChangeCounts>,
+}
+
+/// The `.md` files a git diff between two commits reports, by kind of change. A rename counts
+/// once, as a rename, and not as an addition and a deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChangeCounts {
+    pub added: usize,
+    pub modified: usize,
+    pub deleted: usize,
+    pub renamed: usize,
 }
 
 /// The classification rules of `commit`: its `.codescout/librarian.toml` blob (when present),
@@ -116,10 +142,47 @@ pub fn key_space_from_commit(
 /// previous contents as they were.
 ///
 /// Scan the commit; name the repo from the commit's own `repo.toml`; build the key index over
-/// the whole tree; then parse each document on its own (frontmatter, metadata, entries,
-/// citations, chunks) and resolve its citations against the index. Rows go in path order, and
-/// nothing stored depends on a clock, a random value or where a clone lies.
+/// the whole tree; parse each document on its own (frontmatter, metadata, entries, citations,
+/// chunks), all of them before the write transaction opens; then resolve each document's
+/// citations against the index and write the rows. Rows go in path order, and nothing stored
+/// depends on a clock, a random value or where a clone lies.
+///
+/// Every document is parsed afresh and the parse cache is never read, so this is the oracle the
+/// incremental [`update`](super::incremental::update) is held to. It does write the cache, so an
+/// update right after it reuses what it parsed.
 pub fn build_full(conn: &mut Connection, input: &BuildInput) -> anyhow::Result<BuildReport> {
+    rebuild(conn, input, &Parser::PRODUCTION, false, None)
+}
+
+/// How a build parses a document, as a value so that a test can count parse calls or pretend the
+/// parse logic changed. Production uses [`Parser::PRODUCTION`] and nothing else.
+pub(super) struct Parser<'a> {
+    /// Stored in every cache row and part of the cache key.
+    pub(super) version: &'a str,
+    pub(super) parse: &'a dyn Fn(&str, &str, &[CompiledRule]) -> ParsedDocument,
+}
+
+impl Parser<'static> {
+    pub(super) const PRODUCTION: Parser<'static> = Parser {
+        version: PARSER_VERSION,
+        parse: &parse_document,
+    };
+}
+
+/// The one write path of `build_full` and of the incremental update: they differ only in whether
+/// a document's parse products may come from the cache (`reuse_cache`) and in `changes`, the
+/// counts the update reports.
+///
+/// The key index is built over the whole tree and every document's citations are resolved
+/// against it on every call, so a document that did not change still gets the edges the new
+/// tree gives it.
+pub(super) fn rebuild(
+    conn: &mut Connection,
+    input: &BuildInput,
+    parser: &Parser,
+    reuse_cache: bool,
+    changes: Option<ChangeCounts>,
+) -> anyhow::Result<BuildReport> {
     let (name, name_source) = repo_name_of(input.repo, input.commit)?;
 
     let mut documents: Vec<Document> = Vec::new();
@@ -146,6 +209,37 @@ pub fn build_full(conn: &mut Connection, input: &BuildInput) -> anyhow::Result<B
         }),
     );
 
+    // Every parse, and every cache read, happens here and not inside the write transaction: the
+    // write lock is held for the deletes and inserts alone.
+    let rules_hash = incremental::rules_hash(input.rules);
+    let mut parsed: Vec<Parsed> = Vec::with_capacity(documents.len());
+    for doc in &documents {
+        let key = CacheKey {
+            sha256: doc.sha256.clone(),
+            rel_path: doc.rel_path.clone(),
+            rules_hash: rules_hash.clone(),
+            parser_version: parser.version.to_owned(),
+        };
+        let cached = if reuse_cache {
+            incremental::load(conn, &key)
+                .with_context(|| format!("reading the parse cache for {}", doc.rel_path))?
+        } else {
+            None
+        };
+        parsed.push(match cached {
+            Some(products) => Parsed {
+                key,
+                products,
+                fresh: false,
+            },
+            None => Parsed {
+                products: (parser.parse)(&doc.rel_path, &doc.text, input.rules),
+                key,
+                fresh: true,
+            },
+        });
+    }
+
     let tx = conn.transaction()?;
     for table in DERIVED_TABLES {
         tx.execute(&format!("DELETE FROM {table}"), [])?;
@@ -162,10 +256,12 @@ pub fn build_full(conn: &mut Connection, input: &BuildInput) -> anyhow::Result<B
         ],
     )?;
 
-    let mut report = BuildReport::default();
-    for doc in &documents {
-        let parsed = parse_document(&doc.rel_path, &doc.text, input.rules);
-        store_document(&tx, doc, &parsed, &index, &mut report)
+    let mut report = BuildReport {
+        changes,
+        ..BuildReport::default()
+    };
+    for (doc, parsed) in documents.iter().zip(&parsed) {
+        store_document(&tx, doc, &parsed.products, &index, &mut report)
             .with_context(|| format!("storing {}", doc.rel_path))?;
     }
     for problem in index.problems() {
@@ -180,6 +276,7 @@ pub fn build_full(conn: &mut Connection, input: &BuildInput) -> anyhow::Result<B
             .prepare_cached("INSERT OR IGNORE INTO skipped (rel_path, reason) VALUES (?1, ?2)")?
             .execute(params![rel_path, reason])?;
     }
+    incremental::sync_cache(&tx, &parsed).context("writing the parse cache")?;
     tx.commit()?;
     Ok(report)
 }
@@ -211,37 +308,40 @@ fn repo_name_of(
 }
 
 /// The columns of a `document` row that the text and the rules decide.
-struct DocMetadata {
-    kind: String,
-    status: String,
-    time_scope: Option<String>,
-    confidence: f64,
-    title: Option<String>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocMetadata {
+    pub kind: String,
+    pub status: String,
+    pub time_scope: Option<String>,
+    pub confidence: f64,
+    pub title: Option<String>,
     /// Sorted.
-    owners: Vec<String>,
+    pub owners: Vec<String>,
     /// Sorted.
-    tags: Vec<String>,
-    topic: Option<String>,
+    pub tags: Vec<String>,
+    pub topic: Option<String>,
 }
 
 /// One defined entry: its heading line and the last line of its section, in file lines.
-struct EntryRow {
-    token: String,
-    level: usize,
-    heading_line: u32,
-    end_line: u32,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryRow {
+    pub token: String,
+    pub level: usize,
+    pub heading_line: u32,
+    pub end_line: u32,
 }
 
 /// Everything one document's text and path give, whatever else is in the tree. Resolution is not
 /// here: an edge's resolution depends on every other document, so it is computed over the whole
-/// tree after all documents are parsed.
-struct ParsedDocument {
-    metadata: DocMetadata,
-    parse_note: Option<String>,
-    entries: Vec<EntryRow>,
-    citations: Vec<Citation>,
-    /// `chunk_id` is filled by [`chunk_id`].
-    chunks: Vec<ChunkRow>,
+/// tree after all documents are parsed. This is what the parse cache holds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedDocument {
+    pub metadata: DocMetadata,
+    pub parse_note: Option<String>,
+    pub entries: Vec<EntryRow>,
+    pub citations: Vec<Citation>,
+    /// `chunk_id` is filled by [`chunk_id`]; `artifact_id` is the document's `rel_path`.
+    pub chunks: Vec<ChunkRow>,
 }
 
 /// Parse one document: a pure function of its path, its text and the rules.
@@ -250,7 +350,7 @@ struct ParsedDocument {
 /// frontmatter, its whole text as the body, and `parse_note = "frontmatter_error"`. Entries and
 /// citations are read from the whole text (both skip a valid frontmatter block themselves);
 /// chunks are cut from the body and carry file lines.
-fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> ParsedDocument {
+pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> ParsedDocument {
     let (fm, body, parse_note) = match frontmatter::parse(text) {
         Ok((fm, body)) => (fm, body, None),
         Err(_) => (None, text, Some(PARSE_NOTE_FRONTMATTER_ERROR.to_owned())),
@@ -310,8 +410,13 @@ fn chunk_id(rel_path: &str, chunk_ix: usize, content_hash: &str) -> String {
 /// - tags: the frontmatter's, then each tag of the rule not already there;
 /// - owners and topic: the frontmatter's.
 ///
-/// One difference: owners and tags are sorted, so a stored row does not depend on the order an
-/// author happened to write them in.
+/// Two differences from the old indexer:
+///
+/// - owners and tags are sorted, so a stored row does not depend on the order an author happened
+///   to write them in;
+/// - a file whose frontmatter fails to parse gets its title from the first H1 of its whole text
+///   (it is indexed with no frontmatter and its whole text as the body). The old indexer parsed
+///   an empty body for such a file, so its title was NULL.
 fn derive_metadata(
     rel_path: &str,
     fm: Option<&Frontmatter>,
@@ -431,7 +536,7 @@ fn store_document(
         let (target_repo, target_key, target_token) = edge_target(&citation.reference);
         conn.prepare_cached(
             "INSERT INTO edge (src_rel_path, ord, line, kind, target_repo, target_key, \
-             target_token) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             target_token, dst_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?
         .execute(params![
             doc.rel_path,
@@ -440,7 +545,8 @@ fn store_document(
             kind,
             target_repo,
             target_key,
-            target_token
+            target_token,
+            edge_dst_key(&resolution)
         ])?;
         report.edges += 1;
     }
@@ -483,6 +589,22 @@ fn edge_kind(resolution: &Resolution) -> Option<&'static str> {
         Resolution::CrossRepo { .. } => "cross_repo",
         Resolution::Malformed { .. } => "malformed",
     })
+}
+/// The key of the document a citation resolved to: `file` and `entry` have one. For an entry
+/// cited through a folder index it is the owned document that defines the token. Exhaustive, so
+/// a new resolution has to say whether it names a document.
+fn edge_dst_key(resolution: &Resolution) -> Option<&str> {
+    match resolution {
+        Resolution::File { dst } | Resolution::Entry { dst, .. } => Some(dst.as_str()),
+        Resolution::Local { .. }
+        | Resolution::NotLocal
+        | Resolution::UnknownKey { .. }
+        | Resolution::KeyCollision { .. }
+        | Resolution::UndefinedToken { .. }
+        | Resolution::AmbiguousToken { .. }
+        | Resolution::CrossRepo { .. }
+        | Resolution::Malformed { .. } => None,
+    }
 }
 
 /// `(target_repo, target_key, target_token)` of a citation, as written. A malformed target's raw
@@ -1395,6 +1517,77 @@ mod tests {
         }
         // Every config is tried before the verdict, so one run names every route that failed.
         assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// R15: the build is one transaction. A failure after it began leaves the previous contents.
+    #[test]
+    fn a_failed_build_leaves_the_previous_contents_unchanged() {
+        let (_d1, first) = fixture(&[("docs/a.md", "# A\n\n[[b]]\n"), ("docs/b.md", "# B\n")]);
+        let (_d2, second) = fixture(&[("docs/c.md", "# C\n\ntext\n"), ("docs/d.md", "# D\n")]);
+        let (mut conn, _) = built(&first);
+        let before = dump_all(&conn);
+
+        // A chunk insert fails part-way through the second build's write transaction.
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER boom BEFORE INSERT ON chunk \
+             BEGIN SELECT RAISE(ABORT, 'boom'); END;",
+        )
+        .unwrap();
+        let err = build_commit(&mut conn, &second).unwrap_err();
+        assert!(format!("{err:#}").contains("boom"), "{err:#}");
+        assert_eq!(
+            dump_all(&conn),
+            before,
+            "nothing of the failed build is left"
+        );
+
+        // And the same connection builds again once the fault is gone.
+        conn.execute_batch("DROP TRIGGER boom").unwrap();
+        build_commit(&mut conn, &second).unwrap();
+        assert_ne!(dump_all(&conn), before);
+    }
+
+    /// R14: `dst_key` is the key of the document a `file` or `entry` citation resolved to.
+    #[test]
+    fn an_edge_stores_the_key_of_the_document_it_resolved_to() {
+        let a = "# A\n\n## L-1 — local\n\nSee [[t]], [[t:T-1]], [[readme:F-1]], [[nokey]], \
+                 [[same]], [[other-repo/t]], [[Bad Key!]], [[t:Z-9]], [[readme:F-2]] and L-1.\n";
+        let (_dir, repo) = fixture(&[
+            (".codescout/repo.toml", "name = \"home\"\n"),
+            ("docs/a.md", a),
+            ("docs/t.md", "# T\n\n## T-1 — entry\n"),
+            ("docs/readme/README.md", "# Readme\n"),
+            ("docs/readme/f1-log.md", "## F-1 — defined here\n"),
+            ("docs/readme/x-log.md", "## F-2 — one\n"),
+            ("docs/readme/y-log.md", "## F-2 — two\n"),
+            ("docs/dup/same.md", "# one\n"),
+            ("docs/other/same.md", "# two\n"),
+        ]);
+        let (conn, _) = built(&repo);
+        let rows: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT kind, dst_key FROM edge WHERE src_rel_path = 'docs/a.md' ORDER BY ord")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let row = |kind: &str, dst: Option<&str>| (kind.to_owned(), dst.map(str::to_owned));
+        assert_eq!(
+            rows,
+            [
+                row("file", Some("t")),
+                row("entry", Some("t")),
+                // Cited through the folder index `readme`; defined in the document it owns.
+                row("entry", Some("f1-log")),
+                row("unknown_key", None),
+                row("key_collision", None),
+                row("cross_repo", None),
+                row("malformed", None),
+                row("undefined_token", None),
+                row("ambiguous_token", None),
+                row("local", None),
+            ]
+        );
     }
 
     #[test]

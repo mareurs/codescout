@@ -16,6 +16,15 @@ const BUSY_TIMEOUT_MS: i64 = 5000;
 ///
 /// `skipped` is keyed on `(rel_path, reason)`: a lossy `not_utf8` path (U+FFFD is valid UTF-8) can
 /// equal a real path's `rel_path`, so `rel_path` alone is not unique.
+///
+/// `edge.target_key` is the key as the citation wrote it, and for a malformed citation it holds
+/// the target's raw text (which need not be a key at all): a reader that joins `target_key` to
+/// `document.key` must filter on `kind != 'malformed'`. `edge.dst_key` is the key of the document
+/// the citation resolved to (`kind` `file` or `entry`; NULL for every other kind), which for an
+/// entry cited through a folder index is the owned document that defines the token, not the key
+/// the citation named.
+///
+/// `parse_cache.metadata_json` is the document's `kind`, `status`, `title`, ... as parsed.
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE checkout (
     root         TEXT NOT NULL,
@@ -56,6 +65,7 @@ CREATE TABLE edge (
     target_repo  TEXT,
     target_key   TEXT,
     target_token TEXT,
+    dst_key      TEXT,
     PRIMARY KEY (src_rel_path, ord)
 ) WITHOUT ROWID;
 CREATE TABLE chunk (
@@ -86,6 +96,7 @@ CREATE TABLE parse_cache (
     rules_hash     TEXT NOT NULL,
     parser_version TEXT NOT NULL,
     parse_note     TEXT,
+    metadata_json  TEXT NOT NULL,
     entries_json   TEXT NOT NULL,
     citations_json TEXT NOT NULL,
     chunks_json    TEXT NOT NULL,
@@ -510,6 +521,44 @@ mod tests {
             one["checkout"],
             [["T:repo-x", "T:committed", "T:committed+builtin"]]
         );
+    }
+    #[test]
+    fn an_edge_has_a_nullable_dst_key_after_the_target_columns_and_the_dump_shows_it() {
+        let conn = open_in_memory().unwrap();
+        let columns: Vec<(String, i64)> = conn
+            .prepare("SELECT name, \"notnull\" FROM pragma_table_info('edge') ORDER BY cid")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let names: Vec<&str> = columns.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "src_rel_path",
+                "ord",
+                "line",
+                "kind",
+                "target_repo",
+                "target_key",
+                "target_token",
+                "dst_key"
+            ]
+        );
+        assert_eq!(columns.last().unwrap().1, 0, "dst_key may be NULL");
+
+        for (ord, dst) in [(0_i64, Some("dst-doc")), (1, None)] {
+            conn.execute(
+                "INSERT INTO edge (src_rel_path, ord, line, kind, target_repo, target_key, \
+                 target_token, dst_key) VALUES ('a.md', ?1, 1, 'file', NULL, 'k', NULL, ?2)",
+                params![ord, dst],
+            )
+            .unwrap();
+        }
+        let dump = dump_all(&conn);
+        let last: Vec<&str> = dump["edge"].iter().map(|r| r[7].as_str()).collect();
+        assert_eq!(last, ["T:dst-doc", "N"]);
     }
 
     #[test]
