@@ -232,10 +232,14 @@ const EMBEDDED_SCRIPTS: [(&str, &str); 16] = [
 
 /// Ceiling on stage 3. A warm scan measured 12.8 to 13.1 s on 2026-11-01, and the scan
 /// grows with the corpus (the bug file recorded 5.0 s six days before it recorded 7.0 s),
-/// so the budget is generous rather than tight —
-/// but it is finite, because a pathological transcript set must not hang the tool that
+/// so the budget is generous rather than tight. On 2026-11-12 `usage.db` held 6 scans cut
+/// at the old 30 s ceiling and 58 of 174 answered scans above 15 s on the last two days, so
+/// the ceiling is 60 s. The scan blocks the red's response, so this is also the longest
+/// delay a slow scan can add to a red.
+/// But it is finite, because a pathological transcript set must not hang the tool that
 /// was only trying to explain someone else's build failure.
-const ATTRIBUTION_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
+/// Bug `20927ccfe293c34e`.
+const ATTRIBUTION_TIMEOUT_DEFAULT: Duration = Duration::from_secs(60);
 
 /// Opt-out. Set to any value to disable the hint entirely.
 const DISABLE_ENV: &str = "CODESCOUT_NO_WIP_ATTRIBUTION";
