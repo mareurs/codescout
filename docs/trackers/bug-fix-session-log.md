@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 237
+entry_high_water_F: 238
 entry_high_water_W: 159
 ---
 
@@ -90,6 +90,7 @@ entry_high_water_W: 159
 | F-209 | 2026-11-01 | low | claim-vs-state | mitigated | **"Leaving these two directories costs nothing" was said before the directory counts were read** — I counted symlinks, the watcher counts directories; one remaining directory holds 1,808. |
 | F-208 | 2026-11-01 | low | plan-drift | fixed-verified | **A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again** — `581b05bbe41134f3`: the remedy's reset then add makes the row `retained`, and a named add clears a `retained` row and runs the file-level write lookup again on an unchanged record; fixed in `300cb29ea`. |
 |----|------|---------:|----------|--------|-------|
+| F-238 | 2026-11-12 | med | process | open | **A confirmation run executed my mutant binary because a scratch build shared the slot with the real tree** — 16 tests failed in all 20 iterations; the baked-in manifest path and the test count gave it away; with-slot evicts by checkout, not by --manifest-path. |
 | F-237 | 2026-11-12 | med | measurement | promoted-to-bug-tracker | **A load job I ran on the shared host overlapped the timeouts that a later decision counted** — all three timed_out rows of 2026-11-12 fall in my burn.py windows, two more beside other sessions' gates; coincidence, not shown as cause; bug 20927ccfe293c34e. |
 | F-218 | 2026-11-08 | med | process | mitigated | **A chained fast-forward merge exited 1 with no message, twice, because a peer held a dirty file and then committed to the base** - recovered by messaging the peer, then merging in the isolated worktree and gating the identical tree after the fast-forward. |
 | F-206 | 2026-11-01 | med | plan-drift | open | **"Owners only" holds for the red hint but not for `file-provenance.py`, which the gate and the pre-edit hook also run** — a floor on operations would change the CLI's MINE/SHARED verdicts; the hook's "~7s" is now 16 to 23 s warm. |
@@ -18414,6 +18415,34 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Limits:** one machine, one `usage.db`, read at 12:30 UTC. The overlay uses the time the row was recorded, taken as the end of the call (checked: each timed-out call started 30 s earlier, inside the window). The load of other sessions was read from background-job records only, so a foreground job is invisible. The scans were not re-run without load. The cost to others is also unmeasured: my four runs, 5 to 7 minutes each, slowed the red hints of whoever scanned then.
 
 **Fix idea / Pointer:** bug `20927ccfe293c34e` (the section records this and corrects its first wording, which said a load job should write its window somewhere; the record already exists). Not done, and the operator's choice: join `usage.db` rows with background-job records in the read query, or store a load figure per row. Related: the seam class "instruments that write into what they measure" in the reconnaissance skill; `5f715d8f`'s earlier flake work in `a73c49456056fb92`.
+
+---
+
+## F-238 — A confirmation run executed my mutant binary because a scratch build shared the slot with the real tree
+
+**Valid:** dated 2026-11-12
+
+**Observed:** 2026-11-12, session `5f715d8f`, tree at `d516da4cb` plus an uncommitted test-helper change. Confirming a test fix with `cargo nextest run --workspace --no-fail-fast --stress-count 20`, after I had built a mutant from a scratch copy of the tree with `scripts/with-slot.sh cargo test --manifest-path <scratch>/Cargo.toml …`, run from the repository directory.
+
+**When:** the mutant (resync off) was meant only to show that the new retry does not hide staleness. I ran it directly from its own binary and it behaved as expected. I then started the 20-iteration run on the real tree, in the same slot directory.
+
+**Expected:** nextest compiles the real tree and the fix passes.
+
+**Got:** 16 tests failed in all 20 iterations, the same 16 each time, 25 minutes of whole-suite load for nothing. Two facts showed that the binary was the scratch build. First, `document_symbols_reflects_a_write_made_outside_codescout` failed with its stale-view message (4 against 7), the signature of the mutant. Second, `every_tracked_issue_file_parses_with_the_catalog_reader` failed with `git ls-files failed: not a git repository (… /home/marius/.cache)`: a test binary bakes in its `CARGO_MANIFEST_DIR`, and the scratch copy is not a git tree. The run also had 9762 tests, the real tree 9776. The proposition this proves: the run executed the scratch-built crate. It says nothing about the fix.
+
+**Probable cause:** `scripts/slot-pool.sh` (`slot_evict_foreign_members`) removes the compiled workspace units of a slot only when the slot was last leased for a different CHECKOUT, taken from the working directory's git root. My scratch build ran from the repository directory, so the slot's record named the real checkout and nothing was evicted. Cargo then judged the scratch-built crate fresh, because no real source file was newer than its dep-info (I had edited the real files before the scratch build). That is the hazard the script's own comment records (measured 2026-10-17), reached through `--manifest-path`, which the eviction does not look at.
+
+**Workaround:** run a scratch build from inside the scratch directory (not a git tree: the lessee record is removed and the next real lease evicts), or run `cargo clean -p codescout` inside the lease before the real run. Before reading a long run, check that its test count equals the real tree's and that a test that reads the git repository passes. Earlier real runs this session were safe only because I had edited real files after each scratch build; their counts (9776 and 9682) match the real tree.
+
+**Counterfactual:** a mutant that failed one test instead of sixteen could have been read as "the fix does not work" or, worse, as "the flake is back". It was loud this time.
+
+**Severity:** med
+
+**Status:** open
+
+**Limits:** one slot, one occurrence. I did not re-measure why cargo judged the crate fresh beyond the script's own explanation. I did not check every earlier real run this session for the same contamination: gate runs with recorded counts match; the others were not counted.
+
+**Fix idea / Pointer:** `scripts/with-slot.sh` could refuse, or warn, when `--manifest-path` names a manifest outside the checkout of the working directory. That is the owner's choice and not done. Related: F-237 (an instrument that wrote into what it measured), `a73c49456056fb92` (the mutation matrix), `8117d5eac05e5723` (the test whose confirmation run was affected).
 
 ---
 
