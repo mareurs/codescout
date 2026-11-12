@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(unix)]
 use std::io::{BufRead, BufReader};
 
 fn acquire_after_release(root: &std::path::Path) -> Fence {

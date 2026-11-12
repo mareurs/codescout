@@ -1,5 +1,11 @@
 //! Only the shipped foreground formatter closure may avoid an unresolved-shell marker.
 //! Installed OS tools remain trusted; repository scripts and startup overrides do not.
+//
+// Only the Unix arm of `provenance_fence_context::scope_root` calls into this module; the
+// `not(unix)` arm returns before it. On that target the items below have no reader, so the
+// Windows build sees them as dead code (bug 17fa244491a90b49). The allow is scoped to this
+// module and to `not(unix)`: dead code on Unix is still an error.
+#![cfg_attr(not(unix), allow(dead_code))]
 use anyhow::{bail, ensure, Context};
 use serde_json::Value;
 use std::path::{Path, PathBuf};

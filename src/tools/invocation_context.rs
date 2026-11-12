@@ -86,7 +86,10 @@ pub(crate) enum NativeInvocation {
     Codex {
         session_id: String,
         thread_id: Option<String>,
+        // Read only by `observations::server`, which builds on Linux alone.
+        #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
         call_id: Option<String>,
+        #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
         turn_id: Option<String>,
         version: Option<String>,
     },
