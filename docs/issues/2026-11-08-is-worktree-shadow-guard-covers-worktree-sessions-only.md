@@ -14,7 +14,7 @@ owner: marius
 related:
 - docs/issues/archive/2026-11-05-append-entry-worktree-override-bypasses-main-only-rule.md
 severity: low-medium
-unverified: Not reproduced by running; read from code only.
+unverified: Cases (i) and (ii) measured 2026-11-12 with probe tests that were not committed. Case (iii) and the params-ledger branch were not run. The probes ran on the lean build only.
 ---
 
 # BUG: is_worktree_shadow guards worktree sessions only, so other callers can still allocate an entry id on a worktree shadow
@@ -94,7 +94,15 @@ Allocate entry ids from the main checkout against the main row's id, never again
 
 ## Resume
 
-Write the reproduction tests for cases (i)-(iii) per the plan above, in `src/librarian/tools/append_entry.rs` next to line 1379, run them with `scripts/with-slot.sh cargo test <name>` and confirm they are red on the current tip (that turns "confirmed by reading" into a measurement). Then read the `merge_worktree` renumber (`src/librarian/tools/merge_worktree.rs`, near line 452) to settle the params-ledger branch, then choose the fix option with the owner.
+**Measured 2026-11-12.** Two probe tests were added next to `prose_allocation_is_refused_on_a_worktree_shadow_of_a_main_ledger`, run with `scripts/with-slot.sh cargo test --lib --no-default-features probe_prose_allocation`, and then removed. Both failed, so both allocate on a shadow today:
+- Case (ii), no current project: `append_entry` on the shadow's id returned `Ok` with id `HY-11` and `section_written: true`.
+- Case (i), main-checkout session (`main_root: None`): the call also returned `Ok`; the test panicked at its `is_err()` assertion. The printed result line was interleaved with the other test's output, so the id was not read.
+
+The probes use a fork through `resolve_write_target`, then set `ctx.current_project` (a public field) to `None` or to a project with `main_root: None`. Their source is not in the repo. The patch is in the session scratchpad only.
+
+Not run: case (iii) and the params-ledger branch. The fix is still undecided; see Fix. When the fix lands, the two probes become the regression tests: they already assert `is_err()`.
+
+Next: read the `merge_worktree` renumber near `merge_worktree.rs:452` for the params branch, then choose the fix option with the owner.
 
 ## References
 
