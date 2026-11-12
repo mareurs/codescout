@@ -162,6 +162,8 @@ pub(crate) fn write_entry_into_ledger(
         text = splice_pending_section(&text, &format!("{id_prefix}-{num}"), level, s, caller)?;
     }
     crate::librarian::util::write_catalogued_file(roots, path, &text).map_err(|e| {
+        // The refusal and the io error write `path.display()` into their text.
+        let e = without_path(&format!("{e:#}"), path, &label);
         LibrarianRecoverableError::new(if write_mark {
             format!(
                 "{caller}: cannot record the high-water mark in {label}: {e:#} — no id was \
@@ -199,7 +201,8 @@ pub(crate) fn commit_after_file_write(
     }
 }
 
-/// What became of a section that was already on disk when the catalog `COMMIT` failed.
+/// What became of the bytes (a section and/or the high-water mark) that were already on disk
+/// when the catalog `COMMIT` failed.
 #[derive(Debug)]
 enum SectionRollback {
     /// The bytes this call wrote were still there, and the file is back to its pre-call
@@ -208,13 +211,13 @@ enum SectionRollback {
     /// The file no longer holds what this call wrote — another writer has touched it
     /// since, so putting the old bytes back would discard their edit. Left as found.
     ForeignChange,
-    /// The rollback itself failed; the section is still on disk.
+    /// The rollback itself failed; the written bytes may still be on disk.
     Failed(std::io::Error),
 }
 
 /// Put `path` back to `original`, but ONLY if it still holds exactly `written`.
 ///
-/// **The comparison is the point, not a nicety.** Between the section write and this call
+/// **The comparison is the point, not a nicety.** Between the write and this call
 /// the file is protected by nothing — the `IMMEDIATE` transaction locks the catalog, never
 /// the markdown — and a peer session editing the same ledger is the ordinary case on a
 /// shared checkout. An unconditional restore would silently discard their edit in order to
@@ -246,6 +249,22 @@ fn restore_section_after_failed_commit(
         Ok(_) => SectionRollback::ForeignChange,
         Err(e) => SectionRollback::Failed(std::io::Error::other(e.to_string())),
     }
+}
+
+/// `text` with the document's own path, and the directory it sits in, replaced by `label`.
+///
+/// A hint must name a document by its label and never by an absolute path, but the errors a
+/// lower layer builds (the read door's `io_at`, `refused()`, `write_catalogued_file`'s refusal)
+/// write `path.display()` into their text. Applied to every such error before it enters a hint.
+/// A path the lower layer spells differently (a link's target, a canonical form) is not seen.
+fn without_path(text: &str, path: &std::path::Path, label: &str) -> String {
+    let mut out = text.replace(&path.display().to_string(), label);
+    if let Some(dir) = path.parent().map(|d| d.display().to_string()) {
+        if dir.len() > 1 {
+            out = out.replace(&dir, label);
+        }
+    }
+    out
 }
 
 /// The catalog `COMMIT` failed. Returns a `RecoverableError` naming both halves — what reached
@@ -281,11 +300,20 @@ fn commit_failed_after_section_write(
         );
     };
     let label = document_label(&w.path);
+    // Every lower-layer error that enters a hint below is stripped of the document's path first
+    // (`without_path`): the rusqlite error, and the io error a failed restore carries.
+    let e = without_path(&e.to_string(), &w.path, &label);
+    let rollback = match restore_section_after_failed_commit(&w.path, &w.before, &w.after) {
+        SectionRollback::Failed(io) => SectionRollback::Failed(std::io::Error::other(
+            without_path(&io.to_string(), &w.path, &label),
+        )),
+        other => other,
+    };
     if !w.section_written {
         // Only the committed high-water mark reached disk: there is no section to delete, and a
         // mark left ahead of the catalog is safe because the next allocation takes the max and
         // skips one integer. So every branch says the retry is safe.
-        return match restore_section_after_failed_commit(&w.path, &w.before, &w.after) {
+        return match rollback {
             SectionRollback::Restored => LibrarianRecoverableError::with_hint(
                 format!("{caller}: the catalog write failed; the high-water mark was rolled back"),
                 format!(
@@ -296,7 +324,10 @@ fn commit_failed_after_section_write(
                 ),
             ),
             SectionRollback::ForeignChange => LibrarianRecoverableError::with_hint(
-                format!("{caller}: the catalog write failed; the high-water mark is still on disk"),
+                format!(
+                    "{caller}: the catalog write failed; the file was changed by another writer \
+                     and was left as found"
+                ),
                 format!(
                     "The high-water mark for `{token}` was written to {label} and the catalog \
                      COMMIT then failed, so its id was never persisted. The mark could NOT be \
@@ -308,11 +339,14 @@ fn commit_failed_after_section_write(
                 ),
             ),
             SectionRollback::Failed(io) => LibrarianRecoverableError::with_hint(
-                format!("{caller}: the catalog write failed; the high-water mark is still on disk"),
+                format!(
+                    "{caller}: the catalog write failed; the high-water mark could not be rolled \
+                     back"
+                ),
                 format!(
                     "The high-water mark for `{token}` was written to {label} and the catalog \
                      COMMIT then failed, so its id was never persisted. Restoring the file also \
-                     failed ({io}), so the mark is still on disk. No section was written, so \
+                     failed ({io}), so the mark may still be on disk. No section was written, so \
                      there is nothing to delete; a mark ahead of the catalog is safe, and the \
                      next allocation skips one integer. The call is safe to retry as-is. \
                      Underlying error: {e}"
@@ -320,7 +354,7 @@ fn commit_failed_after_section_write(
             ),
         };
     }
-    match restore_section_after_failed_commit(&w.path, &w.before, &w.after) {
+    match rollback {
         SectionRollback::Restored => LibrarianRecoverableError::with_hint(
             format!("{caller}: the catalog write failed; the section was rolled back"),
             format!(
@@ -331,7 +365,10 @@ fn commit_failed_after_section_write(
             ),
         ),
         SectionRollback::ForeignChange => LibrarianRecoverableError::with_hint(
-            format!("{caller}: the catalog write failed and the section is still on disk"),
+            format!(
+                "{caller}: the catalog write failed; the file was changed by another writer and \
+                 was left as found"
+            ),
             format!(
                 "The section for `{token}` was written to {label} and the catalog COMMIT then \
                  failed, so its id was never persisted. It could NOT be rolled back: the file no \
@@ -845,23 +882,82 @@ mod tests {
         std::fs::create_dir(dir.path().join("docs")).unwrap();
         let md = dir.path().join("docs/ledger.md");
         std::fs::write(&md, "a peer's rewrite\n").unwrap();
-        let write = FileWrite {
-            path: md,
+        let root = dir.path().to_string_lossy().into_owned();
+        let section = |path: std::path::PathBuf, section_written: bool| FileWrite {
+            path,
             before: "before\n".to_string(),
             after: "before\n\n## F-1 — x\n\nprose\n".to_string(),
-            section_written: true,
+            section_written,
         };
 
-        let hint = hint_of(commit_failed_after_section_write(
-            busy(),
-            "F-1",
-            Some(&write),
-            "append_entry",
-        ));
+        // ForeignChange (a peer rewrote the file), for a section write and for a mark-only one.
+        for section_written in [true, false] {
+            let hint = hint_of(commit_failed_after_section_write(
+                busy(),
+                "F-1",
+                Some(&section(md.clone(), section_written)),
+                "append_entry",
+            ));
+            assert!(hint.contains("`[[ledger]]`"), "{hint}");
+            assert!(!hint.contains(&root), "no absolute path in a hint: {hint}");
+        }
 
-        assert!(hint.contains("`[[ledger]]`"), "{hint}");
-        let root = dir.path().to_string_lossy().into_owned();
-        assert!(!hint.contains(&root), "no absolute path in a hint: {hint}");
+        // Failed (the restore could not run): the io error the read door builds names the path
+        // it could not read, so the hint must carry the label in its place.
+        let missing = dir.path().join("docs/never-created.md");
+        for section_written in [true, false] {
+            let hint = hint_of(commit_failed_after_section_write(
+                busy(),
+                "F-1",
+                Some(&section(missing.clone(), section_written)),
+                "append_entry",
+            ));
+            assert!(hint.contains("`[[never-created]]`"), "{hint}");
+            assert!(!hint.contains(&root), "no absolute path in a hint: {hint}");
+        }
     }
-    // mutation: name `w.path.display()` instead of `document_label(&w.path)`.
+    // mutation: name `w.path.display()` instead of `document_label(&w.path)`; or render the
+    // `Failed` io error unscrubbed.
+
+    /// The write-failure refusal of `write_entry_into_ledger` carries the lower layer's error;
+    /// the document's own path in it is replaced by the label.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_refusal_names_the_document_by_label_and_not_by_its_directory() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let md = fixture(dir.path(), &cat, LEDGER);
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("victim.md");
+        std::fs::write(&victim, LEDGER).unwrap();
+        std::fs::remove_file(&md).unwrap();
+        std::os::unix::fs::symlink(&victim, &md).unwrap();
+        let tx = cat.conn.transaction().unwrap();
+
+        let err = write_entry_into_ledger(
+            &tx,
+            &[],
+            "art1",
+            &md,
+            LEDGER,
+            "F",
+            1,
+            Some(&pending("first")),
+            true,
+            "test",
+        )
+        .unwrap_err();
+
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("symbolic link"),
+            "the refusal still says why: {text}"
+        );
+        let link_dir = dir.path().to_string_lossy().into_owned();
+        assert!(
+            !text.contains(&link_dir),
+            "no absolute path of the document: {text}"
+        );
+    }
+    // mutation: render the write error without `without_path`.
 }
