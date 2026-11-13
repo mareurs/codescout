@@ -43,9 +43,12 @@ pub(crate) const CITES_LABEL: &str = "**Cites:**";
 ///   letters.
 ///
 /// Two git roots are one repository when they are the same root, or a linked worktree and its
-/// main checkout, or two linked worktrees of one main checkout (see [`repository_root`]), or when
-/// their committed names are equal (another clone of it). The target's documents are then cited
-/// unqualified, whether or not either root has a committed name.
+/// main checkout, or two linked worktrees of one main checkout, the main checkout being named by
+/// an absolute pointer (see [`repository_root`]). Anything else is its own repository, a
+/// submodule and a worktree with a relative pointer included; it falls to the committed-name
+/// path, where equal committed names (another clone of it) make the roots one repository too. The
+/// target's documents are then cited unqualified, whether or not either root has a committed
+/// name.
 ///
 /// `source_git_root` is the git root of the document that carries the cite: callers pass
 /// `CurrentProject.git_root` exactly as stored (canonical). Roots are compared as paths by
@@ -173,13 +176,34 @@ fn file_name_of(abs_path: &str) -> String {
         |n| n.to_string_lossy().into_owned(),
     )
 }
-/// The main checkout a git root belongs to: the root itself, or, for a linked worktree (a `.git`
-/// pointer file), the main root its pointer names. `lookup_git_root` stops at any `.git`, so a
-/// worktree session's git root is the worktree, while the catalog can hold the main checkout's
-/// row for the same document.
+
+/// The main checkout a git root belongs to, for the comparison that decides whether two git roots
+/// are one repository: the root itself, except for a linked worktree.
+///
+/// A linked worktree is a root whose `.git` is a pointer file naming `<main>/.git/worktrees/<name>`
+/// (`is_linked_worktree` requires the `worktrees` component, so a submodule's `.git/modules/...`
+/// pointer is not one). `lookup_git_root` stops at any `.git`, so a worktree session's git root is
+/// the worktree while the catalog can hold the main checkout's row for the same document. The main
+/// root is used only when it is absolute and holds a `.git` directory: a relative pointer cannot
+/// be told from another repository's (`../..` is the same text everywhere), and a pointer into a
+/// directory that is no repository names nothing. In both cases, and for a submodule, the root is
+/// its own repository.
 fn repository_root(git_root: &Path) -> std::path::PathBuf {
-    crate::util::path_security::worktree_main_root(git_root)
-        .unwrap_or_else(|| git_root.to_path_buf())
+    use crate::util::path_security::{is_linked_worktree, worktree_main_root};
+
+    if !is_linked_worktree(git_root) {
+        return git_root.to_path_buf();
+    }
+    match worktree_main_root(git_root) {
+        Some(main)
+            if main.is_absolute()
+                && std::fs::symlink_metadata(main.join(".git"))
+                    .is_ok_and(|meta| meta.file_type().is_dir()) =>
+        {
+            main
+        }
+        _ => git_root.to_path_buf(),
+    }
 }
 
 /// The path of the artifact `dst_ref` names, and the entry id when it names an entry.
@@ -591,6 +615,84 @@ mod tests {
             grammar_form_of(&cat.conn, &root, "area-slug:F-3").unwrap(),
             "[[area:F-3]]"
         );
+    }
+
+    /// A directory under `base` whose `.git` is a pointer file holding `gitdir: <pointer>`.
+    fn pointer_root(base: &Path, rel: &str, pointer: &str) -> PathBuf {
+        let root = base.join(rel);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join(".git"), format!("gitdir: {pointer}\n")).unwrap();
+        root
+    }
+
+    #[test]
+    fn two_worktrees_of_one_main_checkout_are_one_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = git_root(tmp.path(), "main");
+        let first = linked_worktree(tmp.path(), &main, "wt-one");
+        let second = linked_worktree(tmp.path(), &main, "wt-two");
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&second, "docs/t.md"), None);
+
+        assert_eq!(grammar_form_of(&cat.conn, &first, "id-t").unwrap(), "[[t]]");
+    }
+
+    #[test]
+    fn two_sibling_submodules_are_two_repositories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _superproject = git_root(tmp.path(), "super");
+        let sub_a = pointer_root(&tmp.path().join("super"), "a", "../.git/modules/a");
+        let sub_b = pointer_root(&tmp.path().join("super"), "b", "../.git/modules/b");
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&sub_a, "docs/t.md"), None);
+
+        let msg = refusal(grammar_form_of(&cat.conn, &sub_b, "id-t"));
+        assert!(msg.contains("repo.toml"), "{msg}");
+    }
+
+    #[test]
+    fn a_superproject_and_its_submodule_are_two_repositories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let superproject = git_root(tmp.path(), "super");
+        let absolute = format!("{}/.git/modules/sub", superproject.display());
+        let sub = pointer_root(&superproject, "sub", &absolute);
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&sub, "docs/t.md"), None);
+        row(&cat, "id-s", &at(&superproject, "docs/s.md"), None);
+
+        let into_submodule = refusal(grammar_form_of(&cat.conn, &superproject, "id-t"));
+        assert!(into_submodule.contains("repo.toml"), "{into_submodule}");
+        let out_of_submodule = refusal(grammar_form_of(&cat.conn, &sub, "id-s"));
+        assert!(out_of_submodule.contains("repo.toml"), "{out_of_submodule}");
+    }
+
+    #[test]
+    fn worktrees_with_relative_pointers_of_different_repositories_are_two_repositories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _a = git_root(tmp.path(), "a");
+        let _b = git_root(tmp.path(), "b");
+        let pointer = "../../.git/worktrees/x";
+        let wt_a = pointer_root(&tmp.path().join("a"), ".worktrees/x", pointer);
+        let wt_b = pointer_root(&tmp.path().join("b"), ".worktrees/x", pointer);
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&wt_b, "docs/t.md"), None);
+
+        let msg = refusal(grammar_form_of(&cat.conn, &wt_a, "id-t"));
+        assert!(msg.contains("repo.toml"), "{msg}");
+    }
+
+    #[test]
+    fn worktrees_pointing_into_a_main_with_no_git_directory_are_not_one_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        // `ghost` holds no `.git` directory: the pointers name a repository that is not there.
+        let ghost = tmp.path().join("ghost");
+        let first = linked_worktree(tmp.path(), &ghost, "wt-one");
+        let second = linked_worktree(tmp.path(), &ghost, "wt-two");
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&second, "docs/t.md"), None);
+
+        let msg = refusal(grammar_form_of(&cat.conn, &first, "id-t"));
+        assert!(msg.contains("repo.toml"), "{msg}");
     }
 
     #[test]
