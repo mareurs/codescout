@@ -587,12 +587,22 @@ fn refuse_renumber_of_markdown_defined(
         (from_label, into_label)
     };
     let door = crate::librarian::read_door::ReadDoor::new(roots.to_vec());
-    let body = door.text(&from_path).map_err(|_| {
+    let body = door.text(&from_path).map_err(|e| {
+        // A file that is not there is put back; one the door refuses is made readable.
+        let way_forward = if matches!(&e, crate::librarian::read_door::ReadError::Io(io)
+            if io.kind() == std::io::ErrorKind::NotFound)
+        {
+            "it is not on disk. Put the file back at the folded row's path \
+             (doc(action=\"find\") shows the live row if it moved) and retry, or leave the two \
+             rows separate."
+        } else {
+            "the read door refuses it. Make it a readable regular file inside its repository \
+             and retry, or leave the two rows separate."
+        };
         LibrarianRecoverableError::new(format!(
             "graft: refused — {} would be renumbered to fit {into_name}, and {from_name} \
-             could not be read to check whether it defines them by heading. Nothing was changed. \
-             Put the file back at the row's path (doc(action=\"find\") shows the live row if it \
-             moved) and retry, or leave the two rows separate.",
+             could not be read to check whether it defines them by heading: {way_forward} \
+             Nothing was changed.",
             remap.keys().cloned().collect::<Vec<_>>().join(", ")
         ))
     })?;
@@ -1448,8 +1458,36 @@ mod tests {
             "{msg}"
         );
         assert!(
-            msg.contains("Put the file back") && msg.contains("leave the two rows separate"),
-            "an unreadable source says what to do next: {msg}"
+            msg.contains("Put the file back at the folded row's path")
+                && msg.contains("leave the two rows separate"),
+            "a missing source says what to do next: {msg}"
+        );
+        assert!(
+            msg.contains("not on disk") && !msg.contains("readable regular file"),
+            "a missing source is not reported as a refused one: {msg}"
+        );
+        assert!(row_exists(&cat.conn, "from").unwrap());
+    }
+
+    /// A source the read door REFUSES (a symlink to a file outside the repository) is not a
+    /// missing one: putting a file back is the wrong action, so the refusal says to make it a
+    /// readable regular file. Mutation: report every unreadable source as missing.
+    #[cfg(unix)]
+    #[test]
+    fn a_graft_whose_source_the_door_refuses_says_to_make_it_readable() {
+        let (dir, mut cat) = colliding_ledgers(Some("# x\n"), "## F-1 — y\n");
+        let from_file = dir.path().join("wt/ledger.md");
+        let elsewhere = tempfile::tempdir().unwrap();
+        let outside = elsewhere.path().join("outside.md");
+        std::fs::write(&outside, "# x\n").unwrap();
+        std::fs::remove_file(&from_file).unwrap();
+        std::os::unix::fs::symlink(&outside, &from_file).unwrap();
+        let msg = format!("{:#}", graft_rows(&mut cat, "from", "into").unwrap_err());
+        assert!(
+            msg.contains("the read door refuses it")
+                && msg.contains("readable regular file")
+                && !msg.contains("Put the file back"),
+            "{msg}"
         );
         assert!(row_exists(&cat.conn, "from").unwrap());
     }

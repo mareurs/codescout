@@ -547,34 +547,45 @@ fn renumbers_defined_by_heading(
     remap: &std::collections::BTreeMap<String, String>,
 ) -> (Vec<String>, DecidedBy) {
     let door = crate::librarian::read_door::for_catalog(cat);
-    // A shadow file that is PRESENT is the source, and a door refusal of it is an unreadable
-    // source, never a reason to read the branch tip: the tip can differ from the working file
-    // (a heading that is only in the file, uncommitted, would read as absent there).
-    let source = if std::fs::metadata(&shadow_row.abs_path).is_ok_and(|m| m.is_file()) {
-        door.text(&shadow_row.abs_path)
-            .ok()
-            .map(|body| (body, DecidedBy::WorktreeFile))
+    // A path that EXISTS (a file, a link even a dangling or looping one, a path that cannot be
+    // inspected) is the source, and a door refusal of it is an unreadable source, never a
+    // reason to read the branch tip: the tip can differ from the working file (a heading that is
+    // only in the file, uncommitted, would read as absent there). `symlink_metadata` does not
+    // follow a link, so a dangling link counts as present, as the door sees it. Only a path that
+    // is not there at all reads the tip.
+    let present = match std::fs::symlink_metadata(&shadow_row.abs_path) {
+        Ok(_) => true,
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    };
+    let (source, unreadable_by) = if present {
+        (
+            door.text(&shadow_row.abs_path)
+                .ok()
+                .map(|body| (body, DecidedBy::WorktreeFile)),
+            DecidedBy::WorktreeFileRefused,
+        )
     } else {
-        branch_tip_text(registration, &shadow_row.abs_path).map(|body| (body, DecidedBy::BranchTip))
+        (
+            branch_tip_text(registration, &shadow_row.abs_path)
+                .map(|body| (body, DecidedBy::BranchTip)),
+            DecidedBy::MainFileSourceUnreadable,
+        )
     };
     if let Some((body, by)) = source {
         return (graft::renumbered_ids_defined_in(remap, &body), by);
     }
-    let ids = match door.text(&main_row.abs_path) {
-        Ok(body) => {
-            return (
-                graft::renumbered_ids_defined_in(remap, &body),
-                DecidedBy::MainFileSourceUnreadable,
-            )
-        }
+    match door.text(&main_row.abs_path) {
+        Ok(body) => (
+            graft::renumbered_ids_defined_in(remap, &body),
+            unreadable_by,
+        ),
         Err(crate::librarian::read_door::ReadError::Io(e))
             if e.kind() == std::io::ErrorKind::NotFound =>
         {
-            Vec::new()
+            (Vec::new(), unreadable_by)
         }
-        Err(_) => remap.keys().cloned().collect(),
-    };
-    (ids, DecidedBy::Unreadable)
+        Err(_) => (remap.keys().cloned().collect(), DecidedBy::Unreadable),
+    }
 }
 
 /// Which source decided a skipped renumber, recorded on the conflict as `source`.
@@ -584,8 +595,13 @@ enum DecidedBy {
     WorktreeFile,
     /// The shadow's file at the tip of the registration's branch: proven.
     BranchTip,
-    /// The source could not be read, so main's file stood in: the split is possible, not proven.
+    /// The worktree's file is not there (and no branch tip supplies it), so main's file stood
+    /// in: the split is possible, not proven. Restoring the branch lets the merge read it.
     MainFileSourceUnreadable,
+    /// The worktree's file IS there but the read door refuses it, so main's file stood in: the
+    /// split is possible, not proven. Restoring the branch does not help; making the file a
+    /// readable regular file does.
+    WorktreeFileRefused,
     /// Neither the source nor main's file could be read: every renumbered id is held.
     Unreadable,
 }
@@ -596,6 +612,7 @@ impl DecidedBy {
             DecidedBy::WorktreeFile => "worktree_file",
             DecidedBy::BranchTip => "branch_tip",
             DecidedBy::MainFileSourceUnreadable => "main_file_source_unreadable",
+            DecidedBy::WorktreeFileRefused => "worktree_file_refused",
             DecidedBy::Unreadable => "unreadable",
         }
     }
@@ -609,8 +626,8 @@ impl DecidedBy {
         let abandon = "librarian(action=\"merge_worktree\", root=<this worktree's root>, \
                        abandon=true) drops the worktree's catalog rows, so an entry held only \
                        in params is lost for good, while an entry in the markdown remains in \
-                       the merged file, and that file may hold two `## F-n` definers to rename \
-                       by hand.";
+                       the file that holds it, and a file may then hold two `## F-n` definers \
+                       to rename by hand.";
         if self.proven() {
             return format!(
                 "The worktree's {} defines these ids by heading, so renumbering would split an \
@@ -624,18 +641,32 @@ impl DecidedBy {
                 }
             );
         }
-        let stood_in = if self == DecidedBy::Unreadable {
-            "Neither the worktree's file nor main's file could be read, so every renumbered id \
-             is held"
-        } else {
-            "The worktree's file could not be read (it is absent, no branch is recorded, or the \
-             branch is gone), so main's file stood in for it and defines these ids by heading"
+        let (stood_in, exits) = match self {
+            DecidedBy::Unreadable => (
+                "Neither the worktree's file nor main's file could be read through the read \
+                 door, so every renumbered id is held",
+                "make both readable regular files inside their repositories (restore the \
+                 worktree's branch at its tip if its file is absent) and merge again, so the \
+                 merge reads the source and decides",
+            ),
+            DecidedBy::WorktreeFileRefused => (
+                "The read door refuses the worktree's file, so main's file stood in for it and \
+                 defines these ids by heading",
+                "make the worktree's file a readable regular file inside its repository and \
+                 merge again, so the merge reads the source and decides",
+            ),
+            _ => (
+                "The worktree's file could not be read (it is absent, no branch is recorded, \
+                 or the branch is gone), so main's file stood in for it and defines these ids \
+                 by heading",
+                "restore the worktree's branch at its tip (or its directory) and merge again, \
+                 so the merge reads the source and decides",
+            ),
         };
         format!(
             "{stood_in}: renumbering may split an entry between the params and the markdown. \
-             This row is skipped and the registration stays active. Two exits: restore the \
-             worktree's branch at its tip (or its directory) and merge again, so the merge \
-             reads the source and decides; or {abandon}"
+             This row is skipped and the registration stays active. Two exits: {exits}; or \
+             {abandon}"
         )
     }
 }
@@ -1400,10 +1431,27 @@ mod tests {
             remedy.contains("held only in params"),
             "abandon's cost is named: {remedy}"
         );
+        assert!(
+            remedy.contains("remains in the file that holds it") && !remedy.contains("merged file"),
+            "abandon does not promise the entry is in a merged file: {remedy}"
+        );
         if source == "worktree_file" || source == "branch_tip" {
             assert!(
                 remedy.contains("would split") && !remedy.contains("may split"),
                 "a proven source states the split as fact: {remedy}"
+            );
+        } else if source == "worktree_file_refused" {
+            assert!(
+                remedy.contains("may split") && !remedy.contains("would split"),
+                "a refused file is an unproven source: {remedy}"
+            );
+            assert!(
+                remedy.contains("readable regular file inside its repository"),
+                "the exit for a refused file is to make it readable: {remedy}"
+            );
+            assert!(
+                !remedy.contains("restore the worktree's branch") && !remedy.contains("absent"),
+                "restoring the branch does not help a file that is present: {remedy}"
             );
         } else {
             assert!(
@@ -1495,9 +1543,12 @@ mod tests {
     /// A shadow file that is PRESENT but that the read door refuses (a symlink to a file
     /// outside the repository) is an unreadable source: it fails closed on main's file, and
     /// never falls through to the branch tip, which can differ from the working file. Here
-    /// the tip says "no heading" while main's file defines `F-2`. Mutation: restore the
-    /// `.ok()` that sends a door refusal to `branch_tip_text`; the merge then goes through
-    /// on the stale tip and renumbers an entry its file still names.
+    /// the tip says "no heading" while main's file defines `F-2`. The conflict's `source` is
+    /// `worktree_file_refused`, and its remedy asks for a readable file, not a restored
+    /// branch. Mutation: restore the `.ok()` that sends a door refusal to `branch_tip_text`;
+    /// the merge then goes through on the stale tip and renumbers an entry its file still
+    /// names. Mutation: report the case as `MainFileSourceUnreadable`, and the remedy offers
+    /// the branch restore that cannot help.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_refused_shadow_file_never_falls_through_to_the_branch_tip() {
@@ -1522,7 +1573,53 @@ mod tests {
         let out = call(&s.ctx, serde_json::json!({"root": s.wt_root}))
             .await
             .unwrap();
-        assert_skipped_for_markdown(&s, &out, "main_file_source_unreadable");
+        assert_skipped_for_markdown(&s, &out, "worktree_file_refused");
+    }
+
+    /// A shadow path that is a DANGLING symlink exists as a path the door refuses, though
+    /// `metadata` (which follows links) calls it absent: it is a refused worktree file, not
+    /// a missing one, so the branch tip (which says "no heading" here) is not read. Mutation:
+    /// test presence with `std::fs::metadata` instead of `symlink_metadata`.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_dangling_shadow_link_is_a_refused_file_not_an_absent_one() {
+        let s = renumber_scenario(
+            "# T\n\n## F-2 — wt\n",
+            Some("# T\n\n## F-1 — a\n"),
+            Some("feat"),
+            None,
+        );
+        let shadow_file = {
+            let c = s.ctx.catalog.lock();
+            artifact::get(&c, &s.shadow_id).unwrap().unwrap().abs_path
+        };
+        std::fs::create_dir_all(shadow_file.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(s._tmp.path().join("nowhere.md"), &shadow_file).unwrap();
+        assert!(
+            std::fs::metadata(&shadow_file).is_err() && shadow_file.symlink_metadata().is_ok(),
+            "precondition: the link dangles"
+        );
+        let out = call(&s.ctx, serde_json::json!({"root": s.wt_root}))
+            .await
+            .unwrap();
+        assert_skipped_for_markdown(&s, &out, "worktree_file_refused");
+    }
+
+    /// A present shadow file whose heading is only in the working file (the branch tip and main
+    /// both say "no heading": the uncommitted-heading case) blocks the merge, decided by the
+    /// worktree file. Mutation: ignore the shadow body in the `WorktreeFile` arm.
+    #[tokio::test]
+    async fn a_present_shadow_heading_blocks_the_merge() {
+        let s = renumber_scenario(
+            "# T\n\n## F-1 — a\n",
+            Some("# T\n\n## F-1 — a\n"),
+            Some("feat"),
+            Some("# T\n\n## F-1 — a\n\n## F-2 — wt\n"),
+        );
+        let out = call(&s.ctx, serde_json::json!({"root": s.wt_root}))
+            .await
+            .unwrap();
+        assert_skipped_for_markdown(&s, &out, "worktree_file");
     }
 
     /// Neither the shadow's file nor main's file can be read through the door: every

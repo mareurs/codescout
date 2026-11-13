@@ -1222,7 +1222,11 @@ mod tests {
 
     /// The shadow arm of the shared guard on the PARAMS path: a main-checkout session
     /// (`main_root: None`, so neither the main-checkout nor the session-bound shadow test
-    /// holds) names a worktree's fork. Only `has_fork_record` refuses it.
+    /// holds) names a worktree's fork. Only `has_fork_record` refuses it. The shadow holds a
+    /// params collection, so the unchanged-file and unchanged-params assertions have teeth:
+    /// mutation: call `refuse_allocation_off_the_main_ledger` AFTER
+    /// `augmentation::append_entry` (below `resolve_write_target` and the write) and the
+    /// refusal text still matches, but the shadow's params and file have changed.
     #[tokio::test]
     async fn params_allocation_is_refused_on_a_shadow_from_a_main_checkout_session() {
         use crate::librarian::current_project::CurrentProject;
@@ -1238,6 +1242,27 @@ mod tests {
         }));
         let (shadow_abs, shadow_before) = {
             let c = ctx.catalog.lock();
+            // The shadow carries a params collection, so an allocation that got past the
+            // refusal WOULD write an entry and a section.
+            augmentation::upsert(
+                &c,
+                &augmentation::AugmentationRow {
+                    artifact_id: shadow_id.clone(),
+                    prompt: "p".into(),
+                    params: r#"{"items":[]}"#.into(),
+                    last_refreshed_at: None,
+                    refresh_count: 0,
+                    created_at: "2026-01-01T00:00:00.000Z".into(),
+                    updated_at: "2026-01-01T00:00:00.000Z".into(),
+                    render_template: None,
+                    params_schema: None,
+                    append_mode: false,
+                    history_cap: None,
+                    entry_collection: Some("items".into()),
+                    refreshed_at_commit: None,
+                },
+            )
+            .unwrap();
             let abs = artifact::get(&c, &shadow_id).unwrap().unwrap().abs_path;
             let text = std::fs::read_to_string(&abs).unwrap();
             (abs, text)
@@ -1268,9 +1293,10 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
             .unwrap();
         assert_eq!(artifacts, 2, "main row + the one shadow, nothing new");
-        assert!(
-            augmentation::get(&c, &shadow_id).unwrap().is_none(),
-            "the refused call wrote no augmentation row for the shadow"
+        assert_eq!(
+            augmentation::get(&c, &shadow_id).unwrap().unwrap().params,
+            r#"{"items":[]}"#,
+            "the refused call wrote no entry into the shadow's params"
         );
     }
 
