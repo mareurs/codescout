@@ -8,10 +8,9 @@ Spec v5 (`docs/superpowers/specs/2026-11-11-repo-relative-artifact-key-design.md
 
 ## Still to do after the landing (controller, from the main checkout)
 
-- Fix the sectionless recipes of `docs/trackers/claim-decay.md` (DC) and `windows-platform-support.md` (WIN), then shrink `KNOWN_SECTIONLESS_LEDGER_RECIPES`.
-- Fix `prompt-hamsa-audit-log.md` (~line 29) and the `artifact(` openers (`windows-platform-support.md` ~326, `provenance-subsystem.md` ~1130).
-- Run `doc(action="augment")` from main so the catalog rows match the 11 edited sidecar prompts.
-- File bug files for: N-2 `write_catalogued_file` (`src/librarian/util.rs`) truncates in place, so a disk-full write truncates the ledger (fix: temp file + rename); M-2 a token after `<digits>:` such as `T9:F-1` is read as a numeric qualifier and does not move in `rekey_prefix`. Optional: N-1, N-3, N-4, N-5, N-6 (listed in the research doc).
+DONE 2026-11-13 (commits 9338195fc, 87737a242): DC and WIN recipes pass a section; `KNOWN_SECTIONLESS_LEDGER_RECIPES` is empty (the gate tests take an explicit list); PV and A recipes use `doc(`; the 11 sidecar prompts are aligned (`sidecar_shape_drift` 0); no "worktree-local file" left in the guides; bugs filed: `a806db1ec4ea162b` (N-2, truncate in place) and `f0d4a3093cbb9b63` (M-2).
+
+Still open: optional bug files for N-1, N-3, N-4, N-5, N-6 (listed in the research doc). Next: the Plan D scout, then Plans C2 and C3.
 
 ## Rules that bite when resuming
 
