@@ -6036,6 +6036,18 @@ mod tests {
             text.contains("no frontmatter block") && text.contains("entry_high_water_F"),
             "the refusal names what the document lacks: {text}"
         );
+        let hint = err
+            .downcast_ref::<LibrarianRecoverableError>()
+            .expect("a recoverable refusal")
+            .hint
+            .clone()
+            .unwrap_or_default();
+        assert!(
+            hint.contains("Add a `---` frontmatter block at the top of the file")
+                && !hint.contains("entry_prefix"),
+            "a params ledger is a ledger by its sidecar, not by an `entry_prefix`, so the hint \
+             may not claim the missing block carries one: {hint}"
+        );
         assert_eq!(
             std::fs::read_to_string(&md).unwrap(),
             before,
@@ -6044,6 +6056,9 @@ mod tests {
         assert!(params_ids(&cat, "art1").is_empty(), "nothing was allocated");
     }
     // mutation: pass `write_mark: false` → the call is Ok and the section is written.
+    // mutation: restore the old hint wording in `write_entry_into_ledger` ("... the same block
+    // already carries the `entry_prefix` declaration that made this a ledger") → the hint
+    // assertion is red.
 
     /// An adoption whose committed mark is below the adopted id brings the mark up, in a
     /// mark-only write (no second section).

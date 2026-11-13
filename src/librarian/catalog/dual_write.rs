@@ -148,8 +148,8 @@ pub(crate) fn write_entry_into_ledger(
             LibrarianRecoverableError::with_hint(
                 format!("{caller}: {label} has no frontmatter block to record `{hw_key}` in"),
                 "A ledger's high-water mark is COMMITTED state, so the file needs a \
-                 frontmatter block to hold it. Add one — the same block already carries \
-                 the `entry_prefix` declaration that made this a ledger."
+                 frontmatter block to hold it. Add a `---` frontmatter block at the top of \
+                 the file; the mark is written there."
                     .to_string(),
             )
         })?

@@ -19,12 +19,13 @@ struct Args {
     entry: Value,
     #[serde(default)]
     cites: Vec<String>,
-    /// Prose-ledger section writing. All three or none: the server formats the
+    /// Section writing. All three or none on a prose ledger, and all three required on a
+    /// params ledger (its entry is written into the markdown too): the server formats the
     /// heading as `<level> <ID> — <title>` and inserts it before `anchor_heading`,
     /// in the same file write that records the high-water mark.
     ///
-    /// Supplying them is strictly better than reserving and writing yourself: a
-    /// hand-written heading missing its dash-and-title defines no token under
+    /// On a prose ledger, supplying them is strictly better than reserving and writing
+    /// yourself: a hand-written heading missing its dash-and-title defines no token under
     /// `link_scan`'s `def_re`, and every citation of the entry dangles.
     #[serde(default)]
     title: Option<String>,
@@ -58,7 +59,7 @@ fn default_entry() -> Value {
 /// first, and [`preflight`] runs it alone so the worktree write guard can sit behind it.
 fn parse_args(args: Value) -> Result<Args> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("doc(action=\"append_entry\") requires 'id' and 'id_prefix': {e}"), "Name the ledger and its id namespace, e.g. doc(action=\"append_entry\", id=\"<16-hex>\", id_prefix=\"R\"). For a PROSE ledger pass anchor_heading + title + body TOGETHER and the section is written for you; for a params ledger pass entry_collection + entry.")
+        crate::tools::RecoverableError::with_hint(format!("doc(action=\"append_entry\") requires 'id' and 'id_prefix': {e}"), "Name the ledger and its id namespace, e.g. doc(action=\"append_entry\", id=\"<16-hex>\", id_prefix=\"R\"). For a PROSE ledger pass anchor_heading + title + body TOGETHER and the section is written for you; for a params ledger pass entry_collection + entry + title + body + anchor_heading (the entry is written into the markdown too).")
     })?;
     if !a.entry.is_object() {
         return Err(LibrarianRecoverableError::new(
@@ -486,7 +487,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         out["adopted"] = json!(true);
         out["next_step"] = json!(format!(
             "{id} was already in the file under this title and body, so it is now recorded and \
-             nothing new was written. Do NOT write the section again.",
+             no second section was written. Do NOT write the section again.",
             id = outcome.id
         ));
     }
@@ -494,8 +495,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         out["snapshot_missing"] = json!(outcome.snapshot_missing);
         out["snapshot_hint"] = json!(format!(
             "This tracker keeps a rendered snapshot in its body, and {} row(s) are not in it. \
-             Entry rows live in the catalog, which is machine-local and git-ignored — a row \
-             absent from the body is in no repo. Add the row(s) to the body's table/section \
+             The entry's section is in the markdown, but its table row and structured fields \
+             live in the catalog, which is machine-local and git-ignored — a row absent from \
+             the body is in no repo. Add the row(s) to the body's table/section \
              via doc(action=\"update\", patch={{body_edits: [...]}}).",
             outcome.snapshot_missing.len()
         ));
@@ -716,7 +718,14 @@ mod tests {
             "F-4 was already adrift and F-5 was just created; F-1..F-3 are rendered"
         );
         assert!(result["snapshot_hint"].as_str().unwrap().contains("git"));
+        let hint = result["snapshot_hint"].as_str().unwrap();
+        assert!(
+            hint.contains("section is in the markdown") && hint.contains("table row"),
+            "the entry's section is committed; only its table row and fields are not: {hint}"
+        );
     }
+    // mutation: restore "Entry rows live in the catalog ..." as the snapshot hint's first
+    // sentence → the `section is in the markdown` assertion is red.
 
     /// `append_entry` refuses an `id_prefix` the token grammar cannot express. The PARAMS
     /// path is the load-bearing one: its allocator checks no declaration at all, so nothing
@@ -1228,6 +1237,10 @@ mod tests {
         .unwrap_err();
 
         assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        assert!(
+            err.to_string().contains("`entry` must be a JSON object"),
+            "the refusal this test names, and not the missing-section one: {err:#}"
+        );
     }
 
     #[tokio::test]
@@ -1247,7 +1260,14 @@ mod tests {
         .unwrap_err();
 
         assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("has no augmentation") && !text.contains("written into the markdown too"),
+            "the not-found refusal this test names, and not the missing-section one: {text}"
+        );
     }
+    // mutation: drop the `with_section(...)` wrap from the call → the section refusal answers
+    // first and the message pin is red (the error type alone would still hold).
     /// A params call without its section fields is refused in the TOOL, before any catalog
     /// access: nothing is allocated, nothing is written, and the refusal names every missing
     /// field. A partial trio names only what is absent. The library keeps accepting `None`.
@@ -1307,6 +1327,24 @@ mod tests {
             "{unknown:#}"
         );
     }
+    /// The hint on a call that cannot even be parsed says what a params call needs NOW: the
+    /// section fields too, or the caller follows it into the section refusal.
+    #[tokio::test]
+    async fn the_parse_hint_says_a_params_call_needs_the_section_fields() {
+        let ctx = mk_ctx();
+        let err = call(&ctx, json!({"entry_collection": "failures"}))
+            .await
+            .unwrap_err();
+        let text = format!("{err:?}");
+        assert!(
+            text.contains(
+                "for a params ledger pass entry_collection + entry + title + body + anchor_heading"
+            ),
+            "{text}"
+        );
+    }
+    // mutation: restore "for a params ledger pass entry_collection + entry." in `parse_args` → red.
+
     // mutation: remove the `a.entry_collection.is_some() && section.is_none()` refusal in `call`
     // → the first call returns Ok.
 
@@ -2355,8 +2393,10 @@ mod tests {
         assert_eq!(result["section_written"], true, "{result}");
         let step = result["next_step"].as_str().unwrap();
         assert!(
-            step.contains("already in the file") && step.contains("nothing new was written"),
-            "{step}"
+            step.contains("already in the file")
+                && step.contains("no second section was written")
+                && !step.contains("nothing new was written"),
+            "an adoption may still raise the mark, so it must not claim it wrote nothing: {step}"
         );
         let text = std::fs::read_to_string(&path).unwrap();
         assert_eq!(text.matches("## F-").count(), 1, "{text}");
