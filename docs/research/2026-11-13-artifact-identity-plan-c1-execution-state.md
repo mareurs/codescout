@@ -18,29 +18,32 @@ Written 2026-11-13 for a session compaction. The SDD ledger (`progress.md`) live
 
 ## Where the work is
 
-- Plan: `docs/superpowers/plans/2026-11-12-artifact-identity-plan-c1-dual-write-entries-and-sidecars.md` (10 tasks, two independent Opus reviews before execution, 30 plan rulings C1-R1..R30), committed on the C1 branch only.
-- Branch `feat/artifact-identity-plan-c1-20261112`, worktree `/home/marius/work/claude/codescout/.worktrees/artifact-identity-plan-c1`, based on `experiments` 8873c012e. HEAD at the time of writing: `7846817b0`. `experiments` has moved on since (docs commits from this work and peers): the landing route merges it into the branch first.
-- Execution method: subagent-driven development. Implementer Sonnet at higher effort, reviewer Opus per task, scoped Opus re-review per fix round, one whole-branch Opus review at the end with one fix wave. Controller never fixes code itself (implementers fix). Workspace: `.superpowers/sdd/2026-11-12-artifact-identity-plan-c1-dual-write-entries-and-sidecars/` (briefs `task-N-brief.md`, reports `task-N-report.md`, review diffs, `progress.md`).
-- User decision on record: the user answered "go" to the plan hand-off that asked for approval and an answer on "refuse params `append_entry` from a worktree". It is read as approval of the plan and of the recommended answer (refuse, C1-R9). Tasks 4 and 5 assume the refusal. If the user meant otherwise those tasks need rework.
+- **LANDED 2026-11-13.** The user chose "merge locally". `experiments` was merged into the branch (`7db510676`), the gate ran green on that tree, and `experiments` fast-forwarded from `fa8e24ea0` to `7db510676`. The worktree and the branch were removed. The SDD workspace went with the worktree; this doc holds the committed record.
+- Plan: `docs/superpowers/plans/2026-11-12-artifact-identity-plan-c1-dual-write-entries-and-sidecars.md` (10 tasks, two independent Opus reviews before execution, 30 plan rulings C1-R1..R30). It is now on `experiments`.
+- Execution method: subagent-driven development. Implementer Sonnet at higher effort, reviewer Opus per task, scoped Opus re-review per fix round, one whole-branch Opus review with one fix wave. The controller never fixed code.
+- Final gate (tree untouched, merged HEAD `7db510676`): nextest 9919/9919 lean, 10013/10013 default, python 1836 passed, FMT, CLIPPY, LEAN and DEFAULT all exit 0.
+- Whole-branch review: "Yes after fixes". The one Important finding I-1 (a digit-leading key segment in `rekey_prefix`) was fixed in `b146e18a3`. A scoped re-review confirmed each new test catches its own mutation.
+- User decision on record: "go" was read as approval of the plan and of C1-R9 (refuse params `append_entry` from a worktree). Tasks 4 and 5 assume the refusal.
 
 ## Task status
 
-| Task | State | Commits (base..head) | Fix rounds |
-|---|---|---|---|
-| 1 dual-write contract (`catalog/dual_write.rs`) | complete | 3e2feac9e..10624ff44 (2826d5e54, 7e9151573, 10624ff44) | 2 |
-| 2 retry adopts the section it already wrote | complete | ..b950b627c (5288c9c41, b950b627c) | 1 |
-| 3 cite text as grammar (`catalog/cite_text.rs`) + commit oracle | complete | ..c8d930394 (2694348ea, 9d21fd7e0, 3555f6904, c8d930394) | 3 |
-| 4 no params allocation from a worktree; source-only renumber check | complete, gated green | ..7c9017252 (c573b2948, 1f165952a, 7c9017252) | 2 |
-| 5 params path writes the section and the mark | complete | ..684ff65a0 (c9cba6bf4, 684ff65a0) | 1 |
-| 6 recipes, prompts, descriptions, guides, gates | complete, gated green | ..f5a01df7c (2418567f2, f5a01df7c) | 1 |
-| 7 params-path cites as grammar text | complete | ..7846817b0 (6bead357c, 7846817b0) | 1 |
-| 8 prose path writes cites | IN PROGRESS: implementer `a6991fdab5a93b6cd` died on an API rate-limit error (HTTP 429), the worktree was clean at 7846817b0, the agent was resumed and restarted from the clean tree | none yet | 0 |
-| 9 `rekey_prefix` refuses while other documents cite the old prefix; moves the ledger's own citations | pending | - | - |
-| 10 CLI write lock for 8 commands | pending | - | - |
+All 10 tasks are complete and reviewed. Fix rounds: T1 2, T2 1, T3 3, T4 2, T5 1, T6 1, T7 1, T8 0, T9 1, T10 0, plus one final-review fix wave.
 
-Gate history on the C1 branch: Task 4 gate green on 7c9017252 (407 s) after a first green on 1f165952a was discarded as unreliable (an implementer edited the tree while it ran); Task 6 gate green on f5a01df7c (404 s, tree untouched). The plan calls for a full gate after Tasks 4, 6, 8 and 10. No gate has run on Task 7's commit.
+| Task | Commit(s) |
+|---|---|
+| 1 dual-write contract | 2826d5e54, 7e9151573, 10624ff44 |
+| 2 retry adopts the section it wrote | 5288c9c41, b950b627c |
+| 3 cite text as grammar + commit oracle | 2694348ea, 9d21fd7e0, 3555f6904, c8d930394 |
+| 4 no params allocation from a worktree | c573b2948, 1f165952a, 7c9017252 |
+| 5 params path writes the section and the mark | c9cba6bf4, 684ff65a0 |
+| 6 recipes, prompts, guides, gates | 2418567f2, f5a01df7c |
+| 7 params-path cites as grammar text | 6bead357c, 7846817b0 |
+| 8 prose path writes cites | 370117699 |
+| 9 `rekey_prefix` moves own citations, refuses while others cite | 540cafe09, 921ccf134 (guard on preceding `/`) |
+| 10 CLI write lock for 8 commands | 3ea7a1dc4 |
+| final fix wave (I-1) | b146e18a3 |
 
-Budgets that bind every remaining task: `TOOL_SURFACE_CHAR_BUDGET` is exactly 57_664 (the measured total; headroom 0; the gate asserts `<=`), so any edit to an advertised description or schema is character-neutral or smaller, or re-measured with a log entry (`cargo test --lib tool_surface_report_lengths -- --nocapture`). Guide ceilings: `WRITE_CEILING_APPEND_ENTRY` 5,522 (delivers 5,360), `WRITE_CEILING_UPDATE_ENTRY` 4,232 (4,042), `WRITE_CEILING_LINK` 1,443 (1,262), `MAX_DECLARED_SECTION_BYTES` 2,500 per declared section.
+Budget that binds every later plan: `TOOL_SURFACE_CHAR_BUDGET` is exactly 57_664 (headroom 0). Guide ceilings: `WRITE_CEILING_APPEND_ENTRY` 5,394+128, UPDATE_ENTRY 4,104+128, LINK 1,315+128, `MAX_DECLARED_SECTION_BYTES` 2,500.
 
 ## What the code does now (Tasks 1-7)
 
@@ -96,11 +99,9 @@ Filed from the main checkout (commit with this document):
 
 ## Next steps, in order
 
-1. Wait for the Task 8 implementer (`a6991fdab5a93b6cd`). Then: `review-package` against BASE 7846817b0, Opus task review with named risks (reuse of `resolve_cites`, atomicity, prose adoption key with cites, the tool layer accepting cites only with a section, zero budget headroom, texts that said a prose ledger refuses `cites`), fix loop, then a full gate on an UNTOUCHED tree (nobody edits while it runs).
-2. Task 9 then Task 10 by the same loop; full gate after Task 10.
-3. Whole-branch Opus review with the ledger's deferred list, one fix wave, one scoped re-review.
-4. File the remaining bug TODOs if new ones appear; do the "After the plan" steps; present finishing options.
-5. Then write Plan D's scout (the shadow diff as the cutover acceptance test needs a root-mapping option), and Plans C2, C3.
+1. From the main checkout: fix the sectionless recipes of `docs/trackers/claim-decay.md` (DC) and `windows-platform-support.md` (WIN) and shrink `KNOWN_SECTIONLESS_LEDGER_RECIPES`; fix `prompt-hamsa-audit-log.md` (~line 29) and the `artifact(` openers (`windows-platform-support.md` ~326, `provenance-subsystem.md` ~1130); run `doc(action="augment")` to align catalog rows with the 11 edited sidecar prompts; re-grep guides for "worktree-local file".
+2. File bug files from `docs/issues/_TEMPLATE.md`: N-2 (`write_catalogued_file` in `src/librarian/util.rs` truncates in place; a disk-full write truncates the ledger; fix with temp file + rename) and M-2 (a token after `<digits>:` such as `T9:F-1` reads as a numeric qualifier and does not move). Optional: N-1 (adopted no-write branch never calls `record_written_file`), N-3 (`merge_worktree.rs:573-581` refused shadow + absent main file renumbers fail-open), N-4 (prose path sets no `key_note`), N-5 (`doc(move)` stem rename leaves `[[oldkey]]` cites stale; a Plan D precondition), N-6 (`entry-citations.md` and the `cites` schema say "Not from a worktree", which overstates).
+3. Write the Plan D scout (the shadow diff needs an old-root mapping option; reuse the dual-write library; never drop a row whose text twin does not resolve), then Plans C2 and C3 (C3 needs a persistent derived-file location).
 
 ## Standing instructions from the user (carry forward)
 
