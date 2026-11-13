@@ -8,6 +8,7 @@ pub mod artifact;
 pub(crate) mod audit;
 pub mod augmentation;
 pub mod chunk;
+pub(crate) mod cite_text;
 pub mod commits;
 pub(crate) mod dual_write;
 pub mod entry_cite;

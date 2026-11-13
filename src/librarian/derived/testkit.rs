@@ -231,3 +231,90 @@ pub(crate) fn fill_old_catalog(
         }
     }
 }
+
+/// The derived index of a commit, kept with the temp directory the commit lives in.
+pub(crate) struct Built {
+    pub conn: rusqlite::Connection,
+    _dir: tempfile::TempDir,
+}
+
+/// Commit `files` (`path`, text) into a temp repo and run the full build over that commit: the
+/// commit oracle. The derived index reads commits only, so what an uncommitted working tree holds
+/// is invisible to it.
+pub(crate) fn build_files(files: &[(&str, &str)]) -> Built {
+    use super::build::{build_full, key_space_from_commit, rules_from_commit, BuildInput};
+    use super::scan::open_commit;
+
+    let dir = tempfile::tempdir().unwrap();
+    let entries: Vec<(&str, u32, &[u8])> = files
+        .iter()
+        .map(|&(path, text)| (path, FILE, text.as_bytes()))
+        .collect();
+    let repo = repo_with(dir.path(), &entries);
+    let commit = open_commit(&repo, "HEAD").unwrap();
+    let rules = rules_from_commit(&repo, &commit).unwrap();
+    let space = key_space_from_commit(&repo, &commit).unwrap();
+    let mut conn = super::schema::open_in_memory().unwrap();
+    build_full(
+        &mut conn,
+        &BuildInput {
+            repo: &repo,
+            commit: &commit,
+            root: dir.path(),
+            rules: &rules,
+            space: &space,
+        },
+    )
+    .unwrap();
+    Built { conn, _dir: dir }
+}
+
+/// The tokens of the entries `rel_path` defines in the built index, in document order.
+pub(crate) fn entry_tokens(conn: &rusqlite::Connection, rel_path: &str) -> Vec<String> {
+    let mut stmt = conn
+        .prepare("SELECT token FROM entry WHERE rel_path = ?1 ORDER BY heading_line")
+        .unwrap();
+    let rows = stmt
+        .query_map([rel_path], |r| r.get::<_, String>(0))
+        .unwrap();
+    rows.collect::<Result<_, _>>().unwrap()
+}
+
+/// One edge as [`edges_from`] returns it: `kind`, `target_repo`, `target_key`, `target_token`.
+pub(crate) type EdgeRow = (String, Option<String>, Option<String>, Option<String>);
+
+/// What `rel_path` cites in the built index, by position: `kind`, `target_repo`, `target_key`,
+/// `target_token`. `kind` is the resolution (`file`, `entry`, `unknown_key`, `cross_repo`, ...; see
+/// `edge_kind` in `build.rs`).
+pub(crate) fn edges_from(conn: &rusqlite::Connection, rel_path: &str) -> Vec<EdgeRow> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT kind, target_repo, target_key, target_token \
+             FROM edge WHERE src_rel_path = ?1 ORDER BY ord",
+        )
+        .unwrap();
+    let rows = stmt
+        .query_map([rel_path], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .unwrap();
+    rows.collect::<Result<_, _>>().unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_commit_oracle_sees_what_a_commit_holds() {
+        let b = build_files(&[
+            ("docs/ledger.md", "## F-1 — x\n\n**Cites:** [[target]]\n"),
+            ("docs/target.md", "# T\n"),
+        ]);
+        assert_eq!(entry_tokens(&b.conn, "docs/ledger.md"), vec!["F-1"]);
+        assert_eq!(
+            edges_from(&b.conn, "docs/ledger.md"),
+            vec![("file".into(), None, Some("target".into()), None)]
+        );
+    }
+}

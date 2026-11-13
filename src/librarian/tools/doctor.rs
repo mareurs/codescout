@@ -1645,7 +1645,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                  scope=\"umbrella\", write=true) can also derive one from prose, but \
                  only for a bare artifact id or an entry token that resolves uniquely \
                  within a declared [[umbrella]] — a repo-qualified `<repo>:TOKEN` \
-                 citation will not become a cross-root edge that way, by design."
+                 citation will not become a cross-root edge that way, by design. A \
+                 cite that names a document of another repository is written as \
+                 `[[repo/key]]` from that repository's committed name, so the foreign \
+                 repository needs a committed `.codescout/repo.toml` name first."
                     .to_string(),
             );
         }
@@ -9338,8 +9341,13 @@ mod tests {
         assert!(
             hint.contains("append_entry") && hint.contains("cites="),
             "the hint must name a citation-form-agnostic, always-working remedy \
-             (append_entry with cites=[...]), not only link_scan (which cannot resolve \
-             a repo-qualified citation into a cross-root edge): {hint}"
+                   (append_entry with cites=[...]), not only link_scan (which cannot resolve \
+                   a repo-qualified citation into a cross-root edge): {hint}"
+        );
+        assert!(
+            hint.contains("repo.toml"),
+            "the hint must say a foreign repository needs a committed name to be cited \
+             in the grammar: {hint}"
         );
     }
 

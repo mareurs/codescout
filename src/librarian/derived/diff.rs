@@ -534,7 +534,7 @@ struct NewDoc {
 }
 
 /// Where an old `abs_path` lies relative to the git root.
-enum Scope {
+pub(crate) enum Scope {
     /// Under the root, outside `.worktrees/`: the git-root-relative path with `/`.
     Inside(String),
     /// Outside the root, or not spelled as a plain path below it.
@@ -547,7 +547,7 @@ enum Scope {
 /// with a `..` or non-UTF-8 component after the root, or the root itself, is `OtherRoot`: it
 /// cannot be named as a git-root-relative file. (`Path` already reads `a//b` and `a/./b` as
 /// `a/b`.)
-fn scope_of(git_root: &Path, abs_path: &str) -> Scope {
+pub(crate) fn scope_of(git_root: &Path, abs_path: &str) -> Scope {
     let Ok(rel) = Path::new(abs_path).strip_prefix(git_root) else {
         return Scope::OtherRoot;
     };
