@@ -31,14 +31,17 @@ worktree never sees another's in-progress rows.
 
 ## Fork-on-first-write
 
-The first mutating call against a main-root artifact — `append_entry`,
-`update`, `event_create`, `augment`, or `link` — forks it, creating:
+The first mutating call against a main-root artifact — `update`, `event_create`,
+`augment`, or `link` — forks it, creating:
 
 - a shadow row at the worktree path;
 - a `worktree_fork` event carrying the fork-time base params and frontmatter;
 - a `worktree_of` lineage link back to the main row.
 
-Every write after that lands on the shadow. `delete` and `move` against a
+Every write after that lands on the shadow. `append_entry` never forks: an id
+allocation from a worktree session is refused, with a hint to repeat the call with
+the main row's id and `workspace=<main root>` (see
+[Entry Citations](entry-citations.md)). `delete` and `move` against a
 main-root target are refused from a worktree session — merge first, or act from
 the main checkout.
 
@@ -56,11 +59,18 @@ Folds each shadow's delta — computed against its own fork-time base — onto t
 main twin, reseats rows that were born in the worktree and so have no main twin
 to fold onto, and closes the registration. Drop `dry_run` to write.
 
+A renumber of an id the worktree's file defines by heading is skipped, because no
+tool renumbers an entry in both the params and the markdown, and the registration
+stays active. The conflict's `source` names what decided. The exits are: make the
+worktree's file readable, or restore its branch at its tip, and merge again; or
+`abandon`.
+
 ```text
 librarian(action="merge_worktree", root="/repo/.worktrees/feat", abandon=true)
 ```
 
-Drops the shadows and marks the registration abandoned.
+Drops the shadows and marks the registration abandoned. An entry held only in
+params is lost; an entry in the markdown stays in the file that holds it.
 
 ## `doctor`'s worktree checks are now the legacy path
 

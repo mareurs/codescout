@@ -22,11 +22,15 @@ doc(action="append_entry",
          id="<tracker-id>",
          id_prefix="F",
          entry_collection="frictions",
-         entry={title: "...", status: "open"})
+         entry={title: "...", status: "open"},
+         title="...", body="...", anchor_heading="## History")
 ```
 
 The server computes the next id from the live maximum across **both** sources
-and assigns it, overwriting any `id` you pass in `entry`. When params lags the
+and assigns it, overwriting any `id` you pass in `entry`. It writes the entry into
+the markdown too, as a `## F-N — <title>` section before `anchor_heading` (the only
+shape that defines a citable token), in the same call; a params call without all of
+`title`, `body` and `anchor_heading` is refused and allocates nothing. When params lags the
 body, the response carries a `warning` saying so — the id is still safe, but
 the tracker needs a refresh.
 
@@ -94,9 +98,10 @@ than drift.
 `append_entry` refuses id allocation from a worktree session, on the same grounds it
 refuses `cites`. An entry id is ledger-wide state and must key to the main tracker; left
 unguarded, the worktree's shadow row is a different `artifact_id`, so both trees issue the
-same number — and nothing repairs it at merge, because the renumber only covers params
-rows. Record it in a worktree-local file and fold it in from the main checkout after the
-merge.
+same number — and nothing repairs it at merge, because no tool renumbers an entry in both
+the params and the markdown. The refusal's hint names the route: repeat the call with the
+main row's id and `workspace=<main root>`. The entry is written into the main checkout's
+working tree, where peers see it as an uncommitted change to the ledger.
 
 ## Citing another entry
 
@@ -108,6 +113,7 @@ doc(action="append_entry",
          id_prefix="W",
          entry_collection="wins",
          entry={title: "..."},
+         title="...", body="...", anchor_heading="## History",
          cites=["F-12", "a1b2c3d4e5f60718", "docs/issues/2026-08-01-foo.md"])
 ```
 

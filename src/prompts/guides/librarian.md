@@ -181,8 +181,8 @@ its key — a bare-array patch under `merge` is a silent no-op.
 not in git, so nothing recovers it. Two purpose-built paths exist so you never have to:
 
 ```
-doc(action="append_entry", id=…, entry_collection="tasks",
-         id_prefix="T", entry={...})                        # add a row
+doc(action="append_entry", id=…, entry_collection="tasks", id_prefix="T",
+         entry={...}, title=…, body=…, anchor_heading=…)    # add a row + its section
 doc(action="update_entry", id=…, entry_collection="tasks",
          entry_id="T-7", fields={"status": "done"})         # change a row
 ```
@@ -368,11 +368,13 @@ main checkout's catalog instead of a wholesale fork:
 - **Overlay reads:** a worktree session sees main-repo artifacts live until
   it writes one. `find`/`get` dedup shadow vs. main — where both exist for
   the same lineage, the shadow wins and is annotated `"overlay": true`.
-- **Fork-on-first-write:** the first mutating call (`append_entry`, `update`,
+- **Fork-on-first-write:** the first mutating call (`update`,
   `doc(event_create)`, `doc(action="augment")`, `link`) against a main-root artifact
   from a worktree session forks it — seeds a shadow row at the worktree path,
   a `worktree_fork` event carrying the fork-time base params/frontmatter, and
   a `worktree_of` lineage link. Every write after that lands on the shadow.
+  `append_entry` never forks: an id allocation (params or prose) from a worktree is refused,
+  with a hint to repeat the call with the main row's id and `workspace=<main root>`.
   `delete`/`move` on a main-root target from a worktree session are refused —
   merge or act from the main checkout instead.
 - **Merge:**
@@ -382,7 +384,11 @@ main checkout's catalog instead of a wholesale fork:
   Folds each shadow's delta (vs. its fork-time base) onto its main twin,
   reseats worktree-born rows, and closes the registration. Drop `dry_run`
   to write; `abandon=true` instead drops the shadows and marks the
-  registration abandoned.
+  registration abandoned (an entry held only in params is lost; one in the
+  markdown stays in its file). A renumber of an id the worktree's source defines
+  by heading is skipped and the registration stays active; the conflict's
+  `source` names what decided. Exits: make the worktree's file readable, or
+  restore its branch at its tip, and merge again; or `abandon`.
 - **`doctor`'s `worktree_scoped_row` / `fix=reseat_worktree` is now the
   LEGACY fallback** — it only applies to worktree-scoped rows with no
   ACTIVE registration (pre-overlay drift, or a lost registration). A

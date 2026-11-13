@@ -2783,10 +2783,10 @@ mod taxonomy_recipes {
         None
     }
 
-    /// Value of `key="…"` at depth 0 of `args`, outside strings, at a word boundary.
-    fn top_level_arg(args: &str, key: &str) -> Option<String> {
+    /// Byte offset of `needle` (`key="` or `key=`) in `args` at depth 0, outside strings, at a word
+    /// boundary: the one scan behind `top_level_arg` and `has_top_level_arg`.
+    fn find_top_level(args: &str, needle: &str) -> Option<usize> {
         let bytes = args.as_bytes();
-        let needle = format!("{key}=\"");
         let (mut depth, mut in_str, mut i) = (0usize, false, 0);
         while i < bytes.len() {
             let b = bytes[i];
@@ -2800,9 +2800,7 @@ mod taxonomy_recipes {
                 && bytes[i..].starts_with(needle.as_bytes())
                 && (i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_'))
             {
-                let start = i + needle.len();
-                let len = args[start..].find('"')?;
-                return Some(args[start..start + len].to_string());
+                return Some(i);
             } else {
                 match b {
                     b'"' => in_str = true,
@@ -2814,6 +2812,39 @@ mod taxonomy_recipes {
             i += 1;
         }
         None
+    }
+
+    /// Value of `key="…"` at depth 0 of `args`, outside strings, at a word boundary.
+    fn top_level_arg(args: &str, key: &str) -> Option<String> {
+        let needle = format!("{key}=\"");
+        let start = find_top_level(args, &needle)? + needle.len();
+        let len = args[start..].find('"')?;
+        Some(args[start..start + len].to_string())
+    }
+
+    /// Does `args` pass `key=` at depth 0, whatever its value is spelled as (`title=…` and
+    /// `title="x"` alike)? A field inside `entry={title, …}` is nested and does not count.
+    fn has_top_level_arg(args: &str, key: &str) -> bool {
+        find_top_level(args, &format!("{key}=")).is_some()
+    }
+
+    /// The finding for a PARAMS recipe (one that names an `entry_collection`) that leaves out part
+    /// of the section: `append_entry` writes a params entry into the markdown too, and refuses a
+    /// call without `title`, `body` and `anchor_heading` together. `here` names the recipe.
+    fn params_section_finding(here: &str, args: &str) -> Option<String> {
+        let missing: Vec<&str> = ["title", "body", "anchor_heading"]
+            .into_iter()
+            .filter(|k| !has_top_level_arg(args, k))
+            .collect();
+        (!missing.is_empty()).then(|| {
+            format!(
+                "{here}: the params recipe passes no {}, but append_entry writes a params entry into \
+             the markdown as a section and refuses a params call without `title`, `body` and \
+             `anchor_heading` together. Repair the recipe: add title=…, body=… and \
+             anchor_heading=\"<the heading the section goes before>\" to the call.",
+                missing.join(", ")
+            )
+        })
     }
 
     fn first_tracker_path(cell: &str) -> Option<String> {
@@ -3108,6 +3139,22 @@ mod taxonomy_recipes {
         out
     }
 
+    /// `params_section_finding` for a TAXONOMY params recipe, re-read from its own row like
+    /// `taxonomy_index_row_findings`. A row that cannot be re-read is reported there or by the
+    /// scanner, so it is skipped here only because it is already reported.
+    fn taxonomy_section_findings(root: &Path, r: &Recipe) -> Vec<String> {
+        let Ok(tax) = std::fs::read_to_string(root.join("docs/TAXONOMY.md")) else {
+            return Vec::new();
+        };
+        let Some(line) = tax.lines().nth(r.line.saturating_sub(1)) else {
+            return Vec::new();
+        };
+        line.match_indices(CALL_OPENER)
+            .filter_map(|(open, _)| call_args(line, open + "doc".len()))
+            .filter_map(|args| params_section_finding(&r.at(), args))
+            .collect()
+    }
+
     /// Every Main-table recipe against the check for its shape, plus the index-row gate for a
     /// prose one. A function rather than the body of the corpus test, so a test can hand it a
     /// fixture and see that the gate is wired in: the corpus test reads the real docs, which stay
@@ -3129,7 +3176,10 @@ mod taxonomy_recipes {
                     failures.extend(check_prose(root, r));
                     failures.extend(taxonomy_index_row_findings(root, r));
                 }
-                Shape::Params { collection } => failures.extend(check_params(root, r, collection)),
+                Shape::Params { collection } => {
+                    failures.extend(check_params(root, r, collection));
+                    failures.extend(taxonomy_section_findings(root, r));
+                }
                 Shape::Template => failures.extend(check_template(root, r, TEMPLATE_EXEMPT)),
             }
         }
@@ -3296,7 +3346,8 @@ mod taxonomy_recipes {
     }
 
     /// Asserts the CODE contract per recipe shape. Params recipes are deliberately NOT required
-    /// to declare `entry_prefix` — only the prose path reads it (bug-fix-session-log:F-176).
+    /// to declare `entry_prefix` — only the prose path reads it (bug-fix-session-log:F-176) — but
+    /// they must pass `title`, `body` and `anchor_heading`, which the params path refuses without.
     /// Covers only the *Main taxonomy* table of docs/TAXONOMY.md: TAXONOMY's other tables,
     /// CLAUDE.md, sidecar prompts and ledger templates also route writers to append_entry and are
     /// not read here.
@@ -3956,6 +4007,7 @@ mod taxonomy_recipes {
                                 sidecar.entry_collection
                             ));
                         }
+                        scan.failures.extend(params_section_finding(&at, &args));
                     }
                     None => {
                         let Some(declared) = &declared else { continue };
@@ -4010,9 +4062,10 @@ mod taxonomy_recipes {
         )
     }
 
-    /// Asserts, per call in every sidecar prompt, the two conditions that make `append_entry`
-    /// refuse: a params call must name the collection its own sidecar declares, and a prose call's
-    /// prefix must be declared by the ledger that owns the sidecar.
+    /// Asserts, per call in every sidecar prompt, the conditions that make `append_entry`
+    /// refuse: a params call must name the collection its own sidecar declares and pass `title`,
+    /// `body` and `anchor_heading`, and a prose call's prefix must be declared by the ledger that
+    /// owns the sidecar.
     #[test]
     fn every_sidecar_prompt_append_entry_call_is_one_the_code_accepts() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -4064,7 +4117,7 @@ mod taxonomy_recipes {
     fn a_params_call_naming_its_sidecars_collection_is_clean() {
         let scan = scan_of(
             "",
-            r##"To add: doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"##,
+            r###"To add: doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a}, title=…, body=…, anchor_heading="## T")"###,
             Some("issues"),
         );
         assert!(scan.failures.is_empty(), "{:?}", scan.failures);
@@ -4083,7 +4136,7 @@ mod taxonomy_recipes {
     fn a_params_call_naming_another_collection_is_refused() {
         let scan = scan_of(
             "",
-            r##"doc(action="append_entry", id="x", entry_collection="tasks", id_prefix="WIN", entry={a})"##,
+            r###"doc(action="append_entry", id="x", entry_collection="tasks", id_prefix="WIN", entry={a}, title=…, body=…, anchor_heading="## T")"###,
             Some("issues"),
         );
         assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
@@ -4098,7 +4151,7 @@ mod taxonomy_recipes {
     fn a_params_call_against_a_sidecar_declaring_no_collection_is_refused() {
         let scan = scan_of(
             "",
-            r##"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"##,
+            r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a}, title=…, body=…, anchor_heading="## T")"###,
             None,
         );
         assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
@@ -4145,7 +4198,7 @@ mod taxonomy_recipes {
         // A wrong collection, so a clean parse cannot satisfy this: only a READ call can fail.
         let scan = scan_of(
             "",
-            r##"Call doc(append_entry, entry_collection="tasks", id_prefix="RC", entry={a}) to add."##,
+            r###"Call doc(append_entry, entry_collection="tasks", id_prefix="RC", entry={a}, title=…, body=…, anchor_heading="## T") to add."###,
             Some("catches"),
         );
         assert_eq!(scan.calls.len(), 1, "{:?}", scan.calls);
@@ -4234,7 +4287,7 @@ mod taxonomy_recipes {
 
     #[test]
     fn a_sidecar_with_a_recipe_needs_exactly_one_owner() {
-        let call = r##"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"##;
+        let call = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a}, title=…, body=…, anchor_heading="## T")"###;
         // No ledger declares it.
         let dir = tempfile::tempdir().unwrap();
         put(
@@ -4414,7 +4467,48 @@ mod taxonomy_recipes {
         params: usize,
         /// Calls written as a sentence about the form, not as a recipe. See `is_form_mention`.
         mentions: usize,
+        /// Params recipes that pass no section and are named in `KNOWN_SECTIONLESS_LEDGER_RECIPES`:
+        /// exempt from `failures`, and the list's staleness check reads them.
+        known_sectionless: Vec<(String, String)>,
         failures: Vec<String>,
+    }
+
+    /// Params recipes, as (ledger path, id_prefix), that pass no `title`, `body` and
+    /// `anchor_heading` yet. They sit in librarian-managed trackers, which an edit from a worktree
+    /// would fork; they are fixed from the main checkout. SHRINK-ONLY, in the shape of
+    /// `KNOWN_ABSENT` (tests/ledger_field_labels.rs): an unlisted sectionless params recipe fails
+    /// `every_ledger_append_entry_recipe_is_one_the_code_accepts`, and a listed one that has gained
+    /// its section (or is gone) fails it until its line is removed.
+    const KNOWN_SECTIONLESS_LEDGER_RECIPES: &[(&str, &str)] = &[
+        ("docs/trackers/claim-decay.md", "DC"),
+        ("docs/trackers/windows-platform-support.md", "WIN"),
+    ];
+
+    fn is_known_sectionless(rel: &str, prefix: &str) -> bool {
+        KNOWN_SECTIONLESS_LEDGER_RECIPES
+            .iter()
+            .any(|(f, p)| *f == rel && *p == prefix)
+    }
+
+    /// The scan's findings plus one per `KNOWN_SECTIONLESS_LEDGER_RECIPES` entry that no longer has
+    /// a sectionless params recipe in the scan: the list only shrinks, so a fixed recipe must leave
+    /// it in the same change.
+    fn ledger_findings(scan: &LedgerScan) -> Vec<String> {
+        let mut out = scan.failures.clone();
+        for (rel, prefix) in KNOWN_SECTIONLESS_LEDGER_RECIPES {
+            if !scan
+                .known_sectionless
+                .iter()
+                .any(|(f, p)| f == rel && p == prefix)
+            {
+                out.push(format!(
+                    "KNOWN_SECTIONLESS_LEDGER_RECIPES names `{rel}` ({prefix}), but no params recipe \
+                 for {prefix} there lacks its section any more — delete the entry \
+                 (src/librarian/tools/append_entry.rs); the list only shrinks."
+                ));
+            }
+        }
+        out
     }
 
     /// A call whose arguments, after the opener's own `action="append_entry"` / `append_entry`, are
@@ -4522,7 +4616,14 @@ mod taxonomy_recipes {
                              {collection:?} — append_entry refuses a collection the augmentation does \
                              not declare, so an agent following this recipe is refused. Repair ONE \
                              side: the recipe, or the sidecar's entry_collection."
-                            ));
+                             ));
+                        }
+                        if let Some(finding) = params_section_finding(&here, args) {
+                            if is_known_sectionless(&rel, &prefix) {
+                                scan.known_sectionless.push((rel.clone(), prefix.clone()));
+                            } else {
+                                scan.failures.push(finding);
+                            }
                         }
                     }
                     None => {
@@ -4574,9 +4675,11 @@ mod taxonomy_recipes {
         )
     }
 
-    /// Asserts, per `append_entry` call written in `docs/trackers/*.md`, the two conditions that make
+    /// Asserts, per `append_entry` call written in `docs/trackers/*.md`, the conditions that make
     /// the code refuse it: a prose call's prefix must be declared by the ledger it is written in,
-    /// and a params call must name the collection that ledger's sidecar declares.
+    /// a params call must name the collection that ledger's sidecar declares, and a params call
+    /// must pass `title`, `body` and `anchor_heading` (the two recipes in
+    /// `KNOWN_SECTIONLESS_LEDGER_RECIPES` are exempt until they are fixed).
     #[test]
     fn every_ledger_append_entry_recipe_is_one_the_code_accepts() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -4590,10 +4693,11 @@ mod taxonomy_recipes {
             "the scanner found no ledger, or lost a whole call shape — this is not a clean corpus. \
          {population}"
         );
+        let findings = ledger_findings(&scan);
         assert!(
-            scan.failures.is_empty(),
+            findings.is_empty(),
             "{}",
-            ledger_report(&scan.failures, &population)
+            ledger_report(&findings, &population)
         );
     }
 
@@ -4769,7 +4873,7 @@ mod taxonomy_recipes {
 
         // A params ledger's rows are rendered from params, not typed into the call.
         let params = format!(
-            "{F_ROWS}\ndoc(action=\"append_entry\", id=\"x\", entry_collection=\"c\", id_prefix=\"F\", entry={{a}})"
+            "{F_ROWS}\ndoc(action=\"append_entry\", id=\"x\", entry_collection=\"c\", id_prefix=\"F\", entry={{a}}, title=…, body=…, anchor_heading=\"## T\")"
         );
         let scan = ledger_scan_of("entry_prefix: F\n", &params, Some("c"));
         assert!(scan.failures.is_empty(), "{:?}", scan.failures);
@@ -4902,7 +5006,7 @@ mod taxonomy_recipes {
 
     #[test]
     fn a_ledger_params_call_naming_its_sidecars_collection_is_clean() {
-        let call = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"###;
+        let call = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a}, title=…, body=…, anchor_heading="## T")"###;
         let scan = ledger_scan_of("", call, Some("issues"));
         assert!(scan.failures.is_empty(), "{:?}", scan.failures);
         assert_eq!((scan.prose, scan.params), (0, 1));
@@ -4910,7 +5014,7 @@ mod taxonomy_recipes {
 
     #[test]
     fn a_ledger_params_call_naming_another_collection_is_refused() {
-        let call = r###"doc(action="append_entry", id="x", entry_collection="tasks", id_prefix="WIN", entry={a})"###;
+        let call = r###"doc(action="append_entry", id="x", entry_collection="tasks", id_prefix="WIN", entry={a}, title=…, body=…, anchor_heading="## T")"###;
         let scan = ledger_scan_of("", call, Some("issues"));
         assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
         let f = &scan.failures[0];
@@ -4922,7 +5026,7 @@ mod taxonomy_recipes {
 
     #[test]
     fn a_ledger_params_call_with_no_sidecar_is_refused() {
-        let call = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"###;
+        let call = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a}, title=…, body=…, anchor_heading="## T")"###;
         let scan = ledger_scan_of("", call, None);
         assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
         assert!(
@@ -4930,6 +5034,178 @@ mod taxonomy_recipes {
             "{:?}",
             scan.failures
         );
+    }
+
+    // ---- the section requirement on a params recipe (Plan C1 Task 6) ----
+    //
+    // `append_entry` writes a params entry into the markdown too and refuses a params call without
+    // `title`, `body` and `anchor_heading` together, so a recipe that teaches the call without
+    // them teaches a refusal. Oracle: the tool's own refusal (`params_section_refusal`).
+
+    const PARAMS_NO_SECTION: &str = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"###;
+
+    #[test]
+    fn a_params_call_without_a_section_is_a_recipe_finding() {
+        // Mutation: drop the `params_section_finding` call from the sidecar scan -> no finding.
+        let scan = scan_of("", PARAMS_NO_SECTION, Some("issues"));
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        let f = &scan.failures[0];
+        assert!(
+            f.contains("passes no title, body, anchor_heading"),
+            "the finding must name every missing field: {f}"
+        );
+        assert!(
+            f.contains("docs/augmentations/l.yaml"),
+            "and the sidecar: {f}"
+        );
+    }
+
+    #[test]
+    fn a_params_call_missing_one_section_field_names_only_that_field() {
+        // Load-bearing: `title` and `body` are present, so only `anchor_heading` may be named.
+        let call = PARAMS_NO_SECTION.replace("entry={a}", "entry={a}, title=…, body=…");
+        let scan = scan_of("", &call, Some("issues"));
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("passes no anchor_heading, but"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn section_fields_named_only_inside_the_entry_object_do_not_count() {
+        // Load-bearing: `entry={title, body, anchor_heading}` is nested, and the server reads the
+        // top-level arguments. A scan that matched anywhere in the call would pass this recipe.
+        let call = PARAMS_NO_SECTION.replace(
+            "entry={a}",
+            "entry={title=\"t\", body=\"b\", anchor_heading=\"## T\"}",
+        );
+        let scan = scan_of("", &call, Some("issues"));
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("passes no title, body, anchor_heading"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn a_prose_recipe_is_not_asked_for_params_arguments() {
+        // The prose path has its own all-or-none rule; the new condition reads params calls only.
+        let scan = scan_of("entry_prefix: [R, W]\n", SIDECAR_R_CALL, None);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn a_taxonomy_params_recipe_without_a_section_is_a_finding() {
+        // Mutation: drop `taxonomy_section_findings` from the `Shape::Params` arm -> no finding.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        put(
+            root,
+            "docs/trackers/t.md",
+            "---\nkind: tracker\nexpects_augmentation: docs/augmentations/t.yaml\n---\n# t\n",
+        );
+        put(
+            root,
+            "docs/augmentations/t.yaml",
+            "prompt: p\nentry_collection: observations\n",
+        );
+        let row =
+            |call: &str| format!("| h |\n| **T-N** | `docs/trackers/t.md` | x | `{call}` |\n");
+        let r = Recipe {
+            line: 2,
+            label: "T-N".into(),
+            id_prefix: "T".into(),
+            target: "docs/trackers/t.md".into(),
+            shape: Shape::Params {
+                collection: "observations".into(),
+            },
+        };
+        let bare = r###"doc(action="append_entry", id="t", entry_collection="observations", id_prefix="T", entry={…})"###;
+        put(root, "docs/TAXONOMY.md", &row(bare));
+        let out = check_main_taxonomy_recipes(root, std::slice::from_ref(&r));
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(
+            out[0].contains("docs/TAXONOMY.md:2 (T-N)")
+                && out[0].contains("passes no title, body, anchor_heading"),
+            "{out:?}"
+        );
+
+        let full = r###"doc(action="append_entry", id="t", entry_collection="observations", id_prefix="T", entry={…}, title=…, body=…, anchor_heading="## History")"###;
+        put(root, "docs/TAXONOMY.md", &row(full));
+        let out = check_main_taxonomy_recipes(root, std::slice::from_ref(&r));
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
+    fn the_known_list_exempts_a_sectionless_recipe_and_only_that_one() {
+        // A recipe at a listed (path, prefix) is exempt and recorded; the same recipe at any
+        // other path is a finding. Mutation: drop the `is_known_sectionless` test -> the unlisted
+        // recipe is exempt too, or the listed one is reported.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let call = r###"doc(action="append_entry", id="x", entry_collection="claims", id_prefix="DC", entry={a})"###;
+        for name in ["claim-decay.md", "other.md"] {
+            put(
+                root,
+                &format!("docs/trackers/{name}"),
+                &format!(
+                    "---\nkind: tracker\nexpects_augmentation: docs/augmentations/l.yaml\n---\n{call}\n"
+                ),
+            );
+        }
+        put(
+            root,
+            "docs/augmentations/l.yaml",
+            "prompt: p\nentry_collection: claims\n",
+        );
+        let scan = scan_ledger_recipes(root);
+        assert_eq!(
+            scan.known_sectionless,
+            vec![("docs/trackers/claim-decay.md".to_string(), "DC".to_string())]
+        );
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("docs/trackers/other.md")
+                && scan.failures[0].contains("anchor_heading"),
+            "{:?}",
+            scan.failures
+        );
+    }
+
+    #[test]
+    fn a_known_sectionless_recipe_that_gains_its_section_must_leave_the_list() {
+        // Mutation: never report a stale known-list entry -> no finding.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let call = r###"doc(action="append_entry", id="x", entry_collection="claims", id_prefix="DC", entry={a}, title=…, body=…, anchor_heading="## Template for new entries")"###;
+        put(
+            root,
+            "docs/trackers/claim-decay.md",
+            &format!(
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/l.yaml\n---\n{call}\n"
+            ),
+        );
+        put(
+            root,
+            "docs/augmentations/l.yaml",
+            "prompt: p\nentry_collection: claims\n",
+        );
+        let scan = scan_ledger_recipes(root);
+        assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+        assert!(scan.known_sectionless.is_empty());
+        let findings = ledger_findings(&scan);
+        let stale: Vec<&String> = findings
+            .iter()
+            .filter(|f| {
+                f.contains("KNOWN_SECTIONLESS_LEDGER_RECIPES names `docs/trackers/claim-decay.md`")
+            })
+            .collect();
+        assert_eq!(stale.len(), 1, "{findings:?}");
+        // The other listed recipe is absent from this fixture, so it is stale as well.
+        assert_eq!(findings.len(), 2, "{findings:?}");
     }
 
     #[test]
@@ -5277,6 +5553,13 @@ mod taxonomy_recipes {
             })
             .collect()
     }
+
+    // Not extended with the params-section requirement, deliberately: the FND and FT `Append`
+    // cells of the work-stream table are `entry_collection="…"` SHAPE LABELS that name a
+    // collection and no call arguments (`scan_work_stream_tables` builds `Shape::Params` from
+    // them), so they state nothing the section requirement contradicts. The call recipes live in
+    // the Main taxonomy table, which `every_taxonomy_append_entry_recipe_is_one_the_code_accepts`
+    // checks.
 
     #[test]
     fn every_work_stream_taxonomy_recipe_is_one_the_code_accepts() {

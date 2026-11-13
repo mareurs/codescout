@@ -191,7 +191,8 @@ or three letters, **never more than three** (the grammar is `[A-Z]{1,3}-\d+`).
 **Let the server allocate and write the section:** `doc(action="append_entry", id_prefix="R",
 anchor_heading="## Template for new entries", title=…, body=…, index_row="| {id} | … |")`
 writes `## R-N — <title>` (the only shape that defines a citable token) and the index row in
-one write. Omit `anchor_heading`, `title` or `body` and it only reserves the id. Hand-allocating:
+one write. All three or none: none only reserves the id; a params call (`entry_collection`)
+needs all three. Hand-allocating:
 scan **every** entry format in the file.
 
 ### Entry ids — refusals: main checkout only (every ledger)

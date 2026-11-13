@@ -23,14 +23,17 @@ prompt: |-
   meta-line text, the provenance of a derived field, or a recorded loss).
 
   APPEND: doc(action="append_entry", id="e12cd7e0060ed9b8", id_prefix="PV",
-  entry_collection="items", entry={...}) — assigns the next id atomically.
+  entry_collection="items", entry={...}, title=..., body=...,
+  anchor_heading="## Conventions for this tracker") — assigns the next id atomically and
+  writes the entry's defining heading, `#### PV-N — <title>`, before that heading (the end
+  of § Defining sections for cited entries); `body` is the meta line.
   QUERY: doc(action="get", id="e12cd7e0060ed9b8", entry_filter={"type": {"eq":
   "decision"}}). Note `entry_total` reports rows CONSIDERED (the whole collection), not rows
   matched — that asymmetry is how a typo'd filter field is detectable (considered 30,
   matched 0).
 
-  CITABILITY. A params row defines no citable token. As soon as anything cites an entry, add
-  a compact defining heading under § Defining sections for cited entries: `#### PV-N —
+  CITABILITY. A params row defines no citable token; the defining heading does, and the
+  APPEND call writes it: `#### PV-N —
   <title>` followed by a meta line of the form `type` · **status**. `link_scan` binds `PV-N`
   to that heading shape and to nothing else. Confirm with librarian(action="doctor").
 
