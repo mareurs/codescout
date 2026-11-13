@@ -126,6 +126,11 @@ fn refuse_if_handover_would_strand_citations(
 /// `mv.rs` and `reseat_one` seed the destination slug-less and never hit it. Re-pointing
 /// the displaced slug's rows instead of refusing is a policy choice (which slug should
 /// survive) and is deliberately not made here.
+///
+/// **Refusal (renumber):** a fold that renumbers an id the SOURCE document defines by a
+/// `## F-n` heading, or whose source cannot be read, refuses before writing anything
+/// ([`merge_augmentation`]): the renumber changes the params only, and no tool renumbers one
+/// entry in the params and the markdown together.
 pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<GraftReport> {
     if from_id == into_id {
         return Err(LibrarianRecoverableError::new(
@@ -143,6 +148,9 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
         )));
     }
 
+    // Taken before the transaction borrows the connection: `merge_augmentation` reads the
+    // source document through the read door with the roots this call armed.
+    let roots = cat.write_roots();
     let tx = cat
         .conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -165,7 +173,7 @@ pub fn graft_rows(cat: &mut Catalog, from_id: &str, into_id: &str) -> Result<Gra
 
     // 5. Augmentation params — migrate or merge (before the delete: params live
     //    on `artifact_augmentation`, which also cascade-deletes with the source).
-    merge_augmentation(&tx, from_id, into_id, &mut report)?;
+    merge_augmentation(&tx, from_id, into_id, &roots, &mut report)?;
 
     // 6. Hand the slug over, then delete source LAST — cascades any leftover
     //    dup links / edges / augmentation. `into_id` keeps whatever slug it already
@@ -437,10 +445,16 @@ pub(crate) fn fold_entries(
 ///   (`report.remap` records old->new). Incoming entries whose content
 ///   (minus `id`) already matches a surviving entry are flagged in
 ///   `report.suspicious`.
+///
+/// When that fold renumbers anything, the SOURCE document is read through the read door (with
+/// `roots`, the managed roots the caller took before the transaction opened) and the fold is
+/// refused if a heading there defines a renumbered id, or if the source cannot be read. A fold
+/// that renumbers nothing reads no file.
 fn merge_augmentation(
     tx: &rusqlite::Transaction<'_>,
     from_id: &str,
     into_id: &str,
+    roots: &[std::path::PathBuf],
     report: &mut GraftReport,
 ) -> Result<()> {
     let fetch = |id: &str| -> Result<Option<(String, Option<String>)>> {
@@ -495,6 +509,15 @@ fn merge_augmentation(
 
     let merged = fold_entries(&into_arr, &from_arr, report);
 
+    // A renumber changes the id in the params and nowhere else: a source whose markdown
+    // defines that id by heading would keep the old token in the file while its row moved
+    // to the new one, and no tool renumbers one entry in both stores. Only when the fold
+    // renumbered something, so a graft with nothing to renumber (`doc(move)`, whose
+    // destination is never augmented) reads no file here.
+    if !report.remap.is_empty() {
+        refuse_renumber_of_markdown_defined(tx, from_id, into_id, roots, &report.remap)?;
+    }
+
     // Guard: `unwrap_or_else` above only catches PARSE errors; valid-but-non-object
     // JSON (e.g. a bare array) would panic on index-assign. Fail recoverably instead.
     match into_json.as_object_mut() {
@@ -512,6 +535,66 @@ fn merge_augmentation(
         params![serde_json::to_string(&into_json)?, into_id],
     )?;
     Ok(())
+}
+
+/// Old ids in `remap` that a heading defines in `source_body` (a `## F-1 — title` line the
+/// entry scanner reads, not a token cited in prose). The SOURCE body only: the survivor's
+/// own headings are not a reason to refuse, because the survivor's entries keep their ids.
+/// Pure; the result follows `remap`'s key order.
+pub(crate) fn renumbered_ids_defined_in(
+    remap: &BTreeMap<String, String>,
+    source_body: &str,
+) -> Vec<String> {
+    let defined: std::collections::HashSet<String> =
+        crate::librarian::tools::link_scan::extract::entry_sections(source_body)
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+    remap
+        .keys()
+        .filter(|old| defined.contains(*old))
+        .cloned()
+        .collect()
+}
+
+/// Refuses, before anything is written, a fold whose renumber would split an entry between
+/// the params and the markdown of `from_id`'s document. Fails closed: a source that cannot
+/// be read through the read door is a refusal, not a skip.
+fn refuse_renumber_of_markdown_defined(
+    tx: &rusqlite::Transaction<'_>,
+    from_id: &str,
+    into_id: &str,
+    roots: &[std::path::PathBuf],
+    remap: &BTreeMap<String, String>,
+) -> Result<()> {
+    let abs_path_of = |id: &str| -> Result<std::path::PathBuf> {
+        Ok(std::path::PathBuf::from(tx.query_row(
+            "SELECT abs_path FROM artifact WHERE id=?1",
+            [id],
+            |r| r.get::<_, String>(0),
+        )?))
+    };
+    let from_path = abs_path_of(from_id)?;
+    let from_label = crate::librarian::catalog::dual_write::document_label(&from_path);
+    let into_label = crate::librarian::catalog::dual_write::document_label(&abs_path_of(into_id)?);
+    let door = crate::librarian::read_door::ReadDoor::new(roots.to_vec());
+    let body = door.text(&from_path).map_err(|_| {
+        LibrarianRecoverableError::new(format!(
+            "graft: refused — {} would be renumbered to fit {into_label}, and {from_label} \
+             could not be read to check whether it defines them by heading. Nothing was changed.",
+            remap.keys().cloned().collect::<Vec<_>>().join(", ")
+        ))
+    })?;
+    let hits = renumbered_ids_defined_in(remap, &body);
+    if hits.is_empty() {
+        return Ok(());
+    }
+    Err(LibrarianRecoverableError::new(format!(
+        "graft: refused — {} collide with entries of {into_label} and would be renumbered, but \
+         {from_label} defines them by heading, and no tool renumbers an entry in the markdown \
+         and the params together. Nothing was changed. Leave the two rows separate.",
+        hits.join(", ")
+    )))
 }
 
 #[cfg(test)]
@@ -551,6 +634,17 @@ mod tests {
             entry_collection: Some(coll.into()),
             refreshed_at_commit: None,
         }
+    }
+
+    /// A real source document under a temp git root, with no entry heading: for a graft that
+    /// renumbers, which reads the source before it writes. Returns the guard and the path.
+    fn headingless_source() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        let path = dir.path().join("x.md");
+        std::fs::write(&path, "# x\n").unwrap();
+        let path = path.to_str().unwrap().to_string();
+        (dir, path)
     }
 
     #[test]
@@ -1076,7 +1170,9 @@ mod tests {
     #[test]
     fn graft_renumbers_colliding_incoming_ids_and_reports_remap() {
         let mut cat = Catalog::open_in_memory().unwrap();
-        art(&cat, "from", "/wt/x.md");
+        // A colliding id is renumbered only after the source's file is read, so it has one.
+        let (_dir, src) = headingless_source();
+        art(&cat, "from", &src);
         art(&cat, "into", "/main/x.md");
         augmentation::upsert(
             &cat,
@@ -1156,7 +1252,8 @@ mod tests {
         // params is a TEXT blob with no DB uniqueness). The reserved-universe
         // allocator must avoid the free incoming id entirely.
         let mut cat = Catalog::open_in_memory().unwrap();
-        art(&cat, "from", "/wt/x.md");
+        let (_dir, src) = headingless_source();
+        art(&cat, "from", &src);
         art(&cat, "into", "/main/x.md");
         augmentation::upsert(
             &cat,
@@ -1257,5 +1354,97 @@ mod tests {
         assert_eq!(report.remap.get("F-2").map(String::as_str), Some("F-3"));
         let ids: Vec<&str> = merged.iter().map(|e| e["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["F-1", "F-2", "F-3"]);
+    }
+    /// Two catalogued ledgers of one collection, each with a real file under a temp git
+    /// root (the fold reads the SOURCE document through the read door). `from_text` and
+    /// `into_text` are the files' bytes; `None` leaves the source file absent. Both rows
+    /// carry `F-1` in params, so folding `from` onto `into` renumbers it to `F-2`.
+    fn colliding_ledgers(from_text: Option<&str>, into_text: &str) -> (tempfile::TempDir, Catalog) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::create_dir_all(dir.path().join("wt")).unwrap();
+        std::fs::create_dir_all(dir.path().join("main")).unwrap();
+        let from_path = dir.path().join("wt/ledger.md");
+        let into_path = dir.path().join("main/ledger.md");
+        if let Some(text) = from_text {
+            std::fs::write(&from_path, text).unwrap();
+        }
+        std::fs::write(&into_path, into_text).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        art(&cat, "from", from_path.to_str().unwrap());
+        art(&cat, "into", into_path.to_str().unwrap());
+        augmentation::upsert(
+            &cat,
+            &aug("from", "items", r#"{"items":[{"id":"F-1","t":"wt"}]}"#),
+        )
+        .unwrap();
+        augmentation::upsert(
+            &cat,
+            &aug("into", "items", r#"{"items":[{"id":"F-1","t":"main"}]}"#),
+        )
+        .unwrap();
+        (dir, cat)
+    }
+
+    /// Review Focus 7. The source's markdown defines `F-1` by heading, so a renumber to
+    /// `F-2` would change the params and leave the heading: refused, nothing written.
+    /// Mutation: skip the `refuse_renumber_of_markdown_defined` call in `merge_augmentation`
+    /// and the graft succeeds and deletes `from`.
+    #[test]
+    fn a_graft_that_would_renumber_a_markdown_defined_entry_is_refused() {
+        let (dir, mut cat) = colliding_ledgers(Some("## F-1 — x\n"), "## F-1 — y\n");
+        let msg = format!("{:#}", graft_rows(&mut cat, "from", "into").unwrap_err());
+        assert!(msg.contains("F-1"), "{msg}");
+        assert!(msg.contains("Nothing was changed"), "{msg}");
+        assert!(
+            !msg.contains(dir.path().to_str().unwrap()),
+            "a refusal names a document by label, never by path: {msg}"
+        );
+        assert!(row_exists(&cat.conn, "from").unwrap());
+        let into_params = augmentation::get(&cat, "into").unwrap().unwrap().params;
+        assert!(
+            into_params.contains("\"main\"") && !into_params.contains("\"wt\""),
+            "the refused graft leaves the survivor's params alone: {into_params}"
+        );
+    }
+
+    /// The survivor's own heading is not a reason to refuse: the renumbered entry is the
+    /// SOURCE's, and its markdown defines nothing. Mutation: also check the `into` body.
+    #[test]
+    fn a_survivor_heading_alone_does_not_block_a_renumber() {
+        let (_dir, mut cat) = colliding_ledgers(Some("# Ledger\n"), "## F-1 — y\n");
+        let report = graft_rows(&mut cat, "from", "into").unwrap();
+        assert_eq!(
+            report.remap,
+            BTreeMap::from([("F-1".to_string(), "F-2".to_string())])
+        );
+        assert!(!row_exists(&cat.conn, "from").unwrap());
+    }
+
+    /// Fail closed: a source the door cannot read is a refusal, not "no heading". Mutation:
+    /// map the read error to an empty body.
+    #[test]
+    fn a_graft_that_renumbers_refuses_when_the_source_cannot_be_read() {
+        let (_dir, mut cat) = colliding_ledgers(None, "## F-1 — y\n");
+        let msg = format!("{:#}", graft_rows(&mut cat, "from", "into").unwrap_err());
+        assert!(
+            msg.contains("F-1") && msg.contains("could not be read"),
+            "{msg}"
+        );
+        assert!(row_exists(&cat.conn, "from").unwrap());
+    }
+
+    /// Headings define; prose citations do not. Mutation: match the tokens anywhere in the
+    /// body.
+    #[test]
+    fn renumbered_ids_defined_in_reads_headings_not_prose() {
+        let remap = BTreeMap::from([
+            ("F-1".to_string(), "F-3".to_string()),
+            ("F-2".to_string(), "F-4".to_string()),
+        ]);
+        assert_eq!(
+            renumbered_ids_defined_in(&remap, "## F-1 — x\n\nsee F-2\n"),
+            vec!["F-1".to_string()]
+        );
     }
 }

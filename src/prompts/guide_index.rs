@@ -1238,7 +1238,7 @@ Body Mu.
                 vec![ue_t, app_i, aug_t, lnk_t, upd_t],
             ),
             (
-                "Entry ids — refusals: main checkout only (prose ledgers)",
+                "Entry ids — refusals: main checkout only (every ledger)",
                 vec![app_t],
                 vec![ue_t, app_i, aug_t, lnk_t, upd_t],
             ),

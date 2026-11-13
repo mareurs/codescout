@@ -1,5 +1,5 @@
 use super::{LibrarianRecoverableError, ToolContext};
-use crate::librarian::catalog::{artifact, augmentation};
+use crate::librarian::catalog::{artifact, augmentation, Catalog};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -72,6 +72,59 @@ fn parse_args(args: Value) -> Result<Args> {
 /// See `artifact::preflight`.
 pub(crate) fn preflight(args: &Value) -> Result<()> {
     parse_args(args.clone()).map(|_| ())
+}
+
+/// Refuses an id allocation that does not key to the main checkout's ledger, on both the prose
+/// and the params path.
+///
+/// An entry id is a LEDGER-WIDE fact, and a worktree is by definition not the ledger. A write
+/// from a worktree forks a shadow whose distinct `artifact_id` misses the reservation and the
+/// committed mark, so main and the worktree both issue the same id. Both paths write the entry
+/// into the document's markdown as well, so the two `## PREFIX-N` sections then merge into one
+/// file and give the token two definers (`doctor`'s `entry_defined_twice`), and no tool
+/// renumbers an entry in both stores afterwards
+/// (docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md).
+///
+/// Two halves:
+/// - a WORKTREE session naming a main-checkout row, or the session's own shadow of one
+///   (a ledger born in the worktree is neither, and has no main twin to collide with);
+/// - any session at all naming a worktree's shadow, which the row's own fork records tell
+///   (a main-checkout session, a call with no current project, or a session in another
+///   worktree). docs/issues/2026-11-08-is-worktree-shadow-guard-covers-worktree-sessions-only.md
+///
+/// Called BEFORE `resolve_write_target`, which would fork a shadow, an augmentation, a
+/// `worktree_fork` event and a lineage link for a refused call (the 2026-07-17 regression).
+/// An unknown id is left to the caller's own error. The hint names the call pinned to the main
+/// checkout, whose working tree then holds the entry as an uncommitted ledger change.
+fn refuse_allocation_off_the_main_ledger(ctx: &ToolContext, cat: &Catalog, id: &str) -> Result<()> {
+    let Some(row) = artifact::get(cat, id)? else {
+        return Ok(());
+    };
+    if let Some(cp) = ctx.current_project.as_deref() {
+        if super::worktree::is_main_checkout_artifact(cp, &row.abs_path)
+            || super::worktree::is_worktree_shadow(cat, cp, &row)?
+        {
+            return Err(LibrarianRecoverableError::with_hint(
+                "append_entry: id allocation is not supported from a worktree checkout".to_string(),
+                "An entry id is ledger-wide state and must key to the main tracker. Repeat this \
+                 call with `workspace=<main root>`: the entry is written into the main \
+                 checkout's working tree, where peers see it as an uncommitted change to the \
+                 ledger."
+                    .to_string(),
+            ));
+        }
+    }
+    if super::worktree::has_fork_record(cat, &row)? {
+        return Err(LibrarianRecoverableError::with_hint(
+            "append_entry: id allocation is not supported on a worktree's copy of a ledger"
+                .to_string(),
+            "This id names a worktree shadow of a main ledger. An entry id is ledger-wide state \
+             and must key to the main tracker: pass the main row's id with \
+             `workspace=<main root>`."
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -235,77 +288,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
         let mut cat = ctx.catalog.lock();
         let _armed = super::arm_write_roots(ctx, &cat);
-        // An entry id is a LEDGER-WIDE fact, and a worktree is by definition not the
-        // ledger. Left unguarded, `resolve_write_target` forks a shadow whose distinct
-        // `artifact_id` misses the reservation, so main and the worktree both issue the
-        // same id — and unlike the params branch, nothing can repair it afterwards:
-        // `merge_worktree`'s renumber runs inside `if let Some(coll_name) = &coll` over
-        // params rows, and the `worktree_fork` event snapshots `base_params` with no
-        // body counterpart to diff a prose section against. The two `## PREFIX-N`
-        // sections just merge into one file, giving the token two active definers.
-        //
-        // Same refusal, same reasoning, and the same ORDERING as the `cites` guard
-        // below: it must fire BEFORE resolve_write_target, or a refused call still
-        // leaves behind a shadow row, augmentation, fork event and lineage link (the
-        // 2026-07-17 regression). Hence `is_main_checkout_artifact` here rather than
-        // inspecting the resolved target.
-        // docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md
-        if let Some(cp) = ctx.current_project.as_deref() {
-            if let Some(row) = artifact::get(&cat, &a.id)? {
-                // The shadow half: a caller that names the worktree's own fork of a main
-                // ledger (the `artifact_id` an earlier write returned) is not a
-                // "main checkout artifact" by path, yet allocates against an id main's
-                // reservation never sees. A ledger born in the worktree is neither.
-                if super::worktree::is_main_checkout_artifact(cp, &row.abs_path)
-                    || super::worktree::is_worktree_shadow(&cat, cp, &row)?
-                {
-                    return Err(LibrarianRecoverableError::with_hint(
-                        "append_entry: id allocation is not supported from a worktree checkout"
-                            .to_string(),
-                        "An entry id is ledger-wide state and must key to the main tracker. \
-                         Reserve the id from the main checkout, or record the entry in a \
-                         worktree-local file and fold it into the ledger after the merge."
-                            .to_string(),
-                    ));
-                }
-            }
-        }
-        // The shadow guard above only covers a WORKTREE session. A main-checkout session,
-        // a call with no current project, or a session in another worktree can still name
-        // a shadow's id, and the allocation then misses main's reservation. The fork
-        // records belong to the row, so ask them without a session.
-        // docs/issues/2026-11-08-is-worktree-shadow-guard-covers-worktree-sessions-only.md
-        if let Some(row) = artifact::get(&cat, &a.id)? {
-            if super::worktree::has_fork_record(&cat, &row)? {
-                return Err(LibrarianRecoverableError::with_hint(
-                    "append_entry: id allocation is not supported on a worktree's copy of a \
-                     ledger"
-                        .to_string(),
-                    "This id names a worktree shadow of a main ledger. An entry id is \
-                     ledger-wide state and must key to the main tracker: pass the main \
-                     row's id from the main checkout."
-                        .to_string(),
-                ));
-            }
-        }
-        // SIBLING of the worktree guard above, deliberately NOT nested inside the
-        // `current_project` block: this refusal does not depend on a current project
-        // (the majority of callers, and every test built on `mk_ctx()`, have none), so
-        // nesting it there would make it unreachable outside a workspace project. The
-        // row is fetched again here rather than reused, which is the cost of being a
-        // sibling rather than nested inside the block that already fetched one.
-        //
-        // Sited BEFORE resolve_write_target as defense-in-depth, matching the
-        // worktree guard's placement above — NOT because this guard can reach that
-        // hazard today. `resolve_write_target` forks only when `current_project` and
-        // `main_root` are both `Some`, the row exists, and `is_main_checkout_artifact`
-        // is true; the worktree guard above already refuses on exactly that
-        // condition set (`is_main_checkout_artifact` itself returns `false` when
-        // `main_root` is `None`). So every call that reaches this point has already
-        // been proven, by the guard above, to hit `resolve_write_target`'s early
-        // return with no side effect — reordering this guard is unobservable, not
-        // merely untested. Kept here in case that identity ever stops holding (e.g.
-        // the worktree guard becomes conditional), not because it is load-bearing now.
+        // BEFORE `resolve_write_target`, which would fork a shadow for a refused call.
+        refuse_allocation_off_the_main_ledger(ctx, &cat, &a.id)?;
         //
         // ALLOCATE OPTIMISTICALLY — this used to refuse when `ledger_unpushed_commits`
         // found unpushed commits touching the ledger. Removed 2026-09-11: the refusal's
@@ -438,25 +422,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
     let mut cat = ctx.catalog.lock();
     let _armed = super::arm_write_roots(ctx, &cat);
-    // Refuse cites-from-worktree BEFORE resolve_write_target can fork a shadow.
-    // The old ordering forked first and refused after, so a refused call still
-    // materialized an empty shadow row + augmentation + worktree_fork event +
-    // worktree_of link (2026-07-17 regression) — contradicting the "aborts the
-    // whole call / writes nothing" contract. This mirrors resolve_write_target's
-    // own `is_main_checkout_artifact` check to predict `target != a.id` without
-    // the forking side effect.
-    if !a.cites.is_empty() {
-        if let Some(cp) = ctx.current_project.as_deref() {
-            if let Some(row) = artifact::get(&cat, &a.id)? {
-                if super::worktree::is_main_checkout_artifact(cp, &row.abs_path) {
-                    return Err(LibrarianRecoverableError::with_hint(
-                        "append_entry: `cites` is not supported from a worktree checkout".to_string(),
-                        "Entry-graph edges must key to the main tracker. Omit `cites`, or append from the main checkout.".to_string(),
-                    ));
-                }
-            }
-        }
-    }
+    // BEFORE `resolve_write_target`: a refused call must not fork a shadow row, an
+    // augmentation, a `worktree_fork` event and a lineage link (the 2026-07-17 regression).
+    refuse_allocation_off_the_main_ledger(ctx, &cat, &a.id)?;
     let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
     let outcome = augmentation::append_entry(
         &mut cat,
@@ -1190,7 +1158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn append_from_worktree_lands_on_shadow_not_main() {
+    async fn params_allocation_is_refused_from_a_worktree() {
         let ctx = crate::librarian::tools::worktree::test_support::wt_ctx(
             Catalog::open_in_memory().unwrap(),
         );
@@ -1199,38 +1167,101 @@ mod tests {
             crate::librarian::tools::worktree::test_support::seed_main_tracker(&c)
         };
 
-        let out = call(
+        let err = call(
             &ctx,
             json!({
                 "id": main_id,
                 "entry_collection": "items",
                 "id_prefix": "F",
-                "entry": {"t": "from-worktree"}
+                "title": "t",
+                "body": "b",
+                "anchor_heading": "## Template for new entries"
             }),
         )
         .await
-        .unwrap();
-        assert_eq!(out["id"], "F-2"); // base had F-1
-
+        .unwrap_err();
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("not supported from a worktree") && text.contains("workspace="),
+            "expected the shared refusal naming the main-checkout route, got: {text}"
+        );
+        assert_nothing_forked(&ctx, 1);
         let c = ctx.catalog.lock();
         let main_aug = augmentation::get(&c, &main_id).unwrap().unwrap();
-        assert!(!main_aug.params.contains("from-worktree"), "main untouched");
+        assert!(
+            main_aug.params.contains("F-1") && !main_aug.params.contains("F-2"),
+            "main untouched"
+        );
+    }
+    /// The refusal fires BEFORE `resolve_write_target`, so a refused call leaves no shadow
+    /// artifact row, no `worktree_fork` event and no `worktree_of` lineage link (the
+    /// 2026-07-17 regression). `artifacts` is the number of artifact rows the fixture seeded.
+    fn assert_nothing_forked(ctx: &ToolContext, artifacts: i64) {
+        let cat = ctx.catalog.lock();
+        let count = |sql: &str| -> i64 { cat.conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(
+            count("SELECT COUNT(*) FROM artifact"),
+            artifacts,
+            "must refuse before resolve_write_target forks a shadow artifact row"
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM events WHERE kind = 'worktree_fork'"),
+            0,
+            "must refuse before resolve_write_target emits a worktree_fork event"
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM artifact_link WHERE rel = 'worktree_of'"),
+            0,
+            "must refuse before resolve_write_target inserts a worktree_of lineage link"
+        );
+    }
+
+    /// The shadow arm of the shared guard on the PARAMS path: a main-checkout session
+    /// (`main_root: None`, so neither the main-checkout nor the session-bound shadow test
+    /// holds) names a worktree's fork. Only `has_fork_record` refuses it.
+    #[tokio::test]
+    async fn params_allocation_is_refused_on_a_shadow_from_a_main_checkout_session() {
+        use crate::librarian::current_project::CurrentProject;
+        use std::sync::Arc;
+
+        let (dir, mut ctx, _main_id, shadow_id) = forked_shadow();
+        let main_root = dir.path().join("repo");
+        ctx.current_project = Some(Arc::new(CurrentProject {
+            abs_path: main_root.clone(),
+            git_root: main_root,
+            main_root: None,
+            umbrella: None,
+        }));
+        let err = call(
+            &ctx,
+            json!({
+                "id": shadow_id, "entry_collection": "items", "id_prefix": "HY",
+                "title": "from main", "body": "b", "anchor_heading": "# Ledger"
+            }),
+        )
+        .await
+        .expect_err("allocated on a worktree shadow");
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("worktree") && text.contains("workspace="),
+            "expected the shadow arm of the shared guard, got: {text}"
+        );
     }
 
     /// The regression guard for
     /// `docs/issues/archive/2026-08-17-prose-ledger-worktree-id-collision.md`.
     ///
-    /// The params branch is protected, and `append_from_worktree_lands_on_shadow_not_main`
-    /// above is the proof: it lands on the shadow, and `merge_worktree` renumbers the
-    /// collision on the way back via `graft::fold_entries`. The prose branch could
-    /// inherit the fork but never that repair — `merge_worktree`'s renumber runs inside
-    /// `if let Some(coll_name) = &coll` over params rows, and the `worktree_fork` event
-    /// snapshots `base_params` with no body counterpart to diff a prose section against.
-    /// Measured before the guard existed: main issued `HY-11`, the worktree issued
-    /// `HY-11` again, and `merge_worktree` reported `entries_renumbered: 0`.
-    ///
-    /// So allocation is refused instead, on exactly the grounds `cites` is refused: an
-    /// entry id is ledger-wide state and must key to the main tracker.
+    /// Both branches refuse alike now (`params_allocation_is_refused_from_a_worktree` is the
+    /// params twin), through one guard: an entry id is ledger-wide state and must key to
+    /// the main tracker. The prose branch could never inherit the fork's repair —
+    /// `merge_worktree`'s renumber runs inside `if let Some(coll_name) = &coll` over params
+    /// rows, and the `worktree_fork` event snapshots `base_params` with no body counterpart
+    /// to diff a prose section against. Measured before the guard existed: main issued
+    /// `HY-11`, the worktree issued `HY-11` again, and `merge_worktree` reported
+    /// `entries_renumbered: 0`. The params branch writes its `## F-N` heading into the
+    /// file too, so a worktree allocation there would define one token twice as well.
     ///
     /// Own fixture rather than `wt_ctx` / `seed_main_tracker`: those seed
     /// `/repo/docs/trackers/t.md`, a path with no file behind it, and the prose branch
@@ -1816,8 +1847,9 @@ mod tests {
         .unwrap_err();
         assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
         assert!(
-            err.to_string().contains("worktree"),
-            "expected the worktree-guard error, got: {err}"
+            err.to_string().contains("not supported from a worktree")
+                && format!("{err:#}").contains("workspace="),
+            "expected the shared worktree refusal, got: {err:#}"
         );
         let c = ctx.catalog.lock();
         let n: i64 = c

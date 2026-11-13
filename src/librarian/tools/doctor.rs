@@ -3516,6 +3516,10 @@ fn scan_unregistered_worktree_dirs(ctx: &ToolContext) -> (Vec<Violation>, Value)
 /// **Informational, with no `fix=`.** The remedy is a catalog operation on a machine-local
 /// database (`merge_worktree`, or `abandon=true` to discard), not an edit to this repo, and the
 /// choice between the two is the owner's: merging keeps the history, abandoning deletes it.
+/// A merge skips a shadow row whose renumber would split an entry between params and markdown
+/// and leaves the registration active (the source is read at the branch tip, the directory
+/// being gone), so merging a second time skips it again: the message says `abandon=true` is
+/// then the only exit.
 ///
 /// Scoped to registrations whose `main_root` is the active project's main checkout, so a shared
 /// catalog does not report another project's worktrees. Project grain like
@@ -3550,7 +3554,10 @@ fn scan_active_registrations_with_missing_root(
                     "informational: the worktree `{root}` is registered as ACTIVE, but its \
                      directory is gone, so its shadow rows are still in the catalog and nothing \
                      will merge them. The choice is the owner's: merging keeps the worktree's \
-                     history, abandoning deletes it. {remedy}"
+                     history, abandoning deletes it. A merge skips a row whose renumber would \
+                     split an entry between params and markdown, and leaves the registration \
+                     active, so merging again skips it again: `abandon=true` is then the only \
+                     exit. {remedy}"
                 ),
             )
         })
@@ -20245,6 +20252,10 @@ mod tests {
         assert!(
             detail.contains("merge_worktree") && detail.contains("abandon=true"),
             "the row names both remedies: {detail}"
+        );
+        assert!(
+            detail.contains("merging again skips it again"),
+            "the row says a merge skips a params-from-markdown renumber again: {detail}"
         );
         assert_eq!(
             out["summary"]["by_check"]["active_worktree_registration_root_missing"], 1,

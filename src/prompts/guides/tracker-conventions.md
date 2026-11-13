@@ -194,11 +194,11 @@ writes `## R-N — <title>` (the only shape that defines a citable token) and th
 one write. Omit `anchor_heading`, `title` or `body` and it only reserves the id. Hand-allocating:
 scan **every** entry format in the file.
 
-### Entry ids — refusals: main checkout only (prose ledgers)
+### Entry ids — refusals: main checkout only (every ledger)
 <!-- serves: doc.append_entry(path~docs/trackers/) -->
 
-`append_entry` refuses id allocation from a worktree session: write to a worktree-local file
-and fold it in from the main checkout. `pre-push` catches a peer's duplicate id.
+`append_entry` refuses id allocation from a worktree session: repeat the call with
+`workspace=<main root>`; the entry lands there. `pre-push` catches a peer's duplicate id.
 
 ### Entry ids — where the counter lives
 <!-- serves: doc.append_entry(path~docs/trackers/) -->

@@ -620,6 +620,11 @@ mod tests {
         ];
         for (action, build) in cases {
             for worktree in [true, false] {
+                // A worktree session cannot allocate an entry id (pinned in
+                // `append_entry`'s tests), so there is no shadow for the call to name.
+                if worktree && action == "append_entry" {
+                    continue;
+                }
                 let ctx = if worktree {
                     wt_ctx(Catalog::open_in_memory().unwrap())
                 } else {

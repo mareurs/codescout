@@ -638,7 +638,7 @@ nobody can cite.
 - If you must hand-allocate, scan **every** entry format the file uses, and re-scan
   in the same breath as the write — a max-id is a fact about an instant.
 
-## Entry ids — refusals: main checkout only (prose ledgers)
+## Entry ids — refusals: main checkout only (every ledger)
 
 **Kept in the guide:** Allocation is refused from a worktree session.
 
