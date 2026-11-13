@@ -184,26 +184,41 @@ fn file_name_of(abs_path: &str) -> String {
 /// (`is_linked_worktree` requires the `worktrees` component, so a submodule's `.git/modules/...`
 /// pointer is not one). `lookup_git_root` stops at any `.git`, so a worktree session's git root is
 /// the worktree while the catalog can hold the main checkout's row for the same document. The main
-/// root is used only when it is absolute and holds a `.git` directory: a relative pointer cannot
+/// root is used only when it is absolute, holds a `.git` directory, and owns the git dir the
+/// pointer names: that git dir sits directly in `<main>/.git/worktrees/`. A worktree of a
+/// submodule has a pointer `<super>/.git/modules/<sub>/worktrees/<name>`, which cuts at the
+/// superproject's `.git` but is not one of the superproject's worktrees. A relative pointer cannot
 /// be told from another repository's (`../..` is the same text everywhere), and a pointer into a
-/// directory that is no repository names nothing. In both cases, and for a submodule, the root is
-/// its own repository.
+/// directory that is no repository names nothing. In all these cases, and for a submodule, the
+/// root is its own repository.
 fn repository_root(git_root: &Path) -> std::path::PathBuf {
     use crate::util::path_security::{is_linked_worktree, worktree_main_root};
 
     if !is_linked_worktree(git_root) {
         return git_root.to_path_buf();
     }
-    match worktree_main_root(git_root) {
-        Some(main)
-            if main.is_absolute()
-                && std::fs::symlink_metadata(main.join(".git"))
-                    .is_ok_and(|meta| meta.file_type().is_dir()) =>
-        {
-            main
-        }
-        _ => git_root.to_path_buf(),
+    let Some(main) = worktree_main_root(git_root) else {
+        return git_root.to_path_buf();
+    };
+    let owns_the_git_dir = main.is_absolute()
+        && std::fs::symlink_metadata(main.join(".git")).is_ok_and(|meta| meta.file_type().is_dir())
+        && pointed_git_dir(git_root)
+            .is_some_and(|dir| dir.parent() == Some(main.join(".git").join("worktrees").as_path()));
+    if owns_the_git_dir {
+        main
+    } else {
+        git_root.to_path_buf()
     }
+}
+
+/// The git dir a root's `.git` pointer file names (`gitdir: <path>`), read through the bounded
+/// pointer reader.
+fn pointed_git_dir(git_root: &Path) -> Option<std::path::PathBuf> {
+    let pointer = crate::util::fs::read_git_pointer(&git_root.join(".git"))?;
+    pointer
+        .lines()
+        .find_map(|line| line.strip_prefix("gitdir:").map(str::trim))
+        .map(std::path::PathBuf::from)
 }
 
 /// The path of the artifact `dst_ref` names, and the entry id when it names an entry.
@@ -668,6 +683,9 @@ mod tests {
 
     #[test]
     fn worktrees_with_relative_pointers_of_different_repositories_are_two_repositories() {
+        // The `is_absolute()` clause is pinned here only through the process cwd (a relative `../..`
+        // resolves against it for the directory check); mutation 3 of fix round 2 (drop the gate, the
+        // absolute check and the directory check) is the cwd-independent evidence.
         let tmp = tempfile::tempdir().unwrap();
         let _a = git_root(tmp.path(), "a");
         let _b = git_root(tmp.path(), "b");
@@ -693,6 +711,24 @@ mod tests {
 
         let msg = refusal(grammar_form_of(&cat.conn, &first, "id-t"));
         assert!(msg.contains("repo.toml"), "{msg}");
+    }
+
+    #[test]
+    fn a_worktree_of_a_submodule_is_not_the_superprojects_checkout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let superproject = git_root(tmp.path(), "super");
+        // `git worktree add` inside the submodule: the pointer is absolute, has a `worktrees`
+        // component, and cuts at the superproject's `.git`, but its git dir is the submodule's.
+        let absolute = format!("{}/.git/modules/sub/worktrees/wt", superproject.display());
+        let sub_worktree = pointer_root(tmp.path(), "sub-wt", &absolute);
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&sub_worktree, "docs/t.md"), None);
+        row(&cat, "id-s", &at(&superproject, "docs/s.md"), None);
+
+        let into_worktree = refusal(grammar_form_of(&cat.conn, &superproject, "id-t"));
+        assert!(into_worktree.contains("repo.toml"), "{into_worktree}");
+        let out_of_worktree = refusal(grammar_form_of(&cat.conn, &sub_worktree, "id-s"));
+        assert!(out_of_worktree.contains("repo.toml"), "{out_of_worktree}");
     }
 
     #[test]
