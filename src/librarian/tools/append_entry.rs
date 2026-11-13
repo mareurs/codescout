@@ -2822,6 +2822,10 @@ mod taxonomy_recipes {
         Some(args[start..start + len].to_string())
     }
 
+    /// The arguments a params call must pass: the fields `params_section_refusal` names.
+    /// `the_gates_section_arguments_are_the_ones_the_refusal_names` ties this list to that text.
+    const SECTION_ARGS: [&str; 3] = ["title", "body", "anchor_heading"];
+
     /// Does `args` pass `key=` at depth 0, whatever its value is spelled as (`title=…` and
     /// `title="x"` alike)? A field inside `entry={title, …}` is nested and does not count.
     fn has_top_level_arg(args: &str, key: &str) -> bool {
@@ -2832,7 +2836,7 @@ mod taxonomy_recipes {
     /// of the section: `append_entry` writes a params entry into the markdown too, and refuses a
     /// call without `title`, `body` and `anchor_heading` together. `here` names the recipe.
     fn params_section_finding(here: &str, args: &str) -> Option<String> {
-        let missing: Vec<&str> = ["title", "body", "anchor_heading"]
+        let missing: Vec<&str> = SECTION_ARGS
             .into_iter()
             .filter(|k| !has_top_level_arg(args, k))
             .collect();
@@ -3869,6 +3873,45 @@ mod taxonomy_recipes {
         found.into_iter().map(|(_, call)| call).collect()
     }
 
+    /// Spellings read in a sidecar's `render_template`: the two prompt spellings plus the bare
+    /// `append_entry(…)`. The librarian renders that template into the context agents read, and
+    /// the bare spelling is how its `Append:` line is written. It is not read in `prompt`
+    /// (`SIDECAR_OPENERS`), where a bare mention is a fragment of schema text.
+    const RENDER_OPENERS: [(&str, usize); 3] = [
+        ("doc(action=\"append_entry\"", 3),
+        ("doc(append_entry", 3),
+        ("append_entry(", 12),
+    ];
+
+    /// Findings for the calls in a sidecar's `render_template`: one that never closes its `(`, and
+    /// a params call (one that names `entry_collection`) without `title`, `body` and
+    /// `anchor_heading`. A prose call or a bare mention is not judged here.
+    fn render_template_findings(rel: &str, template: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        for (opener, paren) in RENDER_OPENERS {
+            for (at, _) in template.match_indices(opener) {
+                found.push((at, call_args(template, at + paren)));
+            }
+        }
+        found.sort_by_key(|(at, _)| *at);
+        found
+            .into_iter()
+            .enumerate()
+            .filter_map(|(n, (_, args))| {
+                let here = format!("`{rel}` render_template, call {}", n + 1);
+                match args {
+                    None => Some(format!(
+                        "{here}: the append_entry call never closes its `(`"
+                    )),
+                    Some(args) if has_top_level_arg(args, "entry_collection") => {
+                        params_section_finding(&here, args)
+                    }
+                    Some(_) => None,
+                }
+            })
+            .collect()
+    }
+
     /// Sidecar (repo-relative) -> the artifacts under `docs/` whose `expects_augmentation` names it.
     /// A sidecar belongs to exactly one ledger; the prose check reads that ledger's prefixes.
     fn sidecar_owners(root: &Path) -> BTreeMap<String, Vec<String>> {
@@ -3927,6 +3970,10 @@ mod taxonomy_recipes {
                 }
             };
             scan.sidecars += 1;
+            if let Some(template) = &sidecar.render_template {
+                scan.failures
+                    .extend(render_template_findings(&rel, template));
+            }
             let calls = prompt_calls(&sidecar.prompt);
             if calls.is_empty() {
                 if sidecar.prompt.contains("append_entry") {
@@ -4616,7 +4663,7 @@ mod taxonomy_recipes {
                              {collection:?} — append_entry refuses a collection the augmentation does \
                              not declare, so an agent following this recipe is refused. Repair ONE \
                              side: the recipe, or the sidecar's entry_collection."
-                             ));
+                            ));
                         }
                         if let Some(finding) = params_section_finding(&here, args) {
                             if is_known_sectionless(&rel, &prefix) {
@@ -5040,7 +5087,8 @@ mod taxonomy_recipes {
     //
     // `append_entry` writes a params entry into the markdown too and refuses a params call without
     // `title`, `body` and `anchor_heading` together, so a recipe that teaches the call without
-    // them teaches a refusal. Oracle: the tool's own refusal (`params_section_refusal`).
+    // them teaches a refusal. The gate's list of the three fields is tied to the refusal's own
+    // text by `the_gates_section_arguments_are_the_ones_the_refusal_names`.
 
     const PARAMS_NO_SECTION: &str = r###"doc(action="append_entry", id="x", entry_collection="issues", id_prefix="WIN", entry={a})"###;
 
@@ -5095,6 +5143,62 @@ mod taxonomy_recipes {
         // The prose path has its own all-or-none rule; the new condition reads params calls only.
         let scan = scan_of("entry_prefix: [R, W]\n", SIDECAR_R_CALL, None);
         assert!(scan.failures.is_empty(), "{:?}", scan.failures);
+    }
+
+    #[test]
+    fn the_gates_section_arguments_are_the_ones_the_refusal_names() {
+        // Ties `SECTION_ARGS` to the refusal text of `params_section_refusal`, the message an
+        // agent meets when a params call lacks its section. What the call does with each field
+        // is covered by `a_params_append_without_a_section_is_refused_and_allocates_nothing`.
+        // Mutation: drop `body` from the refusal's "needs `title`, `body` and
+        // `anchor_heading`" sentence, or add a field to `SECTION_ARGS` -> the lists differ.
+        let text = super::params_section_refusal(&[]).to_string();
+        let message = text.split(" (hint:").next().unwrap_or(&text);
+        let named: Vec<&str> = message.split('`').skip(1).step_by(2).collect();
+        assert_eq!(named, SECTION_ARGS, "{text}");
+    }
+
+    #[test]
+    fn a_params_call_in_a_render_template_is_read_like_one_in_a_prompt() {
+        // The librarian renders `render_template` into the context agents read, and its
+        // `Append:` line is a recipe. Mutation: drop the `render_template_findings` call from
+        // `scan_sidecar_prompts` -> no finding.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let put_sidecar = |template: &str| {
+            sidecar_fixture(root, "", "A plain ledger with no recipe.", Some("audits"));
+            put(
+                root,
+                "docs/augmentations/l.yaml",
+                &format!(
+                    "prompt: p\nentry_collection: audits\nrender_template: {}\n",
+                    serde_json::to_string(template).unwrap()
+                ),
+            );
+        };
+        put_sidecar("Append: `append_entry(entry_collection=\"audits\", id_prefix=\"A\")`.");
+        let scan = scan_sidecar_prompts(root);
+        assert_eq!(scan.failures.len(), 1, "{:?}", scan.failures);
+        assert!(
+            scan.failures[0].contains("docs/augmentations/l.yaml` render_template, call 1")
+                && scan.failures[0].contains("passes no title, body, anchor_heading"),
+            "{:?}",
+            scan.failures
+        );
+        // A recipe that carries its section, a prose mention and a bare mention are clean.
+        for clean in [
+            "Append: `append_entry(entry_collection=\"audits\", id_prefix=\"A\", title=…, body=…, anchor_heading=\"## H\")`.",
+            "Append: `doc(action=\"append_entry\", id_prefix=\"A\", title=…, body=…, anchor_heading=\"## H\")`.",
+            "`append_entry` allocates the id.",
+            "append_entry() allocates the id.",
+        ] {
+            put_sidecar(clean);
+            let scan = scan_sidecar_prompts(root);
+            assert!(scan.failures.is_empty(), "{clean}: {:?}", scan.failures);
+        }
+        // The second prompt spelling is read in a template too.
+        put_sidecar("doc(append_entry, entry_collection=\"audits\", id_prefix=\"A\")");
+        assert_eq!(scan_sidecar_prompts(root).failures.len(), 1);
     }
 
     #[test]

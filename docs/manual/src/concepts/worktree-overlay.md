@@ -39,7 +39,8 @@ The first mutating call against a main-root artifact — `update`, `event_create
 - a `worktree_of` lineage link back to the main row.
 
 Every write after that lands on the shadow. `append_entry` never forks: an id
-allocation from a worktree session is refused, with a hint to repeat the call with
+allocation on a main ledger from a worktree session is refused (a ledger born in the
+worktree is not), with a hint to repeat the call with
 the main row's id and `workspace=<main root>` (see
 [Entry Citations](entry-citations.md)). `delete` and `move` against a
 main-root target are refused from a worktree session — merge first, or act from
@@ -61,8 +62,10 @@ to fold onto, and closes the registration. Drop `dry_run` to write.
 
 A renumber of an id the worktree's file defines by heading is skipped, because no
 tool renumbers an entry in both the params and the markdown, and the registration
-stays active. The conflict's `source` names what decided. The exits are: make the
-worktree's file readable, or restore its branch at its tip, and merge again; or
+stays active. The conflict's `source` says which source decided. When the
+worktree's file (or its branch tip) defines the id, `abandon` is the only exit.
+When main's file stood in because the source could not be read, make the
+worktree's file readable or restore its branch at its tip and merge again, or
 `abandon`.
 
 ```text

@@ -6607,8 +6607,16 @@ mod tests {
     /// `limit`, which put 9 more action/key pairs under the sweep (30 → 39) and clear five of
     /// the thirteen keys it could not read. The first draft was +239; the rewrites that only
     /// restated a description were cut before measuring.
+    ///
+    /// **Lowered 2026-11-13, 57_688 → 57_665 (−23), returning bytes.** The `doc` schema texts
+    /// for `entry_collection`, `id_prefix` and `anchor_heading` and the `doc` description were
+    /// reworded to say that a params `append_entry` writes its section (`title`, `body` and
+    /// `anchor_heading` required) and that the id counts the frontmatter high-water mark; the
+    /// rewrite came out shorter. Measured: `tool_surface_report_lengths` reports TOTAL 57_665
+    /// (headroom 0); the `doc` row is 19_692 (description 1_625, schema 18_067), 23 below its
+    /// previous total, and no other row moves.
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_688;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_665;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {

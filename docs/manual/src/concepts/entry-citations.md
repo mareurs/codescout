@@ -95,7 +95,7 @@ than drift.
 
 ### From the main checkout only
 
-`append_entry` refuses id allocation from a worktree session, on the same grounds it
+`append_entry` refuses id allocation on a main ledger from a worktree session (a ledger born in the worktree has no main twin and is not refused), on the same grounds it
 refuses `cites`. An entry id is ledger-wide state and must key to the main tracker; left
 unguarded, the worktree's shadow row is a different `artifact_id`, so both trees issue the
 same number — and nothing repairs it at merge, because no tool renumbers an entry in both

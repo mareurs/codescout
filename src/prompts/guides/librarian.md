@@ -373,8 +373,9 @@ main checkout's catalog instead of a wholesale fork:
   from a worktree session forks it — seeds a shadow row at the worktree path,
   a `worktree_fork` event carrying the fork-time base params/frontmatter, and
   a `worktree_of` lineage link. Every write after that lands on the shadow.
-  `append_entry` never forks: an id allocation (params or prose) from a worktree is refused,
-  with a hint to repeat the call with the main row's id and `workspace=<main root>`.
+  `append_entry` never forks: an id allocation (params or prose) on a main ledger from a
+  worktree is refused (a ledger born in the worktree is not), with a hint to repeat the call
+  with the main row's id and `workspace=<main root>`.
   `delete`/`move` on a main-root target from a worktree session are refused —
   merge or act from the main checkout instead.
 - **Merge:**
@@ -387,8 +388,10 @@ main checkout's catalog instead of a wholesale fork:
   registration abandoned (an entry held only in params is lost; one in the
   markdown stays in its file). A renumber of an id the worktree's source defines
   by heading is skipped and the registration stays active; the conflict's
-  `source` names what decided. Exits: make the worktree's file readable, or
-  restore its branch at its tip, and merge again; or `abandon`.
+  `source` says which source decided. When the worktree's file (or its branch
+  tip) defines the id, `abandon` is the only exit. When main's file stood in
+  because the source could not be read, make the worktree's file readable or
+  restore its branch at its tip and merge again, or `abandon`.
 - **`doctor`'s `worktree_scoped_row` / `fix=reseat_worktree` is now the
   LEGACY fallback** — it only applies to worktree-scoped rows with no
   ACTIVE registration (pre-overlay drift, or a lost registration). A
