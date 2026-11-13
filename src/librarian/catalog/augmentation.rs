@@ -1945,7 +1945,13 @@ pub fn allocate_entry_id(
         written.as_ref(),
         &id,
         "allocate_entry_id",
-        RetryRule::DeleteFirst,
+        // An adopted section stays in the file whatever this call wrote, so a failed commit
+        // gets the delete-first remedy even when this call wrote nothing or only the mark.
+        if adopted {
+            RetryRule::AdoptedOrphan
+        } else {
+            RetryRule::DeleteFirst
+        },
     )?;
 
     Ok(AllocateOutcome {
@@ -6021,7 +6027,65 @@ mod tests {
         let out = allocate_entry_id(&mut cat, "art1", "F", Some(&different_body("first"))).unwrap();
         assert_eq!((out.id.as_str(), out.adopted), ("F-2", false));
     }
-    // mutation: pass `""` as section_body → adopted, red.
+    // mutation: `find_unrecorded_section` ignores the body comparison (titles only) → F-1 adopted,
+    // red.
+
+    /// An ADOPTED prose call whose own COMMIT fails leaves the adopted section in the file, so its
+    /// hint is the delete-first remedy for that section, whether the call wrote nothing (the mark
+    /// already covered the id) or wrote only the mark. "Safe to retry as-is" is false here: once a
+    /// peer reserves a later id the retry no longer finds the orphan and writes a second section
+    /// (C1-R22). The oracle is the hint text and the file bytes.
+    #[test]
+    fn an_adopted_prose_call_whose_commit_fails_keeps_the_delete_first_remedy() {
+        for mark in [Some(1u64), None] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut cat = Catalog::open_in_memory().unwrap();
+            let md = orphan_fixture(dir.path(), &mut cat, mark);
+            let before = std::fs::read_to_string(&md).unwrap();
+            cat.conn
+                .execute_batch(
+                    "CREATE TABLE commit_tripwire(
+                         missing TEXT REFERENCES artifact(id) DEFERRABLE INITIALLY DEFERRED
+                     );
+                     CREATE TRIGGER commit_tripwire_trg AFTER INSERT ON entry_reservation
+                     BEGIN
+                         INSERT INTO commit_tripwire(missing) VALUES ('no-such-artifact');
+                     END;",
+                )
+                .unwrap();
+
+            let err =
+                allocate_entry_id(&mut cat, "art1", "F", Some(&pending("first"))).unwrap_err();
+
+            let hint = err
+                .downcast_ref::<LibrarianRecoverableError>()
+                .expect("a recoverable error, so it routes isError:false")
+                .hint
+                .clone()
+                .unwrap_or_default();
+            assert!(
+                hint.contains("Delete the `F-1` section"),
+                "mark {mark:?}: the adopted section is still in the file, so the caller deletes \
+                 it first: {hint}"
+            );
+            assert!(
+                !hint.contains("safe to retry as-is"),
+                "mark {mark:?}: a blind retry can write a second section: {hint}"
+            );
+            assert!(
+                !hint.contains(&dir.path().to_string_lossy().into_owned()),
+                "mark {mark:?}: no absolute path in a hint: {hint}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&md).unwrap(),
+                before,
+                "mark {mark:?}: the adopted section stays, and a mark this call wrote is restored"
+            );
+        }
+    }
+    // mutation: pass `RetryRule::DeleteFirst` for an adopted call in `allocate_entry_id` → the
+    // no-write case says "no file was touched ... safe to retry as-is" and the mark-only case says
+    // "No section was written ... safe to retry as-is", red.
 
     #[test]
     fn a_recorded_section_is_never_adopted() {

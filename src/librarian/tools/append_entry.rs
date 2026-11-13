@@ -388,13 +388,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // than the dangling case this path exists to prevent.
         let next_step = if outcome.adopted {
             // The section was already in the file (a failed earlier call wrote it and persisted
-            // no id), so this call wrote none: saying "wrote" would be false and "reserved"
-            // would send the caller to write a duplicate.
+            // no id), so this call wrote no second one: saying "wrote" would be false and
+            // "reserved" would send the caller to write a duplicate. This call may still have
+            // raised the frontmatter mark, so it does not claim to have written nothing. No
+            // `compaction_note`: that note attributes the id to the committed mark, and an
+            // adopted id came from the section already in the file.
             format!(
                 "{id} was already in the file under this title and body, so it is now \
-                 recorded and nothing new was written. The heading is \
+                 recorded and no second section was written. The heading is \
                  `{heading} {id} — <title>`, so the entry is citable. Do NOT write the section \
-                 again.{compaction_note}",
+                 again.",
                 id = outcome.id
             )
         } else if outcome.section_written {
@@ -2151,7 +2154,8 @@ mod tests {
         let step = result["next_step"].as_str().unwrap();
         assert!(
             step.contains("already in the file")
-                && step.contains("nothing new was written")
+                && step.contains("no second section was written")
+                && !step.contains("nothing new")
                 && !step.contains("Wrote R-1")
                 && !step.contains("Reserved R-1"),
             "an adoption is neither a write nor a reservation: {step}"
@@ -2165,6 +2169,45 @@ mod tests {
         );
     }
     // mutation: drop the `outcome.adopted` arm of the prose `next_step` → "Wrote R-1" appears.
+
+    /// The compaction note attributes an id to the committed mark ("the committed frontmatter mark
+    /// alone accounts for this id"). An adopted id came from the section already in the file, so
+    /// the note must not appear even when the mark leads the body and the reservation table.
+    #[tokio::test]
+    async fn an_adopted_prose_retry_never_attributes_its_id_to_the_committed_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: R\nentry_high_water_R: 5\n---\n\n# Ledger\n\n\
+             ## R-1 — t\n\n**Valid:** dated 2026-01-01\n\nb\n\n## Template\n",
+        )
+        .unwrap();
+        let ctx = mk_ctx();
+        seed_prose(&ctx, "art1", &md);
+
+        let result = call(
+            &ctx,
+            json!({"id": "art1", "id_prefix": "R", "anchor_heading": "## Template",
+                   "title": "t", "body": "b"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["id"], "R-1");
+        assert_eq!(result["adopted"], true, "{result}");
+        assert_eq!(
+            result["frontmatter_max"], 5,
+            "the fixture must have the mark leading the body, or the note is not in play"
+        );
+        let step = result["next_step"].as_str().unwrap();
+        assert!(
+            !step.contains("accounts for this id"),
+            "the adopted id is R-1, not a number the mark produced: {step}"
+        );
+    }
+    // mutation: append `{compaction_note}` to the adopted arm of the prose `next_step` → the
+    // "accounts for this id" assertion red.
 
     /// An adopted section adds no index row in this call, so `snapshot_missing` keeps naming the
     /// row the orphan never got: the retry must not claim a row it did not write.

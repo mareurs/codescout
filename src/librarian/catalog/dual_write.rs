@@ -184,7 +184,8 @@ pub(crate) fn write_entry_into_ledger(
 
 /// What a retry does with a section that a failed call left on disk, and so what the failed
 /// call's hint tells the caller to do about it. Only a SECTION write has such a remedy; a
-/// write that carried only the high-water mark always says "safe to retry".
+/// write that carried only the high-water mark says "safe to retry", except under
+/// [`RetryRule::AdoptedOrphan`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RetryRule {
     /// The retry finds the section ([`find_unrecorded_section`]) and records it: the caller
@@ -194,6 +195,11 @@ pub(crate) enum RetryRule {
     /// prose path's "recorded" test is one per-prefix maximum, which a peer's later reservation
     /// can raise past the orphan, so there the orphan can look recorded without being so.
     DeleteFirst,
+    /// The call ADOPTED a section an earlier failed call left, and its own commit failed. The
+    /// section is in the file whatever this call wrote (nothing, or only the mark), so no branch
+    /// may say "safe to retry": the remedy is [`RetryRule::DeleteFirst`]'s, for every outcome
+    /// of the rollback. Used by the prose path only; the params path re-adopts on a retry.
+    AdoptedOrphan,
 }
 
 /// A section's text with its server-stamped validity line and the blank lines around it
@@ -201,7 +207,9 @@ pub(crate) enum RetryRule {
 ///
 /// `splice_pending_section` stamps `**Valid:** dated <today>` above a body that declares no
 /// class, so the stamp is the one difference between the two that a retry on another day
-/// changes; only that exact leading line is dropped, never a class the caller wrote.
+/// changes. Any leading `**Valid:** dated YYYY-MM-DD` line is dropped, including one the caller
+/// wrote, so two bodies that differ only in a caller-declared date compare equal. A leading
+/// validity line of any other class is kept and compared.
 fn without_validity_stamp(text: &str) -> &str {
     let text = text.trim();
     let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
@@ -262,6 +270,14 @@ fn heading_number(heading_line: &str, id_prefix: &str, title: &str) -> Option<u6
 /// text, with no marker in the committed file (ruling C1-R3), so two entries that are identical
 /// in both become one, and on another machine an identical committed entry is adopted because
 /// "recorded" is machine-local.
+///
+/// **What is NOT adopted** (a retry then writes a duplicate section under a new id):
+/// - a heading spelled with `-` or `–` instead of `—`: `def_re` (`link_scan/extract.rs`) accepts
+///   all three dashes, this match only the em dash the server writes;
+/// - a caller body that itself contains a heading at or above the entry's level, because the
+///   section on disk ends at that heading, so its text no longer equals the body;
+/// - an `anchor_heading` deeper than the entry's level, because the heading the section was
+///   inserted before then falls inside the section's text.
 pub(crate) fn find_unrecorded_section(
     doc: &str,
     id_prefix: &str,
@@ -368,6 +384,17 @@ fn without_path(text: &str, path: &std::path::Path, label: &str) -> String {
     out
 }
 
+/// The remedy for a section that is still on disk when a retry cannot be trusted to adopt it:
+/// delete it first. "Can", not "will": a retry usually finds the section, and fails to only when
+/// the recorded test covers it (a peer's later reservation on the prose path).
+fn delete_first_remedy(token: &str) -> String {
+    format!(
+        "Do NOT retry blind — the next allocation counts the ids already in the body, so a retry \
+         can write a SECOND section under a NEW id. Delete the `{token}` section (and its index \
+         row, if one was written) first, then retry."
+    )
+}
+
 /// The catalog `COMMIT` failed. Returns a `RecoverableError` naming both halves — what reached
 /// disk and what did not — and, load-bearing, WHICH REMEDY APPLIES.
 ///
@@ -388,7 +415,8 @@ fn without_path(text: &str, path: &std::path::Path, label: &str) -> String {
 ///
 /// For a section that stays on disk, `retry` picks the remedy: [`RetryRule::Adopts`] says a
 /// retry with the same title and body finds the section and records it (nothing to delete);
-/// [`RetryRule::DeleteFirst`] keeps "delete it, then retry".
+/// [`RetryRule::DeleteFirst`] keeps "delete it, then retry"; [`RetryRule::AdoptedOrphan`] gives
+/// that same remedy to a call that adopted the section and wrote none, whatever it wrote.
 fn commit_failed_after_section_write(
     e: rusqlite::Error,
     token: &str,
@@ -396,6 +424,30 @@ fn commit_failed_after_section_write(
     caller: &str,
     retry: RetryRule,
 ) -> anyhow::Error {
+    if retry == RetryRule::AdoptedOrphan {
+        // An adopted section is in the file whatever this call wrote (nothing, or only the mark),
+        // so none of the branches below may say the retry is safe. A mark this call wrote is put
+        // back when the file still holds our bytes; the outcome does not change the remedy, and a
+        // mark left ahead of the catalog costs one skipped integer.
+        let (place, e) = match written {
+            Some(w) => {
+                let label = document_label(&w.path);
+                let _ = restore_section_after_failed_commit(&w.path, &w.before, &w.after);
+                let e = without_path(&e.to_string(), &w.path, &label);
+                (label, e)
+            }
+            None => ("the ledger".to_string(), e.to_string()),
+        };
+        return LibrarianRecoverableError::with_hint(
+            format!("{caller}: the catalog write failed; the adopted section is still in the file"),
+            format!(
+                "The section for `{token}` was already in {place} when this call found it, and the \
+                 catalog COMMIT then failed, so its id was never persisted. This call removed \
+                 nothing from the file. {} Underlying error: {e}",
+                delete_first_remedy(token)
+            ),
+        );
+    }
     let Some(w) = written else {
         return LibrarianRecoverableError::with_hint(
             format!("{caller}: the catalog write failed"),
@@ -465,15 +517,11 @@ fn commit_failed_after_section_write(
     let remedy = match retry {
         RetryRule::Adopts => format!(
             "The section is the one this call was writing, so do NOT delete it: retry with the \
-             same title and body, and the call finds `{token}` in the file, records it, and \
-             writes no second section (an edit to the section's title or body since then makes \
-             the retry a new entry)."
+                   same title and body, and the call finds `{token}` in the file, records it, and \
+                   writes no second section (an edit to the section's title or body since then makes \
+                   the retry a new entry)."
         ),
-        RetryRule::DeleteFirst => format!(
-            "Do NOT retry blind — the next allocation counts the ids already in the body, so a \
-             retry writes a SECOND section under a NEW id. Delete the `{token}` section (and its \
-             index row, if one was written) first, then retry."
-        ),
+        RetryRule::DeleteFirst | RetryRule::AdoptedOrphan => delete_first_remedy(token),
     };
     match rollback {
         SectionRollback::Restored => LibrarianRecoverableError::with_hint(
@@ -920,6 +968,7 @@ mod tests {
         assert!(
             delete_first.contains("Delete the")
                 && delete_first.contains("F-1")
+                && delete_first.contains("a retry can write a SECOND section")
                 && !delete_first.contains("same title")
                 && !delete_first.contains("safe to retry"),
             "where a peer's reservation can cover the orphan a retry does not adopt it, so the \
