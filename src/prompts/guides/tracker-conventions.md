@@ -344,8 +344,9 @@ Deeper mechanics: `get_guide("librarian")`; trackers that carry cross-session be
 <!-- serves: doc.link(path~docs/trackers/) -->
 
 - **Cite by ID in prose.** Entry IDs (`A-11`, `F-3`, `BUG-40`), artifact ids (16-hex) or
-  rel_paths, `<repo>:<ID>` across repos. Prose is the ONLY write surface for citations — never
-  hand-create `cites` edges. **Entry IDs are stable; artifact ids are not** (a 16-hex id changes
+  rel_paths, `<repo>:<ID>` across repos. Prose is the ONLY write surface for citations
+  (`append_entry` `cites=` writes its own `**Cites:**` line) — never hand-create edges.
+  **Entry IDs are stable; artifact ids are not** (a 16-hex id changes
   when the file moves), so prefer an entry ID or rel_path for a target likely to be archived.
 - **`link_scan` derives the edges:** `librarian(action="link_scan")` reports, `write=true`
   applies. It is idempotent and heals what bypasses `doc(action="move")`.

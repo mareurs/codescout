@@ -508,6 +508,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if let Some(note) = outcome.undefined_in_body {
         out["undefined_in_body"] = json!(note);
     }
+    // What was written into the section, so the caller sees the text twin of each edge.
+    if !outcome.cites.is_empty() {
+        out["cites"] = json!(outcome.cites);
+    }
+    if let Some(note) = outcome.key_note {
+        out["key_note"] = json!(note);
+    }
     Ok(out)
 }
 
@@ -2012,10 +2019,12 @@ mod tests {
     #[tokio::test]
     async fn append_with_cites_writes_entry_cite_and_not_artifact_link() {
         let dir = tempfile::tempdir().unwrap();
+        // A repository: the cite's grammar text is named against the ledger's git root.
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         let ctx = mk_ctx();
         // an augmented tracker with entry_collection "failures" and a real file
-        seed_on_disk(&ctx, "art1", dir.path());
-        seed(&ctx, "art2");
+        let path = seed_on_disk(&ctx, "art1", dir.path());
+        seed_on_disk(&ctx, "art2", dir.path());
         let out = call(
             &ctx,
             with_section(json!({
@@ -2026,6 +2035,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(out["id"], "F-1");
+        assert_eq!(
+            out["cites"],
+            json!(["[[art2]]"]),
+            "the response names the grammar text written"
+        );
+        assert!(out.get("key_note").is_none(), "{out}");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("prose\n\n**Cites:** [[art2]]\n"), "{text}");
         let cat = ctx.catalog.lock();
         // slug minted on art1; one entry_cite row; zero artifact_link rows.
         let slug: String = cat
@@ -2043,10 +2060,12 @@ mod tests {
             .unwrap();
         assert_eq!(al, 0, "cites must not touch artifact_link");
     }
+    // mutation: skip `with_cites` in `append_entry` → the `**Cites:**` assertion is red.
 
     #[tokio::test]
     async fn append_with_unresolvable_cite_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         let ctx = mk_ctx();
         let path = seed_on_disk(&ctx, "art1", dir.path());
         let before = std::fs::read_to_string(&path).unwrap();
@@ -2072,6 +2091,213 @@ mod tests {
             before,
             "nor may the section or the mark reach the file for a refused cite"
         );
+    }
+    /// A context rooted at `root` (a git root), for a call that appends and then scans.
+    fn scan_ctx(root: &std::path::Path) -> ToolContext {
+        use crate::librarian::current_project::CurrentProject;
+        use crate::librarian::workspace::Root;
+        TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_root(Root {
+                name: "r".into(),
+                path: root.to_path_buf(),
+            })
+            .with_current_project(std::sync::Arc::new(CurrentProject {
+                abs_path: root.to_path_buf(),
+                git_root: root.to_path_buf(),
+                main_root: None,
+                umbrella: None,
+            }))
+            .build()
+    }
+
+    /// A target document at `path` holding `text`, with `slug`, whose params carry entry `F-3`.
+    fn seed_target(ctx: &ToolContext, id: &str, slug: &str, path: &std::path::Path, text: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+        seed(ctx, id);
+        let cat = ctx.catalog.lock();
+        cat.conn
+            .execute(
+                "UPDATE artifact SET abs_path = ?1, slug = ?2 WHERE id = ?3",
+                rusqlite::params![path.to_str().unwrap(), slug, id],
+            )
+            .unwrap();
+        cat.conn
+            .execute(
+                "UPDATE artifact_augmentation SET params = ?1 WHERE artifact_id = ?2",
+                rusqlite::params![r#"{"failures":[{"id":"F-3"}]}"#, id],
+            )
+            .unwrap();
+    }
+
+    /// `(dst_ref, origin)` of every `entry_cite` row whose source entry is `local`.
+    fn rows_for(ctx: &ToolContext, local: &str) -> Vec<(String, String)> {
+        let cat = ctx.catalog.lock();
+        let mut stmt = cat
+            .conn
+            .prepare(
+                "SELECT dst_ref, origin FROM entry_cite WHERE src_local = ?1 \
+                 ORDER BY dst_ref, origin",
+            )
+            .unwrap();
+        stmt.query_map([local], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// The old scanner beside the write row: it reads `target:F-3` inside `[[target:F-3]]` and
+    /// derives the same `<slug>:F-3` the write row holds, and `entry_cite`'s key leaves `origin`
+    /// out, so its insert is ignored.
+    #[tokio::test]
+    async fn a_write_scan_after_a_cited_append_keeps_one_write_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let ctx = scan_ctx(&root);
+        seed_on_disk(&ctx, "art1", &root);
+        seed_target(
+            &ctx,
+            "art2",
+            "target-slug",
+            &root.join("target.md"),
+            "## F-3 — t\n\nbody\n",
+        );
+        let out = call(
+            &ctx,
+            with_section(json!({
+                "id": "art1", "entry_collection": "failures", "id_prefix": "F",
+                "entry": {}, "cites": ["target-slug:F-3"]
+            })),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["cites"], json!(["[[target:F-3]]"]));
+        let new_id = out["id"].as_str().unwrap().to_string();
+
+        let scan = crate::librarian::tools::link_scan::call(&ctx, json!({ "write": true }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            scan["counts"]["entry_edges"]["skipped_existing"],
+            json!(1),
+            "{scan:#}"
+        );
+        assert_eq!(
+            scan["counts"]["entry_edges"]["written"],
+            json!(0),
+            "{scan:#}"
+        );
+        assert_eq!(
+            rows_for(&ctx, &new_id),
+            vec![("target-slug:F-3".to_string(), "write".to_string())]
+        );
+    }
+    // mutation: insert the write row with dst_ref `target:F-3` (key, not slug) → written 1.
+
+    /// A cite into ANOTHER repository is written `[[foreign/key:F-3]]`, and the old scanner
+    /// still reads `key:F-3` out of it and looks `key` up as a file STEM of the repository it
+    /// scans. With no such file there it reports a cross-repository reference and makes no edge.
+    #[tokio::test]
+    async fn a_write_scan_of_a_cross_repository_cite_makes_no_edge_when_no_local_file_has_the_stem()
+    {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let ctx = scan_ctx(&root);
+        seed_on_disk(&ctx, "art1", &root);
+        let (foreign, new_id) = cross_repository_append(&ctx, tmp.path()).await;
+        assert!(foreign.join("docs/xtarget.md").exists());
+
+        let scan = crate::librarian::tools::link_scan::call(&ctx, json!({ "write": true }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            scan["counts"]["entry_edges"]["written"],
+            json!(0),
+            "{scan:#}"
+        );
+        assert_eq!(
+            rows_for(&ctx, &new_id),
+            vec![("xslug:F-3".to_string(), "write".to_string())],
+            "only the write row"
+        );
+    }
+
+    /// Records a known gap in the old scanner, which this plan leaves unchanged: when the
+    /// repository being scanned holds a DIFFERENT file whose stem equals the foreign key and
+    /// that file defines the token, `key:F-3` inside `[[foreign/key:F-3]]` resolves to it and
+    /// `write=true` records an edge to the wrong document, beside the right write row.
+    #[tokio::test]
+    async fn a_write_scan_of_a_cross_repository_cite_edges_to_a_local_file_that_shares_the_stem() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("mine");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let ctx = scan_ctx(&root);
+        seed_on_disk(&ctx, "art1", &root);
+        seed_target(
+            &ctx,
+            "art3",
+            "local-namesake",
+            &root.join("docs/xtarget.md"),
+            "## F-3 — a different entry\n",
+        );
+        let (_foreign, new_id) = cross_repository_append(&ctx, tmp.path()).await;
+
+        let scan = crate::librarian::tools::link_scan::call(&ctx, json!({ "write": true }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            scan["counts"]["entry_edges"]["written"],
+            json!(1),
+            "{scan:#}"
+        );
+        assert_eq!(
+            rows_for(&ctx, &new_id),
+            vec![
+                ("local-namesake:F-3".to_string(), "scan".to_string()),
+                ("xslug:F-3".to_string(), "write".to_string()),
+            ],
+            "the scan row points at the local namesake, not at the cited foreign document"
+        );
+    }
+
+    /// Appends to `art1` an entry that cites `F-3` of `xtarget.md` in a committed-name
+    /// repository `foreign` (slug `xslug`) beside the ledger's repository; returns that
+    /// repository's root and the new entry's id.
+    async fn cross_repository_append(
+        ctx: &ToolContext,
+        base: &std::path::Path,
+    ) -> (std::path::PathBuf, String) {
+        let foreign = base.join("foreign");
+        std::fs::create_dir_all(foreign.join(".git")).unwrap();
+        std::fs::create_dir_all(foreign.join(".codescout")).unwrap();
+        std::fs::write(
+            foreign.join(".codescout/repo.toml"),
+            "name = \"foreign-repo\"\n",
+        )
+        .unwrap();
+        seed_target(
+            ctx,
+            "art2",
+            "xslug",
+            &foreign.join("docs/xtarget.md"),
+            "## F-3 — t\n",
+        );
+        let out = call(
+            ctx,
+            with_section(json!({
+                "id": "art1", "entry_collection": "failures", "id_prefix": "F",
+                "entry": {}, "cites": ["xslug:F-3"]
+            })),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["cites"], json!(["[[foreign-repo/xtarget:F-3]]"]));
+        (foreign, out["id"].as_str().unwrap().to_string())
     }
 
     #[tokio::test]

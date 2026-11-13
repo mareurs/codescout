@@ -1,8 +1,11 @@
+use crate::librarian::catalog::cite_text::{grammar_form_of, with_cites};
 use crate::librarian::catalog::dual_write::{
     commit_after_file_write, find_unrecorded_section, frontmatter_mark, record_written_file,
     write_entry_into_ledger, FileWrite, RetryRule,
 };
 use crate::librarian::catalog::Catalog;
+use crate::librarian::derived::diff::{scope_of, Scope};
+use crate::librarian::identity::key::key_of;
 use crate::librarian::tools::{schema_validate, LibrarianRecoverableError};
 use anyhow::Result;
 use rusqlite::OptionalExtension;
@@ -810,6 +813,14 @@ pub struct AppendOutcome {
     /// second one. `section_written` is `true` then: the section is on disk and the caller
     /// must not write it again. See [`dual_write::find_unrecorded_section`].
     pub adopted: bool,
+    /// The citations written into the entry's section, as grammar text (`[[key]]`,
+    /// `[[key:TOKEN]]`, `[[repo/key…]]`), in input order with repeats dropped. Empty when the
+    /// call carried no `cites` or wrote no section.
+    pub cites: Vec<String>,
+    /// Set when the ledger's own file name is not a canonical key: the entry is written and its
+    /// bare token resolves inside the ledger, but `[[key:TOKEN]]` cannot name it from another
+    /// document until the file is renamed.
+    pub key_note: Option<String>,
 }
 
 /// Atomically assigns the next `<id_prefix>-N` id and appends `entry` to
@@ -822,6 +833,12 @@ pub struct AppendOutcome {
 /// high-water mark go to disk in one write (`write_mark: true`), and a ledger with no
 /// frontmatter block to hold the mark is refused with nothing written. Without one the call
 /// writes params only; the tool refuses that shape, so only tests and Plan D's export reach it.
+///
+/// With a section, each of `cites` is also written into it as grammar text, one `**Cites:**`
+/// line at the end of the section ([`resolve_cites`]); a cite the grammar cannot name (no git
+/// root, outside the key space, a key two files share, a repository with no committed name)
+/// refuses the whole call before an id is chosen. The `entry_cite` `origin='write'` rows are
+/// written either way, and an adoption compares against the section as rendered with that line.
 pub fn append_entry(
     cat: &mut Catalog,
     artifact_id: &str,
@@ -931,9 +948,15 @@ pub fn append_entry(
         ),
         _ => None,
     };
+    // Every cite is resolved, and rendered as grammar text, BEFORE an id is chosen and before
+    // anything is written: a cite the grammar cannot name refuses the whole call with the file and
+    // the catalog untouched (C1-R6, C1-R15). The section the call writes is the caller's with its
+    // `**Cites:**` line, so that rendered section is also what a retry is matched against.
+    let resolved = resolve_cites(&tx, abs_path.as_deref(), cites, section.is_some())?;
+    let rendered: Option<PendingSection> = section.map(|s| with_cites(s, &resolved.forms));
     // "Recorded" on this path is exact: params hold `<P>-n`. A section the file has and params
     // lack is the orphan of a failed call (C1-R3, C1-R4).
-    let adopted_n: Option<u64> = match (section, section_doc.as_deref()) {
+    let adopted_n: Option<u64> = match (rendered.as_ref(), section_doc.as_deref()) {
         (Some(s), Some(doc)) => find_unrecorded_section(doc, id_prefix, &s.title, &s.body, &|n| {
             let token = format!("{id_prefix}-{n}");
             existing_ids.contains(&token)
@@ -1037,11 +1060,10 @@ pub fn append_entry(
         rusqlite::params![new_params_text, artifact_id],
     )?;
 
-    if !cites.is_empty() {
+    if !resolved.refs.is_empty() {
         let slug = crate::librarian::catalog::artifact::ensure_slug(&tx, artifact_id)?;
         let now = chrono::Utc::now().timestamp_millis();
-        for raw in cites {
-            let dst_ref = resolve_cite_ref(&tx, raw)?;
+        for dst_ref in resolved.refs {
             crate::librarian::catalog::entry_cite::insert_with(
                 &tx,
                 &crate::librarian::catalog::entry_cite::EntryCiteRow {
@@ -1070,7 +1092,7 @@ pub fn append_entry(
     // transaction rolls back and the id is never persisted, but these bytes are already
     // written.
     let mut written_section: Option<FileWrite> = None;
-    let section_written = match section {
+    let section_written = match rendered.as_ref() {
         None => false,
         Some(s) => {
             let (Some(path), Some(doc)) = (abs_path.as_deref(), section_doc.as_deref()) else {
@@ -1128,6 +1150,10 @@ pub fn append_entry(
     // After the commit, deliberately: this reads the body off disk and must never be
     // able to fail a write that already succeeded.
     let undefined_in_body = undefined_in_body_note(cat, artifact_id, &new_id);
+    let key_note = abs_path
+        .as_deref()
+        .filter(|_| section_written)
+        .and_then(|path| ledger_key_note(path, &new_id));
     Ok(AppendOutcome {
         id: new_id,
         warning,
@@ -1135,6 +1161,8 @@ pub fn append_entry(
         undefined_in_body,
         section_written,
         adopted,
+        cites: resolved.forms,
+        key_note,
     })
 }
 
@@ -2453,6 +2481,79 @@ fn resolve_cite_ref(conn: &rusqlite::Connection, raw: &str) -> Result<String> {
             ids.len()
         ))),
     }
+}
+/// The cites of one `append_entry` call after resolution.
+struct ResolvedCites {
+    /// Each ref's `entry_cite.dst_ref`, in input order (what the `origin='write'` rows key on).
+    refs: Vec<String>,
+    /// Each ref as grammar text, in input order with exact repeats dropped. Empty when the call
+    /// writes no section, so there is no text to carry them.
+    forms: Vec<String>,
+}
+
+/// Resolves every cite of an `append_entry` call, and, when the call writes a section, renders
+/// each as grammar text with [`grammar_form_of`] against the ledger's git root. The first cite
+/// that cannot be resolved or named refuses the whole call.
+///
+/// The ledger's git root is the one above its file ([`lookup_git_root`]); a ledger that lies in
+/// no git repository has no repository to name its cites against, so a call that cites from it is
+/// refused, by file name. A call with no cites needs no root.
+fn resolve_cites(
+    conn: &rusqlite::Connection,
+    ledger_path: Option<&str>,
+    cites: &[String],
+    writes_section: bool,
+) -> Result<ResolvedCites> {
+    let mut refs = Vec::with_capacity(cites.len());
+    let mut forms: Vec<String> = Vec::new();
+    let text_root = match (writes_section, ledger_path, cites.is_empty()) {
+        (true, Some(path), false) => {
+            let root =
+                crate::librarian::current_project::lookup_git_root(std::path::Path::new(path))
+                    .ok_or_else(|| {
+                        let name = std::path::Path::new(path)
+                            .file_name()
+                            .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned());
+                        LibrarianRecoverableError::new(format!(
+                    "append_entry: `{name}` lies in no git repository, so its citations cannot \
+                     be written as grammar text — nothing was written"
+                ))
+                    })?;
+            Some(root)
+        }
+        _ => None,
+    };
+    for raw in cites {
+        let dst_ref = resolve_cite_ref(conn, raw)?;
+        if let Some(root) = &text_root {
+            let form = grammar_form_of(conn, root, &dst_ref)?;
+            if !forms.contains(&form) {
+                forms.push(form);
+            }
+        }
+        refs.push(dst_ref);
+    }
+    Ok(ResolvedCites { refs, forms })
+}
+
+/// The note a ledger gets when its own file name is not a canonical key: its entries are written
+/// and their bare tokens resolve inside it, but `[[key:TOKEN]]` has no key to name it by until the
+/// file is renamed. `None` when the name is a key, and when the ledger has no git root to judge
+/// the name against. Names the file by its name, never by a path.
+fn ledger_key_note(ledger_path: &str, entry_id: &str) -> Option<String> {
+    let root =
+        crate::librarian::current_project::lookup_git_root(std::path::Path::new(ledger_path))?;
+    let Scope::Inside(rel) = scope_of(&root, ledger_path) else {
+        return None;
+    };
+    key_of(&rel).err()?;
+    let name = std::path::Path::new(&rel).file_name()?.to_string_lossy();
+    Some(format!(
+        "`{name}` is not a canonical key, so no `[[key:{entry_id}]]` can name this entry from \
+         another document until the file is renamed (lowercase letters and digits, single \
+         hyphens). The entry is written, and the bare token `{entry_id}` resolves inside this \
+         ledger."
+    ))
 }
 
 /// Every `<id_prefix>-N` index an artifact's markdown body line-anchors.
@@ -5752,7 +5853,16 @@ mod tests {
     /// Sets up a ledger artifact with an empty `failures` collection and its file on
     /// disk, returning the file's path and its exact pre-call bytes.
     fn ledger_fixture(dir: &std::path::Path, cat: &mut Catalog) -> (std::path::PathBuf, String) {
-        let md = dir.join("ledger.md");
+        ledger_fixture_named(dir, cat, "ledger.md")
+    }
+
+    /// [`ledger_fixture`] with the ledger's file named `name`.
+    fn ledger_fixture_named(
+        dir: &std::path::Path,
+        cat: &mut Catalog,
+        name: &str,
+    ) -> (std::path::PathBuf, String) {
+        let md = dir.join(name);
         let before = "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n\
                       ## Template for new entries\n\nboilerplate\n"
             .to_string();
@@ -6118,12 +6228,77 @@ mod tests {
     // mutation: pass `None` instead of `written_section.as_ref()` to `commit_after_file_write` →
     // the file keeps the mark the rolled-back call wrote and the equality assertion is red.
 
+    /// A temp repository (a `.git` directory makes it one for `lookup_git_root`) holding the
+    /// params ledger `docs/<ledger>` (artifact `art1`), the document `docs/other.md`
+    /// (`0123456789abcdef`), and `docs/target.md` (`fedcba9876543210`, slug `target-slug`, entry
+    /// `F-3` in its params). Returns the ledger's path.
+    fn cite_repo(dir: &std::path::Path, cat: &mut Catalog, ledger: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        let docs = dir.join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let (md, _) = ledger_fixture_named(&docs, cat, ledger);
+        plain_doc(cat, "0123456789abcdef", &docs.join("other.md"), None);
+        plain_doc(
+            cat,
+            "fedcba9876543210",
+            &docs.join("target.md"),
+            Some("target-slug"),
+        );
+        let mut a = aug("fedcba9876543210");
+        a.entry_collection = Some("failures".to_string());
+        a.params = r#"{"failures":[{"id":"F-3"}]}"#.to_string();
+        upsert(cat, &a).unwrap();
+        md
+    }
+
+    /// A one-line markdown file at `path` and its catalog row; `slug` is set when given.
+    fn plain_doc(cat: &Catalog, id: &str, path: &std::path::Path, slug: Option<&str>) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "# Doc\n").unwrap();
+        art_upsert(
+            cat,
+            &TestArtifactRowBuilder::new(id).with_abs_path(path).build(),
+        )
+        .unwrap();
+        if let Some(slug) = slug {
+            cat.conn
+                .execute(
+                    "UPDATE artifact SET slug = ?1 WHERE id = ?2",
+                    rusqlite::params![slug, id],
+                )
+                .unwrap();
+        }
+    }
+
+    /// The `origin='write'` `entry_cite` rows of entry `local`.
+    fn write_rows(cat: &Catalog, local: &str) -> i64 {
+        cat.conn
+            .query_row(
+                "SELECT COUNT(*) FROM entry_cite WHERE src_local = ?1 AND origin = 'write'",
+                [local],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    fn cited(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(|s| s.to_string()).collect()
+    }
+
     #[test]
     fn a_params_adoption_writes_the_cites_for_the_adopted_id() {
         let dir = tempfile::tempdir().unwrap();
         let mut cat = Catalog::open_in_memory().unwrap();
-        orphan_fixture(dir.path(), &mut cat, None);
-        crate::librarian::catalog::artifact::upsert(&cat, &sample_art("0123456789abcdef")).unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        // The orphan a failed call with this cite left: the section AND its `**Cites:**` line.
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n\
+             ## F-1 — first\n\n**Valid:** dated 2026-01-01\n\nprose\n\n\
+             **Cites:** [[other]]\n\n\
+             ## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
 
         let out = append_entry(
             &mut cat,
@@ -6131,12 +6306,13 @@ mod tests {
             "failures",
             "F",
             json!({}),
-            &["0123456789abcdef".to_string()],
+            &cited(&["0123456789abcdef"]),
             Some(&pending("first")),
         )
         .unwrap();
 
         assert_eq!((out.id.as_str(), out.adopted), ("F-1", true));
+        assert_eq!(out.cites, vec!["[[other]]"]);
         let src_local: String = cat
             .conn
             .query_row(
@@ -6147,6 +6323,351 @@ mod tests {
             .expect("the adopted entry's citation is recorded under its own id");
         assert_eq!(src_local, "F-1");
     }
+    // mutation: skip the `entry_cite` insert when the section is adopted → the query finds no row.
+
+    /// The adoption key is the RENDERED body: an orphan written without the cites line is a
+    /// different entry from one that carries them, so the retry numbers a new section.
+    #[test]
+    fn an_orphan_without_the_cites_line_is_not_adopted_by_a_call_that_cites() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n\
+             ## F-1 — first\n\n**Valid:** dated 2026-01-01\n\nprose\n\n\
+             ## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
+
+        let out = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &cited(&["0123456789abcdef"]),
+            Some(&pending("first")),
+        )
+        .unwrap();
+
+        assert_eq!((out.id.as_str(), out.adopted), ("F-2", false));
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("## F-2 — first") && text.contains("**Cites:** [[other]]"),
+            "{text}"
+        );
+    }
+    // mutation: compare the adoption against the caller's un-rendered body (`s.body` instead of
+    // the rendered section's) → the orphan is adopted as F-1 and the assertion is red.
+
+    /// Oracle: parse.
+    #[test]
+    fn params_cites_are_grammar_text_and_write_rows() {
+        use crate::librarian::identity::grammar::Reference;
+        use crate::librarian::identity::key::Key;
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+
+        let out = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &cited(&["docs/other.md", "target-slug:F-3", "docs/other.md"]),
+            Some(&pending("first")),
+        )
+        .unwrap();
+
+        let text = std::fs::read_to_string(&md).unwrap();
+        let parsed = crate::librarian::derived::build::parse_document(
+            "docs/ledger.md",
+            &text,
+            &crate::librarian::classify::default_rules().unwrap(),
+        );
+        assert!(
+            parsed.citations.iter().any(|c| c.reference
+                == Reference::File {
+                    repo: None,
+                    key: Key::parse("other").unwrap()
+                }),
+            "{text}"
+        );
+        assert!(
+            parsed.citations.iter().any(|c| c.reference
+                == Reference::Entry {
+                    repo: None,
+                    key: Key::parse("target").unwrap(),
+                    token: "F-3".into()
+                }),
+            "{text}"
+        );
+        assert!(
+            text.contains("prose\n\n**Cites:** [[other]], [[target:F-3]]\n"),
+            "one line at the end of the section, input order, the repeat dropped: {text}"
+        );
+        assert_eq!(write_rows(&cat, &out.id), 2);
+        assert_eq!(out.cites, vec!["[[other]]", "[[target:F-3]]"]);
+        assert_eq!(out.key_note, None, "docs/ledger.md is a canonical key");
+    }
+    // mutation: skip `with_cites` (`rendered = section.cloned()`) → no citation parses.
+
+    /// Review Focus 3. Oracle: the file's bytes and the catalog's params.
+    #[test]
+    fn a_cite_that_names_a_shared_key_aborts_the_whole_append() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        plain_doc(
+            &cat,
+            "1111111111111111",
+            &dir.path().join("docs/a/notes.md"),
+            None,
+        );
+        plain_doc(
+            &cat,
+            "2222222222222222",
+            &dir.path().join("docs/b/notes.md"),
+            None,
+        );
+        let before = std::fs::read_to_string(&md).unwrap();
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &cited(&["docs/other.md", "docs/a/notes.md"]),
+            Some(&pending("first")),
+        )
+        .unwrap_err();
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("docs/a/notes.md") && msg.contains("docs/b/notes.md"),
+            "{msg}"
+        );
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+        assert!(params_ids(&cat, "art1").is_empty());
+        assert_eq!(
+            write_rows(&cat, "F-1"),
+            0,
+            "no cite row of the good ref either"
+        );
+    }
+    // mutation: swallow `grammar_form_of`'s error in `resolve_cites` (`.unwrap_or_default()`) → the
+    // call is Ok and `unwrap_err` panics. The file and params halves hold by construction: every
+    // refusal precedes the write.
+
+    #[test]
+    fn a_cite_outside_the_key_space_aborts_the_whole_append() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(
+            dir.path().join(".codescout/key-space.toml"),
+            "exclude = [\"contrib/**\"]\n",
+        )
+        .unwrap();
+        plain_doc(
+            &cat,
+            "3333333333333333",
+            &dir.path().join("contrib/x.md"),
+            None,
+        );
+        let before = std::fs::read_to_string(&md).unwrap();
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &cited(&["docs/other.md", "contrib/x.md"]),
+            Some(&pending("first")),
+        )
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("key-space.toml"), "{err:#}");
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+        assert!(params_ids(&cat, "art1").is_empty());
+    }
+    // mutation: same as above (swallow `grammar_form_of`'s error) → the call is Ok.
+
+    /// A cite into another repository is `[[repo/key]]` from that repository's committed name.
+    #[test]
+    fn a_cite_into_a_named_other_repository_is_qualified_by_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        let other = dir.path().join("elsewhere");
+        std::fs::create_dir_all(other.join(".git")).unwrap();
+        std::fs::create_dir_all(other.join(".codescout")).unwrap();
+        std::fs::write(
+            other.join(".codescout/repo.toml"),
+            "name = \"other-repo\"\n",
+        )
+        .unwrap();
+        plain_doc(&cat, "4444444444444444", &other.join("docs/notes.md"), None);
+
+        let out = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &cited(&["4444444444444444"]),
+            Some(&pending("first")),
+        )
+        .unwrap();
+
+        assert_eq!(out.cites, vec!["[[other-repo/notes]]"]);
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(text.contains("**Cites:** [[other-repo/notes]]"), "{text}");
+        assert_eq!(write_rows(&cat, &out.id), 1);
+    }
+    // mutation: same as above (`if true` in `grammar_form_of`) → `[[notes]]`, the assertion is red.
+
+    /// C1-R15: a target repository with no committed name refuses the whole append, naming the
+    /// config file to add and no path.
+    #[test]
+    fn a_cite_into_an_unnamed_other_repository_aborts_the_append_naming_repo_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        let other = dir.path().join("elsewhere");
+        std::fs::create_dir_all(other.join(".git")).unwrap();
+        plain_doc(&cat, "4444444444444444", &other.join("docs/notes.md"), None);
+        let before = std::fs::read_to_string(&md).unwrap();
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &cited(&["4444444444444444"]),
+            Some(&pending("first")),
+        )
+        .unwrap_err();
+
+        let msg = format!("{err:#}");
+        assert!(msg.contains(".codescout/repo.toml"), "{msg}");
+        assert!(
+            !msg.contains(&dir.path().display().to_string()) && !msg.contains("4444444444444444"),
+            "no absolute path and no id: {msg}"
+        );
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+        assert!(params_ids(&cat, "art1").is_empty());
+    }
+    // mutation: in `grammar_form_of`, take the same-repository branch always (`if true`) → the
+    // cite is written unqualified and the call is Ok (and the named case loses its prefix).
+
+    /// A ledger that lies in no git repository has no repository to name its cites against.
+    #[test]
+    fn a_cite_from_a_ledger_in_no_repository_is_refused_by_file_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let (md, before) = ledger_fixture(dir.path(), &mut cat);
+        // The target is in a repository; the ledger is not.
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        plain_doc(&cat, "0123456789abcdef", &repo.join("docs/other.md"), None);
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &cited(&["0123456789abcdef"]),
+            Some(&pending("first")),
+        )
+        .unwrap_err();
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("ledger.md") && msg.contains("no git repository"),
+            "{msg}"
+        );
+        assert!(!msg.contains(&dir.path().display().to_string()), "{msg}");
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+    }
+    // mutation: in `resolve_cites`, take the text path only when the ledger has a git root (a
+    // `match` guard) → the call is Ok with no forms.
+
+    /// Oracle: commit. The text the call wrote resolves, in the derived index built from a
+    /// commit, to the entry and the file it cites.
+    #[test]
+    fn a_dual_written_entry_resolves_in_the_derived_index_after_a_commit() {
+        use crate::librarian::derived::testkit::{build_files, edges_from, entry_tokens};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        let out = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &cited(&["docs/other.md", "target-slug:F-3"]),
+            Some(&pending("first")),
+        )
+        .unwrap();
+        let ledger_text = std::fs::read_to_string(&md).unwrap();
+
+        let b = build_files(&[
+            ("docs/ledger.md", &ledger_text),
+            ("docs/target.md", "## F-3 — t\n"),
+            ("docs/other.md", "# O\n"),
+        ]);
+
+        assert_eq!(
+            entry_tokens(&b.conn, "docs/ledger.md"),
+            vec![out.id.clone()]
+        );
+        let edges = edges_from(&b.conn, "docs/ledger.md");
+        assert!(
+            edges.contains(&(
+                "entry".into(),
+                None,
+                Some("target".into()),
+                Some("F-3".into())
+            )),
+            "{edges:?}"
+        );
+        assert!(
+            edges.contains(&("file".into(), None, Some("other".into()), None)),
+            "{edges:?}"
+        );
+    }
+    // mutation: wrap the `cites_line` text in an HTML comment → no edges.
+
+    #[test]
+    fn a_ledger_whose_own_name_is_not_a_key_still_takes_the_entry_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "Ledger_One.md");
+
+        let out = append_first(&mut cat, &pending("first"));
+
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(text.contains("## F-1 — first"), "{text}");
+        let note = out.key_note.expect("the ledger's name is not a key");
+        assert!(
+            note.contains("Ledger_One.md") && note.contains("F-1"),
+            "{note}"
+        );
+        assert!(
+            !note.contains(&dir.path().display().to_string()),
+            "a file name, not a path: {note}"
+        );
+    }
+    // mutation: never set `key_note` → `expect` panics.
     // mutation: skip the `entry_cite` insert when the section is adopted → the query finds no row.
 
     #[test]

@@ -1641,7 +1641,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                  exemption has nothing to admit right now — inert on this catalog, not \
                  broken. To create one: doc(action=\"append_entry\", cites=[...]) or \
                  doc(action=\"link\", rel=\"cites\") from a local artifact naming a \
-                 foreign one directly. librarian(action=\"link_scan\", \
+                 foreign one directly. A cite that append_entry writes for a document \
+                 of another repository is the grammar text `[[repo/key]]`, using that \
+                 repository's committed name; a target repository with no committed \
+                 name refuses the append and needs .codescout/repo.toml there. \
+                 librarian(action=\"link_scan\", \
                  scope=\"umbrella\", write=true) can also derive one from prose, but \
                  only for a bare artifact id or an entry token that resolves uniquely \
                  within a declared [[umbrella]] — a repo-qualified `<repo>:TOKEN` \
@@ -9318,10 +9322,12 @@ mod tests {
     /// derives an edge for a bare artifact id or an entry token, never a
     /// repo-qualified `<repo>:TOKEN` one (`link_scan/resolve.rs`'s `CrossRepoToken`
     /// arm — "edges do not span workspaces"). Asserting the hint names the
-    /// always-working `append_entry`/`cites=` form, not merely `link_scan`, is what
+    /// `append_entry`/`cites=` form, not merely `link_scan`, is what
     /// keeps this test from passing a hint that sends the operator somewhere useless —
     /// the exact defect class this repo has already measured once (see CLAUDE.md §
-    /// *Testing Discipline*, "loudness is a property of a path").
+    /// *Testing Discipline*, "loudness is a property of a path"). The hint also says what
+    /// the remedy needs for a cite into another repository: that repository's committed
+    /// name (`.codescout/repo.toml`), without which `append_entry` refuses the cite.
     #[tokio::test]
     async fn cross_root_cites_edges_is_published_at_zero_with_a_working_remedy() {
         let tmp = tempfile::tempdir().unwrap();
@@ -9347,9 +9353,20 @@ mod tests {
         );
         assert!(
             hint.contains("append_entry") && hint.contains("cites="),
-            "the hint must name a citation-form-agnostic, always-working remedy \
-             (append_entry with cites=[...]), not only link_scan (which cannot resolve \
-             a repo-qualified citation into a cross-root edge): {hint}"
+            "the hint must name a citation-form-agnostic remedy (append_entry with \
+             cites=[...]), not only link_scan (which cannot resolve a repo-qualified \
+             citation into a cross-root edge): {hint}"
+        );
+        assert!(
+            hint.contains("[[repo/key]]")
+                && hint.contains("committed name")
+                && hint.contains(".codescout/repo.toml"),
+            "a cite into another repository is written as `[[repo/key]]` from that \
+             repository's committed name, and an unnamed target needs repo.toml: {hint}"
+        );
+        assert!(
+            !hint.contains("always-working"),
+            "an unnamed foreign target refuses the append, so the remedy is not unconditional: {hint}"
         );
     }
 

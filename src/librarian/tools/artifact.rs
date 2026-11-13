@@ -481,7 +481,7 @@ impl Tool for Artifact {
                 "cites": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "append_entry: optional write-time citations. Each ref is a 16-hex artifact id, a `<slug>:<local>` entry id, or a unique rel_path. Creates entry_cite edges from the new entry atomically; an unresolvable/ambiguous ref aborts the whole call. Not supported from a worktree checkout."
+                    "description": "append_entry: citations (16-hex id, `<slug>:<local>`, or unique rel_path), each written into the entry as grammar text and recorded as an edge. Unresolvable, ambiguous or shared-key refs abort the call; refs into another repository need its committed name. Not from a worktree."
                 },
                 "anchor_heading": {
                     "type": "string",

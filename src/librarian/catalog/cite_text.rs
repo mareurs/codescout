@@ -21,7 +21,6 @@ use rusqlite::OptionalExtension;
 use std::path::Path;
 
 /// The label of the line that holds an entry's citations.
-#[cfg_attr(not(test), allow(dead_code))] // removed by Task 7
 pub(crate) const CITES_LABEL: &str = "**Cites:**";
 
 /// The grammar text of a resolved cite: `[[key]]` for a document, `[[key:TOKEN]]` for an entry of
@@ -59,7 +58,6 @@ pub(crate) const CITES_LABEL: &str = "**Cites:**";
 /// catalog row for a file the tree lacks (ignored build output, files of a nested repository) can
 /// make a key look shared, so a cite can be refused for a collision the tree does not have.
 /// A document the catalog has not indexed yet is not seen at all.
-#[cfg_attr(not(test), allow(dead_code))] // removed by Task 7
 pub(crate) fn grammar_form_of(
     conn: &rusqlite::Connection,
     source_git_root: &Path,
@@ -279,7 +277,6 @@ fn invalid_rel(e: &KeyError) -> &str {
 /// The one line that holds an entry's citations: `**Cites:** [[a]], [[b:F-3]]`, in input order,
 /// an exact repeat dropped. No forms give an empty string: a label with nothing after it is not a
 /// citation line.
-#[cfg_attr(not(test), allow(dead_code))] // removed by Task 7
 pub(crate) fn cites_line(forms: &[String]) -> String {
     let mut seen = std::collections::HashSet::new();
     let kept: Vec<&str> = forms
@@ -296,7 +293,6 @@ pub(crate) fn cites_line(forms: &[String]) -> String {
 
 /// `section` with its citations as one labelled line at the end of its body, after a blank line;
 /// a plain clone when there are none.
-#[cfg_attr(not(test), allow(dead_code))] // removed by Task 7
 pub(crate) fn with_cites(section: &PendingSection, forms: &[String]) -> PendingSection {
     if forms.is_empty() {
         return section.clone();
