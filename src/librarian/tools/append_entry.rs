@@ -306,18 +306,23 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     .to_string(),
             ));
         }
-        if !a.cites.is_empty() {
-            return Err(LibrarianRecoverableError::with_hint(
-                "append_entry: `cites` is not supported on a prose ledger".to_string(),
-                "Reserve the id, write the body, and cite in prose — link_scan derives the \
-                 edges from the text."
-                    .to_string(),
-            ));
-        }
         let mut cat = ctx.catalog.lock();
         let _armed = super::arm_write_roots(ctx, &cat);
         // BEFORE `resolve_write_target`, which would fork a shadow for a refused call.
         refuse_allocation_off_the_main_ledger(ctx, &cat, &a.id)?;
+        // `cites` are written into the section, so a call without one has nowhere to put them.
+        // After the worktree refusal, which wins, and before any allocation.
+        if !a.cites.is_empty() && section.is_none() {
+            return Err(LibrarianRecoverableError::with_hint(
+                "append_entry: `cites` on a prose ledger is written into the entry's section, so \
+                 the call needs `title`, `body` and `anchor_heading` with it"
+                    .to_string(),
+                "Add `title`, `body` and `anchor_heading`: the server writes the section with a \
+                 `**Cites:**` line of grammar citations. To reserve an id only, omit `cites`. \
+                 Nothing has been allocated."
+                    .to_string(),
+            ));
+        }
         //
         // ALLOCATE OPTIMISTICALLY — this used to refuse when `ledger_unpushed_commits`
         // found unpushed commits touching the ledger. Removed 2026-09-11: the refusal's
@@ -343,8 +348,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // Without `title` there is no `— <title>` to format, which is the entire
         // reason this path exists.
         let target = super::worktree::resolve_write_target(&mut cat, ctx, &a.id)?;
-        let outcome =
-            augmentation::allocate_entry_id(&mut cat, &target, &a.id_prefix, section.as_ref())?;
+        let outcome = augmentation::allocate_entry_id_with_cites(
+            &mut cat,
+            &target,
+            &a.id_prefix,
+            section.as_ref(),
+            &a.cites,
+        )?;
         // Phrase the hint in the LEDGER'S shape, never in one we picked. The hard-coded
         // `##` here told the `###` U-N ledger to write H2 — against its 36 siblings, its
         // own augmentation prompt, and docs/TAXONOMY.md, all three of which say H3. When
@@ -406,7 +416,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // `compaction_note`: that note attributes the id to the committed mark, and an
             // adopted id came from the section already in the file.
             format!(
-                "{id} was already in the file under this title and body, so it is now \
+                "{id} was already in the file under this title, body and cites, so it is now \
                  recorded and no second section was written. The heading is \
                  `{heading} {id} — <title>`, so the entry is citable. Do NOT write the section \
                  again.",
@@ -444,6 +454,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         });
         if outcome.adopted {
             out["adopted"] = json!(true);
+        }
+        // What was written into the section, so the caller sees the text twin of each edge.
+        if !outcome.cites.is_empty() {
+            out["cites"] = json!(outcome.cites);
         }
         return Ok(out);
     }
@@ -486,7 +500,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // is what tells the caller the section needs no second write.
         out["adopted"] = json!(true);
         out["next_step"] = json!(format!(
-            "{id} was already in the file under this title and body, so it is now recorded and \
+            "{id} was already in the file under this title, body and cites, so it is now recorded and \
              no second section was written. Do NOT write the section again.",
             id = outcome.id
         ));
@@ -1142,22 +1156,76 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_prose_ledger_refuses_cites() {
+    async fn a_prose_ledger_takes_cites_with_a_section_and_refuses_them_without() {
         let dir = tempfile::tempdir().unwrap();
+        // A repository: the cite's grammar text is named against the ledger's git root.
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         let md = dir.path().join("ledger.md");
-        std::fs::write(&md, "---\nentry_prefix: R\n---\n\n## R-1 — x\n").unwrap();
+        let before = "---\nentry_prefix: R\n---\n\n## R-1 — x\n\n## Template for new entries\n";
+        std::fs::write(&md, before).unwrap();
         let ctx = mk_ctx();
         seed_prose(&ctx, "art1", &md);
+        seed_on_disk(&ctx, "art2", dir.path());
 
+        // Without a section the cites have no place to land: refused, naming the fields to add,
+        // and nothing is reserved or written.
         let err = call(
             &ctx,
-            json!({"id": "art1", "id_prefix": "R", "cites": ["R-1"]}),
+            json!({"id": "art1", "id_prefix": "R", "cites": ["art2.md"]}),
         )
         .await
         .unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("cites")
+                && msg.contains("`title`")
+                && msg.contains("`body`")
+                && msg.contains("`anchor_heading`"),
+            "{msg}"
+        );
+        assert!(
+            !msg.contains(&dir.path().display().to_string()) && !msg.contains("art2"),
+            "no path and no id: {msg}"
+        );
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+        let reserved: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row("SELECT COUNT(*) FROM entry_reservation", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(reserved, 0, "nothing was reserved");
 
-        assert!(err.to_string().contains("cites"), "{err}");
+        // With the section the same cite is written into it as grammar text.
+        let out = call(
+            &ctx,
+            json!({
+                "id": "art1", "id_prefix": "R", "cites": ["art2.md"],
+                "title": "t", "body": "b", "anchor_heading": "## Template for new entries"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out["id"], "R-2", "{out}");
+        assert_eq!(out["cites"], json!(["[[art2]]"]));
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(text.contains("b\n\n**Cites:** [[art2]]\n"), "{text}");
+        let rows: i64 = ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM entry_cite WHERE src_local = 'R-2' AND origin = 'write'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 1);
     }
+    // mutation: restore the unconditional `cites` refusal on the prose path (`if !a.cites.is_empty()`
+    // with no section test) → the second half's `unwrap` panics. Drop the refusal in `call` → the
+    // library's own refusal (it also names the three fields) keeps the first half green; drop both →
+    // the first half's `unwrap_err` panics.
 
     #[tokio::test]
     async fn call_warns_when_params_lags_the_body() {

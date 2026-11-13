@@ -129,6 +129,11 @@ entry. **An unresolvable or ambiguous ref aborts the whole call** — the system
 declines to guess which `F-12` you meant rather than recording a wrong edge,
 because a wrong edge silently pollutes every context pack that walks the graph.
 
+A prose ledger (no `entry_collection`) takes `cites` the same way when the call also
+writes the section (`title`, `body` and `anchor_heading` together): the citations land in
+the section as a `**Cites:**` line and as the same edges. Without a section there is no
+text to carry them, so the call is refused with nothing reserved.
+
 Not supported from a worktree checkout.
 
 ## Reading them back

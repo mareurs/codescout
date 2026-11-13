@@ -1206,6 +1206,9 @@ pub struct AllocateOutcome {
     /// second one. `section_written` is `true` then: the section is on disk and the caller
     /// must not write it again. See [`dual_write::find_unrecorded_section`].
     pub adopted: bool,
+    /// Each cite of the call as the grammar text written into the section, in input order with
+    /// exact repeats dropped. Empty when the call carried no cites.
+    pub cites: Vec<String>,
 }
 
 /// Frontmatter key by which an artifact declares itself a ledger owning an id
@@ -1800,12 +1803,32 @@ pub(crate) fn snapshot_block_last_line(doc: &str, anchor: &str) -> Option<String
 ///
 /// A reserved-but-never-written id leaks an integer. Deliberate: integers are
 /// cheap, and every ledger convention in this repo already forbids reuse.
-pub fn allocate_entry_id(
+///
+/// **`cites`** are written only with a `section`: each is resolved ([`resolve_cites`], the params
+/// path's resolver) inside the transaction before the reservation is staged, and the section is
+/// written with one `**Cites:**` line at its end; the `entry_cite` `origin='write'` rows are
+/// inserted beside the reservation. `cites` without a section are refused with nothing reserved,
+/// and a cite the grammar cannot name refuses the whole call. A retry adopts an orphan section
+/// only when its title, body and cites all match: the adoption key is the section as rendered.
+pub fn allocate_entry_id_with_cites(
     cat: &mut Catalog,
     artifact_id: &str,
     id_prefix: &str,
     section: Option<&PendingSection>,
+    cites: &[String],
 ) -> Result<AllocateOutcome> {
+    // `cites` have no place to land without a section: the entry's text is the section, and a
+    // cite with no text would exist only as a catalog row (spec requirement 3). Refused before the
+    // transaction opens, so nothing is read, reserved or written.
+    if !cites.is_empty() && section.is_none() {
+        return Err(LibrarianRecoverableError::with_hint(
+            "allocate_entry_id: `cites` needs a section to be written into".to_string(),
+            "Pass `title`, `body` and `anchor_heading` together with `cites`: the server writes the \
+             citations as a `**Cites:**` line at the end of the section. Nothing has been \
+             reserved."
+                .to_string(),
+        ));
+    }
     let roots = cat.write_roots();
     let tx = cat
         .conn
@@ -1895,13 +1918,22 @@ pub fn allocate_entry_id(
         .optional()?
         .map(|v| v.max(0) as u64);
 
-    // A section already in the file under this title and body, whose id the reservation table
+    // A section already in the file under this title, body and cites, whose id the reservation table
     // does not cover, is the orphan of a failed earlier call: that call wrote the file, then lost
     // the catalog COMMIT, so its id was never persisted. Adopt it instead of numbering a second
     // section (C1-R3). "Recorded" here is ONE per-prefix maximum, so a peer that reserved a
     // higher id after our failed commit makes the orphan look recorded and it is not adopted;
     // the commit below keeps `RetryRule::DeleteFirst` for exactly that case (C1-R22).
-    let adopted_n: Option<u64> = section.and_then(|s| {
+    //
+    // Every cite is resolved and rendered as grammar text BEFORE the reservation is staged and
+    // before anything is written ([`resolve_cites`], the params path's own resolver): a cite the
+    // grammar cannot name refuses the call, the transaction drops, and no reservation, section,
+    // mark or `entry_cite` row exists. The adoption key is the section AS RENDERED with its
+    // `**Cites:**` line, so a retry with the same title, body and cites adopts, and different
+    // cites are a new entry.
+    let resolved = resolve_cites(&tx, Some(&abs_path), cites, section.is_some())?;
+    let rendered: Option<PendingSection> = section.map(|s| with_cites(s, &resolved.forms));
+    let adopted_n: Option<u64> = rendered.as_ref().and_then(|s| {
         find_unrecorded_section(&doc, id_prefix, &s.title, &s.body, &|n| {
             reserved_max.is_some_and(|r| n <= r)
         })
@@ -1927,6 +1959,26 @@ pub fn allocate_entry_id(
            updated_at    = excluded.updated_at",
         rusqlite::params![artifact_id, id_prefix, next as i64],
     )?;
+    // The same `origin='write'` rows the params path inserts. A prose entry has no params row,
+    // but the row is what the old scanner's tables read until Plan D; the scan's
+    // `INSERT OR IGNORE` on `(src_slug, src_local, dst_ref, rel)` keeps one row if it runs later.
+    if !resolved.refs.is_empty() {
+        let slug = crate::librarian::catalog::artifact::ensure_slug(&tx, artifact_id)?;
+        let now = chrono::Utc::now().timestamp_millis();
+        for dst_ref in &resolved.refs {
+            crate::librarian::catalog::entry_cite::insert_with(
+                &tx,
+                &crate::librarian::catalog::entry_cite::EntryCiteRow {
+                    src_slug: slug.clone(),
+                    src_local: format!("{id_prefix}-{next}"),
+                    dst_ref: dst_ref.clone(),
+                    rel: "cites".to_string(),
+                    origin: "write".to_string(),
+                    created_at: now,
+                },
+            )?;
+        }
+    }
 
     // Persist the mark BEFORE committing, and fail the whole allocation if it cannot
     // be written. The ordering is the durability argument:
@@ -1979,7 +2031,7 @@ pub fn allocate_entry_id(
             &doc,
             id_prefix,
             next,
-            if adopted { None } else { section },
+            if adopted { None } else { rendered.as_ref() },
             true,
             "allocate_entry_id",
         )?)
@@ -2010,7 +2062,18 @@ pub fn allocate_entry_id(
         heading_level: observed_level,
         section_written: section.is_some(),
         adopted,
+        cites: resolved.forms,
     })
+}
+/// [`allocate_entry_id_with_cites`] for a caller with no cites: the same call with `&[]`, so the
+/// allocator's many callers keep their signature.
+pub fn allocate_entry_id(
+    cat: &mut Catalog,
+    artifact_id: &str,
+    id_prefix: &str,
+    section: Option<&PendingSection>,
+) -> Result<AllocateOutcome> {
+    allocate_entry_id_with_cites(cat, artifact_id, id_prefix, section, &[])
 }
 
 /// Insert `row` immediately after the first line equal to `after_line`, comparing
@@ -6687,6 +6750,358 @@ mod tests {
         );
     }
     // mutation: never set `key_note` → `expect` panics.
+
+    // ---- the prose path writes `cites` too ----------------------------------------------------
+    //
+    // The ledger is the `cite_repo` fixture (a real `.git`; its params row is never read by the
+    // prose path), driven through `allocate_entry_id_with_cites`. Oracles: the parse oracle on the
+    // bytes read back, the commit oracle for resolved edges, and the file and the catalog's own
+    // tables for what a refusal must leave untouched.
+
+    /// Oracle: parse.
+    #[test]
+    fn prose_cites_are_grammar_text_and_write_rows() {
+        use crate::librarian::identity::grammar::Reference;
+        use crate::librarian::identity::key::Key;
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+
+        let out = allocate_entry_id_with_cites(
+            &mut cat,
+            "art1",
+            "F",
+            Some(&pending("first")),
+            &cited(&["docs/other.md", "target-slug:F-3", "docs/other.md"]),
+        )
+        .unwrap();
+
+        assert_eq!(out.id, "F-1");
+        assert_eq!(out.cites, vec!["[[other]]", "[[target:F-3]]"]);
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("prose\n\n**Cites:** [[other]], [[target:F-3]]\n"),
+            "one line at the end of the section, input order, the repeat dropped: {text}"
+        );
+        let parsed = crate::librarian::derived::build::parse_document(
+            "docs/ledger.md",
+            &text,
+            &crate::librarian::classify::default_rules().unwrap(),
+        );
+        assert!(
+            parsed.citations.iter().any(|c| c.reference
+                == Reference::File {
+                    repo: None,
+                    key: Key::parse("other").unwrap()
+                }),
+            "{text}"
+        );
+        assert!(
+            parsed.citations.iter().any(|c| c.reference
+                == Reference::Entry {
+                    repo: None,
+                    key: Key::parse("target").unwrap(),
+                    token: "F-3".into()
+                }),
+            "{text}"
+        );
+        let entry = parsed
+            .entries
+            .iter()
+            .find(|e| e.token == out.id)
+            .expect("the entry's section is defined");
+        assert_eq!(parsed.citations.len(), 2, "{text}");
+        for c in &parsed.citations {
+            assert!(
+                (entry.heading_line..=entry.end_line).contains(&c.line),
+                "the cites line lies inside {}'s section, not after it: {text}",
+                out.id
+            );
+        }
+        assert_eq!(
+            write_rows(&cat, &out.id),
+            2,
+            "the prose path writes the same origin='write' rows as the params path"
+        );
+        assert_eq!(reserved_max(&cat, "art1", "F"), Some(1));
+        assert!(text.contains("entry_high_water_F: 1"), "{text}");
+    }
+    // mutation: skip `with_cites` on the prose path (`rendered = section.cloned()`) → the text
+    // assertion is red (`out.cites` still lists the forms).
+    // mutation: skip the `entry_cite` insert on the prose path → `write_rows` is 0.
+
+    /// Oracle: the file's bytes and the catalog's reservation table.
+    #[test]
+    fn prose_cites_without_a_section_are_refused_and_reserve_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        let before = std::fs::read_to_string(&md).unwrap();
+
+        let err =
+            allocate_entry_id_with_cites(&mut cat, "art1", "F", None, &cited(&["docs/other.md"]))
+                .unwrap_err();
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("`title`") && msg.contains("`body`") && msg.contains("`anchor_heading`"),
+            "the refusal names the fields that give the cites a place to land: {msg}"
+        );
+        assert!(
+            !msg.contains(&dir.path().display().to_string()) && !msg.contains("0123456789abcdef"),
+            "no path and no id: {msg}"
+        );
+        assert_eq!(reserved_max(&cat, "art1", "F"), None, "nothing reserved");
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+        assert_eq!(write_rows(&cat, "F-1"), 0);
+    }
+    // mutation: drop the no-section refusal → Ok with an id and no text (`unwrap_err` panics).
+
+    /// A cite the grammar cannot name refuses the whole call, the good cite before it included.
+    /// Oracle: the file's bytes, the reservation table and the `entry_cite` rows.
+    #[test]
+    fn a_prose_cite_of_a_non_canonical_name_aborts_and_reserves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        plain_doc(
+            &cat,
+            "5555555555555555",
+            &dir.path().join("docs/Bad_Name.md"),
+            None,
+        );
+        let before = std::fs::read_to_string(&md).unwrap();
+
+        let err = allocate_entry_id_with_cites(
+            &mut cat,
+            "art1",
+            "F",
+            Some(&pending("first")),
+            &cited(&["docs/other.md", "docs/Bad_Name.md"]),
+        )
+        .unwrap_err();
+
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Bad_Name.md"), "{msg}");
+        assert!(
+            !msg.contains(&dir.path().display().to_string()) && !msg.contains("5555555555555555"),
+            "no path and no id: {msg}"
+        );
+        assert_eq!(reserved_max(&cat, "art1", "F"), None, "nothing reserved");
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+        assert_eq!(write_rows(&cat, "F-1"), 0, "no row of the good cite either");
+    }
+    // mutation: swallow `grammar_form_of`'s error in `resolve_cites` (`.unwrap_or_default()`) → the
+    // call is Ok and `unwrap_err` panics. The brief's mutation (stage the reservation before the
+    // cites resolve and commit it on error) is unreachable through this function: an `Err` return
+    // drops the transaction, which rolls the reservation back.
+
+    /// Oracle: commit. The text the prose call wrote resolves, in the derived index built from a
+    /// commit, to the entry it defines and to the file and the entry it cites.
+    #[test]
+    fn a_dual_written_prose_entry_resolves_in_the_derived_index_after_a_commit() {
+        use crate::librarian::derived::testkit::{build_files, edges_from, entry_tokens};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        let out = allocate_entry_id_with_cites(
+            &mut cat,
+            "art1",
+            "F",
+            Some(&pending("first")),
+            &cited(&["docs/other.md", "target-slug:F-3"]),
+        )
+        .unwrap();
+        let ledger_text = std::fs::read_to_string(&md).unwrap();
+
+        let b = build_files(&[
+            ("docs/ledger.md", &ledger_text),
+            ("docs/target.md", "## F-3 — t\n"),
+            ("docs/other.md", "# O\n"),
+        ]);
+
+        assert_eq!(
+            entry_tokens(&b.conn, "docs/ledger.md"),
+            vec![out.id.clone()]
+        );
+        let edges = edges_from(&b.conn, "docs/ledger.md");
+        assert!(
+            edges.contains(&(
+                "entry".into(),
+                None,
+                Some("target".into()),
+                Some("F-3".into())
+            )),
+            "{edges:?}"
+        );
+        assert!(
+            edges.contains(&("file".into(), None, Some("other".into()), None)),
+            "{edges:?}"
+        );
+    }
+    // mutation: wrap the `cites_line` text in an HTML comment → no edges.
+
+    /// A cite into another repository is `[[repo/key]]` on the prose path too: it shares
+    /// `resolve_cites` with the params path. Oracle: the file's bytes and the `entry_cite` rows.
+    #[test]
+    fn a_prose_cite_into_a_named_other_repository_is_qualified_by_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        let other = dir.path().join("elsewhere");
+        std::fs::create_dir_all(other.join(".git")).unwrap();
+        std::fs::create_dir_all(other.join(".codescout")).unwrap();
+        std::fs::write(
+            other.join(".codescout/repo.toml"),
+            "name = \"other-repo\"\n",
+        )
+        .unwrap();
+        plain_doc(&cat, "4444444444444444", &other.join("docs/notes.md"), None);
+
+        let out = allocate_entry_id_with_cites(
+            &mut cat,
+            "art1",
+            "F",
+            Some(&pending("first")),
+            &cited(&["4444444444444444"]),
+        )
+        .unwrap();
+
+        assert_eq!(out.cites, vec!["[[other-repo/notes]]"]);
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(text.contains("**Cites:** [[other-repo/notes]]"), "{text}");
+        assert_eq!(write_rows(&cat, &out.id), 1);
+    }
+    // mutation: in `grammar_form_of`, take the same-repository branch always (`if true`) →
+    // `[[notes]]`, the assertion is red.
+
+    /// The prose adoption key includes the `**Cites:**` line, as the params key does: a retry with
+    /// the same title, body and cites adopts the orphan and records its cite rows. Oracle: the
+    /// file's bytes (unchanged: the mark already covers the id) and the catalog's tables.
+    #[test]
+    fn a_prose_retry_with_the_same_title_body_and_cites_adopts_and_records_the_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\nentry_high_water_F: 1\n---\n\n# Ledger\n\n\
+             ## F-1 — first\n\n**Valid:** dated 2026-01-01\n\nprose\n\n\
+             **Cites:** [[other]]\n\n\
+             ## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
+        let before = std::fs::read_to_string(&md).unwrap();
+
+        let out = allocate_entry_id_with_cites(
+            &mut cat,
+            "art1",
+            "F",
+            Some(&pending("first")),
+            &cited(&["0123456789abcdef"]),
+        )
+        .unwrap();
+
+        assert_eq!((out.id.as_str(), out.adopted), ("F-1", true));
+        assert_eq!(out.cites, vec!["[[other]]"]);
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+        assert_eq!(reserved_max(&cat, "art1", "F"), Some(1));
+        assert_eq!(write_rows(&cat, "F-1"), 1, "the adopted entry's cite row");
+    }
+    // mutation: skip the `entry_cite` insert when the section is adopted → `write_rows` is 0.
+
+    /// Different cites are a different entry on the prose path, in both directions: an orphan with
+    /// no cites line is not adopted by a call that cites, and an orphan that has one is not adopted
+    /// by a call that does not. Oracle: the file's bytes.
+    #[test]
+    fn a_prose_orphan_is_adopted_only_by_a_call_with_the_same_cites() {
+        // Orphan without the line, call with cites.
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n\
+             ## F-1 — first\n\n**Valid:** dated 2026-01-01\n\nprose\n\n\
+             ## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
+        let out = allocate_entry_id_with_cites(
+            &mut cat,
+            "art1",
+            "F",
+            Some(&pending("first")),
+            &cited(&["0123456789abcdef"]),
+        )
+        .unwrap();
+        assert_eq!((out.id.as_str(), out.adopted), ("F-2", false));
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("## F-2 — first") && text.contains("**Cites:** [[other]]"),
+            "{text}"
+        );
+
+        // Orphan with the line, call without cites.
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n\
+             ## F-1 — first\n\n**Valid:** dated 2026-01-01\n\nprose\n\n\
+             **Cites:** [[other]]\n\n\
+             ## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
+        let out = allocate_entry_id(&mut cat, "art1", "F", Some(&pending("first"))).unwrap();
+        assert_eq!((out.id.as_str(), out.adopted), ("F-2", false));
+    }
+    // mutation: compare the prose adoption against the caller's un-rendered body (`s.body` instead
+    // of the rendered section's) → the first half adopts F-1 and is red.
+
+    /// A prose call that cites and whose COMMIT fails leaves the file and the catalog as they were:
+    /// the section, its cites line and the mark are restored, and no `entry_cite` row survives the
+    /// rollback. Oracle: the file's bytes and the catalog's tables.
+    #[test]
+    fn a_prose_commit_failure_after_a_cited_write_restores_the_file_and_keeps_no_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = cite_repo(dir.path(), &mut cat, "ledger.md");
+        let before = std::fs::read_to_string(&md).unwrap();
+        cat.conn
+            .execute_batch(
+                "CREATE TABLE commit_tripwire(
+                     missing TEXT REFERENCES artifact(id) DEFERRABLE INITIALLY DEFERRED
+                 );
+                 CREATE TRIGGER commit_tripwire_trg AFTER INSERT ON entry_reservation
+                 BEGIN
+                     INSERT INTO commit_tripwire(missing) VALUES ('no-such-artifact');
+                 END;",
+            )
+            .unwrap();
+
+        let err = allocate_entry_id_with_cites(
+            &mut cat,
+            "art1",
+            "F",
+            Some(&pending("first")),
+            &cited(&["docs/other.md"]),
+        )
+        .unwrap_err();
+
+        let hint = err
+            .downcast_ref::<LibrarianRecoverableError>()
+            .expect("a recoverable error, so it routes isError:false")
+            .hint
+            .clone()
+            .unwrap_or_default();
+        assert!(hint.contains("safe to retry as-is"), "{hint}");
+        assert_eq!(std::fs::read_to_string(&md).unwrap(), before);
+        assert_eq!(write_rows(&cat, "F-1"), 0, "the rollback took the row");
+        assert_eq!(reserved_max(&cat, "art1", "F"), None);
+    }
+    // mutation: pass `None` instead of `written.as_ref()` to `commit_after_file_write` on the prose
+    // path → the file keeps the section and the cites line and the equality assertion is red.
 
     #[test]
     fn a_prose_retry_with_no_later_reservation_adopts_the_section() {
