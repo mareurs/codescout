@@ -170,6 +170,7 @@ async fn run_create(args: CreateArgs) -> Result<()> {
             ));
         }
     }
+    let _lock = crate::cli::write_lock::take(&ctx, "doc event create").await?;
     let v = crate::librarian::tools::event_create::call(&ctx, Value::Object(tool_args)).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())

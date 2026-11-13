@@ -18,6 +18,7 @@ pub mod doc_refresh;
 pub mod key_gate;
 
 pub mod doctor;
+pub mod write_lock;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Args;

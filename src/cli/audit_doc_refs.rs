@@ -73,6 +73,13 @@ pub struct AuditArgs {
     pub common: CommonOpts,
 }
 
+/// Whether this invocation writes, and so takes the project write lock. Mirrors the MCP
+/// `librarian(audit_doc_refs)` arm of `LibrarianAdapter::is_write`: the audit writes unless it is
+/// told to emit no tracker, and the CLI sends `emit_tracker` as `!no_emit_tracker`.
+pub(crate) fn takes_the_write_lock(args: &AuditArgs) -> bool {
+    !args.no_emit_tracker
+}
+
 pub async fn run(args: AuditArgs) -> Result<()> {
     let common = args.common.clone();
     let output = common.output();
@@ -93,6 +100,11 @@ pub async fn run(args: AuditArgs) -> Result<()> {
     }
     tool_args.insert("fail_on".into(), Value::String(args.fail_on.clone()));
 
+    let _lock = if takes_the_write_lock(&args) {
+        Some(crate::cli::write_lock::take(&ctx, "audit-doc-refs").await?)
+    } else {
+        None
+    };
     let v = crate::librarian::tools::audit_doc_refs::call(&ctx, Value::Object(tool_args)).await?;
 
     let exit_code = v.get("exit_code").and_then(|x| x.as_i64()).unwrap_or(0) as i32;

@@ -501,6 +501,7 @@ pub(crate) async fn run_create(args: CreateArgs) -> Result<()> {
 
     let tool_args = build_create_tool_args(&args)?;
 
+    let _lock = crate::cli::write_lock::take(&ctx, "doc create").await?;
     let v = crate::librarian::tools::create::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
@@ -638,6 +639,7 @@ pub(crate) async fn run_update(args: UpdateArgs) -> Result<()> {
 
     let tool_args = build_update_tool_args(&args)?;
 
+    let _lock = crate::cli::write_lock::take(&ctx, "doc update").await?;
     let v = crate::librarian::tools::update::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
@@ -668,6 +670,7 @@ pub(crate) async fn run_move(args: MoveArgs) -> Result<()> {
         "id": args.id,
         "new_rel_path": args.new_rel_path,
     });
+    let _lock = crate::cli::write_lock::take(&ctx, "doc move").await?;
     let v = crate::librarian::tools::mv::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
@@ -703,6 +706,7 @@ pub(crate) async fn run_link(args: LinkArgs) -> Result<()> {
         "dst_id": args.dst,
         "rel": args.rel,
     });
+    let _lock = crate::cli::write_lock::take(&ctx, "doc link").await?;
     let v = crate::librarian::tools::link::call(&ctx, tool_args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())

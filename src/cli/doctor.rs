@@ -163,11 +163,23 @@ fn to_tool_args(args: &DoctorArgs) -> Map<String, Value> {
     out
 }
 
+/// Whether this invocation writes, and so takes the project write lock. Mirrors the MCP
+/// `librarian(doctor)` arm of `LibrarianAdapter::is_write` (`fix` present at all, so a dry run
+/// is guarded too): the plain scan is a long read and holds no lock.
+pub(crate) fn takes_the_write_lock(args: &DoctorArgs) -> bool {
+    args.fix.is_some()
+}
+
 pub async fn run(args: DoctorArgs) -> Result<()> {
     let common = args.common.clone();
     let output = common.output();
     let ctx = open_ctx(&common).await?;
 
+    let _lock = if takes_the_write_lock(&args) {
+        Some(crate::cli::write_lock::take(&ctx, "doctor --fix").await?)
+    } else {
+        None
+    };
     let v = crate::librarian::tools::doctor::call(&ctx, Value::Object(to_tool_args(&args))).await?;
 
     // `summary.defects`, NOT `summary.total` — see `fails_the_gate`.

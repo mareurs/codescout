@@ -42,6 +42,7 @@ pub async fn run(args: AugmentArgs) -> Result<()> {
     let common = args.common.clone();
     let output = common.output();
     let ctx = open_ctx(&common).await?;
+    let _lock = crate::cli::write_lock::take(&ctx, "doc augment").await?;
     let v = run_with_ctx(&ctx, args).await?;
     crate::cli::format::print(&v, &output)?;
     Ok(())
