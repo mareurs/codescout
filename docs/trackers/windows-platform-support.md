@@ -59,7 +59,8 @@ to master — the tracker outlives them.
 
 <!-- Rendered mirror of the augmentation `issues` params (tool-usage-patterns
      style). Maintain via:
-       doc(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={...})
+       doc(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={...},
+          anchor_heading="## Currently stable on Windows", title="<title>", body="<defining text>")
       -- NEVER doc(action="augment", merge=true, augment={params:{issues:[...]}}): it replaces the array
      then re-sync this table. Filter rows live with:
        doc(action="get", id="52451519052d207c", entry_filter={"status":{"eq":"open"}}) -->
@@ -321,9 +322,9 @@ _WIN-9 and WIN-12 were fixed 2026-06-09 — see History._
 
 When a Windows issue is found or its status changes:
 
-1. `artifact(action="get", id="52451519052d207c", entry_filter={...})` — confirm it is not
+1. `doc(action="get", id="52451519052d207c", entry_filter={...})` — confirm it is not
    already tracked.
-2. `artifact(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={area, status, summary, ref, since})` — the server assigns the next WIN-N atomically. To flip a status use `artifact(action="update_entry", entry_collection="issues", entry_id="WIN-N", fields={status: "..."})`. **Never** `artifact_augment(merge=true, params={issues:[...]})`: RFC 7396 replaces the array wholesale, which took the sibling T-N queue from 19 entries to 1 on 2026-08-16.
+2. `doc(action="append_entry", id="52451519052d207c", entry_collection="issues", id_prefix="WIN", entry={area, status, summary, ref, since}, anchor_heading="## Currently stable on Windows", title="<title>", body="<defining text>")` — the server assigns the next WIN-N atomically and writes its `WIN-N — <title>` section in the same call. To flip a status use `doc(action="update_entry", id="52451519052d207c", entry_collection="issues", entry_id="WIN-N", fields={status: "..."})`. **Never** `doc(action="augment", merge=true, augment={params:{issues:[...]}})`: RFC 7396 replaces the array wholesale, which took the sibling T-N queue from 19 entries to 1 on 2026-08-16.
    Never reuse or delete a WIN-N id. When a fix lands, flip `status` in place via
    `update_entry` and cite the fixing commit (master-side SHA after cherry-pick)
    in `ref`.

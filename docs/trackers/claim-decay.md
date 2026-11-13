@@ -130,22 +130,15 @@ doc(action="get", id="<this id>",
                                {"status": {"eq": "open"}}]})
 ```
 
-## How to append — two writes, in this order
+## How to append — one call
 
-This is a **filterable** ledger (`entry_collection: "claims"`), so a row and a section are
-separate things and you need both. The row is what `entry_filter` reads; the
-`## DC-N — <title>` heading is the only shape `link_scan` accepts as a definition, so
-without it the entry can never be cited.
+This is a **filterable** ledger (`entry_collection: "claims"`), so an entry is a row and a section. The row is what `entry_filter` reads. The `## DC-N — <title>` heading is the only shape `link_scan` accepts as a definition, so without it the entry can never be cited. One call writes both, and the server assigns the id atomically:
 
 ```
-# 1. Row — the server assigns the id atomically
 doc(action="append_entry", id="<this id>",
-         entry_collection="claims", id_prefix="DC", entry={...})
-
-# 2. Section — using the id step 1 returned
-doc(action="update", id="<this id>", patch={body_edits: [{
-    heading: "## Template for new entries", action: "insert_before",
-    content: "## DC-N — <title>\n\n**Site:** ...\n"}]})
+         entry_collection="claims", id_prefix="DC", entry={...},
+         anchor_heading="## Template for new entries",
+         title="<title>", body="**Site:** ...\n")
 ```
 
 > ⚠️ Never `doc(action="augment", merge=true, augment={params:{claims: [...]}})` — RFC 7396 replaces the

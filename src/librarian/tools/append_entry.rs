@@ -4858,23 +4858,24 @@ mod taxonomy_recipes {
     /// `KNOWN_ABSENT` (tests/ledger_field_labels.rs): an unlisted sectionless params recipe fails
     /// `every_ledger_append_entry_recipe_is_one_the_code_accepts`, and a listed one that has gained
     /// its section (or is gone) fails it until its line is removed.
-    const KNOWN_SECTIONLESS_LEDGER_RECIPES: &[(&str, &str)] = &[
-        ("docs/trackers/claim-decay.md", "DC"),
-        ("docs/trackers/windows-platform-support.md", "WIN"),
-    ];
+    const KNOWN_SECTIONLESS_LEDGER_RECIPES: &[(&str, &str)] = &[];
 
-    fn is_known_sectionless(rel: &str, prefix: &str) -> bool {
-        KNOWN_SECTIONLESS_LEDGER_RECIPES
-            .iter()
-            .any(|(f, p)| *f == rel && *p == prefix)
+    fn is_known_sectionless(known: &[(&str, &str)], rel: &str, prefix: &str) -> bool {
+        known.iter().any(|(f, p)| *f == rel && *p == prefix)
     }
 
     /// The scan's findings plus one per `KNOWN_SECTIONLESS_LEDGER_RECIPES` entry that no longer has
     /// a sectionless params recipe in the scan: the list only shrinks, so a fixed recipe must leave
     /// it in the same change.
     fn ledger_findings(scan: &LedgerScan) -> Vec<String> {
+        ledger_findings_against(scan, KNOWN_SECTIONLESS_LEDGER_RECIPES)
+    }
+
+    /// `ledger_findings` against an explicit list, so a test can exercise the exemption and the
+    /// staleness check while the real list is empty.
+    fn ledger_findings_against(scan: &LedgerScan, known: &[(&str, &str)]) -> Vec<String> {
         let mut out = scan.failures.clone();
-        for (rel, prefix) in KNOWN_SECTIONLESS_LEDGER_RECIPES {
+        for (rel, prefix) in known {
             if !scan
                 .known_sectionless
                 .iter()
@@ -4911,6 +4912,12 @@ mod taxonomy_recipes {
     /// ledger that does not read, a call that does not close, and a call with no `id_prefix` are each
     /// a finding; only a bare mention of the form (`is_form_mention`) is set aside, and it is counted.
     fn scan_ledger_recipes(root: &Path) -> LedgerScan {
+        scan_ledger_recipes_against(root, KNOWN_SECTIONLESS_LEDGER_RECIPES)
+    }
+
+    /// `scan_ledger_recipes` against an explicit known list, so a test can exercise the exemption
+    /// while the real list is empty.
+    fn scan_ledger_recipes_against(root: &Path, known: &[(&str, &str)]) -> LedgerScan {
         let mut scan = LedgerScan::default();
         let mut names: Vec<String> = std::fs::read_dir(root.join(LEDGER_DIR))
             .into_iter()
@@ -4998,7 +5005,7 @@ mod taxonomy_recipes {
                             ));
                         }
                         if let Some(finding) = params_section_finding(&here, args) {
-                            if is_known_sectionless(&rel, &prefix) {
+                            if is_known_sectionless(known, &rel, &prefix) {
                                 scan.known_sectionless.push((rel.clone(), prefix.clone()));
                             } else {
                                 scan.failures.push(finding);
@@ -5057,8 +5064,8 @@ mod taxonomy_recipes {
     /// Asserts, per `append_entry` call written in `docs/trackers/*.md`, the conditions that make
     /// the code refuse it: a prose call's prefix must be declared by the ledger it is written in,
     /// a params call must name the collection that ledger's sidecar declares, and a params call
-    /// must pass `title`, `body` and `anchor_heading` (the two recipes in
-    /// `KNOWN_SECTIONLESS_LEDGER_RECIPES` are exempt until they are fixed).
+    /// must pass `title`, `body` and `anchor_heading` (a recipe named in
+    /// `KNOWN_SECTIONLESS_LEDGER_RECIPES` is exempt until it is fixed; the list is empty today).
     #[test]
     fn every_ledger_append_entry_recipe_is_one_the_code_accepts() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -5597,7 +5604,7 @@ mod taxonomy_recipes {
             "docs/augmentations/l.yaml",
             "prompt: p\nentry_collection: claims\n",
         );
-        let scan = scan_ledger_recipes(root);
+        let scan = scan_ledger_recipes_against(root, &[("docs/trackers/claim-decay.md", "DC")]);
         assert_eq!(
             scan.known_sectionless,
             vec![("docs/trackers/claim-decay.md".to_string(), "DC".to_string())]
@@ -5629,10 +5636,14 @@ mod taxonomy_recipes {
             "docs/augmentations/l.yaml",
             "prompt: p\nentry_collection: claims\n",
         );
-        let scan = scan_ledger_recipes(root);
+        let known = [
+            ("docs/trackers/claim-decay.md", "DC"),
+            ("docs/trackers/windows-platform-support.md", "WIN"),
+        ];
+        let scan = scan_ledger_recipes_against(root, &known);
         assert!(scan.failures.is_empty(), "{:?}", scan.failures);
         assert!(scan.known_sectionless.is_empty());
-        let findings = ledger_findings(&scan);
+        let findings = ledger_findings_against(&scan, &known);
         let stale: Vec<&String> = findings
             .iter()
             .filter(|f| {

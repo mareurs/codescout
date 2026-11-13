@@ -1127,8 +1127,9 @@ headline has already drifted once from the measurement beneath it. Declared 2026
 
 - **ID prefix:** `PV-N`, monotonic, never reused. Registered in
   [`docs/TAXONOMY.md`](../TAXONOMY.md).
-- **Append via** `artifact(action="append_entry", id="<this>", id_prefix="PV",
-  entry_collection="items", entry={...})` — assigns the next ID atomically.
+- **Append via** `doc(action="append_entry", id="<this>", id_prefix="PV",
+  entry_collection="items", entry={...}, anchor_heading="## Conventions for this tracker",
+  title=…, body=…)` — assigns the next ID atomically and writes its section.
   Add narrative below only when a table row is insufficient. **Add a compact defining heading
   (§ *Defining sections for cited entries*) as soon as anything cites the entry** — that is a
   citability requirement, not a narrative one: a params row defines no `PV-N` token, so a cited

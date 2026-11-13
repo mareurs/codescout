@@ -26,8 +26,8 @@ Audit IDs are `A-N`, monotonic, never reused.
 
 > Rendered from `params.audits` (`entry_collection`) — the catalog is the source
 > of truth and this table is its **git-durable snapshot**. Add a row with
-> `artifact(action="append_entry", id=…, entry_collection="audits", id_prefix="A", entry={…})`
-> and change one with `artifact(action="update_entry", …, entry_id="A-N", fields={…})`.
+> `doc(action="append_entry", id=…, entry_collection="audits", id_prefix="A", entry={…}, anchor_heading="## Protocol — subtract-and-measure (P-1..P-8)", title=…, body=…)`
+> and change one with `doc(action="update_entry", …, entry_id="A-N", fields={…})`.
 > Do **not** use `artifact_augment(merge=true, params={audits: […]})` — RFC 7396
 > array semantics REPLACE the whole collection rather than merging into it.
 > This table does not re-render itself: after any entry write, update the row here
