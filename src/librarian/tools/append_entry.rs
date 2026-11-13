@@ -2092,6 +2092,40 @@ mod tests {
             "nor may the section or the mark reach the file for a refused cite"
         );
     }
+    /// A ledger whose own file name is not a canonical key still takes the entry, and the tool
+    /// response says so by file name.
+    #[tokio::test]
+    async fn the_response_carries_a_key_note_when_the_ledger_name_is_not_a_key() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let ctx = mk_ctx();
+        seed_with_body(
+            &ctx,
+            "art1",
+            &dir.path().join("Ledger_One.md"),
+            "# Ledger\n",
+            &[],
+        );
+
+        let out = call(
+            &ctx,
+            with_section(json!({
+                "id": "art1", "entry_collection": "failures", "id_prefix": "F",
+                "entry": {"status": "fail"}
+            })),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out["id"], "F-1");
+        let note = out["key_note"]
+            .as_str()
+            .expect("the response carries a key_note");
+        assert!(note.contains("Ledger_One.md"), "{note}");
+        assert!(out.get("cites").is_none(), "no cites were given: {out}");
+    }
+    // mutation: drop the `out["key_note"]` assignment in `call` → `expect` panics.
+
     /// A context rooted at `root` (a git root), for a call that appends and then scans.
     fn scan_ctx(root: &std::path::Path) -> ToolContext {
         use crate::librarian::current_project::CurrentProject;
@@ -2226,12 +2260,16 @@ mod tests {
         );
     }
 
-    /// Records a known gap in the old scanner, which this plan leaves unchanged: when the
-    /// repository being scanned holds a DIFFERENT file whose stem equals the foreign key and
-    /// that file defines the token, `key:F-3` inside `[[foreign/key:F-3]]` resolves to it and
-    /// `write=true` records an edge to the wrong document, beside the right write row.
+    /// KNOWN GAP, tracked in
+    /// `docs/issues/2026-11-13-old-scanner-reads-a-cross-repo-grammar-cite-as-a-local-stem-and-writes-a-wrong-edge.md`.
+    /// This pins today's WRONG edge: when the repository being scanned holds a DIFFERENT file
+    /// whose stem equals the foreign key and that file defines the token, `key:F-3` inside
+    /// `[[foreign/key:F-3]]` resolves to it and `write=true` records an edge to the wrong
+    /// document, beside the right write row. When the scanner is fixed this test must flip to
+    /// `written: 0` and the write row alone.
     #[tokio::test]
-    async fn a_write_scan_of_a_cross_repository_cite_edges_to_a_local_file_that_shares_the_stem() {
+    async fn known_gap_a_write_scan_of_a_cross_repository_cite_edges_to_a_local_file_that_shares_the_stem(
+    ) {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("mine");
         std::fs::create_dir_all(root.join(".git")).unwrap();

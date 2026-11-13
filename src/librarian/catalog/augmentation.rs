@@ -2516,7 +2516,7 @@ fn resolve_cites(
                             .map_or_else(|| path.to_string(), |n| n.to_string_lossy().into_owned());
                         LibrarianRecoverableError::new(format!(
                     "append_entry: `{name}` lies in no git repository, so its citations cannot \
-                     be written as grammar text — nothing was written"
+                     be written as grammar text — retry without `cites`; nothing was written"
                 ))
                     })?;
             Some(root)
@@ -6408,11 +6408,28 @@ mod tests {
             text.contains("prose\n\n**Cites:** [[other]], [[target:F-3]]\n"),
             "one line at the end of the section, input order, the repeat dropped: {text}"
         );
+        let entry = parsed
+            .entries
+            .iter()
+            .find(|e| e.token == out.id)
+            .expect("the entry's section is defined");
+        assert_eq!(parsed.citations.len(), 2, "{text}");
+        for c in &parsed.citations {
+            assert!(
+                (entry.heading_line..=entry.end_line).contains(&c.line),
+                "the cites line lies inside {}'s section ({}..={}), not after it: {text}",
+                out.id,
+                entry.heading_line,
+                entry.end_line
+            );
+        }
         assert_eq!(write_rows(&cat, &out.id), 2);
         assert_eq!(out.cites, vec!["[[other]]", "[[target:F-3]]"]);
         assert_eq!(out.key_note, None, "docs/ledger.md is a canonical key");
     }
     // mutation: skip `with_cites` (`rendered = section.cloned()`) → no citation parses.
+    // mutation: `with_cites` puts a `# Other` heading before the body → the section-bounds
+    // assertion is red (the text assertion still passes).
 
     /// Review Focus 3. Oracle: the file's bytes and the catalog's params.
     #[test]
@@ -6591,7 +6608,9 @@ mod tests {
 
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("ledger.md") && msg.contains("no git repository"),
+            msg.contains("ledger.md")
+                && msg.contains("no git repository")
+                && msg.contains("retry without `cites`"),
             "{msg}"
         );
         assert!(!msg.contains(&dir.path().display().to_string()), "{msg}");
@@ -6668,7 +6687,6 @@ mod tests {
         );
     }
     // mutation: never set `key_note` → `expect` panics.
-    // mutation: skip the `entry_cite` insert when the section is adopted → the query finds no row.
 
     #[test]
     fn a_prose_retry_with_no_later_reservation_adopts_the_section() {

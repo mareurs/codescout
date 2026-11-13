@@ -1639,9 +1639,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 "0 cross_root_cites_edges: no cites edge (artifact_link or entry_cite) \
                  crosses this scope's root boundary, so DoctorScope::admit's relevance \
                  exemption has nothing to admit right now — inert on this catalog, not \
-                 broken. To create one: doc(action=\"append_entry\", cites=[...]) or \
-                 doc(action=\"link\", rel=\"cites\") from a local artifact naming a \
-                 foreign one directly. A cite that append_entry writes for a document \
+                 broken. To create one: doc(action=\"append_entry\", cites=[...]) from a \
+                 local artifact naming a foreign one directly. A cite that append_entry \
+                 writes for a document \
                  of another repository is the grammar text `[[repo/key]]`, using that \
                  repository's committed name; a target repository with no committed \
                  name refuses the append and needs .codescout/repo.toml there. \
@@ -9317,8 +9317,8 @@ mod tests {
     /// value measured on today's catalog, per the exemption's own field docs
     /// (`doctor/scope.rs`) — and the zero-case hint names a remedy that R3 confirmed
     /// actually works, not merely a metric sitting there unexplained.
-    /// `doc(action="append_entry", cites=[...])` / `doc(action="link", rel="cites")`
-    /// are citation-form-agnostic; `link_scan(scope="umbrella", ...)` alone only
+    /// `doc(action="append_entry", cites=[...])` is citation-form-agnostic;
+    /// `link_scan(scope="umbrella", ...)` alone only
     /// derives an edge for a bare artifact id or an entry token, never a
     /// repo-qualified `<repo>:TOKEN` one (`link_scan/resolve.rs`'s `CrossRepoToken`
     /// arm — "edges do not span workspaces"). Asserting the hint names the
@@ -9365,8 +9365,9 @@ mod tests {
              repository's committed name, and an unnamed target needs repo.toml: {hint}"
         );
         assert!(
-            !hint.contains("always-working"),
-            "an unnamed foreign target refuses the append, so the remedy is not unconditional: {hint}"
+            !hint.contains("always-working") && !hint.contains("rel=\"cites\""),
+            "an unnamed foreign target refuses the append, so the remedy is not unconditional, \
+             and the tracker guide says never to hand-create `cites` edges: {hint}"
         );
     }
 

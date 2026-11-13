@@ -189,7 +189,7 @@ pub(crate) fn write_entry_into_ledger(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RetryRule {
     /// The retry finds the section ([`find_unrecorded_section`]) and records it: the caller
-    /// retries with the same title and body and deletes nothing.
+    /// retries with the same title, body and cites and deletes nothing.
     Adopts,
     /// The retry cannot be trusted to find it, so the caller deletes the section first. The
     /// prose path's "recorded" test is one per-prefix maximum, which a peer's later reservation
@@ -414,7 +414,7 @@ fn delete_first_remedy(token: &str) -> String {
 /// retry": the mark running ahead of the catalog costs one skipped integer.
 ///
 /// For a section that stays on disk, `retry` picks the remedy: [`RetryRule::Adopts`] says a
-/// retry with the same title and body finds the section and records it (nothing to delete);
+/// retry with the same title, body and cites finds the section and records it (nothing to delete);
 /// [`RetryRule::DeleteFirst`] keeps "delete it, then retry"; [`RetryRule::AdoptedOrphan`] gives
 /// that same remedy to a call that adopted the section and wrote none, whatever it wrote.
 fn commit_failed_after_section_write(
@@ -517,8 +517,8 @@ fn commit_failed_after_section_write(
     let remedy = match retry {
         RetryRule::Adopts => format!(
             "The section is the one this call was writing, so do NOT delete it: retry with the \
-                   same title and body, and the call finds `{token}` in the file, records it, and \
-                   writes no second section (an edit to the section's title or body since then makes \
+                   same title, body and cites, and the call finds `{token}` in the file, records it, and \
+                   writes no second section (an edit to the section's title, body or cites since then makes \
                    the retry a new entry)."
         ),
         RetryRule::DeleteFirst | RetryRule::AdoptedOrphan => delete_first_remedy(token),
@@ -957,11 +957,11 @@ mod tests {
              retry and must not forbid it: {restored}"
         );
         assert!(
-            adopts.contains("retry with the same title and body")
+            adopts.contains("retry with the same title, body and cites")
                 && adopts.contains("F-1")
                 && !adopts.contains("safe to retry as-is")
                 && !adopts.contains("Delete the"),
-            "a section still on disk is adopted by a retry with the same title and body, so the \
+            "a section still on disk is adopted by a retry with the same title, body and cites, so the \
              hint says that, names the section, and neither invites a blind retry nor sends the \
              caller to delete it: {adopts}"
         );

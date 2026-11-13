@@ -49,8 +49,8 @@ pub(crate) const CITES_LABEL: &str = "**Cites:**";
 /// target's documents are then cited unqualified, whether or not either root has a committed
 /// name.
 ///
-/// `source_git_root` is the git root of the document that carries the cite: callers pass
-/// `CurrentProject.git_root` exactly as stored (canonical). Roots are compared as paths by
+/// `source_git_root` is the git root of the document that carries the cite: callers pass the git
+/// root above that document's stored path. Roots are compared as paths by
 /// component, so a trailing or doubled slash does not matter; only a symlinked spelling of one
 /// root differs.
 ///

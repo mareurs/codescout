@@ -6615,8 +6615,14 @@ mod tests {
     /// rewrite came out shorter. Measured: `tool_surface_report_lengths` reports TOTAL 57_665
     /// (headroom 0); the `doc` row is 19_692 (description 1_625, schema 18_067), 23 below its
     /// previous total, and no other row moves.
+    ///
+    /// **Lowered 2026-11-13, 57_665 → 57_664 (−1), returning a byte.** The `doc` schema text for
+    /// `cites` was reworded to say that each ref is written into the entry as grammar text and
+    /// that a ref into another repository needs its committed name; it came out one character
+    /// shorter (278 → 277). Measured: `tool_surface_report_lengths` reports TOTAL 57_664
+    /// (headroom 0).
     // cap-class: NOT_A_CAP — test-only ratchet on the advertised tool surface; it bounds no runtime path
-    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_665;
+    const TOOL_SURFACE_CHAR_BUDGET: usize = 57_664;
 
     #[tokio::test]
     async fn tool_surface_under_budget() {
