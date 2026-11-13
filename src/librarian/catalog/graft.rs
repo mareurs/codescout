@@ -577,11 +577,22 @@ fn refuse_renumber_of_markdown_defined(
     let from_path = abs_path_of(from_id)?;
     let from_label = crate::librarian::catalog::dual_write::document_label(&from_path);
     let into_label = crate::librarian::catalog::dual_write::document_label(&abs_path_of(into_id)?);
+    // Two rows can wear one label (one file name in two folders): tell them apart by role.
+    let (from_name, into_name) = if from_label == into_label {
+        (
+            format!("the folded row's {from_label}"),
+            format!("the survivor's {into_label}"),
+        )
+    } else {
+        (from_label, into_label)
+    };
     let door = crate::librarian::read_door::ReadDoor::new(roots.to_vec());
     let body = door.text(&from_path).map_err(|_| {
         LibrarianRecoverableError::new(format!(
-            "graft: refused — {} would be renumbered to fit {into_label}, and {from_label} \
-             could not be read to check whether it defines them by heading. Nothing was changed.",
+            "graft: refused — {} would be renumbered to fit {into_name}, and {from_name} \
+             could not be read to check whether it defines them by heading. Nothing was changed. \
+             Put the file back at the row's path (doc(action=\"find\") shows the live row if it \
+             moved) and retry, or leave the two rows separate.",
             remap.keys().cloned().collect::<Vec<_>>().join(", ")
         ))
     })?;
@@ -590,8 +601,8 @@ fn refuse_renumber_of_markdown_defined(
         return Ok(());
     }
     Err(LibrarianRecoverableError::new(format!(
-        "graft: refused — {} collide with entries of {into_label} and would be renumbered, but \
-         {from_label} defines them by heading, and no tool renumbers an entry in the markdown \
+        "graft: refused — {} collide with entries of {into_name} and would be renumbered, but \
+         {from_name} defines them by heading, and no tool renumbers an entry in the markdown \
          and the params together. Nothing was changed. Leave the two rows separate.",
         hits.join(", ")
     )))
@@ -1355,6 +1366,7 @@ mod tests {
         let ids: Vec<&str> = merged.iter().map(|e| e["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["F-1", "F-2", "F-3"]);
     }
+
     /// Two catalogued ledgers of one collection, each with a real file under a temp git
     /// root (the fold reads the SOURCE document through the read door). `from_text` and
     /// `into_text` are the files' bytes; `None` leaves the source file absent. Both rows
@@ -1397,6 +1409,10 @@ mod tests {
         assert!(msg.contains("F-1"), "{msg}");
         assert!(msg.contains("Nothing was changed"), "{msg}");
         assert!(
+            msg.contains("the folded row's") && msg.contains("the survivor's"),
+            "two rows with one label are told apart: {msg}"
+        );
+        assert!(
             !msg.contains(dir.path().to_str().unwrap()),
             "a refusal names a document by label, never by path: {msg}"
         );
@@ -1430,6 +1446,10 @@ mod tests {
         assert!(
             msg.contains("F-1") && msg.contains("could not be read"),
             "{msg}"
+        );
+        assert!(
+            msg.contains("Put the file back") && msg.contains("leave the two rows separate"),
+            "an unreadable source says what to do next: {msg}"
         );
         assert!(row_exists(&cat.conn, "from").unwrap());
     }

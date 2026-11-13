@@ -3516,10 +3516,10 @@ fn scan_unregistered_worktree_dirs(ctx: &ToolContext) -> (Vec<Violation>, Value)
 /// **Informational, with no `fix=`.** The remedy is a catalog operation on a machine-local
 /// database (`merge_worktree`, or `abandon=true` to discard), not an edit to this repo, and the
 /// choice between the two is the owner's: merging keeps the history, abandoning deletes it.
-/// A merge skips a shadow row whose renumber would split an entry between params and markdown
-/// and leaves the registration active (the source is read at the branch tip, the directory
-/// being gone), so merging a second time skips it again: the message says `abandon=true` is
-/// then the only exit.
+/// A merge skips a shadow row whose renumber would, or may, split an entry between params and
+/// markdown and leaves the registration active, so merging a second time skips it again until
+/// the worktree's branch is restored at its tip (the directory being gone, the source is read
+/// there) or the owner abandons, which drops entries held only in params.
 ///
 /// Scoped to registrations whose `main_root` is the active project's main checkout, so a shared
 /// catalog does not report another project's worktrees. Project grain like
@@ -3554,10 +3554,11 @@ fn scan_active_registrations_with_missing_root(
                     "informational: the worktree `{root}` is registered as ACTIVE, but its \
                      directory is gone, so its shadow rows are still in the catalog and nothing \
                      will merge them. The choice is the owner's: merging keeps the worktree's \
-                     history, abandoning deletes it. A merge skips a row whose renumber would \
-                     split an entry between params and markdown, and leaves the registration \
-                     active, so merging again skips it again: `abandon=true` is then the only \
-                     exit. {remedy}"
+                     history, abandoning deletes it, and an entry held only in params is lost \
+                     for good. A merge skips a row whose renumber would, or may, split an entry \
+                     between params and markdown (its conflict records which source decided) \
+                     and leaves the registration active, so merging again skips it again until \
+                     the worktree's branch is restored at its tip or the owner abandons. {remedy}"
                 ),
             )
         })
@@ -20254,8 +20255,11 @@ mod tests {
             "the row names both remedies: {detail}"
         );
         assert!(
-            detail.contains("merging again skips it again"),
-            "the row says a merge skips a params-from-markdown renumber again: {detail}"
+            detail.contains("merging again skips it again")
+                && detail.contains("restored at its tip")
+                && detail.contains("held only in params"),
+            "the row says a merge skips a params-from-markdown renumber again, names the \
+             restored branch as an exit and what abandon drops: {detail}"
         );
         assert_eq!(
             out["summary"]["by_check"]["active_worktree_registration_root_missing"], 1,

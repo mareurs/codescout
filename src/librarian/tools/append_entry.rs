@@ -107,9 +107,9 @@ fn refuse_allocation_off_the_main_ledger(ctx: &ToolContext, cat: &Catalog, id: &
             return Err(LibrarianRecoverableError::with_hint(
                 "append_entry: id allocation is not supported from a worktree checkout".to_string(),
                 "An entry id is ledger-wide state and must key to the main tracker. Repeat this \
-                 call with `workspace=<main root>`: the entry is written into the main \
-                 checkout's working tree, where peers see it as an uncommitted change to the \
-                 ledger."
+                 call with the main row's id and `workspace=<main root>`: the entry is written \
+                 into the main checkout's working tree, where peers see it as an uncommitted \
+                 change to the ledger."
                     .to_string(),
             ));
         }
@@ -1183,8 +1183,10 @@ mod tests {
         assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
         let text = format!("{err:#}");
         assert!(
-            text.contains("not supported from a worktree") && text.contains("workspace="),
-            "expected the shared refusal naming the main-checkout route, got: {text}"
+            text.contains("not supported from a worktree")
+                && text.contains("workspace=")
+                && text.contains("main row's id"),
+            "expected the shared refusal naming the main-checkout route and the main row's id, got: {text}"
         );
         assert_nothing_forked(&ctx, 1);
         let c = ctx.catalog.lock();
@@ -1194,6 +1196,7 @@ mod tests {
             "main untouched"
         );
     }
+
     /// The refusal fires BEFORE `resolve_write_target`, so a refused call leaves no shadow
     /// artifact row, no `worktree_fork` event and no `worktree_of` lineage link (the
     /// 2026-07-17 regression). `artifacts` is the number of artifact rows the fixture seeded.
@@ -1233,6 +1236,12 @@ mod tests {
             main_root: None,
             umbrella: None,
         }));
+        let (shadow_abs, shadow_before) = {
+            let c = ctx.catalog.lock();
+            let abs = artifact::get(&c, &shadow_id).unwrap().unwrap().abs_path;
+            let text = std::fs::read_to_string(&abs).unwrap();
+            (abs, text)
+        };
         let err = call(
             &ctx,
             json!({
@@ -1247,6 +1256,21 @@ mod tests {
         assert!(
             text.contains("worktree") && text.contains("workspace="),
             "expected the shadow arm of the shared guard, got: {text}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&shadow_abs).unwrap(),
+            shadow_before,
+            "a refused call leaves the shadow file untouched"
+        );
+        let c = ctx.catalog.lock();
+        let artifacts: i64 = c
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(artifacts, 2, "main row + the one shadow, nothing new");
+        assert!(
+            augmentation::get(&c, &shadow_id).unwrap().is_none(),
+            "the refused call wrote no augmentation row for the shadow"
         );
     }
 

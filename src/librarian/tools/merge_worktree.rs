@@ -142,9 +142,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
-    // A row skipped for a renumber that would split params from markdown keeps the
+    // A row skipped for a renumber that would (or may) split params from markdown keeps the
     // registration open: closing it would leave the skipped shadow row with no merge to
-    // retry it, and `abandon` is its only exit.
+    // retry it, and its remedy names the exits.
     let held_open = conflicts
         .iter()
         .any(|c| c.get("kind").and_then(Value::as_str) == Some(RENUMBER_NEEDS_MARKDOWN));
@@ -164,12 +164,18 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "hint": "Rewrite live-tree citations for any remapped entry ids (see remap).",
     });
     if held_open {
-        out["hint"] = json!(
-            "A row was skipped because renumbering it would split an entry between the params \
-             and the markdown, so the registration stays active and a second merge skips it \
-             again. The skipped row's remedy names the only exit (abandon=true); the rows that \
-             merged are done. Rewrite live-tree citations for any remapped entry ids (see remap)."
-        );
+        out["hint"] = json!(if a.dry_run {
+            "A row would be skipped because renumbering it would split, or may split, an entry \
+             between the params and the markdown, and a merge would leave the registration \
+             active. The row's `source` says whether its source was proven, and its remedy names \
+             the exits. Nothing was written."
+        } else {
+            "A row was skipped because renumbering it would split, or may split, an entry \
+             between the params and the markdown, so the registration stays active and a second \
+             merge skips it again until its remedy is applied. The row's `source` says whether \
+             its source was proven, and its remedy names the exits; the rows that merged are \
+             done. Rewrite live-tree citations for any remapped entry ids (see remap)."
+        });
     }
     Ok(out)
 }
@@ -350,7 +356,7 @@ fn merge_one(
         // an id the row no longer holds, and no tool renumbers one entry in both stores:
         // skip the row, before anything is written (the dry run reports it too).
         if !fold_report.remap.is_empty() {
-            let hits = renumbers_defined_by_heading(
+            let (hits, by) = renumbers_defined_by_heading(
                 cat,
                 registration,
                 &shadow_row,
@@ -362,13 +368,8 @@ fn merge_one(
                     "kind": RENUMBER_NEEDS_MARKDOWN,
                     "document": crate::librarian::catalog::dual_write::document_label(&main_row.abs_path),
                     "ids": hits,
-                    "remedy": "No tool renumbers one entry in the params and the markdown together \
-                               (`update_entry` refuses `id`; `rekey_prefix` moves a whole prefix), so \
-                               this row is skipped and the registration stays active. \
-                               librarian(action=\"merge_worktree\", root=<this worktree's root>, \
-                               abandon=true) is the only exit: it drops the worktree's catalog rows, \
-                               the entries remain as markdown in the merged file, and that file may \
-                               hold two `## F-n` definers to rename by hand.",
+                    "source": by.as_str(),
+                    "remedy": by.remedy(),
                 })));
             }
         }
@@ -533,33 +534,109 @@ fn merge_one(
 /// worktree's heading too, and only the source tells it from main's own entry of that id.
 ///
 /// FAILS CLOSED when the source cannot be read (no branch recorded, branch deleted or
-/// rebased, file absent at the tip, a door refusal): the ids count as defined whenever main's
-/// file defines them by heading, and a main file the door refuses counts every id. A main
-/// file that is not on disk defines nothing, so a params-only ledger merges as before.
+/// rebased, file absent at the tip, or a door refusal of a PRESENT shadow file, which never
+/// falls through to the tip): the ids count as defined whenever main's file defines them by
+/// heading, and a main file the door refuses counts every id. A main file that is not on disk
+/// defines nothing, so a params-only ledger merges as before. The second value says which
+/// source decided, so the skip can say whether the split is proven.
 fn renumbers_defined_by_heading(
     cat: &Catalog,
     registration: &reg::RegistrationRow,
     shadow_row: &ArtifactRow,
     main_row: &ArtifactRow,
     remap: &std::collections::BTreeMap<String, String>,
-) -> Vec<String> {
+) -> (Vec<String>, DecidedBy) {
     let door = crate::librarian::read_door::for_catalog(cat);
-    let source = std::fs::metadata(&shadow_row.abs_path)
-        .is_ok_and(|m| m.is_file())
-        .then(|| door.text(&shadow_row.abs_path).ok())
-        .flatten()
-        .or_else(|| branch_tip_text(registration, &shadow_row.abs_path));
-    if let Some(body) = source {
-        return graft::renumbered_ids_defined_in(remap, &body);
+    // A shadow file that is PRESENT is the source, and a door refusal of it is an unreadable
+    // source, never a reason to read the branch tip: the tip can differ from the working file
+    // (a heading that is only in the file, uncommitted, would read as absent there).
+    let source = if std::fs::metadata(&shadow_row.abs_path).is_ok_and(|m| m.is_file()) {
+        door.text(&shadow_row.abs_path)
+            .ok()
+            .map(|body| (body, DecidedBy::WorktreeFile))
+    } else {
+        branch_tip_text(registration, &shadow_row.abs_path).map(|body| (body, DecidedBy::BranchTip))
+    };
+    if let Some((body, by)) = source {
+        return (graft::renumbered_ids_defined_in(remap, &body), by);
     }
-    match door.text(&main_row.abs_path) {
-        Ok(body) => graft::renumbered_ids_defined_in(remap, &body),
+    let ids = match door.text(&main_row.abs_path) {
+        Ok(body) => {
+            return (
+                graft::renumbered_ids_defined_in(remap, &body),
+                DecidedBy::MainFileSourceUnreadable,
+            )
+        }
         Err(crate::librarian::read_door::ReadError::Io(e))
             if e.kind() == std::io::ErrorKind::NotFound =>
         {
             Vec::new()
         }
         Err(_) => remap.keys().cloned().collect(),
+    };
+    (ids, DecidedBy::Unreadable)
+}
+
+/// Which source decided a skipped renumber, recorded on the conflict as `source`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DecidedBy {
+    /// The shadow's own file, read through the door: proven.
+    WorktreeFile,
+    /// The shadow's file at the tip of the registration's branch: proven.
+    BranchTip,
+    /// The source could not be read, so main's file stood in: the split is possible, not proven.
+    MainFileSourceUnreadable,
+    /// Neither the source nor main's file could be read: every renumbered id is held.
+    Unreadable,
+}
+
+impl DecidedBy {
+    fn as_str(self) -> &'static str {
+        match self {
+            DecidedBy::WorktreeFile => "worktree_file",
+            DecidedBy::BranchTip => "branch_tip",
+            DecidedBy::MainFileSourceUnreadable => "main_file_source_unreadable",
+            DecidedBy::Unreadable => "unreadable",
+        }
+    }
+
+    fn proven(self) -> bool {
+        matches!(self, DecidedBy::WorktreeFile | DecidedBy::BranchTip)
+    }
+
+    /// What the skip says and which exits it names, true for the source that decided.
+    fn remedy(self) -> String {
+        let abandon = "librarian(action=\"merge_worktree\", root=<this worktree's root>, \
+                       abandon=true) drops the worktree's catalog rows, so an entry held only \
+                       in params is lost for good, while an entry in the markdown remains in \
+                       the merged file, and that file may hold two `## F-n` definers to rename \
+                       by hand.";
+        if self.proven() {
+            return format!(
+                "The worktree's {} defines these ids by heading, so renumbering would split an \
+                 entry between the params and the markdown, and no tool renumbers an entry in \
+                 both (`update_entry` refuses `id`; `rekey_prefix` moves a whole prefix). This \
+                 row is skipped and the registration stays active. {abandon} It is the only exit.",
+                if self == DecidedBy::WorktreeFile {
+                    "file"
+                } else {
+                    "file at its branch tip"
+                }
+            );
+        }
+        let stood_in = if self == DecidedBy::Unreadable {
+            "Neither the worktree's file nor main's file could be read, so every renumbered id \
+             is held"
+        } else {
+            "The worktree's file could not be read (it is absent, no branch is recorded, or the \
+             branch is gone), so main's file stood in for it and defines these ids by heading"
+        };
+        format!(
+            "{stood_in}: renumbering may split an entry between the params and the markdown. \
+             This row is skipped and the registration stays active. Two exits: restore the \
+             worktree's branch at its tip (or its directory) and merge again, so the merge \
+             reads the source and decides; or {abandon}"
+        )
     }
 }
 
@@ -1215,6 +1292,9 @@ mod tests {
             let sig = git2::Signature::now("t", "t@e").unwrap();
             repo.commit(Some("refs/heads/feat"), &sig, &sig, "tip", &tree, &[])
                 .unwrap();
+            // `feat` is merged into main's HEAD, so a worktree directory that exists passes
+            // the rebase precondition.
+            repo.set_head("refs/heads/feat").unwrap();
         }
         std::fs::write(repo_dir.join(rel), main_text).unwrap();
         if let Some(text) = shadow_text {
@@ -1295,7 +1375,10 @@ mod tests {
         }
     }
 
-    fn assert_skipped_for_markdown(s: &Renumber, out: &serde_json::Value) {
+    /// `source` is the conflict's record of which source decided; a PROVEN source (the
+    /// worktree file or the branch tip) says the split would happen, an unreadable one says it
+    /// may and names restoring the branch as an exit. Both name `abandon` and what it drops.
+    fn assert_skipped_for_markdown(s: &Renumber, out: &serde_json::Value, source: &str) {
         assert_eq!(
             out["conflicts"][0]["kind"],
             serde_json::json!("entry_renumber_needs_markdown"),
@@ -1306,8 +1389,32 @@ mod tests {
             serde_json::json!(["F-2"]),
             "{out}"
         );
+        assert_eq!(
+            out["conflicts"][0]["source"],
+            serde_json::json!(source),
+            "{out}"
+        );
         let remedy = out["conflicts"][0]["remedy"].as_str().unwrap();
         assert!(remedy.contains("abandon"), "{remedy}");
+        assert!(
+            remedy.contains("held only in params"),
+            "abandon's cost is named: {remedy}"
+        );
+        if source == "worktree_file" || source == "branch_tip" {
+            assert!(
+                remedy.contains("would split") && !remedy.contains("may split"),
+                "a proven source states the split as fact: {remedy}"
+            );
+        } else {
+            assert!(
+                remedy.contains("may split") && !remedy.contains("would split"),
+                "an unproven source says `may`: {remedy}"
+            );
+            assert!(
+                remedy.contains("restore the worktree's branch"),
+                "an unproven skip names the exit that lets the merge read the source: {remedy}"
+            );
+        }
         assert_eq!(out["merged"], serde_json::json!([]), "{out}");
         let c = s.ctx.catalog.lock();
         assert_eq!(
@@ -1316,6 +1423,11 @@ mod tests {
             "a skipped row keeps the registration active"
         );
         assert_eq!(out["registration"], serde_json::json!("active"), "{out}");
+        let hint = out["hint"].as_str().unwrap();
+        assert!(
+            hint.contains("stays active") && hint.contains("skips it again"),
+            "{hint}"
+        );
         assert!(
             artifact::get(&c, &s.shadow_id).unwrap().is_some(),
             "the skipped shadow row stays for `abandon`"
@@ -1348,7 +1460,7 @@ mod tests {
         let out = call(&s.ctx, serde_json::json!({"root": s.wt_root}))
             .await
             .unwrap();
-        assert_skipped_for_markdown(&s, &out);
+        assert_skipped_for_markdown(&s, &out, "branch_tip");
     }
 
     /// Discriminates the branch tip from main's file: only the tip defines `F-2`. Mutation:
@@ -1365,7 +1477,7 @@ mod tests {
         let out = call(&s.ctx, serde_json::json!({"root": s.wt_root}))
             .await
             .unwrap();
-        assert_skipped_for_markdown(&s, &out);
+        assert_skipped_for_markdown(&s, &out, "branch_tip");
     }
 
     /// No branch recorded and no worktree directory: the source cannot be read, so the row
@@ -1377,7 +1489,61 @@ mod tests {
         let out = call(&s.ctx, serde_json::json!({"root": s.wt_root}))
             .await
             .unwrap();
-        assert_skipped_for_markdown(&s, &out);
+        assert_skipped_for_markdown(&s, &out, "main_file_source_unreadable");
+    }
+
+    /// A shadow file that is PRESENT but that the read door refuses (a symlink to a file
+    /// outside the repository) is an unreadable source: it fails closed on main's file, and
+    /// never falls through to the branch tip, which can differ from the working file. Here
+    /// the tip says "no heading" while main's file defines `F-2`. Mutation: restore the
+    /// `.ok()` that sends a door refusal to `branch_tip_text`; the merge then goes through
+    /// on the stale tip and renumbers an entry its file still names.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_shadow_file_never_falls_through_to_the_branch_tip() {
+        let s = renumber_scenario(
+            "# T\n\n## F-2 — wt\n",
+            Some("# T\n\n## F-1 — a\n"),
+            Some("feat"),
+            None,
+        );
+        let outside = s._tmp.path().join("outside.md");
+        std::fs::write(&outside, "# T\n\n## F-2 — wt\n").unwrap();
+        let shadow_file = {
+            let c = s.ctx.catalog.lock();
+            artifact::get(&c, &s.shadow_id).unwrap().unwrap().abs_path
+        };
+        std::fs::create_dir_all(shadow_file.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &shadow_file).unwrap();
+        assert!(
+            std::fs::metadata(&shadow_file).unwrap().is_file(),
+            "precondition: the shadow file is present"
+        );
+        let out = call(&s.ctx, serde_json::json!({"root": s.wt_root}))
+            .await
+            .unwrap();
+        assert_skipped_for_markdown(&s, &out, "main_file_source_unreadable");
+    }
+
+    /// Neither the shadow's file nor main's file can be read through the door: every
+    /// renumbered id is held, and the conflict says no source could be read. Mutation: let an
+    /// unreadable main file count no ids.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_main_file_holds_every_renumbered_id() {
+        let s = renumber_scenario("# T\n", None, None, None);
+        let main_file = {
+            let c = s.ctx.catalog.lock();
+            artifact::get(&c, &s.main_id).unwrap().unwrap().abs_path
+        };
+        let outside = s._tmp.path().join("outside.md");
+        std::fs::write(&outside, "# T\n").unwrap();
+        std::fs::remove_file(&main_file).unwrap();
+        std::os::unix::fs::symlink(&outside, &main_file).unwrap();
+        let out = call(&s.ctx, serde_json::json!({"root": s.wt_root}))
+            .await
+            .unwrap();
+        assert_skipped_for_markdown(&s, &out, "unreadable");
     }
 
     /// The same unreadable source with no heading in main's file for the id: nothing says the
@@ -1439,6 +1605,13 @@ mod tests {
             "{out}"
         );
         assert_eq!(out["merged"], serde_json::json!([]), "{out}");
+        let hint = out["hint"].as_str().unwrap();
+        assert!(
+            hint.contains("would be skipped")
+                && !hint.contains("second merge")
+                && !hint.contains("are done"),
+            "a dry run says what it knows, not what a merge did: {hint}"
+        );
         let c = s.ctx.catalog.lock();
         assert_eq!(reg::get(&c, &s.wt_root).unwrap().unwrap().status, "active");
         assert!(artifact::get(&c, &s.shadow_id).unwrap().is_some());
