@@ -174,6 +174,12 @@ fn retarget_patterns(v: &mut Value, from_prefix: &str, to_prefix: &str) -> usize
     moved
 }
 
+/// Whether `b`, the byte just before a qualifier, shows the qualifier is not the start of its
+/// name: it continues a longer name (ASCII alphanumeric, `_`, `-`) or follows a repo `/`.
+fn continues_a_name(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'/')
+}
+
 /// Retarget namespace mentions in prose: concrete ids (`T-9`) **and the template form
 /// `T-N`**, where `N` is the literal letter.
 ///
@@ -204,9 +210,15 @@ fn retarget_patterns(v: &mut Value, from_prefix: &str, to_prefix: &str) -> usize
 /// ledger has no key (it lies in no repository, or its name is not a canonical key), so only the
 /// slug is recognised.
 ///
-/// **A repo-qualified cite (`[[repo/key:F-1]]`) is left alone.** Its key sits right after a `/`,
-/// and several repositories hold a ledger of the same key and prefix, so the rekey cannot tell
-/// that cite from one of its own and has no authority over another repository's text.
+/// **A qualifier starts a name, a letter or a digit, and a match whose preceding byte continues a
+/// name or follows a repo `/` is left alone.** A key segment may start with a digit
+/// (`2026-08-18-x`), so the qualifier group takes `[a-z0-9][a-z0-9_-]*`. When the byte before it is
+/// ASCII alphanumeric, `_` or `-`, the group caught only the tail of a longer name
+/// (`[[2026-11-ledger:F-1]]` yields `ledger`, `[[Foo-ledger:F-1]]` yields `oo-ledger`), a cite of
+/// another document. When it is `/`, the cite is repo-qualified (`[[repo/key:F-1]]`), and several
+/// repositories hold a ledger of the same key and prefix. Either way the rekey cannot show the
+/// cite is its own and has no authority over it. The check reads bytes of `text`, so it cannot
+/// split a character.
 fn retarget_prose(
     text: &str,
     from_prefix: &str,
@@ -215,17 +227,17 @@ fn retarget_prose(
     own_key: Option<&str>,
 ) -> Result<String> {
     let re = Regex::new(&format!(
-        r"(?:(?P<q>[a-z][a-z0-9_-]*):)?\b{}-(?P<n>\d+|N)\b",
+        r"(?:(?P<q>[a-z0-9][a-z0-9_-]*):)?\b{}-(?P<n>\d+|N)\b",
         regex::escape(from_prefix)
     ))?;
     Ok(re
         .replace_all(text, |c: &regex::Captures| {
             let n = &c["n"];
             match c.name("q") {
-                // A qualifier right after a `/` is the key of a repo-qualified cite
-                // (`[[repo/key:F-1]]`): it names a ledger of another repository, or one this
-                // rekey cannot prove is its own. Leave the whole match byte-for-byte.
-                Some(q) if q.start() > 0 && text.as_bytes()[q.start() - 1] == b'/' => {
+                // A qualifier that is the tail of a longer name (the byte before it continues
+                // one) or the key of a repo-qualified cite (`[[repo/key:F-1]]`) names a document
+                // this rekey cannot prove is its own. Leave the whole match byte-for-byte.
+                Some(q) if q.start() > 0 && continues_a_name(text.as_bytes()[q.start() - 1]) => {
                     c.get(0).map_or(String::new(), |m| m.as_str().to_string())
                 }
                 // A qualifier naming someone else is a citation of THEIR namespace. Leave the
@@ -1072,6 +1084,50 @@ mod tests {
             "an unqualified token belongs to this ledger; got: {out}"
         );
     }
+    /// A key segment may start with a digit, so a ledger keyed `2026-08-18-x` writes its own
+    /// citation as `[[2026-08-18-x:F-3]]` and that citation moves with the prefix.
+    ///
+    /// Oracle: the returned text. Mutation: revert the qualifier group to `[a-z][a-z0-9_-]*` and
+    /// the group catches only `x` (preceded by `-`), so the cite stays `F-3`.
+    #[test]
+    fn a_digit_leading_own_key_is_recognised_as_a_qualifier() {
+        let out = retarget_prose(
+            "see [[2026-08-18-x:F-3]] and 2026-08-18-x:F-4",
+            "F",
+            "G",
+            Some("a-slug"),
+            Some("2026-08-18-x"),
+        )
+        .unwrap();
+
+        assert_eq!(out, "see [[2026-08-18-x:G-3]] and 2026-08-18-x:G-4");
+    }
+
+    /// A qualifier that is only the tail of a longer name, or follows a repo `/`, is another
+    /// document's cite and stays byte-for-byte; the ledger's own `[[ledger:F-1]]` in the same
+    /// text still moves, as does one that follows `[[`, a space or the start of the text.
+    ///
+    /// Oracle: the returned text. Mutation: remove the preceding-byte guard arm in
+    /// `retarget_prose` and `[[XYledger:F-1]]` (q = `ledger`, preceded by `Y`), `[[FOO-ledger:F-1]]`,
+    /// `[[FOO_ledger:F-1]]` and `[[ab/ledger:F-1]]` become `...:G-1`. The digit-leading names stay
+    /// whole in the group, so they are left alone with or without the guard.
+    #[test]
+    fn a_qualifier_that_continues_a_longer_name_is_left_alone() {
+        let text =
+            "[[2026-11-ledger:F-1]] [[ab/2026-ledger:F-1]] [[Foo-ledger:F-1]] [[XYledger:F-1]] \
+             [[FOO-ledger:F-1]] [[FOO_ledger:F-1]] [[ab/ledger:F-1]] [[ledger:F-1]]";
+
+        let out = retarget_prose(text, "F", "G", Some("a-slug"), Some("ledger")).unwrap();
+
+        assert_eq!(
+            out,
+            "[[2026-11-ledger:F-1]] [[ab/2026-ledger:F-1]] [[Foo-ledger:F-1]] [[XYledger:F-1]] \
+             [[FOO-ledger:F-1]] [[FOO_ledger:F-1]] [[ab/ledger:F-1]] [[ledger:G-1]]"
+        );
+        let edges = retarget_prose("ledger:F-1 x ledger:F-2", "F", "G", None, Some("ledger"));
+        assert_eq!(edges.unwrap(), "ledger:G-1 x ledger:G-2");
+    }
+
     /// With no slug known, every qualified token is someone else's as far as this rewriter
     /// can tell, and the safe reading is to leave it alone. Bare tokens still move.
     #[test]
