@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 15
-entry_high_water_W: 8
+entry_high_water_F: 16
+entry_high_water_W: 10
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -115,6 +115,7 @@ entry_high_water_W: 8
 | F-13 | 2026-11-12 | med | shared-checkout | promoted-to-bug-tracker | **Landing Plan B1 took four gates because the base moved twice and a peer's LSP external-write tests fail intermittently** — branch 2 of 6 lane runs, clean `experiments` 1 of 6; cause not found |
 | F-14 | 2026-11-12 | med | plan-prose | open | **Key-space census after the B1 exclusions: 26 duplicate-key groups (54 files), 17 invalid-key files, 9 of them not renamable** — 14 groups are plan and spec pairs kept in scope; the spec does not yet say so |
 | F-15 | 2026-11-12 | med | architectural | open | **Shadow diff of experiments HEAD: the closed grammar sees 26 of the old catalog's 3812 file-grain edges; the rest is migration work, not a builder defect** — 4764 of 4770 only-old edge rows have a text form the grammar does not read; 4924 Unexplained of 5678 rows |
+| F-16 | 2026-11-13 | med | shared-checkout | mitigated | **A background gate ran while an implementer edited the same worktree, so its green could not be trusted** — the output carries no commit id; discarded and rerun on an untouched tree |
 
 ## Wins Index
 
@@ -128,6 +129,8 @@ entry_high_water_W: 8
 | W-6 | 2026-11-11 | high | independent Opus review of a scout report | a split built on "retire catalog_audit ships alone", a two-signal guard and four missed consumers | validated |
 | W-7 | 2026-11-11 | high | independent Opus review of a plan before execution | a gate that refuses every commit editing a file already in a collision; a cache that diverges from a rebuild after a rename | validated |
 | W-8 | 2026-11-12 | high | whole-branch Opus review after per-task reviews | a hook that refuses pure moves of colliding files; a dismissed dialog stored as a permanent decline; a nudge on read-only activations | validated |
+| W-9 | 2026-11-12 | high | independent Opus review of a scout report before planning | a flock the CLI never takes; a vector table that breaks the schema's determinism rule; a cache key that ignores model, budget and dimension; four missed writers | validated |
+| W-10 | 2026-11-13 | high | two independent Opus reviews of a plan before execution | cross-repo cites written as unqualified keys; a duplicate-key check counting worktree shadow rows; a renumber check reading the survivor body; tasks that end red on clippy; gates that stay green while the code refuses the recipe | validated |
 
 ---
 
@@ -823,6 +826,64 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 - Plan D: the migration must emit `[[entry-key]]` for each token that becomes an entry, and must size the 3406 plus 1364 rewrites. Compare W-4 (144 `[[F-16]]` rewrites).
 - 26 duplicate-key groups and 17 invalid-key documents exclude those documents from key resolution (see F-14).
 - Resolve the six suspected items above before Plan E reads from the derived index.
+
+## W-9 — Independent Opus review of the Plan C scout before any plan was written
+
+**Valid:** dated 2026-11-12
+
+**Pattern:** Before writing Plan C, a Sonnet scout read the code the plan touches and wrote a report with each claim tagged verified or reported. A separate Opus reviewer then opened the code again for the load-bearing claims and ran its own sweeps for writers and readers. The plan writer builds from the corrected facts, not from the scout alone.
+
+**What it caught.**
+- The scout said every doc write takes the project flock. The reviewer found that the CLI write commands call tool bodies with no lock. I re-checked this: `acquire_write_guard` has one production caller, `src/server.rs:1138`, and no file under `src/cli` uses it.
+- The scout proposed a plain blob table in the derived file for the vector cache. The reviewer showed it passes the determinism test but breaks the schema's own rule that every stored row is deterministic, because an embedding is not a pure function of its input.
+- The scout's cache key (`embed_input_hash`) ignores the model, the budget and the dimension. The reviewer found that the code index already treats a remote model name as untrustworthy.
+- The writer inventory missed `sources`, `event_edges` (the `resolves` edge has readers), `commit_refresh`, and the renumbering of params ids in graft and merge. The renumbering would make params and markdown disagree once entries are dual-written.
+- The scout never stated the file-versus-catalog write order, and the four write tools disagree: create writes the catalog first, update and append write the file first.
+- The scout said the vector and git-history caches can start now. They have no persistent derived file, no build trigger and no consumer.
+
+**Counterfactual.** A plan built from the scout alone would have assumed a lock that the CLI does not take, specified a vector table that violates the schema invariant, keyed it on a name that can lie, and left a params-versus-markdown disagreement in graft and merge. Each would have surfaced in an implementer's retry or in a final review, not at planning time. The cost of the pattern was one reviewer run (about 490 s).
+
+**Evidence:** the scout report and the condensed review are session-scratch files; the corrected facts are in the Plan C1 file when it lands.
+
+**Status:** validated
+
+## F-16 — A background gate ran while an implementer edited the same worktree, so its green could not be trusted
+
+**Valid:** dated 2026-11-13
+
+**Observed:** Plan C1 Task 4, 2026-11-13. A full gate ran in the background on commit 1f165952a while the Task 4 implementer, resumed for a fix round, edited, staged and committed in the same worktree. The gate came back green, and I nearly recorded it as the Task 4 result.
+
+**Expected:** a gate result names the tree it ran on.
+
+**Got:** the implementer told me afterwards that the gate may have compiled a mix of 1f165952a and the next round's sources. I could not tell from the gate output, which carries no commit id. I discarded the green, ran a new gate on 7c9017252 with nobody editing, and recorded the first as unreliable.
+
+**Probable cause:** I started the gate and the scoped re-review in parallel to save time, and the implementer still held an open fix round. The re-review is read-only. The implementer is not.
+
+**Workaround:** a gate runs only while no implementer holds an open round on that worktree. From Task 6 on, the controller dispatches the next implementer or fix round only after the gate wake. The re-review may run beside a gate because it only reads.
+
+**Severity:** med
+
+**Status:** mitigated
+
+**Rests on:** a green result is evidence for the tree it ran on; a gate that does not print the commit it built cannot prove which tree that was.
+
+**Fix idea / Pointer:** `scripts/gate.sh` could print `git rev-parse HEAD` and `git status --porcelain` at its start and end, so a result names its tree and a mid-run edit is visible.
+
+## W-10 — Two independent Opus reviews of Plan C1 before any implementer ran
+
+**Valid:** dated 2026-11-13
+
+**Pattern:** Plan C1 was written by one agent and then reviewed twice by independent Opus reviewers, each told to distrust the plan and to open the code for every symbol, signature and line the plan names. Each review produced concrete plan-text fixes, and the writer applied them in a revision commit.
+
+**What they caught (before any implementer ran).**
+- First review (commit 9febe63d3): two Critical and eight Important findings. Cross-repo cites would have been written as unqualified `[[key]]` and resolved in the wrong repository; the duplicate-key check counted worktree shadow rows and `//` twin rows, so it would have refused ordinary cites; Task 1 left the tree red at its own step; Task 4 turned tests red in four unlisted files and three recipe gates would have stayed green while the code refused the recipes they check; Task 6's renumber check read the survivor's body, so after Task 4 it would have refused almost every collision; the guide heading pins and a 128-byte budget margin were not named; `rekey_prefix` would have left the new `**Cites:**` text stale; Task 4 was too large for one pass.
+- Second review (commit a5b5afdae): eight more Important findings. Tasks 1 and 3 ended red on clippy dead code; the prose retry remedy was wrong after a peer's append; the `tool_surface_under_budget` gate (an exact measured total) was not named; two managed ledgers held sectionless recipes the extended gate would refuse; `artifact.rs:604`'s planned fix could not work on in-memory fixtures; a gone worktree with a legacy params-only entry slipped past the renumber check; one CLI lock test could not fail under its own mutation; the sidecar-prompt route through `doc(augment)` forks shadow rows and reformats files.
+
+**Counterfactual.** Each of these would have surfaced as a failed implementer run and a fix round, or a Critical in the whole-branch review. Several (the cross-repo qualification, the survivor-body renumber check) would have produced wrong committed text or a silent params-versus-markdown split. The cost of the pattern was two reviewer runs of about 14 and 14 minutes and two revision rounds by the writer.
+
+**Evidence:** the plan's own history (9febe63d3, a5b5afdae, 3e2feac9e) on the C1 branch; the condensed review `plan-c1-review.md` in the session scratchpad.
+
+**Status:** validated
 
 ## Template for new entries
 
