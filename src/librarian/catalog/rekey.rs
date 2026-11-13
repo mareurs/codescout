@@ -203,6 +203,10 @@ fn retarget_patterns(v: &mut Value, from_prefix: &str, to_prefix: &str) -> usize
 /// a qualifier equal to either one is the ledger's own and moves with the prefix. `None` means the
 /// ledger has no key (it lies in no repository, or its name is not a canonical key), so only the
 /// slug is recognised.
+///
+/// **A repo-qualified cite (`[[repo/key:F-1]]`) is left alone.** Its key sits right after a `/`,
+/// and several repositories hold a ledger of the same key and prefix, so the rekey cannot tell
+/// that cite from one of its own and has no authority over another repository's text.
 fn retarget_prose(
     text: &str,
     from_prefix: &str,
@@ -218,6 +222,12 @@ fn retarget_prose(
         .replace_all(text, |c: &regex::Captures| {
             let n = &c["n"];
             match c.name("q") {
+                // A qualifier right after a `/` is the key of a repo-qualified cite
+                // (`[[repo/key:F-1]]`): it names a ledger of another repository, or one this
+                // rekey cannot prove is its own. Leave the whole match byte-for-byte.
+                Some(q) if q.start() > 0 && text.as_bytes()[q.start() - 1] == b'/' => {
+                    c.get(0).map_or(String::new(), |m| m.as_str().to_string())
+                }
                 // A qualifier naming someone else is a citation of THEIR namespace. Leave the
                 // whole match byte-for-byte; this rekey has no authority over it.
                 Some(q) if Some(q.as_str()) != own_slug && Some(q.as_str()) != own_key => {
@@ -2260,7 +2270,8 @@ mod tests {
     /// not its slug, so the slug-only qualifier check leaves it on the old prefix.
     ///
     /// Oracle: the bytes read back from disk. Mutation: ignore `own_key` in `retarget_prose` and
-    /// `[[ledger:F-1]]` stays.
+    /// `[[ledger:F-1]]` stays. Mutation for the repo-qualified half: remove the `/` guard arm in
+    /// `retarget_prose` and `[[otherrepo/ledger:F-1]]` becomes `[[otherrepo/ledger:G-1]]`.
     #[test]
     fn a_ledgers_own_grammar_citation_moves_with_the_prefix() {
         let mut cat = Catalog::open_in_memory().unwrap();
@@ -2271,7 +2282,7 @@ mod tests {
             "led",
             "docs/ledger.md",
             "ledger-slug",
-            "---\nkind: tracker\n---\n\n## F-1 — first\n\nbody\n\n## F-2 — second\n\n**Cites:** [[ledger:F-1]] and [[elsewhere:F-1]]\n",
+            "---\nkind: tracker\n---\n\n## F-1 — first\n\nbody\n\n## F-2 — second\n\n**Cites:** [[ledger:F-1]] and [[elsewhere:F-1]] and [[otherrepo/ledger:F-1]]\n",
         );
 
         rekey_prefix_rows(&mut cat, "led", "F", "G", RekeyMode::Apply).unwrap();
@@ -2282,5 +2293,10 @@ mod tests {
             out.contains("[[elsewhere:F-1]]"),
             "another document's entry is not this ledger's to move; got:\n{out}"
         );
+        assert!(
+            out.contains("[[otherrepo/ledger:F-1]]"),
+            "a repo-qualified cite names another repository's ledger; got:\n{out}"
+        );
+        assert!(!out.contains("otherrepo/ledger:G-1"), "got:\n{out}");
     }
 }
