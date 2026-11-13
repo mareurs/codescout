@@ -32,7 +32,9 @@ pub(crate) const CITES_LABEL: &str = "**Cites:**";
 /// names the target by its file name and never by an absolute path, a row id or a 16-hex id, when
 /// the target
 ///
-/// - is not in the catalog, lies in no git repository, or is a `.worktrees/` copy;
+/// - is not in the catalog, or lies in no git repository, or lies under a `.worktrees/<name>/`
+///   directory that holds no `.git` (a linked worktree has a `.git` file, so it is its own git
+///   root and is not refused);
 /// - lies outside the key space, or has no valid key, or shares its key with another document of
 ///   its repository (judged by [`check_tree`] over the catalog's rows of that repository, so a
 ///   worktree shadow, a `//` spelling of one file and a row marked missing are not collisions);
@@ -40,8 +42,20 @@ pub(crate) const CITES_LABEL: &str = "**Cites:**";
 /// - yields text the grammar does not read as a file or an entry, such as a token with four
 ///   letters.
 ///
-/// A repository whose committed name equals the source repository's own is the same repository
-/// (another checkout of it), so its documents are cited unqualified.
+/// Two git roots are one repository when they are the same root, or a linked worktree and its
+/// main checkout, or two linked worktrees of one main checkout (see [`repository_root`]), or when
+/// their committed names are equal (another clone of it). The target's documents are then cited
+/// unqualified, whether or not either root has a committed name.
+///
+/// `source_git_root` is the git root of the document that carries the cite: callers pass
+/// `CurrentProject.git_root` exactly as stored (canonical). Roots are compared as paths by
+/// component, so a trailing or doubled slash does not matter; only a symlinked spelling of one
+/// root differs.
+///
+/// Accepted cost: the key check reads the catalog's rows, not the repository's commit tree. A
+/// catalog row for a file the tree lacks (ignored build output, files of a nested repository) can
+/// make a key look shared, so a cite can be refused for a collision the tree does not have.
+/// A document the catalog has not indexed yet is not seen at all.
 #[cfg_attr(not(test), allow(dead_code))] // removed by Task 7
 pub(crate) fn grammar_form_of(
     conn: &rusqlite::Connection,
@@ -102,7 +116,7 @@ pub(crate) fn grammar_form_of(
         anyhow::anyhow!("internal: the key check passed a document that has no key")
     })?;
 
-    let qualifier = if target_root == source_git_root {
+    let qualifier = if repository_root(&target_root) == repository_root(source_git_root) {
         None
     } else {
         let Some(target_name) = committed else {
@@ -158,6 +172,14 @@ fn file_name_of(abs_path: &str) -> String {
         || "the document".to_string(),
         |n| n.to_string_lossy().into_owned(),
     )
+}
+/// The main checkout a git root belongs to: the root itself, or, for a linked worktree (a `.git`
+/// pointer file), the main root its pointer names. `lookup_git_root` stops at any `.git`, so a
+/// worktree session's git root is the worktree, while the catalog can hold the main checkout's
+/// row for the same document.
+fn repository_root(git_root: &Path) -> std::path::PathBuf {
+    crate::util::path_security::worktree_main_root(git_root)
+        .unwrap_or_else(|| git_root.to_path_buf())
 }
 
 /// The path of the artifact `dst_ref` names, and the entry id when it names an entry.
@@ -216,7 +238,8 @@ fn invalid_rel(e: &KeyError) -> &str {
 }
 
 /// The one line that holds an entry's citations: `**Cites:** [[a]], [[b:F-3]]`, in input order,
-/// an exact repeat dropped.
+/// an exact repeat dropped. No forms give an empty string: a label with nothing after it is not a
+/// citation line.
 #[cfg_attr(not(test), allow(dead_code))] // removed by Task 7
 pub(crate) fn cites_line(forms: &[String]) -> String {
     let mut seen = std::collections::HashSet::new();
@@ -226,7 +249,7 @@ pub(crate) fn cites_line(forms: &[String]) -> String {
         .filter(|form| seen.insert(*form))
         .collect();
     if kept.is_empty() {
-        CITES_LABEL.to_string()
+        String::new()
     } else {
         format!("{CITES_LABEL} {}", kept.join(", "))
     }
@@ -494,6 +517,85 @@ mod tests {
             !rootless.contains("/nonexistent-codescout-test-root"),
             "{rootless}"
         );
+    }
+
+    /// A linked worktree of `main`: a directory whose `.git` is a pointer file into `main`.
+    fn linked_worktree(base: &Path, main: &Path, name: &str) -> PathBuf {
+        let worktree = base.join(name);
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}/.git/worktrees/{name}\n", main.display()),
+        )
+        .unwrap();
+        worktree
+    }
+
+    #[test]
+    fn a_cite_from_a_worktree_to_its_main_checkout_needs_no_committed_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = git_root(tmp.path(), "main");
+        let worktree = linked_worktree(tmp.path(), &main, "wt");
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&main, "docs/t.md"), Some("t-slug"));
+
+        // Neither checkout holds a repo.toml: one repository, so the plain key is right.
+        assert_eq!(
+            grammar_form_of(&cat.conn, &worktree, "id-t").unwrap(),
+            "[[t]]"
+        );
+        assert_eq!(
+            grammar_form_of(&cat.conn, &worktree, "t-slug:F-3").unwrap(),
+            "[[t:F-3]]"
+        );
+    }
+
+    #[test]
+    fn a_cite_from_the_main_checkout_to_one_of_its_worktrees_needs_no_committed_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = git_root(tmp.path(), "main");
+        let worktree = linked_worktree(tmp.path(), &main, "wt");
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&worktree, "docs/t.md"), None);
+
+        assert_eq!(grammar_form_of(&cat.conn, &main, "id-t").unwrap(), "[[t]]");
+    }
+
+    #[test]
+    fn a_worktree_of_another_repository_is_still_another_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mine = git_root(tmp.path(), "mine");
+        let other = git_root(tmp.path(), "other");
+        let other_worktree = linked_worktree(tmp.path(), &other, "other-wt");
+        let cat = Catalog::open_in_memory().unwrap();
+        row(&cat, "id-t", &at(&other_worktree, "docs/t.md"), None);
+
+        let msg = refusal(grammar_form_of(&cat.conn, &mine, "id-t"));
+        assert!(msg.contains("repo.toml"), "{msg}");
+        assert!(!msg.contains(&other.display().to_string()), "{msg}");
+    }
+
+    #[test]
+    fn a_folder_index_entry_ref_is_cited_by_its_folder_with_the_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = git_root(tmp.path(), "mine");
+        let cat = Catalog::open_in_memory().unwrap();
+        row(
+            &cat,
+            "id-area-readme",
+            &at(&root, "docs/area/readme.md"),
+            Some("area-slug"),
+        );
+
+        assert_eq!(
+            grammar_form_of(&cat.conn, &root, "area-slug:F-3").unwrap(),
+            "[[area:F-3]]"
+        );
+    }
+
+    #[test]
+    fn cites_line_of_nothing_is_empty() {
+        assert_eq!(cites_line(&[]), "");
     }
 
     #[test]
