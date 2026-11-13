@@ -197,11 +197,18 @@ fn retarget_patterns(v: &mut Value, from_prefix: &str, to_prefix: &str) -> usize
 ///
 /// `own_slug = None` therefore means "leave every qualified token alone", which is the safe
 /// reading when the caller cannot say which ledger it is.
+///
+/// **`own_key` is the second name a ledger answers to.** A ledger writes its own citations in the
+/// citation grammar, `[[key:F-3]]`, and its key (the stem of its file) need not equal its slug, so
+/// a qualifier equal to either one is the ledger's own and moves with the prefix. `None` means the
+/// ledger has no key (it lies in no repository, or its name is not a canonical key), so only the
+/// slug is recognised.
 fn retarget_prose(
     text: &str,
     from_prefix: &str,
     to_prefix: &str,
     own_slug: Option<&str>,
+    own_key: Option<&str>,
 ) -> Result<String> {
     let re = Regex::new(&format!(
         r"(?:(?P<q>[a-z][a-z0-9_-]*):)?\b{}-(?P<n>\d+|N)\b",
@@ -213,10 +220,10 @@ fn retarget_prose(
             match c.name("q") {
                 // A qualifier naming someone else is a citation of THEIR namespace. Leave the
                 // whole match byte-for-byte; this rekey has no authority over it.
-                Some(q) if Some(q.as_str()) != own_slug => {
+                Some(q) if Some(q.as_str()) != own_slug && Some(q.as_str()) != own_key => {
                     c.get(0).map_or(String::new(), |m| m.as_str().to_string())
                 }
-                // Our own slug: the token moves, the qualifier stays correct.
+                // Our own slug or our own key: the token moves, the qualifier stays correct.
                 Some(q) => format!("{}:{to_prefix}-{n}", q.as_str()),
                 // Unqualified: belongs to this ledger by definition.
                 None => format!("{to_prefix}-{n}"),
@@ -251,6 +258,7 @@ fn rekey_augmentation(
     from_prefix: &str,
     to_prefix: &str,
     own_slug: Option<&str>,
+    own_key: Option<&str>,
     report: &mut RekeyReport,
 ) -> Result<()> {
     let Some(row) = augmentation::get_by_conn(tx, artifact_id)? else {
@@ -292,7 +300,7 @@ fn rekey_augmentation(
     }
 
     // --- 3. The augmentation prompt, which teaches the entry shape by quoting it.
-    let new_prompt = retarget_prose(&row.prompt, from_prefix, to_prefix, own_slug)?;
+    let new_prompt = retarget_prose(&row.prompt, from_prefix, to_prefix, own_slug, own_key)?;
     report.prompt_rewritten = new_prompt != row.prompt;
 
     // --- 4. The safety net. See this function's doc comment: pattern recognition is a
@@ -360,6 +368,7 @@ fn rekey_body(
     from_prefix: &str,
     to_prefix: &str,
     own_slug: Option<&str>,
+    own_key: Option<&str>,
     mode: RekeyMode,
     report: &mut RekeyReport,
 ) -> Result<()> {
@@ -443,7 +452,7 @@ fn rekey_body(
         if is_delimiter || fence.in_fence() {
             out.push_str(line);
         } else {
-            let rewritten = retarget_prose(line, from_prefix, to_prefix, own_slug)?;
+            let rewritten = retarget_prose(line, from_prefix, to_prefix, own_slug, own_key)?;
             if rewritten != line {
                 report.body_lines_rewritten += 1;
             }
@@ -557,6 +566,72 @@ fn replace_token(s: &str, from: &str, to: &str) -> String {
     out
 }
 
+/// The key of the document at `abs_path`: its path below the git root run through
+/// [`key_of`](crate::librarian::identity::key::key_of). `None` when the file lies in no
+/// repository or its name is not a canonical key, so no `[[key]]` form names it.
+fn key_of_document(abs_path: &str) -> Option<String> {
+    let path = std::path::Path::new(abs_path);
+    let root = crate::librarian::current_project::lookup_git_root(path)?;
+    let rel = path.strip_prefix(root).ok()?;
+    crate::librarian::identity::key::key_of(&rel.to_string_lossy())
+        .ok()
+        .map(|key| key.as_str().to_string())
+}
+
+/// The documents, other than the ledger, that cite one of its `<from_prefix>-N` entries in
+/// grammar text, each named by [`document_label`](crate::librarian::catalog::dual_write::document_label).
+///
+/// A candidate is a document with an inbound `origin = 'write'` row naming the old prefix. It is
+/// a citer when its text, read through the read door, holds a `[[ledger_key:<from>-N]]` citation
+/// (`Reference::Entry`, qualified by a repository or not). A rekey moves ids and the ledger's own
+/// prose, never another document's text, so a grammar citation in a citer would keep naming an
+/// entry the ledger no longer defines.
+///
+/// Fails closed: a candidate whose file the door refuses, or that cannot be read, is a citer.
+/// `roots` are taken before `tx` opened; the door is never rebuilt from the catalog inside it.
+/// A row whose slug no catalogued document carries names no file to read and is not a candidate.
+fn grammar_citers_of(
+    tx: &rusqlite::Transaction<'_>,
+    roots: &[std::path::PathBuf],
+    ledger_slug: &str,
+    ledger_key: &str,
+    from_prefix: &str,
+) -> Result<Vec<String>> {
+    let mut stmt = tx.prepare(
+        "SELECT DISTINCT a.abs_path FROM entry_cite c JOIN artifact a ON a.slug = c.src_slug \
+         WHERE c.origin = 'write' AND c.src_slug <> ?1 AND c.dst_ref LIKE ?2 \
+         ORDER BY a.abs_path",
+    )?;
+    let pattern = format!("{ledger_slug}:{from_prefix}-%");
+    let candidates: Vec<String> = stmt
+        .query_map(params![ledger_slug, pattern], |r| r.get(0))?
+        .collect::<std::result::Result<_, _>>()?;
+    drop(stmt);
+
+    let door = crate::librarian::read_door::ReadDoor::new(roots.to_vec());
+    let mut labels = std::collections::BTreeSet::new();
+    for abs_path in candidates {
+        let path = std::path::Path::new(&abs_path);
+        let cites_the_ledger = match door.text(path) {
+            Ok(text) => crate::librarian::identity::grammar::extract(&text)
+                .iter()
+                .any(|c| {
+                    matches!(
+                        &c.reference,
+                        crate::librarian::identity::grammar::Reference::Entry { key, token, .. }
+                            if key.as_str() == ledger_key
+                                && retarget_token(token, from_prefix, from_prefix).is_some()
+                    )
+                }),
+            Err(_) => true,
+        };
+        if cites_the_ledger {
+            labels.insert(crate::librarian::catalog::dual_write::document_label(path));
+        }
+    }
+    Ok(labels.into_iter().collect())
+}
+
 /// Move every `<from_prefix>-N` entry id owned by `artifact_id` to `<to_prefix>-N`, across the
 /// catalog tables keyed on it.
 ///
@@ -585,13 +660,16 @@ pub fn rekey_prefix_rows(
             |r| r.get(0),
         )
         .optional()?;
-    if let Some(p) = own_path {
+    if let Some(p) = own_path.as_deref() {
         augmentation::refuse_taken_prefixes(
             &cat.conn,
-            std::path::Path::new(&p),
+            std::path::Path::new(p),
             &[to_prefix.to_string()],
         )?;
     }
+    // The name the ledger's own grammar citations carry (`[[key:F-3]]`); `None` for a ledger no
+    // key names, which cannot be cited in the grammar at all.
+    let ledger_key: Option<String> = own_path.as_deref().and_then(key_of_document);
 
     let roots = cat.write_roots();
     // The sidecar publication after the commit would be refused for a declared path that is a
@@ -614,6 +692,27 @@ pub fn rekey_prefix_rows(
         )
         .optional()?
         .flatten();
+
+    // Another document's `**Cites:**` text is not this rekey's to rewrite, so while one cites an
+    // entry under the old prefix the rekey refuses. Before any write below and in `Preview` as
+    // in `Apply`: dropping `tx` on the way out rolls back, and an Ok preview stays a promise.
+    if let (Some(slug), Some(key)) = (slug.as_deref(), ledger_key.as_deref()) {
+        let citers = grammar_citers_of(&tx, &roots, slug, key, from_prefix)?;
+        if !citers.is_empty() {
+            return Err(LibrarianRecoverableError::with_hint(
+                format!(
+                    "rekey_prefix: grammar citations of this ledger's `{from_prefix}` entries remain in {}",
+                    citers.join(", ")
+                ),
+                format!(
+                    "Each of those documents holds a `**Cites:**` citation of an entry that \
+                     `{from_prefix}` names; a rekey moves this ledger's ids and its own text, not \
+                     theirs. Rewrite that text first, then run the rekey again. Nothing has been \
+                     written."
+                ),
+            ));
+        }
+    }
 
     if let Some(slug) = slug.as_deref() {
         // --- Outbound: this ledger is the CITER, and the token sits in `src_local`.
@@ -748,6 +847,7 @@ pub fn rekey_prefix_rows(
         from_prefix,
         to_prefix,
         slug.as_deref(),
+        ledger_key.as_deref(),
         &mut report,
     )?;
     rekey_body(
@@ -757,6 +857,7 @@ pub fn rekey_prefix_rows(
         from_prefix,
         to_prefix,
         slug.as_deref(),
+        ledger_key.as_deref(),
         mode,
         &mut report,
     )?;
@@ -946,7 +1047,7 @@ mod tests {
     fn a_qualified_citation_of_another_ledger_is_not_rewritten() {
         let text = "see tool-usage-patterns:T-14, and my-ledger:T-3, and bare T-7";
 
-        let out = retarget_prose(text, "T", "SRI", Some("my-ledger")).unwrap();
+        let out = retarget_prose(text, "T", "SRI", Some("my-ledger"), None).unwrap();
 
         assert!(
             out.contains("tool-usage-patterns:T-14"),
@@ -965,7 +1066,7 @@ mod tests {
     /// can tell, and the safe reading is to leave it alone. Bare tokens still move.
     #[test]
     fn without_a_known_slug_every_qualified_token_is_left_alone() {
-        let out = retarget_prose("my-ledger:T-3 and bare T-7", "T", "SRI", None).unwrap();
+        let out = retarget_prose("my-ledger:T-3 and bare T-7", "T", "SRI", None, None).unwrap();
 
         assert!(out.contains("my-ledger:T-3"), "got: {out}");
         assert!(out.contains("bare SRI-7"), "got: {out}");
@@ -1989,6 +2090,197 @@ mod tests {
         assert!(
             on_disk.contains("## SRI-N"),
             "and the prompt too — it teaches the heading shape; got:\n{on_disk}"
+        );
+    }
+    // ---- grammar citations of the prefix (Plan C1, Task 9) ----
+
+    /// A temp repository: a `.git` directory so `document_label` and `key_of` see a root, and a
+    /// `docs/` folder for the documents.
+    fn repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::create_dir(dir.path().join("docs")).unwrap();
+        dir
+    }
+
+    /// Write `text` at `rel` under `dir` and catalogue it as artifact `id` with `slug`.
+    fn doc_in(
+        cat: &Catalog,
+        dir: &tempfile::TempDir,
+        id: &str,
+        rel: &str,
+        slug: &str,
+        text: &str,
+    ) -> std::path::PathBuf {
+        let path = dir.path().join(rel);
+        std::fs::write(&path, text).unwrap();
+        art(cat, id, &path.to_string_lossy(), slug);
+        path
+    }
+
+    const GRAMMAR_LEDGER: &str = "---\nkind: tracker\n---\n\n## F-1 — first\n\nbody\n";
+
+    /// The refusal precedes every write, so a refused rekey leaves the ledger file and the
+    /// citer's row exactly as they were. `Preview` is the dry run: it refuses the same way as
+    /// `Apply`, because an Ok preview is a promise that the apply succeeds.
+    ///
+    /// Oracle: the returned error and the bytes read back from disk. Mutation: make
+    /// `grammar_citers_of` return an empty `Vec` and the rekey applies, so both calls return Ok.
+    #[test]
+    fn a_rekey_is_refused_while_another_document_cites_the_prefix_in_grammar_text() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let dir = repo();
+        let ledger = doc_in(
+            &cat,
+            &dir,
+            "led",
+            "docs/ledger.md",
+            "ledger-slug",
+            GRAMMAR_LEDGER,
+        );
+        doc_in(
+            &cat,
+            &dir,
+            "oth",
+            "docs/other.md",
+            "other-slug",
+            "## R-1 — a review\n\n**Cites:** [[ledger:F-1]]\n",
+        );
+        cite(&cat, "other-slug", "R-1", "ledger-slug:F-1", "write");
+
+        for mode in [RekeyMode::Preview, RekeyMode::Apply] {
+            let err = rekey_prefix_rows(&mut cat, "led", "F", "G", mode).unwrap_err();
+            let text = format!("{err:#}");
+            assert!(text.contains("[[other]]"), "names the citer; got: {text}");
+            assert!(
+                !text.contains(&*dir.path().to_string_lossy()),
+                "no absolute path; got: {text}"
+            );
+        }
+
+        assert!(std::fs::read_to_string(&ledger).unwrap().contains("## F-1"));
+        assert_eq!(
+            dsts(&cat),
+            ["ledger-slug:F-1"],
+            "the citer's row did not move"
+        );
+    }
+
+    /// A write row alone does not block: a legacy row whose citer text carries no grammar
+    /// citation of the ledger has nothing to rewrite first.
+    ///
+    /// Oracle: the report and the catalog row. Mutation: refuse on the rows alone (skip the text
+    /// check) and this returns an error.
+    #[test]
+    fn a_write_row_with_no_grammar_text_does_not_block() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let dir = repo();
+        doc_in(
+            &cat,
+            &dir,
+            "led",
+            "docs/ledger.md",
+            "ledger-slug",
+            GRAMMAR_LEDGER,
+        );
+        doc_in(
+            &cat,
+            &dir,
+            "oth",
+            "docs/other.md",
+            "other-slug",
+            "## R-1 — a review\n\n**Cites:** ledger-slug:F-1 and a plain F-1\n",
+        );
+        cite(&cat, "other-slug", "R-1", "ledger-slug:F-1", "write");
+
+        let report = rekey_prefix_rows(&mut cat, "led", "F", "G", RekeyMode::Apply).unwrap();
+
+        assert_eq!(report.durable_inbound_repointed, 1);
+        assert_eq!(dsts(&cat), ["ledger-slug:G-1"]);
+    }
+
+    /// A citer whose file cannot be read is a citer the rekey cannot clear, so it refuses and
+    /// names the citer. The file is missing here; the next test uses a file the read door
+    /// refuses.
+    ///
+    /// Oracle: the returned error. Mutation: skip a citer whose text cannot be read and this
+    /// returns Ok.
+    #[test]
+    fn an_unreadable_citer_refuses_the_rekey() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let dir = repo();
+        doc_in(
+            &cat,
+            &dir,
+            "led",
+            "docs/ledger.md",
+            "ledger-slug",
+            GRAMMAR_LEDGER,
+        );
+        let gone = dir.path().join("docs/gone.md");
+        art(&cat, "oth", &gone.to_string_lossy(), "other-slug");
+        cite(&cat, "other-slug", "R-1", "ledger-slug:F-1", "write");
+
+        let err = rekey_prefix_rows(&mut cat, "led", "F", "G", RekeyMode::Apply).unwrap_err();
+
+        assert!(format!("{err:#}").contains("[[gone]]"), "got: {err:#}");
+    }
+
+    /// The read door's refusal is a refusal of the rekey too: a citer that is a link out of its
+    /// repository, whose target holds no grammar text, still refuses. Were the door's refusal
+    /// read as "no citation", this would return Ok.
+    ///
+    /// Oracle: the returned error. Mutation: skip a citer the door refuses and this returns Ok.
+    #[cfg(unix)]
+    #[test]
+    fn a_citer_the_read_door_refuses_refuses_the_rekey() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let dir = repo();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("target.md"), "nothing to see\n").unwrap();
+        doc_in(
+            &cat,
+            &dir,
+            "led",
+            "docs/ledger.md",
+            "ledger-slug",
+            GRAMMAR_LEDGER,
+        );
+        let link = dir.path().join("docs/escape.md");
+        std::os::unix::fs::symlink(outside.path().join("target.md"), &link).unwrap();
+        art(&cat, "oth", &link.to_string_lossy(), "other-slug");
+        cite(&cat, "other-slug", "R-1", "ledger-slug:F-1", "write");
+
+        let err = rekey_prefix_rows(&mut cat, "led", "F", "G", RekeyMode::Apply).unwrap_err();
+
+        assert!(format!("{err:#}").contains("[[escape]]"), "got: {err:#}");
+    }
+
+    /// A ledger's own self-citation is written in grammar form (`[[key:F-n]]`), and its key is
+    /// not its slug, so the slug-only qualifier check leaves it on the old prefix.
+    ///
+    /// Oracle: the bytes read back from disk. Mutation: ignore `own_key` in `retarget_prose` and
+    /// `[[ledger:F-1]]` stays.
+    #[test]
+    fn a_ledgers_own_grammar_citation_moves_with_the_prefix() {
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let dir = repo();
+        let ledger = doc_in(
+            &cat,
+            &dir,
+            "led",
+            "docs/ledger.md",
+            "ledger-slug",
+            "---\nkind: tracker\n---\n\n## F-1 — first\n\nbody\n\n## F-2 — second\n\n**Cites:** [[ledger:F-1]] and [[elsewhere:F-1]]\n",
+        );
+
+        rekey_prefix_rows(&mut cat, "led", "F", "G", RekeyMode::Apply).unwrap();
+
+        let out = std::fs::read_to_string(&ledger).unwrap();
+        assert!(out.contains("[[ledger:G-1]]"), "got:\n{out}");
+        assert!(
+            out.contains("[[elsewhere:F-1]]"),
+            "another document's entry is not this ledger's to move; got:\n{out}"
         );
     }
 }
