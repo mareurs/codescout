@@ -17463,7 +17463,7 @@ mod guide_hint_tests {
                 "rel_path": rel_path,
                 "kind": "tracker",
                 "title": "section-grain fixture",
-                "body": "fixture body",
+                "body": "fixture body\n\n## Template for new entries\n\nboilerplate\n",
                 "extra": {"entry_prefix": "T"}
             }),
         )
@@ -17804,7 +17804,10 @@ mod guide_hint_tests {
                 "id": tracker,
                 "entry_collection": "tasks",
                 "id_prefix": "T",
-                "entry": {"title": "probe task", "status": "open"}
+                "entry": {"title": "probe task", "status": "open"},
+                "title": "probe task",
+                "body": "the probe entry",
+                "anchor_heading": "## Template for new entries"
             }),
         )
         .await;

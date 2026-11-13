@@ -589,7 +589,10 @@ mod tests {
     /// One case per action, each on a FRESH context so no earlier write has already forked the
     /// shadow (the first write must name the shadow it is about to create, not the main file
     /// the shadow did not yet exist for); a non-worktree control per action proves the same
-    /// code still names the artifact itself. Mutation sites: `write_target_id` keys,
+    /// code still names the artifact itself. `append_entry` has no case here: it writes the
+    /// entry into the ledger's markdown, so a case needs a real file this fixture's `/repo/...`
+    /// paths lack, and a worktree session cannot allocate an id at all.
+    /// Mutation sites: `write_target_id` keys,
     /// `name_the_target`'s `peek_write_target` call.
     /// docs/issues/2026-10-16-tracker-conventions-write-sections-are-declared-but-unreachable.md
     #[tokio::test]
@@ -600,11 +603,7 @@ mod tests {
         const SHADOW: &str = "/repo/.worktrees/feat/docs/trackers/t.md";
 
         type BuildArgs = fn(&str, &str) -> Value;
-        let cases: [(&str, BuildArgs); 4] = [
-            ("append_entry", |id, _| {
-                json!({"action": "append_entry", "id": id, "entry_collection": "items",
-                       "id_prefix": "F", "entry": {"t": "x"}})
-            }),
+        let cases: [(&str, BuildArgs); 3] = [
             ("update_entry", |id, _| {
                 json!({"action": "update_entry", "id": id, "entry_collection": "items",
                        "entry_id": "F-1", "fields": {"t": "b"}})
@@ -620,11 +619,6 @@ mod tests {
         ];
         for (action, build) in cases {
             for worktree in [true, false] {
-                // A worktree session cannot allocate an entry id (pinned in
-                // `append_entry`'s tests), so there is no shadow for the call to name.
-                if worktree && action == "append_entry" {
-                    continue;
-                }
                 let ctx = if worktree {
                     wt_ctx(Catalog::open_in_memory().unwrap())
                 } else {

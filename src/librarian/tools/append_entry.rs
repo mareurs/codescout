@@ -127,6 +127,23 @@ fn refuse_allocation_off_the_main_ledger(ctx: &ToolContext, cat: &Catalog, id: &
     Ok(())
 }
 
+/// The refusal of a params call (one that names an `entry_collection`) that lacks the section
+/// fields. An entry on a params ledger is written into the markdown as well as the catalog, and
+/// the markdown needs a title, a body and a placement.
+fn params_section_refusal(missing: &[&str]) -> anyhow::Error {
+    LibrarianRecoverableError::with_hint(
+        format!(
+            "append_entry: an entry on a params ledger is written into the markdown too, so the \
+             call needs `title`, `body` and `anchor_heading` together — missing: {}",
+            missing.join(", ")
+        ),
+        "Pass all three. The server writes the entry as a `<ID> — <title>` section before \
+         `anchor_heading` and records the ledger's high-water mark in the same file write; \
+         `entry` keeps the structured fields. Nothing has been allocated."
+            .to_string(),
+    )
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a = parse_args(args)?;
     // Above the branch, so the params path and the prose path refuse alike: the params
@@ -245,6 +262,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             .filter(|(_, absent)| *absent)
             .map(|(name, _)| name)
             .collect();
+            if a.entry_collection.is_some() {
+                return Err(params_section_refusal(&missing));
+            }
             return Err(LibrarianRecoverableError::with_hint(
                 format!(
                     "append_entry: writing a prose entry needs `title`, `body` and \
@@ -258,6 +278,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             ));
         }
     };
+    // A params entry is written into the markdown too (spec requirement 1: no entry exists
+    // only in params), so a params call without its section is refused here, before any
+    // catalog access. The library `augmentation::append_entry` still takes `None` (tests, and
+    // Plan D's export), which is why the requirement lives in the tool (C1-R16).
+    if a.entry_collection.is_some() && section.is_none() {
+        return Err(params_section_refusal(&["title", "body", "anchor_heading"]));
+    }
 
     // PROSE-LEDGER PATH. Nine of the ten numeric prefixes in `docs/TAXONOMY.md`
     // keep entries as `## PREFIX-N` body sections, not params rows, and so could
@@ -539,6 +566,52 @@ mod tests {
         .unwrap();
     }
 
+    /// The anchor heading every params fixture below carries, and the section fields a params
+    /// call must now pass (an entry on a params ledger is written into the markdown too).
+    const ANCHOR: &str = "## Template for new entries";
+
+    /// `args` with the three section fields a params call needs.
+    fn with_section(mut args: Value) -> Value {
+        args["title"] = json!("entry");
+        args["body"] = json!("prose");
+        args["anchor_heading"] = json!(ANCHOR);
+        args
+    }
+
+    /// A ledger file that carries what a params write needs: a frontmatter block to hold the
+    /// high-water mark, and an anchor heading (`## Template…`) the section is placed before. Each
+    /// is added only when `body` lacks it.
+    fn ledger_text(body: &str) -> String {
+        let head = if body.starts_with("---") {
+            ""
+        } else {
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n"
+        };
+        let tail = if body.contains("## Template") {
+            String::new()
+        } else {
+            format!("\n{ANCHOR}\n\nboilerplate\n")
+        };
+        format!("{head}{body}{tail}")
+    }
+
+    /// `seed` for a test whose call reaches the section write: the row points at a real ledger
+    /// file in `dir` (frontmatter and anchor heading), returned.
+    fn seed_on_disk(ctx: &ToolContext, id: &str, dir: &std::path::Path) -> std::path::PathBuf {
+        let path = dir.join(format!("{id}.md"));
+        std::fs::write(&path, ledger_text("# Ledger\n")).unwrap();
+        seed(ctx, id);
+        ctx.catalog
+            .lock()
+            .conn
+            .execute(
+                "UPDATE artifact SET abs_path = ?1 WHERE id = ?2",
+                rusqlite::params![path.to_str().unwrap(), id],
+            )
+            .unwrap();
+        path
+    }
+
     /// Seed a tracker whose markdown file really exists, so the body-reading
     /// half of `append_entry` has something to read. The default `seed` points
     /// at `/test/<id>.md`, which does not exist — fine for id allocation,
@@ -550,7 +623,7 @@ mod tests {
         body: &str,
         rows: &[&str],
     ) {
-        std::fs::write(path, body).unwrap();
+        std::fs::write(path, ledger_text(body)).unwrap();
         let now = chrono::Utc::now().timestamp_millis();
         let cat = ctx.catalog.lock();
         art_upsert(
@@ -628,8 +701,8 @@ mod tests {
 
         let result = call(
             &ctx,
-            json!({"id": "art1", "entry_collection": "failures",
-                   "id_prefix": "F", "entry": {"status": "fail"}}),
+            with_section(json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"}})),
         )
         .await
         .unwrap();
@@ -662,8 +735,8 @@ mod tests {
 
         let err = call(
             &ctx,
-            json!({"id": "art1", "entry_collection": "failures",
-                   "id_prefix": "DCTX", "entry": {"status": "fail"}}),
+            with_section(json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "DCTX", "entry": {"status": "fail"}})),
         )
         .await
         .expect_err("an uncitable id_prefix must be refused on the params path");
@@ -671,8 +744,8 @@ mod tests {
 
         let ok = call(
             &ctx,
-            json!({"id": "art1", "entry_collection": "failures",
-                   "id_prefix": "DCX", "entry": {"status": "fail"}}),
+            with_section(json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "DCX", "entry": {"status": "fail"}})),
         )
         .await
         .expect("a three-letter prefix on the same ledger must allocate");
@@ -684,14 +757,12 @@ mod tests {
 
     /// docs/issues/archive/2026-08-18-an-index-row-satisfies-the-drift-check-but-defines-no-citable-token.md
     ///
-    /// `append_entry` emits `undefined_in_body` from its own call site, so it needs
-    /// its own test — the update_entry tests cover the classification but not this
-    /// wiring. Reuses the fixture above deliberately: the id it just minted is
-    /// reported as needing a row AND as uncitable, which is the pair of facts a
-    /// single `snapshot_missing` could never carry. Telling the author to "add the
-    /// row" is what let ten A-N entries and 117 BL-N citations go dark.
+    /// The params path used to leave the new id uncitable (an index row defines no token) and
+    /// said so in `undefined_in_body`. The tool now writes the `## <ID> — <title>` heading in
+    /// the same call, so the id is defined and the note is absent, while the row-snapshot half
+    /// (`snapshot_missing`) still reports on its own: the two facts stay independent.
     #[tokio::test]
-    async fn append_also_says_the_new_id_is_not_yet_citable() {
+    async fn append_defines_the_new_id_so_it_reports_no_citation_gap() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("queue.md");
         let ctx = mk_ctx();
@@ -705,25 +776,34 @@ mod tests {
 
         let result = call(
             &ctx,
-            json!({"id": "art1", "entry_collection": "failures",
-                   "id_prefix": "F", "entry": {"status": "fail"}}),
+            with_section(json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"}})),
         )
         .await
         .unwrap();
 
         assert_eq!(result["id"], "F-4");
-        let note = result["undefined_in_body"]
-            .as_str()
-            .expect("a row-only ledger must say the new id is uncitable");
         assert!(
-            note.contains("defines NO"),
-            "no F-N is defined anywhere, so it is the whole-ledger message: {note}"
+            result.get("undefined_in_body").is_none(),
+            "a params entry is written as a `## F-4 — <title>` section, so the new id is \
+             defined and citable: {result}"
+        );
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("## F-4 — entry"),
+            "the heading that defines the token is on disk"
         );
         assert!(
             result["snapshot_missing"].is_array(),
             "and the row half still reports independently: {result}"
         );
     }
+    // The wiring of `undefined_in_body` at this call site cannot fire through the tool any more
+    // (a params call always writes its heading); the library keeps `None` and its test is
+    // `append_entry_does_not_claim_a_snapshot_when_the_body_is_headings_only`.
+    // mutation: pass `None` for the section in `call`'s `augmentation::append_entry` → the
+    // heading assertion is red.
 
     /// The gate. A tracker whose body anchors no ids keeps its rows in params
     /// deliberately — flagging it would fire on every append forever.
@@ -736,8 +816,8 @@ mod tests {
 
         let result = call(
             &ctx,
-            json!({"id": "art1", "entry_collection": "failures",
-                   "id_prefix": "F", "entry": {"status": "fail"}}),
+            with_section(json!({"id": "art1", "entry_collection": "failures",
+                   "id_prefix": "F", "entry": {"status": "fail"}})),
         )
         .await
         .unwrap();
@@ -750,22 +830,29 @@ mod tests {
 
     #[tokio::test]
     async fn call_assigns_and_returns_next_id() {
+        let dir = tempfile::tempdir().unwrap();
         let ctx = mk_ctx();
-        seed(&ctx, "art1");
+        let path = seed_on_disk(&ctx, "art1", dir.path());
 
         let result = call(
             &ctx,
-            json!({
+            with_section(json!({
                 "id": "art1",
                 "entry_collection": "failures",
                 "id_prefix": "F",
                 "entry": {"status": "fail"}
-            }),
+            })),
         )
         .await
         .unwrap();
 
         assert_eq!(result["id"], "F-1");
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("entry_high_water_F: 1"),
+            "the entry is in the markdown under the committed mark"
+        );
     }
 
     /// A prose ledger: augmented (so it is declared) but with NO
@@ -1063,7 +1150,11 @@ mod tests {
         // missing the rows the body documents, so say so.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("tracker.md");
-        std::fs::write(&path, "## F-8 — body-only entry\n").unwrap();
+        std::fs::write(
+            &path,
+            ledger_text(&format!("## F-8 — body-only entry\n\n{ANCHOR}\n")),
+        )
+        .unwrap();
 
         let ctx = mk_ctx();
         seed(&ctx, "art1");
@@ -1079,12 +1170,12 @@ mod tests {
 
         let result = call(
             &ctx,
-            json!({
+            with_section(json!({
                 "id": "art1",
                 "entry_collection": "failures",
                 "id_prefix": "F",
                 "entry": {"status": "fail"}
-            }),
+            })),
         )
         .await
         .unwrap();
@@ -1099,17 +1190,18 @@ mod tests {
 
     #[tokio::test]
     async fn call_omits_warning_when_params_is_current() {
+        let dir = tempfile::tempdir().unwrap();
         let ctx = mk_ctx();
-        seed(&ctx, "art1");
+        seed_on_disk(&ctx, "art1", dir.path());
 
         let result = call(
             &ctx,
-            json!({
+            with_section(json!({
                 "id": "art1",
                 "entry_collection": "failures",
                 "id_prefix": "F",
                 "entry": {"status": "fail"}
-            }),
+            })),
         )
         .await
         .unwrap();
@@ -1125,12 +1217,12 @@ mod tests {
 
         let err = call(
             &ctx,
-            json!({
+            with_section(json!({
                 "id": "art1",
                 "entry_collection": "failures",
                 "id_prefix": "F",
                 "entry": "not an object"
-            }),
+            })),
         )
         .await
         .unwrap_err();
@@ -1144,18 +1236,79 @@ mod tests {
 
         let err = call(
             &ctx,
-            json!({
+            with_section(json!({
                 "id": "nope",
                 "entry_collection": "failures",
                 "id_prefix": "F",
                 "entry": {}
-            }),
+            })),
         )
         .await
         .unwrap_err();
 
         assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
     }
+    /// A params call without its section fields is refused in the TOOL, before any catalog
+    /// access: nothing is allocated, nothing is written, and the refusal names every missing
+    /// field. A partial trio names only what is absent. The library keeps accepting `None`.
+    #[tokio::test]
+    async fn a_params_append_without_a_section_is_refused_and_allocates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx();
+        let path = seed_on_disk(&ctx, "art1", dir.path());
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        let err = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures", "id_prefix": "F", "entry": {}}),
+        )
+        .await
+        .unwrap_err();
+        let text = format!("{err:#}");
+        assert!(err.downcast_ref::<LibrarianRecoverableError>().is_some());
+        assert!(
+            text.contains("written into the markdown too")
+                && text.contains("title, body, anchor_heading"),
+            "the refusal says why and names the missing fields: {text}"
+        );
+
+        let partial = call(
+            &ctx,
+            json!({"id": "art1", "entry_collection": "failures", "id_prefix": "F", "entry": {},
+                   "title": "t"}),
+        )
+        .await
+        .unwrap_err();
+        let text = format!("{partial:#}");
+        assert!(
+            text.contains("written into the markdown too")
+                && text.contains("missing: body, anchor_heading"),
+            "a partial trio on a params ledger gets the params refusal, naming only what is \
+             absent: {text}"
+        );
+
+        let params = augmentation::get(&ctx.catalog.lock(), "art1")
+            .unwrap()
+            .unwrap()
+            .params;
+        assert_eq!(params, r#"{"failures":[]}"#, "nothing was allocated");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        // Before any catalog access: an id the catalog has never seen gets the same refusal,
+        // not the not-found one.
+        let unknown = call(
+            &ctx,
+            json!({"id": "nope", "entry_collection": "failures", "id_prefix": "F", "entry": {}}),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            format!("{unknown:#}").contains("written into the markdown too"),
+            "{unknown:#}"
+        );
+    }
+    // mutation: remove the `a.entry_collection.is_some() && section.is_none()` refusal in `call`
+    // → the first call returns Ok.
 
     #[tokio::test]
     async fn params_allocation_is_refused_from_a_worktree() {
@@ -1820,15 +1973,17 @@ mod tests {
 
     #[tokio::test]
     async fn append_with_cites_writes_entry_cite_and_not_artifact_link() {
+        let dir = tempfile::tempdir().unwrap();
         let ctx = mk_ctx();
-        seed(&ctx, "art1"); // seeds an augmented tracker with entry_collection "failures"
+        // an augmented tracker with entry_collection "failures" and a real file
+        seed_on_disk(&ctx, "art1", dir.path());
         seed(&ctx, "art2");
         let out = call(
             &ctx,
-            json!({
+            with_section(json!({
                 "id": "art1", "entry_collection": "failures", "id_prefix": "F",
                 "entry": {"status": "fail"}, "cites": ["art2.md"]
-            }),
+            })),
         )
         .await
         .unwrap();
@@ -1853,14 +2008,16 @@ mod tests {
 
     #[tokio::test]
     async fn append_with_unresolvable_cite_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
         let ctx = mk_ctx();
-        seed(&ctx, "art1");
+        let path = seed_on_disk(&ctx, "art1", dir.path());
+        let before = std::fs::read_to_string(&path).unwrap();
         let err = call(
             &ctx,
-            json!({
+            with_section(json!({
                 "id": "art1", "entry_collection": "failures", "id_prefix": "F",
                 "entry": {"status": "fail"}, "cites": ["no-such-target"]
-            }),
+            })),
         )
         .await
         .unwrap_err();
@@ -1871,6 +2028,11 @@ mod tests {
         assert!(
             !aug.params.contains("F-1"),
             "entry must not be written when a cite is bad"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            before,
+            "nor may the section or the mark reach the file for a refused cite"
         );
     }
 
@@ -1890,7 +2052,8 @@ mod tests {
             &ctx,
             json!({
                 "id": main_id, "entry_collection": "items", "id_prefix": "F",
-                "entry": {"t": "x"}, "cites": [main_id.clone()]
+                "entry": {"t": "x"}, "cites": [main_id.clone()],
+                "title": "t", "body": "b", "anchor_heading": "## Template for new entries"
             }),
         )
         .await

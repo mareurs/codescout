@@ -1,6 +1,6 @@
 use crate::librarian::catalog::dual_write::{
-    commit_after_file_write, find_unrecorded_section, record_written_file, write_entry_into_ledger,
-    FileWrite, RetryRule,
+    commit_after_file_write, find_unrecorded_section, frontmatter_mark, record_written_file,
+    write_entry_into_ledger, FileWrite, RetryRule,
 };
 use crate::librarian::catalog::Catalog;
 use crate::librarian::tools::{schema_validate, LibrarianRecoverableError};
@@ -816,6 +816,12 @@ pub struct AppendOutcome {
 /// `params.<entry_collection>`. Runs inside a single `IMMEDIATE` transaction
 /// so the read-max-write is safe under both intra-process and cross-process
 /// concurrency (paired with `busy_timeout` set on the connection).
+///
+/// With a `section` the entry is also written into the markdown: the number is
+/// `max(params, body, committed mark) + 1`, the `## <ID> — <title>` section and the ledger's
+/// high-water mark go to disk in one write (`write_mark: true`), and a ledger with no
+/// frontmatter block to hold the mark is refused with nothing written. Without one the call
+/// writes params only; the tool refuses that shape, so only tests and Plan D's export reach it.
 pub fn append_entry(
     cat: &mut Catalog,
     artifact_id: &str,
@@ -935,7 +941,18 @@ pub fn append_entry(
         _ => None,
     };
     let adopted = adopted_n.is_some();
-    let next = adopted_n.unwrap_or_else(|| params_next.max(body_max.map_or(0, |m| m + 1)));
+    // The COMMITTED mark counts only for a call that writes a section: that call also writes the
+    // mark (`write_mark: true` below), so the number it takes must lie above every number the
+    // committed text already holds. A call with no section (library callers, Plan D's export)
+    // writes no file and takes the params and body numbers as before.
+    let committed_mark: Option<u64> = section_doc
+        .as_deref()
+        .and_then(|doc| frontmatter_mark(doc, id_prefix));
+    let next = adopted_n.unwrap_or_else(|| {
+        params_next
+            .max(body_max.map_or(0, |m| m + 1))
+            .max(committed_mark.map_or(0, |m| m + 1))
+    });
     let new_id = format!("{id_prefix}-{next}");
 
     // Skipping the collision is only half the repair — params is still missing
@@ -1062,14 +1079,17 @@ pub fn append_entry(
                      section cannot be written — no id was allocated"
                 )));
             };
-            // An adopted section is already in the file, so nothing is written: this path folds
-            // no frontmatter mark into its write (`write_mark: false`), so there is nothing
-            // else to bring up either.
-            if !adopted {
-                // The splice, the guarded write and the row's `record_written_file` are the
-                // dual-write contract's one function. A link or a path outside the roots is
-                // refused with the transaction still open, so no id is consumed and the params
-                // row rolls back.
+            // The params path folds the committed mark into its write like the prose path
+            // does (`write_mark: true`), so the entry is in the markdown AND under the
+            // committed high-water mark, which is what survives a clone. A document with no
+            // frontmatter block is refused by the write with nothing on disk and the
+            // transaction still open.
+            //
+            // An adopted section is already in the file, so only the mark can be behind it: a
+            // mark-only write when it is below the adopted id (a failed commit then says the
+            // retry is safe, no section having been written by this call), and no write when
+            // the mark already covers it.
+            if !adopted || committed_mark.is_none_or(|m| m < next) {
                 written_section = Some(write_entry_into_ledger(
                     &tx,
                     &roots,
@@ -1078,8 +1098,8 @@ pub fn append_entry(
                     doc,
                     id_prefix,
                     next,
-                    Some(s),
-                    false,
+                    if adopted { None } else { Some(s) },
+                    true,
                     "append_entry",
                 )?);
             }
@@ -5901,7 +5921,7 @@ mod tests {
     fn a_params_retry_adopts_a_section_the_file_has_and_params_lack() {
         let dir = tempfile::tempdir().unwrap();
         let mut cat = Catalog::open_in_memory().unwrap();
-        let md = orphan_fixture(dir.path(), &mut cat, None);
+        let md = orphan_fixture(dir.path(), &mut cat, Some(1));
         let before = std::fs::read_to_string(&md).unwrap();
 
         let out = append_first(&mut cat, &pending("first"));
@@ -5916,13 +5936,172 @@ mod tests {
         assert_eq!(text.matches("## F-").count(), 1, "{text}");
         assert_eq!(
             text, before,
-            "the params path writes no mark, so an adoption writes nothing at all"
+            "the committed mark already holds 1, so an adoption has nothing to write"
         );
         assert_eq!(params_ids(&cat, "art1"), vec!["F-1"]);
     }
     // mutation: skip the adoption lookup on the params path → F-2, two sections.
     // mutation: drop `&& !adopted` from the `warning` filter → the `warning.is_none()` assertion
     // red.
+
+    // ---- the params path writes the entry into the markdown ----------------------------------
+    //
+    // Oracles: the parse oracle (`parse_document` on the bytes read back from disk) for what the
+    // file defines, and the FILE itself for the mark; the response's `id` alone would be
+    // satisfied by a params-only row.
+
+    /// Oracle: parse.
+    #[test]
+    fn a_params_append_writes_the_section_and_raises_the_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let (md, _) = ledger_fixture(dir.path(), &mut cat);
+
+        let out = append_first(&mut cat, &pending("first"));
+
+        assert_eq!(out.id, "F-1");
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("entry_high_water_F: 1"),
+            "the entry is under the COMMITTED mark, the one input that survives a clone: {text}"
+        );
+        let parsed = crate::librarian::derived::build::parse_document(
+            "docs/ledger.md",
+            &text,
+            &crate::librarian::classify::default_rules().unwrap(),
+        );
+        assert_eq!(
+            parsed
+                .entries
+                .iter()
+                .map(|e| e.token.as_str())
+                .collect::<Vec<_>>(),
+            vec![out.id.as_str()],
+            "the markdown defines exactly the token the call returned: {text}"
+        );
+        assert_eq!(params_ids(&cat, "art1"), vec!["F-1"]);
+    }
+    // mutation: leave `write_mark: false` in the params path's `write_entry_into_ledger` call →
+    // the `entry_high_water_F: 1` assertion is red.
+
+    /// The mark leads params and body on a fresh clone of a compacted ledger.
+    #[test]
+    fn the_committed_mark_counts_on_the_params_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let (md, _) = ledger_fixture(dir.path(), &mut cat);
+        std::fs::write(
+            &md,
+            "---\nkind: tracker\nentry_prefix: F\nentry_high_water_F: 7\n---\n\n# Ledger\n\n\
+             ## Template for new entries\n\nboilerplate\n",
+        )
+        .unwrap();
+
+        let out = append_first(&mut cat, &pending("first"));
+
+        assert_eq!(
+            out.id, "F-8",
+            "params are empty and no heading claims an id; only the committed mark says 7 \
+             were handed out"
+        );
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(text.contains("entry_high_water_F: 8"), "{text}");
+        assert!(text.contains("## F-8 — first"), "{text}");
+    }
+    // mutation: drop `.max(committed_mark.map_or(0, |m| m + 1))` from `next` → F-1.
+
+    /// A section write records the mark, so a document with no frontmatter block to hold it is
+    /// refused with nothing written and nothing allocated.
+    #[test]
+    fn a_params_ledger_with_no_frontmatter_is_refused_with_a_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let (md, _) = ledger_fixture(dir.path(), &mut cat);
+        let before = "# Ledger\n\n## Template for new entries\n\nboilerplate\n";
+        std::fs::write(&md, before).unwrap();
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &[],
+            Some(&pending("first")),
+        )
+        .unwrap_err();
+
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("no frontmatter block") && text.contains("entry_high_water_F"),
+            "the refusal names what the document lacks: {text}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            before,
+            "nothing reached the file"
+        );
+        assert!(params_ids(&cat, "art1").is_empty(), "nothing was allocated");
+    }
+    // mutation: pass `write_mark: false` → the call is Ok and the section is written.
+
+    /// An adoption whose committed mark is below the adopted id brings the mark up, in a
+    /// mark-only write (no second section).
+    #[test]
+    fn a_params_adoption_raises_a_committed_mark_that_is_below_the_adopted_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = orphan_fixture(dir.path(), &mut cat, None);
+
+        let out = append_first(&mut cat, &pending("first"));
+
+        assert_eq!((out.id.as_str(), out.adopted), ("F-1", true));
+        let text = std::fs::read_to_string(&md).unwrap();
+        assert!(
+            text.contains("entry_high_water_F: 1\n"),
+            "an adopted id must be under the committed mark, or a fresh clone reissues it: {text}"
+        );
+        assert_eq!(
+            text.matches("## F-").count(),
+            1,
+            "a mark-only write: no second section: {text}"
+        );
+        assert_eq!(params_ids(&cat, "art1"), vec!["F-1"]);
+    }
+    // mutation: change the write guard to `if !adopted` → the file keeps no mark.
+
+    /// The mark-only write of an adoption that then fails to commit is put back, so the retry
+    /// finds the same orphan and adopts it again.
+    #[test]
+    fn a_params_adoption_whose_commit_fails_restores_the_file_and_the_retry_adopts_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cat = Catalog::open_in_memory().unwrap();
+        let md = orphan_fixture(dir.path(), &mut cat, None);
+        let before = std::fs::read_to_string(&md).unwrap();
+        arm_commit_tripwire(&cat);
+
+        let err = append_entry(
+            &mut cat,
+            "art1",
+            "failures",
+            "F",
+            json!({}),
+            &[],
+            Some(&pending("first")),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            std::fs::read_to_string(&md).unwrap(),
+            before,
+            "the mark-only write is restored with the rolled-back row: {err:#}"
+        );
+        disarm_commit_tripwire(&cat);
+        let out = append_first(&mut cat, &pending("first"));
+        assert_eq!((out.id.as_str(), out.adopted), ("F-1", true));
+    }
+    // mutation: pass `None` instead of `written_section.as_ref()` to `commit_after_file_write` →
+    // the file keeps the mark the rolled-back call wrote and the equality assertion is red.
 
     #[test]
     fn a_params_adoption_writes_the_cites_for_the_adopted_id() {
