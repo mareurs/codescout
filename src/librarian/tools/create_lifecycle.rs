@@ -299,14 +299,22 @@ fn collection_args(a: &Args) -> Result<CollectionArgs<'_>> {
         ("time_scope", a.time_scope.is_some()),
         ("augment", a.augment.is_some()),
         ("status", a.status.is_some()),
+        ("tags", !a.tags.is_empty()),
     ]
     .into_iter()
     .filter_map(|(name, given)| given.then_some(name))
     .collect();
     if !refused.is_empty() {
+        // The readme is rendered from the title, `extra` and the body alone, so a tag given here
+        // would reach the catalog row and not the file.
+        let tags_remedy = if refused.contains(&"tags") {
+            ", and set the tags afterwards with doc(update)"
+        } else {
+            ""
+        };
         return Err(refuse(format!(
-            "a collection takes no owners, topic, time_scope, augment or status, and this call \
-             gives {}; remove them",
+            "a collection takes no owners, topic, time_scope, augment, status or tags at create, \
+             and this call gives {}; remove them{tags_remedy}",
             refused.join(", ")
         )));
     }
@@ -450,7 +458,7 @@ pub(super) async fn collection_mode(ctx: &ToolContext, a: &Args) -> Result<Value
         kind: COLLECTION_KIND.to_string(),
         status: COLLECTION_STATUS.to_string(),
         title: input.title.trim().to_string(),
-        tags: a.tags.clone(),
+        tags: Vec::new(),
         owners: Vec::new(),
         topic: None,
         time_scope: None,

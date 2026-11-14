@@ -775,7 +775,7 @@ async fn title_id_and_kind_in_extra_name_their_own_remedy() {
 }
 
 #[tokio::test]
-async fn a_collection_takes_no_owners_topic_time_scope_augment_or_status() {
+async fn a_collection_takes_no_owners_topic_time_scope_augment_status_or_tags() {
     let tmp = checkout(&[]);
     let ctx = mk_ctx(tmp.path());
     for (key, value) in [
@@ -784,6 +784,7 @@ async fn a_collection_takes_no_owners_topic_time_scope_augment_or_status() {
         ("time_scope", json!("2026-W46")),
         ("augment", json!({"prompt": "p"})),
         ("status", json!("done")),
+        ("tags", json!(["t"])),
     ] {
         let mut args = new_ledger(ledger_schema());
         args[key] = value;
@@ -847,4 +848,45 @@ async fn a_root_below_the_git_top_level_refuses_a_collection() {
     assert!(text.contains("top level"), "{text}");
     assert_one_remedy(&text);
     assert_no_collection_written(&sub, &ctx, &[NEW_DIR]);
+}
+
+#[tokio::test]
+async fn a_collection_with_tags_is_refused_and_names_doc_update() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    let mut args = new_ledger(ledger_schema());
+    args["tags"] = json!(["cluster/friction"]);
+
+    let text = refusal(&ctx, args).await;
+
+    assert!(text.contains("tags"), "{text}");
+    assert!(text.contains("doc(update)"), "names the remedy: {text}");
+    assert_one_remedy(&text);
+    assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+}
+
+/// The remedy the tags refusal names works: `doc(update)` on a created collection's readme sets
+/// the tags in the file and in the row, and the readme still loads as the same collection.
+#[tokio::test]
+async fn doc_update_sets_tags_on_a_created_collection() {
+    use crate::librarian::lifecycle::collection::load_collection_dir;
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    let v = call(&ctx, new_ledger(ledger_schema())).await.unwrap();
+    let id = v["id"].as_str().unwrap();
+
+    super::update::call(
+        &ctx,
+        json!({"id": id, "patch": {"tags": ["cluster/friction"]}}),
+    )
+    .await
+    .unwrap();
+
+    let text = std::fs::read_to_string(tmp.path().join(NEW_README)).unwrap();
+    let (fm, _) = frontmatter::parse(&text).unwrap();
+    assert_eq!(fm.unwrap().tags, ["cluster/friction"], "{text}");
+    let row = artifact::get(&ctx.catalog.lock(), id).unwrap().unwrap();
+    assert_eq!(row.tags, ["cluster/friction"]);
+    let loaded = load_collection_dir(tmp.path(), NEW_DIR).unwrap();
+    assert_eq!(loaded.schema().entry_kinds, ["friction"]);
 }
