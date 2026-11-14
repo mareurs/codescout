@@ -43,9 +43,10 @@ use crate::librarian::derived::build::{
     build_full, key_space_from_commit, rules_from_commit, BuildInput,
 };
 use crate::librarian::derived::diff::{
-    diff_with_rules, open_old_immutable, open_old_read_only, side_file_present, DiffCause, DiffRow,
-    OldCatalog, RootMap, ShadowDiff, Subject,
+    diff_with_rules, open_old_immutable, open_old_read_only, DiffCause, DiffRow, OldCatalog,
+    RootMap, ShadowDiff, Subject,
 };
+use crate::librarian::derived::old_catalog::{resolve_old_catalog, side_file_present};
 use crate::librarian::derived::scan::open_commit;
 use crate::librarian::derived::schema;
 
@@ -84,24 +85,6 @@ pub struct Outcome {
 /// rows it left out, and `--json` carries every row.
 // cap-class: NOT_A_CAP — a printed sample of a report whose full counts are printed beside it; the omitted rows are counted in the text and `--json` lists every one, so nothing is presented as complete
 const MAX_PRINTED_ROWS_PER_CAUSE: usize = 20;
-
-/// The old catalog both `derive-shadow` and `cutover` read: the flag, else `LIBRARIAN_DB`, else
-/// `librarian/catalog.db` in the local data directory, so two dry runs read one catalog.
-///
-/// This is not the librarian server's resolution. The server reads `LIBRARIAN_DB` from its own
-/// environment (the MCP configuration), which can differ from the operator's shell, so a run
-/// with the variable unset here can read another file than the server uses; pass `--old-db` to
-/// name the file. With no local data directory the server falls back to
-/// `/tmp/librarian/catalog.db` and this function returns `None`.
-pub(crate) fn resolve_old_catalog(
-    arg: Option<&Path>,
-    librarian_db: Option<std::ffi::OsString>,
-    data_dir: Option<PathBuf>,
-) -> Option<PathBuf> {
-    arg.map(Path::to_path_buf)
-        .or_else(|| librarian_db.map(PathBuf::from))
-        .or_else(|| data_dir.map(|dir| dir.join("librarian").join("catalog.db")))
-}
 
 /// Does the SQLite file at `path` say it is a WAL database? Bytes 18 and 19 of the header are
 /// the file format's write and read versions; `2` is WAL. `None` when the file cannot be read
@@ -775,27 +758,6 @@ mod tests {
         assert!(out.stdout.starts_with("NOT COMPARED — "), "{}", out.stdout);
         assert!(out.stdout.contains("--old-root"), "{}", out.stdout);
         assert!(out.stdout.contains("absolute"), "{}", out.stdout);
-    }
-
-    #[test]
-    fn resolve_old_catalog_prefers_the_flag_then_librarian_db_then_the_data_dir() {
-        use std::ffi::OsString;
-        let flag = PathBuf::from("/flag/catalog.db");
-        let env = || Some(OsString::from("/env/catalog.db"));
-        let data = || Some(PathBuf::from("/data"));
-        assert_eq!(
-            resolve_old_catalog(Some(&flag), env(), data()),
-            Some(flag.clone())
-        );
-        assert_eq!(
-            resolve_old_catalog(None, env(), data()),
-            Some(PathBuf::from("/env/catalog.db"))
-        );
-        assert_eq!(
-            resolve_old_catalog(None, None, data()),
-            Some(PathBuf::from("/data/librarian/catalog.db"))
-        );
-        assert_eq!(resolve_old_catalog(None, None, None), None);
     }
 
     #[test]
