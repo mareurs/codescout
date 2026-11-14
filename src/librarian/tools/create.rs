@@ -339,7 +339,7 @@ fn undo_failed_create(cat: &crate::librarian::catalog::Catalog, id: &str, full: 
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let mut a = parse_args(args)?;
+    let a = parse_args(args)?;
 
     // F4: `params_path` is advertised on the shared `augment` schema object (honored
     // by `doc(action="augment")`) but not meaningful here — `create` writes the
@@ -359,9 +359,41 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
-    // Resolve base directory: explicit repo arg looks up in workspace.roots
-    // (legacy compatibility), otherwise derive from current_project.abs_path.
-    let base_dir: std::path::PathBuf = match a.repo.as_deref() {
+    let status = resolve_status(&a.kind, a.status.as_deref())?;
+    let art = NewArtifact {
+        rel_path: a.rel_path,
+        content: Content::Compose {
+            body: a.body.clone(),
+        },
+        kind: a.kind.clone(),
+        status,
+        title: a.title,
+        tags: a.tags,
+        owners: a.owners,
+        topic: a.topic,
+        time_scope: a.time_scope,
+        extra: &a.extra,
+        body_for_checks: &a.body,
+        augment: a.augment.as_ref(),
+    };
+    let mut result = write_new(ctx, a.repo.as_deref(), art, WriteMode::Plain).await?;
+    if a.kind == "tracker" && a.augment.is_none() {
+        result["tracker_hint"] = json!(
+            "Tracker created without augmentation. \
+             Call librarian(tracker_design) to pick an archetype \
+             and attach a refresh prompt via doc(action=\"augment\")."
+        );
+    }
+    Ok(result)
+}
+
+/// Where a create's `rel_path` is resolved: the named workspace root when `repo` is given (legacy
+/// compatibility), otherwise the current project's root.
+pub(super) fn resolve_base_dir(
+    ctx: &ToolContext,
+    repo: Option<&str>,
+) -> Result<std::path::PathBuf> {
+    match repo {
         Some(r) => {
             let root = ctx
                 .workspace
@@ -381,7 +413,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         format!("Valid repo names: {valid}"),
                     )
                 })?;
-            root.path.clone()
+            Ok(root.path.clone())
         }
         None => ctx
             .current_project
@@ -392,8 +424,104 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     "no active project — cannot resolve rel_path",
                     "Pass repo=<name> or activate a project via workspace(action='activate', ...)",
                 )
-            })?,
-    };
+            }),
+    }
+}
+
+/// How [`write_new`] puts the row and the file down.
+pub(super) enum WriteMode {
+    /// `create` as it always was: `upsert_and_mint_slug`, then `fs::write`, and on a failed write
+    /// [`undo_failed_create`].
+    Plain,
+}
+
+/// The bytes [`write_new`] writes.
+pub(super) enum Content {
+    /// `write_new` builds the frontmatter from the [`NewArtifact`] fields plus `id: Some(id)`, and
+    /// appends `body` (plain create).
+    Compose { body: String },
+}
+
+/// One new document for [`write_new`]: its path, its bytes and the catalog row's fields.
+pub(super) struct NewArtifact<'a> {
+    pub rel_path: String,
+    pub content: Content,
+    pub kind: String,
+    pub status: String,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub owners: Vec<String>,
+    pub topic: Option<String>,
+    pub time_scope: Option<String>,
+    pub extra: &'a std::collections::BTreeMap<String, Value>,
+    /// The body the content checks (`reject_body_leading_frontmatter`, the project requirements)
+    /// read.
+    pub body_for_checks: &'a str,
+    /// Written in the same transaction as the row.
+    pub augment: Option<&'a AugmentSpec>,
+}
+
+/// The catalog writes that ride in the row's transaction: the augmentation and the worktree
+/// session's registration.
+fn finalize_in_tx(
+    cat: &crate::librarian::catalog::Catalog,
+    id: &str,
+    augment: Option<&AugmentSpec>,
+    current_project: Option<&crate::librarian::current_project::CurrentProject>,
+) -> Result<()> {
+    if let Some(aug_spec) = augment {
+        let params_str = aug_spec
+            .params
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?
+            .unwrap_or_else(|| "{}".to_string());
+        let now_ts = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+        crate::librarian::catalog::augmentation::upsert(
+            cat,
+            &crate::librarian::catalog::augmentation::AugmentationRow {
+                artifact_id: id.to_string(),
+                prompt: aug_spec.prompt.clone(),
+                params: params_str,
+                last_refreshed_at: None,
+                refresh_count: 0,
+                created_at: now_ts.clone(),
+                updated_at: now_ts,
+                render_template: aug_spec.render_template.clone(),
+                params_schema: aug_spec
+                    .params_schema
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
+                append_mode: aug_spec.append_mode,
+                history_cap: aug_spec.history_cap,
+                entry_collection: aug_spec.entry_collection.clone(),
+                // Server-computed provenance: never caller-supplied.
+                refreshed_at_commit: None,
+            },
+        )?;
+    }
+    // A worktree-born artifact has no main-checkout twin to fork — just make
+    // sure the worktree session itself is durably registered.
+    if let Some(cp) = current_project {
+        super::worktree::ensure_registration(cat, cp)?;
+    }
+    Ok(())
+}
+
+/// Write one new document and its catalog row: the one write path of `doc(action="create")`,
+/// entry create and collection create, so every guard below applies to all three.
+///
+/// Returns `{"id", "abs_path"}`.
+pub(super) async fn write_new(
+    ctx: &ToolContext,
+    repo: Option<&str>,
+    art: NewArtifact<'_>,
+    mode: WriteMode,
+) -> Result<Value> {
+    let base_dir = resolve_base_dir(ctx, repo)?;
 
     // Prevention: refuse writing a temp-dir-rooted artifact into the real shared
     // catalog. See docs/issues/archive/2026-07-17-tmp-probe-artifacts-pollute-global-catalog.md.
@@ -406,9 +534,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // Normalise FIRST: the validator must see the path that will be joined. It used to run on the
     // raw string, and on Unix `a\..\..\escaped.md` (a backslash is an ordinary name character)
     // passed it and became `a/../../escaped.md` one line later.
-    a.rel_path = crate::librarian::util::normalize_rel_path(&a.rel_path);
-    validate_rel_path(&a.rel_path)?;
-    let full = base_dir.join(&a.rel_path);
+    let rel_path = crate::librarian::util::normalize_rel_path(&art.rel_path);
+    validate_rel_path(&rel_path)?;
+    let full = base_dir.join(&rel_path);
     if full.exists() {
         return Err(LibrarianRecoverableError::new(format!(
             "path exists: {}",
@@ -435,51 +563,60 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "create",
     )?;
     let id = crate::librarian::ids::artifact_id_from_abs(&full);
-    reject_reserved_extra_keys(&a.extra, ExtraKeySurface::Create)?;
+    reject_reserved_extra_keys(art.extra, ExtraKeySurface::Create)?;
     // One owner per prefix per repository. Checked before anything is written, so a refusal
     // leaves no second owner on disk for the next reindex to catalog.
     crate::librarian::catalog::augmentation::refuse_taken_prefixes(
         &ctx.catalog.lock().conn,
         &full,
-        &crate::librarian::catalog::augmentation::claimed_prefixes(&a.extra),
+        &crate::librarian::catalog::augmentation::claimed_prefixes(art.extra),
     )?;
-    reject_body_leading_frontmatter(&a.body)?;
+    reject_body_leading_frontmatter(art.body_for_checks)?;
     // The project's own write-time requirements (`.codescout/requirements.toml`). Checked here, with the
     // other validators and BEFORE the file and the catalog row are written, so a refusal leaves neither.
-    crate::librarian::requirements::enforce_on_create(&base_dir, &a.kind, &a.tags, &a.body)?;
-    let status = resolve_status(&a.kind, a.status.as_deref())?;
-    // A bug's `opened` is the day it was filed. The server knows it, so it writes it rather than
-    // leave `tests/issue_frontmatter.rs` to refuse the file in whichever session next runs the
-    // gate. A supplied value is the caller's own fact (a late filing) and is kept as given.
-    let mut extra = a.extra.clone();
-    if a.kind == "bug" {
-        let opened = extra
-            .entry("opened".to_string())
-            .or_insert_with(|| Value::String(chrono::Utc::now().format("%Y-%m-%d").to_string()));
-        // The gate refuses anything but a `YYYY-MM-DD` date, and a supplied value is kept as
-        // given, so refuse a bad one here, before the file and the catalog row exist.
-        if !is_iso_date(opened) {
-            return Err(LibrarianRecoverableError::with_hint(
-                format!("doc(action=\"create\") kind=bug: extra.opened {opened} is not a YYYY-MM-DD date"),
-                "Pass extra={\"opened\": \"YYYY-MM-DD\"}, or omit `opened` and the server writes today's UTC date.",
-            ));
+    crate::librarian::requirements::enforce_on_create(
+        &base_dir,
+        &art.kind,
+        &art.tags,
+        art.body_for_checks,
+    )?;
+    let content = match &art.content {
+        Content::Compose { body } => {
+            // A bug's `opened` is the day it was filed. The server knows it, so it writes it rather
+            // than leave `tests/issue_frontmatter.rs` to refuse the file in whichever session next
+            // runs the gate. A supplied value is the caller's own fact (a late filing) and is kept
+            // as given.
+            let mut extra = art.extra.clone();
+            if art.kind == "bug" {
+                let opened = extra.entry("opened".to_string()).or_insert_with(|| {
+                    Value::String(chrono::Utc::now().format("%Y-%m-%d").to_string())
+                });
+                // The gate refuses anything but a `YYYY-MM-DD` date, and a supplied value is kept
+                // as given, so refuse a bad one here, before the file and the catalog row exist.
+                if !is_iso_date(opened) {
+                    return Err(LibrarianRecoverableError::with_hint(
+                        format!("doc(action=\"create\") kind=bug: extra.opened {opened} is not a YYYY-MM-DD date"),
+                        "Pass extra={\"opened\": \"YYYY-MM-DD\"}, or omit `opened` and the server writes today's UTC date.",
+                    ));
+                }
+            }
+            let fm = Frontmatter {
+                id: Some(id.clone()),
+                kind: Some(art.kind.clone()),
+                status: Some(art.status.clone()),
+                title: Some(art.title.clone()),
+                owners: art.owners.clone(),
+                tags: art.tags.clone(),
+                topic: art.topic.clone(),
+                time_scope: art.time_scope.clone(),
+                extra,
+            };
+            crate::librarian::frontmatter::write(
+                &fm,
+                &crate::librarian::frontmatter::render_body(body),
+            )
         }
-    }
-    let fm = Frontmatter {
-        id: Some(id.clone()),
-        kind: Some(a.kind.clone()),
-        status: Some(status.clone()),
-        title: Some(a.title.clone()),
-        owners: a.owners.clone(),
-        tags: a.tags.clone(),
-        topic: a.topic.clone(),
-        time_scope: a.time_scope.clone(),
-        extra,
     };
-    let content = crate::librarian::frontmatter::write(
-        &fm,
-        &crate::librarian::frontmatter::render_body(&a.body),
-    );
     // This write does not go through `atomic_write` (the disk write below is a plain
     // `fs::write`), so the guard on codescout's own config files is asked here, before the
     // catalog row exists. Measured: `rel_path = ".codescout/project.toml"` was written.
@@ -489,13 +626,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let row = ArtifactRow {
         id: id.clone(),
         abs_path: full.clone(),
-        kind: a.kind.clone(),
-        status: status.clone(),
-        title: Some(a.title),
-        owners: a.owners,
-        tags: a.tags,
-        topic: a.topic,
-        time_scope: a.time_scope,
+        kind: art.kind,
+        status: art.status,
+        title: Some(art.title),
+        owners: art.owners,
+        tags: art.tags,
+        topic: art.topic,
+        time_scope: art.time_scope,
         source: Some("generated".into()),
         created_at: now,
         updated_at: now,
@@ -503,89 +640,47 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         file_sha256: crate::librarian::util::sha_of_bytes(content.as_bytes()),
         confidence: 1.0,
     };
-    // Finalize the catalog atomically before creating a directory or file.
-    // A slug, augmentation or registration failure must not leave earlier writes.
-    {
-        let cat = ctx.catalog.lock();
-        let tx = cat.conn.unchecked_transaction()?;
-        artifact::upsert_and_mint_slug(&cat, &row)?;
-        if let Some(aug_spec) = &a.augment {
-            let params_str = aug_spec
-                .params
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?
-                .unwrap_or_else(|| "{}".to_string());
-            let now_ts = chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string();
-            crate::librarian::catalog::augmentation::upsert(
-                &cat,
-                &crate::librarian::catalog::augmentation::AugmentationRow {
-                    artifact_id: id.clone(),
-                    prompt: aug_spec.prompt.clone(),
-                    params: params_str,
-                    last_refreshed_at: None,
-                    refresh_count: 0,
-                    created_at: now_ts.clone(),
-                    updated_at: now_ts,
-                    render_template: aug_spec.render_template.clone(),
-                    params_schema: aug_spec
-                        .params_schema
-                        .as_ref()
-                        .map(serde_json::to_string)
-                        .transpose()?,
-                    append_mode: aug_spec.append_mode,
-                    history_cap: aug_spec.history_cap,
-                    entry_collection: aug_spec.entry_collection.clone(),
-                    // Server-computed provenance: never caller-supplied.
-                    refreshed_at_commit: None,
-                },
-            )?;
+    match mode {
+        WriteMode::Plain => {
+            // Finalize the catalog atomically before creating a directory or file.
+            // A slug, augmentation or registration failure must not leave earlier writes.
+            {
+                let cat = ctx.catalog.lock();
+                let tx = cat.conn.unchecked_transaction()?;
+                artifact::upsert_and_mint_slug(&cat, &row)?;
+                finalize_in_tx(&cat, &id, art.augment, ctx.current_project.as_deref())?;
+                tx.commit()?;
+            }
+            // Disk write last — the file is the user-visible side effect; the DB row
+            // is the durable record. If a catalog upsert above fails, no orphan file
+            // is left on disk to block a retry (BUG-058).
+            //
+            // The parent directory is built here and not earlier: every validator above can still
+            // refuse, and a refusal that had already made the directory left it behind, empty. The
+            // symlink guards stay ahead of everything because they judge the path, not the
+            // directory.
+            // docs/issues/archive/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md
+            // A failed write attempts to take the catalog row back (`undo_failed_create`): it was
+            // written above, so without this a full disk or a quota error leaves a row for a missing
+            // or empty file, and the next create of the path is refused as "path exists".
+            // docs/issues/2026-10-29-artifact-create-partial-filesystem-failure.md
+            let written = (|| -> std::io::Result<()> {
+                if let Some(parent) = full.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&full, &content)
+            })();
+            if let Err(e) = written {
+                undo_failed_create(&ctx.catalog.lock(), &id, &full);
+                return Err(anyhow::Error::from(e).context(format!(
+                    "could not write {}; cleanup was attempted, but the catalog row or a partial file may remain",
+                    full.display()
+                )));
+            }
         }
-        // A worktree-born artifact has no main-checkout twin to fork — just make
-        // sure the worktree session itself is durably registered.
-        if let Some(cp) = ctx.current_project.as_deref() {
-            super::worktree::ensure_registration(&cat, cp)?;
-        }
-        tx.commit()?;
-    }
-    // Disk write last — the file is the user-visible side effect; the DB row
-    // is the durable record. If a catalog upsert above fails, no orphan file
-    // is left on disk to block a retry (BUG-058).
-    //
-    // The parent directory is built here and not earlier: every validator above can still refuse,
-    // and a refusal that had already made the directory left it behind, empty. The symlink guards
-    // stay ahead of everything because they judge the path, not the directory.
-    // docs/issues/archive/2026-10-31-a-refused-doc-create-leaves-the-empty-parent-directory-it-already-made.md
-    // A failed write attempts to take the catalog row back (`undo_failed_create`): it was written above,
-    // so without this a full disk or a quota error leaves a row for a missing or empty file, and
-    // the next create of the path is refused as "path exists".
-    // docs/issues/2026-10-29-artifact-create-partial-filesystem-failure.md
-    let written = (|| -> std::io::Result<()> {
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&full, &content)
-    })();
-    if let Err(e) = written {
-        undo_failed_create(&ctx.catalog.lock(), &id, &full);
-        return Err(anyhow::Error::from(e).context(format!(
-            "could not write {}; cleanup was attempted, but the catalog row or a partial file may remain",
-            full.display()
-        )));
     }
 
-    let mut result =
-        json!({"id": id, "abs_path": crate::util::fs::to_forward_slash(&row.abs_path)});
-    if a.kind == "tracker" && a.augment.is_none() {
-        result["tracker_hint"] = json!(
-            "Tracker created without augmentation. \
-             Call librarian(tracker_design) to pick an archetype \
-             and attach a refresh prompt via doc(action=\"augment\")."
-        );
-    }
-    Ok(result)
+    Ok(json!({"id": id, "abs_path": crate::util::fs::to_forward_slash(&row.abs_path)}))
 }
 
 #[cfg(test)]
