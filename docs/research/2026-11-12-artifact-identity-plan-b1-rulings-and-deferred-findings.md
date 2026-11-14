@@ -108,7 +108,7 @@ Every row of § Open findings was read against the code that day by four read-on
 **Still open:**
 - Task 2: `render` of `InvalidKey(NotMarkdown)` has no remedy text (probably not worth fixing, the case is unreachable). The partial-exclusion warning for two readmes is accepted.
 - Task 4: the hook is dormant until a binary is built, by design.
-- Task 5: linked worktrees outside `.worktrees` are still entered; the Depth bound wording; the "a repo counts once" assertion cannot fail, because the report is deduplicated at the end.
+- Task 5: linked worktrees outside `.worktrees` are still entered; the Depth bound wording. (The "a repo counts once" assertion is closed: `two_projects_in_one_repo_are_judged_once` in `fb765398b` reads the vector before the final dedup, and failed red with the `judged` check removed.)
 - Task 6: no test drives the live dialog with a peer present (an in-process duplex harness exists at `src/server/native_context_tests.rs`).
 - Final: whether `ScanLimits::default()` needs a `RESULT_CAP` row. That is a decision, not a fix.
 

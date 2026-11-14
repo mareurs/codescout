@@ -6,6 +6,10 @@ struct NativeContextWire {
     client: tokio::io::BufReader<tokio::io::DuplexStream>,
     task: tokio::task::JoinHandle<()>,
     pending: std::collections::BTreeMap<u64, Value>,
+    /// What the client answers to an `elicitation/create` request. Declines by default.
+    elicit_reply: Value,
+    /// How many `elicitation/create` requests the server sent.
+    elicit_asked: usize,
 }
 
 impl Drop for NativeContextWire {
@@ -17,6 +21,10 @@ impl Drop for NativeContextWire {
 impl NativeContextWire {
     async fn new(client_name: &str) -> Self {
         let (dir, server) = make_server().await;
+        Self::serve(client_name, dir, server).await
+    }
+
+    async fn serve(client_name: &str, dir: tempfile::TempDir, server: CodeScoutServer) -> Self {
         let (client, transport) = tokio::io::duplex(65536);
         let task = tokio::spawn(async move {
             let (read, write) = tokio::io::split(transport);
@@ -28,6 +36,8 @@ impl NativeContextWire {
             client: tokio::io::BufReader::new(client),
             task,
             pending: std::collections::BTreeMap::new(),
+            elicit_reply: json!({"action":"decline"}),
+            elicit_asked: 0,
         };
         wire.send(json!({
             "jsonrpc":"2.0", "id":1, "method":"initialize",
@@ -69,8 +79,9 @@ impl NativeContextWire {
                 assert!(self.client.read_line(&mut line).await.unwrap() > 0);
                 let value: Value = serde_json::from_str(&line).unwrap();
                 if value.get("method").and_then(Value::as_str) == Some("elicitation/create") {
-                    self.send(json!({"jsonrpc":"2.0","id":value["id"],
-                                     "result":{"action":"decline"}}))
+                    self.elicit_asked += 1;
+                    let reply = self.elicit_reply.clone();
+                    self.send(json!({"jsonrpc":"2.0","id":value["id"],"result":reply}))
                         .await;
                 } else if let Some(response_id) = value.get("id").and_then(Value::as_u64) {
                     if response_id == id {
@@ -85,8 +96,12 @@ impl NativeContextWire {
     }
 
     async fn call(&mut self, id: u64, meta: Value, arguments: Value) -> Value {
+        self.call_tool(id, "run_command", meta, arguments).await
+    }
+
+    async fn call_tool(&mut self, id: u64, tool: &str, meta: Value, arguments: Value) -> Value {
         self.send(json!({"jsonrpc":"2.0","id":id,"method":"tools/call",
-                         "params":{"name":"run_command","arguments":arguments,"_meta":meta}}))
+                         "params":{"name":tool,"arguments":arguments,"_meta":meta}}))
             .await;
         let response = self.recv(id).await;
         assert!(response.get("error").is_none(), "{response}");
@@ -113,6 +128,49 @@ fn native_context_ambient_env() -> String {
         .map(|key| std::env::var(key).unwrap_or_default())
         .collect::<Vec<_>>()
         .join("|")
+}
+/// The wire for the repo-name dialog: a project with a `project.toml` and no `repo.toml`, and a
+/// client that answers every `elicitation/create` with `reply`.
+async fn name_dialog_wire(reply: Value) -> NativeContextWire {
+    let (dir, server) = crate::server::test_support::make_server_with_project_toml(Some(
+        "[project]\nname = \"t\"\n",
+    ))
+    .await;
+    let mut wire = NativeContextWire::serve("test-client", dir, server).await;
+    wire.elicit_reply = reply;
+    wire
+}
+
+#[tokio::test]
+async fn a_name_typed_in_the_dialog_is_written_to_the_repo_file() {
+    let mut wire = name_dialog_wire(json!({
+        "action":"accept", "content":{"name":"dialog-chosen"}
+    }))
+    .await;
+    let response = wire.call_tool(2, "onboarding", json!({}), json!({})).await;
+    let block = &native_context_output(&response)["repo_name"];
+    assert_eq!(wire.elicit_asked, 1, "{response}");
+    assert_eq!(block["name"], "dialog-chosen", "{response}");
+    assert_eq!(block["confirmed"], true, "{response}");
+    let file = std::fs::read_to_string(wire.dir.path().join(".codescout/repo.toml")).unwrap();
+    assert!(file.contains("dialog-chosen"), "{file}");
+}
+
+#[tokio::test]
+async fn a_declined_dialog_is_remembered_and_not_asked_again() {
+    let mut wire = name_dialog_wire(json!({"action":"decline"})).await;
+    let first = wire.call_tool(2, "onboarding", json!({}), json!({})).await;
+    let block = &native_context_output(&first)["repo_name"];
+    assert_eq!(wire.elicit_asked, 1, "{first}");
+    assert_eq!(block["declined"], true, "{first}");
+    assert_eq!(block["remembered"], true, "{first}");
+    assert!(!wire.dir.path().join(".codescout/repo.toml").exists());
+    let second = wire.call_tool(3, "onboarding", json!({}), json!({})).await;
+    assert_eq!(wire.elicit_asked, 1, "the decline is a decision: {second}");
+    assert_eq!(
+        native_context_output(&second)["repo_name"]["declined"],
+        true
+    );
 }
 
 #[tokio::test]
@@ -346,16 +404,24 @@ fn native_stamp_rendezvous(dir: &std::path::Path, session: &str) {
 }
 
 /// The `cc_session_id` usage.db recorded for the one `run_command` whose input names `marker`.
+///
+/// A missing row panics with the dropped-rows log beside the database error, so a failure says
+/// whether the recorder reported a failed write.
 fn native_recorded_session(dir: &std::path::Path, marker: &str) -> String {
     rusqlite::Connection::open(dir.join(".codescout").join("usage.db"))
         .unwrap()
         .query_row(
             "SELECT cc_session_id FROM tool_calls \
-             WHERE tool_name = 'run_command' AND input_json LIKE ?1",
+                   WHERE tool_name = 'run_command' AND input_json LIKE ?1",
             [format!("%{marker}%")],
             |r| r.get(0),
         )
-        .unwrap_or_else(|e| panic!("no single usage row for {marker}: {e}"))
+        .unwrap_or_else(|e| {
+            panic!(
+                "no single usage row for {marker}: {e}; usage-dropped-rows.log: {}",
+                crate::server::test_support::dropped_rows_log(dir)
+            )
+        })
 }
 
 /// Docs: ce484db75532c7f0. The commit guard reads `usage.db.cc_session_id`
