@@ -274,6 +274,28 @@ mod tests {
         assert_eq!(json["archived"], false);
         assert_eq!(json["fields"]["owner"], "sam");
     }
+    #[test]
+    fn table_columns_match_the_serialised_row() {
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-w.md",
+                &entry_created("waiting", "2026-10-01", ""),
+            ),
+        ]);
+        let row = &rows(&tree, &k("l"), false).unwrap()[0];
+        let json = serde_json::to_value(row).unwrap();
+        let mut serialised: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut declared: Vec<&str> = crate::librarian::lifecycle::schema::TABLE_COLUMNS.to_vec();
+        serialised.sort_unstable();
+        declared.sort_unstable();
+        assert_eq!(serialised, declared);
+    }
 
     #[test]
     fn the_table_prints_the_closed_date_and_cites_each_row() {

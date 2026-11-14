@@ -113,6 +113,31 @@ pub enum SchemaError {
     ExitRequired,
     #[error("`exit_when` is not allowed on a ledger")]
     ExitRefused,
+    #[error("field name {name:?} is reserved (a table column or a frontmatter key no write can set); give the field another name")]
+    FieldNameReserved { name: String },
+}
+/// The serialised keys of [`super::table::EntryRow`], in row order. A declared field may not
+/// take one of these names (`table_columns_match_the_serialised_row` keeps the list honest).
+pub const TABLE_COLUMNS: &[&str] = &[
+    "key",
+    "entry_kind",
+    "title",
+    "status",
+    "class",
+    "created",
+    "closed",
+    "revisit_by",
+    "archived",
+    "fields",
+];
+
+/// Whether `name` is taken: a table column, an `entry::RESERVED` key, or a
+/// `frontmatter::RESERVED_KEYS` key. A field declared under such a name could never be set by
+/// any write, so the schema is refused instead.
+fn is_reserved_field_name(name: &str) -> bool {
+    TABLE_COLUMNS.contains(&name)
+        || super::entry::RESERVED.contains(&name)
+        || crate::librarian::frontmatter::RESERVED_KEYS.contains(&name)
 }
 
 fn malformed(key: &'static str, detail: impl Into<String>) -> SchemaError {
@@ -239,6 +264,10 @@ fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<Strin
         return out;
     };
     for (name, spec) in map {
+        if is_reserved_field_name(name) {
+            errs.push(SchemaError::FieldNameReserved { name: name.clone() });
+            continue;
+        }
         match spec.get("type").and_then(Value::as_str) {
             Some("scalar") => {
                 out.insert(name.clone(), FieldType::Scalar);
@@ -469,5 +498,52 @@ mod tests {
         assert!(parse_schema(Lifecycle::Ledger, &fm(y))
             .unwrap_err()
             .contains(&SchemaError::InitialNotOpen("done".into())));
+    }
+    #[test]
+    fn a_declared_field_named_like_a_reserved_name_is_refused() {
+        let base = "title: T\nentry_kinds: [k]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n";
+        // One name from each of the three sets: a table column, `entry::RESERVED`, a frontmatter key.
+        for name in ["archived", "created", "owners"] {
+            let readme = format!("{base}fields:\n  {name}: {{type: scalar}}\n");
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&readme)).unwrap_err();
+            assert!(
+                errs.contains(&SchemaError::FieldNameReserved { name: name.into() }),
+                "{name}: {errs:?}"
+            );
+        }
+        // An unreserved name still parses.
+        let ok = format!("{base}fields:\n  owner: {{type: scalar}}\n");
+        assert!(parse_schema(Lifecycle::Ledger, &fm(&ok)).is_ok());
+    }
+
+    #[test]
+    fn a_reserved_field_name_error_reads_as_problem_semicolon_remedy() {
+        let text = SchemaError::FieldNameReserved {
+            name: "status".into(),
+        }
+        .to_string();
+        assert_eq!(text.matches("; ").count(), 1, "{text}");
+        assert!(text.contains("\"status\""), "{text}");
+        let remedy = text.split("; ").nth(1).unwrap();
+        assert!(remedy.starts_with("give "), "{text}");
+    }
+
+    #[test]
+    fn every_name_in_the_three_reserved_sets_is_refused() {
+        let base = "title: T\nentry_kinds: [k]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n";
+        let all = TABLE_COLUMNS
+            .iter()
+            .chain(crate::librarian::lifecycle::entry::RESERVED.iter())
+            .chain(crate::librarian::frontmatter::RESERVED_KEYS.iter());
+        for name in all {
+            let readme = format!("{base}fields:\n  {name}: {{type: list}}\n");
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&readme)).unwrap_err();
+            assert!(
+                errs.contains(&SchemaError::FieldNameReserved {
+                    name: (*name).into()
+                }),
+                "{name}: {errs:?}"
+            );
+        }
     }
 }
