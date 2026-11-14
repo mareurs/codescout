@@ -88,7 +88,7 @@ Not fixed.
 
 ## Tests added
 
-None. N/A: not investigated.
+`01a93680a` (patch-id `51f8d3d56cef`) adds diagnostics, not a fix: `rows_for` keeps its last read error and, when it ends with no row, prints it with the dropped-rows log; `native_recorded_session` puts the log in its panic text; the shared helper is `test_support::dropped_rows_log`. The test `the_empty_row_diagnosis_names_the_read_error_and_the_dropped_rows_log` pins the message for three cases (no log, a two-line log, an unreadable log). Gate green on that commit: FMT 0, CLIPPY 0, LEAN 10048 passed, DEFAULT 10142 passed, Python 1836 passed. Not shown: that the message appears in a real failure (nextest prints captured stderr for a failing test, which I did not exercise), and the new test was not mutation-tested; its assertions name each of the three parts of the message.
 
 ## Workarounds
 
@@ -100,6 +100,9 @@ Read the recorder's write path (where the `tool_calls` row is inserted relative 
 
 
 Update 2026-11-14: the first branch above is settled, the row is written before the response returns, so a fixed wait is not the fix. What remains is whether the write failed (a dropped row, 5 s lock) or the read failed. The next failure decides it if its captured output is kept: search it for `usage row dropped`. A cheaper step is a test-side change that makes the panic text carry the evidence: have `rows_for` and `native_recorded_session` return the read error, and print the tempdir's `.codescout/usage-dropped-rows.log` when no row is found. That change is not made. It would cost one gate run and would turn the next failure into a measurement.
+
+
+Update 2026-11-14 (after `01a93680a`): the diagnostics are in place. On the next failure of one of these five tests, read the failing test's captured output first. `rows_for(<tool>): no row after 5.3 s; last read error: …; usage-dropped-rows.log: …` separates the cases: a read error means the read failed; `absent` with `none, every read succeeded…` means the row was never written and the recorder did not report a failed write; a logged `database is locked` line means the write was dropped. Keep that output in the bug before anything else.
 
 ## References
 
