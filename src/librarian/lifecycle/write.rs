@@ -195,6 +195,54 @@ pub fn change_status(
     reread(schema, &text)?;
     Ok(text)
 }
+/// Set or delete declared fields of an entry document. `Some(v)` sets a field; `None` and
+/// `Some(Value::Null)` delete it. Every refusal is collected before any edit: a reserved name
+/// (set or deleted) and an undeclared name being set are `FieldUndeclared`. An undeclared,
+/// non-reserved key the document already carries may be deleted, so a stray key can be repaired.
+/// A wrong type or any other defect is caught by the re-read, which every `Ok` passes, an empty
+/// edit included (a valid document then comes back unchanged).
+pub fn change_fields(
+    doc: &str,
+    schema: &CollectionSchema,
+    edits: &BTreeMap<String, Option<Value>>,
+) -> Result<String, Vec<WriteProblem>> {
+    let meta = read_entry(doc)?;
+    let problems: Vec<WriteProblem> = edits
+        .iter()
+        .filter(|(name, edit)| {
+            let deleting = matches!(edit, None | Some(Value::Null));
+            let known = if deleting {
+                schema.fields.contains_key(*name) || meta.fields.contains_key(*name)
+            } else {
+                schema.fields.contains_key(*name)
+            };
+            is_reserved_name(name) || !known
+        })
+        .map(|(name, _)| WriteProblem::FieldUndeclared(name.clone()))
+        .collect();
+    if !problems.is_empty() {
+        return Err(problems);
+    }
+    if edits.is_empty() {
+        reread(schema, doc)?;
+        return Ok(doc.to_string());
+    }
+    let text = frontmatter::rewrite_frontmatter_normalizing(doc, |fm| {
+        for (name, edit) in edits {
+            match edit {
+                Some(value) if !value.is_null() => {
+                    fm.extra.insert(name.clone(), value.clone());
+                }
+                _ => {
+                    fm.extra.remove(name);
+                }
+            }
+        }
+    })
+    .map_err(|e| vec![WriteProblem::BadYaml(e.to_string())])?;
+    reread(schema, &text)?;
+    Ok(text)
+}
 
 /// Render a new entry file. Every problem the pre-checks find is returned together; the text is
 /// rendered and re-read only when they found none.

@@ -606,3 +606,142 @@ fn body_and_unknown_keys_survive() {
     assert_eq!(m.title, "Status moves");
     assert_eq!(m.created, d0());
 }
+
+// ---- change_fields ---------------------------------------------------------------------------
+
+fn edits(list: &[(&str, Option<Value>)]) -> BTreeMap<String, Option<Value>> {
+    list.iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect()
+}
+
+fn alter(text: &str, list: &[(&str, Option<Value>)]) -> Result<String, Vec<WriteProblem>> {
+    change_fields(text, &schema(), &edits(list))
+}
+
+/// A valid document with no `severity`.
+fn bare() -> String {
+    make(&input("friction", "Field edits")).unwrap().text
+}
+
+#[test]
+fn a_declared_field_is_set_and_deleted() {
+    let set = alter(&bare(), &[("severity", Some(json!("high")))]).unwrap();
+    assert_eq!(meta(&set).fields["severity"], json!("high"));
+    for gone in [None, Some(Value::Null)] {
+        let m = meta(&alter(&set, &[("severity", gone)]).unwrap());
+        assert!(!m.fields.contains_key("severity"), "{:?}", m.fields);
+    }
+}
+
+#[test]
+fn an_undeclared_field_is_refused_naming_it() {
+    assert_eq!(
+        alter(&bare(), &[("colour", Some(json!("red")))]).unwrap_err(),
+        vec![WriteProblem::FieldUndeclared("colour".into())]
+    );
+}
+
+#[test]
+fn a_reserved_key_is_refused_here() {
+    let text = doc("fixed");
+    for name in ["status", "closed", "title", "owners", "entry_kind"] {
+        for edit in [Some(json!("x")), None, Some(Value::Null)] {
+            let got = alter(&text, &[(name, edit.clone())]).unwrap_err();
+            assert_eq!(
+                got,
+                vec![WriteProblem::FieldUndeclared(name.into())],
+                "{name} {edit:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_wrongly_typed_value_is_invalid() {
+    let problems = alter(&bare(), &[("severity", Some(json!("medium")))]).unwrap_err();
+    assert!(
+        invalid(&problems)
+            .iter()
+            .any(|p| matches!(p, EntryProblem::FieldType { field, .. } if field == "severity")),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn body_and_other_keys_survive() {
+    let body = "# Heading\n\ntext with --- and\n```\ncode\n```\n\n\ntrailing  \n";
+    let before = doc_with("open", None, Some(body)).replacen(
+        "status: open\n",
+        "status: open\nowners: [marius]\ntopic: x\n",
+        1,
+    );
+    assert!(before.contains("owners: [marius]") && before.contains("topic: x"));
+    let after = alter(&before, &[("severity", Some(json!("low")))]).unwrap();
+    assert_eq!(read(&after).1, read(&before).1);
+    let (fm_after, _) = read(&after);
+    assert_eq!(fm_after.owners, vec!["marius".to_string()]);
+    assert_eq!(fm_after.topic.as_deref(), Some("x"));
+    let m = meta(&after);
+    assert_eq!(m.fields["severity"], json!("low"));
+    assert_eq!(m.title, "Status moves");
+    assert_eq!(m.status, "open");
+    assert_eq!(m.created, d0());
+    assert_eq!(m.status_since, d0());
+}
+
+#[test]
+fn an_empty_edit_returns_a_valid_document_unchanged_and_an_invalid_one_as_err() {
+    let clean = doc("open");
+    assert_eq!(alter(&clean, &[]).unwrap(), clean);
+    let bad = doc("open").replace("entry_kind: friction", "entry_kind: bug");
+    assert!(bad.contains("entry_kind: bug"));
+    let problems = alter(&bad, &[]).unwrap_err();
+    assert!(
+        invalid(&problems).contains(&EntryProblem::KindUndeclared("bug".into())),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn a_mixed_batch_is_refused_naming_the_bad_field() {
+    let got = alter(
+        &bare(),
+        &[
+            ("severity", Some(json!("high"))),
+            ("colour", Some(json!("red"))),
+        ],
+    )
+    .unwrap_err();
+    assert_eq!(got, vec![WriteProblem::FieldUndeclared("colour".into())]);
+}
+
+#[test]
+fn a_stray_undeclared_key_can_be_deleted() {
+    let stray = bare().replacen("status: open\n", "status: open\ncolour: red\n", 1);
+    assert!(stray.contains("colour: red"));
+    let problems = alter(&stray, &[]).unwrap_err();
+    assert!(
+        invalid(&problems).contains(&EntryProblem::FieldUndeclared("colour".into())),
+        "{problems:?}"
+    );
+    let fixed = alter(&stray, &[("colour", None)]).unwrap();
+    assert!(!fixed.contains("colour"), "{fixed}");
+    assert_eq!(
+        alter(&stray, &[("colour", Some(json!("blue")))]).unwrap_err(),
+        vec![WriteProblem::FieldUndeclared("colour".into())]
+    );
+}
+
+#[test]
+fn no_frontmatter_and_bad_yaml_are_named() {
+    assert_eq!(
+        alter("just text", &[("severity", Some(json!("low")))]).unwrap_err(),
+        vec![WriteProblem::NoFrontmatter]
+    );
+    let bad = alter("---\nkind: [unclosed\n---\nbody\n", &[]).unwrap_err();
+    assert!(
+        matches!(bad.as_slice(), [WriteProblem::BadYaml(_)]),
+        "{bad:?}"
+    );
+}
