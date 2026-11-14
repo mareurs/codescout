@@ -13,6 +13,7 @@ pub mod commits;
 pub(crate) mod dual_write;
 pub mod entry_cite;
 pub mod event_edges;
+pub(crate) mod event_text;
 pub mod events;
 pub mod find;
 pub mod gc;
