@@ -1085,4 +1085,96 @@ mod tests {
             "the model passed to `with_vector_cache` is the configured one, never a literal"
         );
     }
+    /// The production region of a source file: the lines before the first one that trims to
+    /// `mod tests {`, without the comment lines.
+    fn production_lines(text: &str) -> Vec<&str> {
+        text.lines()
+            .take_while(|l| l.trim() != "mod tests {")
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect()
+    }
+
+    /// No production code embeds a chunk around the vector cache. `embed_artifact` is the
+    /// uncached embed; the one caller outside the seam is the dimension probe of the backfill,
+    /// which is compatibility information and never a vector worth keeping. Every other site
+    /// calls `embed_artifact_cached`.
+    ///
+    /// The bare calls are exactly the seam's two (the pass-through of a service without a cache,
+    /// and the miss path) and the probe. The cached calls are the reindex tool's drain and the
+    /// two sites of the indexer (the backfill and `index_repo`), so a site that loses its call
+    /// cannot pass: the absence check on bare calls alone is monotone under removal.
+    ///
+    /// Named blind spot: production code that sits after an inline `mod tests {` is not
+    /// scanned. The behavioural test of each site covers it.
+    #[test]
+    fn every_embed_call_outside_the_seam_is_the_dimension_probe() {
+        use std::collections::BTreeMap;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut bare: BTreeMap<String, usize> = BTreeMap::new();
+        let mut cached: BTreeMap<String, usize> = BTreeMap::new();
+        let mut indexer_bare_lines: Vec<String> = Vec::new();
+        for entry in walkdir::WalkDir::new(root.join("src"))
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.extension().is_some_and(|x| x == "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(path).unwrap();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            for line in production_lines(&text) {
+                let n_bare = line.matches(".embed_artifact(").count()
+                    + line.matches("::embed_artifact(").count();
+                let n_cached = line.matches(".embed_artifact_cached(").count()
+                    + line.matches("::embed_artifact_cached(").count();
+                if n_bare > 0 {
+                    *bare.entry(rel.clone()).or_default() += n_bare;
+                    if rel == "src/librarian/indexer.rs" {
+                        indexer_bare_lines.push(line.to_string());
+                    }
+                }
+                if n_cached > 0 {
+                    *cached.entry(rel.clone()).or_default() += n_cached;
+                }
+            }
+        }
+
+        let want_bare: BTreeMap<String, usize> = [
+            ("src/librarian/embedding.rs".to_string(), 2),
+            ("src/librarian/indexer.rs".to_string(), 1),
+        ]
+        .into();
+        assert_eq!(
+            bare, want_bare,
+            "a production `embed_artifact` call outside the seam skips the vector cache: use \
+             `embed_artifact_cached` and flush with `flush_cache`. Only the seam's two calls and \
+             the backfill's dimension probe may stay bare"
+        );
+        assert_eq!(
+            indexer_bare_lines.len(),
+            1,
+            "{indexer_bare_lines:?}: the one bare call in the indexer"
+        );
+        assert!(
+            indexer_bare_lines[0].contains("\"codescout backfill dimension probe\""),
+            "the one bare call in the indexer is the dimension probe, not: {}",
+            indexer_bare_lines[0]
+        );
+
+        let want_cached: BTreeMap<String, usize> = [
+            ("src/librarian/indexer.rs".to_string(), 2),
+            ("src/librarian/tools/reindex.rs".to_string(), 1),
+        ]
+        .into();
+        assert_eq!(
+            cached, want_cached,
+            "the three embed sites that go through the vector cache: the reindex drain, the \
+             backfill and `index_repo`. A site that loses its call embeds around the cache"
+        );
+    }
 }

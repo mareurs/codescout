@@ -124,6 +124,7 @@ fn report_json(
         "refused_by_read_door": report.refused_by_read_door,
         "embed_failed": report.embed_failed,
         "embed_errors": report.embed_errors,
+        "embed_cache": report.embed_cache.to_json(),
         // The report names the population it walked. A count whose scope is not stated
         // is the defect this run was fixed for: 10 and 2807 were both correct answers to
         // different questions, and nothing in the output said which was being answered.
@@ -314,6 +315,31 @@ mod tests {
             ])
         );
         assert_eq!(printed["scope"]["abs_path_root"], "/work/p");
+    }
+    /// The cache counts are printed beside the others: `hits` says how many of `embedded` the
+    /// cache supplied, and `status` says whether the cache was on, off or unusable.
+    #[test]
+    fn the_printed_report_carries_the_cache_counts() {
+        use crate::librarian::vector_cache::{CacheStatus, CacheTally};
+        let report = crate::librarian::indexer::BackfillReport {
+            embedded: 4,
+            embed_cache: CacheTally {
+                status: CacheStatus::On,
+                hits: 3,
+                stored: 1,
+                errors: 2,
+            },
+            ..Default::default()
+        };
+        let printed = report_json(&report, None);
+        assert_eq!(printed["embed_cache"]["hits"], 3);
+        assert_eq!(printed["embed_cache"]["stored"], 1);
+        assert_eq!(printed["embed_cache"]["errors"], 2);
+        assert_eq!(printed["embed_cache"]["status"], "on");
+        assert_eq!(
+            printed["embedded"], 4,
+            "`embedded` still counts every vector written"
+        );
     }
 
     /// A run that left chunks without vectors must exit non-zero, naming the count and the
