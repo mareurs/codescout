@@ -181,7 +181,7 @@ pub fn change_status(
         None
     };
     let was_terminal = schema.statuses.get(&meta.status) == Some(&StatusClass::Terminal);
-    let closed = (class == StatusClass::Terminal).then(|| match meta.closed {
+    let closed = (class == StatusClass::Terminal).then_some(match meta.closed {
         Some(date) if was_terminal => date,
         _ => today,
     });

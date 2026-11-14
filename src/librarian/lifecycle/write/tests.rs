@@ -645,9 +645,18 @@ fn an_undeclared_field_is_refused_naming_it() {
 #[test]
 fn a_reserved_key_is_refused_here() {
     let text = doc("fixed");
-    for name in ["status", "closed", "title", "owners", "entry_kind"] {
+    let names = ["status", "closed", "title", "owners", "entry_kind"];
+    // Also with a schema that declares them: the reserved refusal must not rest on "undeclared".
+    let mut declared = schema();
+    for name in names {
+        declared.fields.insert(name.into(), FieldType::Scalar);
+    }
+    for (schema, name) in [schema(), declared]
+        .iter()
+        .flat_map(|s| names.map(|n| (s, n)))
+    {
         for edit in [Some(json!("x")), None, Some(Value::Null)] {
-            let got = alter(&text, &[(name, edit.clone())]).unwrap_err();
+            let got = change_fields(&text, schema, &edits(&[(name, edit.clone())])).unwrap_err();
             assert_eq!(
                 got,
                 vec![WriteProblem::FieldUndeclared(name.into())],
