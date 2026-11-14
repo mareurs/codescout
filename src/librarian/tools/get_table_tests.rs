@@ -377,7 +377,173 @@ async fn a_broken_collection_returns_readable_problems_not_a_table() {
     assert!(text.contains("cannot be loaded"), "{text}");
     assert!(text.contains(README), "names the readme: {text}");
     assert!(!text.contains("| Entry |"), "{text}");
+    assert!(
+        text.contains("full=true"),
+        "names the way to read it: {text}"
+    );
     assert_one_remedy(&text);
+
+    // The way the refusal names works: the readme's text, to fix it from.
+    let out = get(&ctx, json!({"id": id, "full": true})).await.unwrap();
+    assert!(out.get("table").is_none(), "{out}");
+    assert!(out.to_string().contains("What we decided."), "{out}");
+}
+/// A readme the session's checkout does not hold (a collection made on main after the worktree
+/// branched, or a row whose file is gone) gives no table. The refusal names the checkout and the
+/// call that still reads the catalogued file, and that call works.
+#[tokio::test]
+async fn a_readme_missing_from_the_sessions_checkout_names_full_true() {
+    let (_tmp, main, worktree) = repo_with_worktree();
+    write(&main, README, LEDGER);
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_root(Root {
+            name: "r".into(),
+            path: main.clone(),
+        })
+        .with_current_project(std::sync::Arc::new(CurrentProject {
+            abs_path: worktree.clone(),
+            git_root: worktree.clone(),
+            main_root: Some(main.clone()),
+            umbrella: None,
+        }))
+        .build();
+    let id = seed(&ctx, &main, README, "collection");
+
+    let text = format!("{:#}", get(&ctx, json!({"id": id})).await.unwrap_err());
+    assert!(
+        text.contains("has no readme in this session's checkout"),
+        "{text}"
+    );
+    assert!(text.contains("pass full=true"), "{text}");
+    assert_one_remedy(&text);
+
+    let out = get(&ctx, json!({"id": id, "full": true})).await.unwrap();
+    assert!(out.get("table").is_none(), "{out}");
+    assert!(
+        out.to_string().contains("What we decided."),
+        "main's prose: {out}"
+    );
+}
+
+/// A stale row: the readme was deleted by hand. The same refusal, and `full=true` still answers
+/// with today's `body_error`.
+#[tokio::test]
+async fn a_readme_gone_from_disk_names_full_true() {
+    let tmp = two_entry_project();
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), README, "collection");
+    std::fs::remove_file(tmp.path().join(README)).unwrap();
+
+    let text = format!("{:#}", get(&ctx, json!({"id": id})).await.unwrap_err());
+    assert!(
+        text.contains("has no readme in this session's checkout"),
+        "{text}"
+    );
+    assert_one_remedy(&text);
+
+    let out = get(&ctx, json!({"id": id, "full": true})).await.unwrap();
+    assert!(out["body_error"].is_string(), "{out}");
+}
+
+/// An entry whose frontmatter does not parse is missing from the table and the rows; the
+/// response names it, so the count is not taken for complete.
+#[tokio::test]
+async fn an_unparsed_entry_is_named_in_table_problems() {
+    let bad = "docs/trackers/ledgers/d/2026-11-03-bad.md";
+    let tmp = project(&[
+        (README, LEDGER),
+        (
+            "docs/trackers/ledgers/d/2026-11-02-b.md",
+            &entry("B", "open", "2026-11-02", ""),
+        ),
+        (
+            bad,
+            "---\nentry_kind: decision\ntitle: Bad\nstatus: open\n---\n\nNo dates.\n",
+        ),
+    ]);
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), README, "collection");
+
+    let out = get(
+        &ctx,
+        json!({"id": id, "entry_filter": {"status": {"eq": "open"}}}),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(table(&out).lines().count(), 3, "{}", table(&out));
+    assert_eq!(out["entry_total"], json!(1));
+    let problems = out["table_problems"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{out}"));
+    assert_eq!(problems.len(), 1, "{out}");
+    let text = problems[0].as_str().unwrap();
+    assert!(text.starts_with(bad), "{text}");
+    assert_one_remedy(text);
+
+    let out = get(&ctx, json!({"id": id, "heading": "# Decisions"}))
+        .await
+        .unwrap();
+    assert!(
+        out.get("table_problems").is_none(),
+        "no table, no table problems: {out}"
+    );
+
+    let out = get(
+        &ctx,
+        json!({"id": id, "heading": "# Decisions", "entry_filter": {"status": {"eq": "open"}}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        out["table_problems"].as_array().map(Vec::len),
+        Some(1),
+        "the entries leave it out too: {out}"
+    );
+}
+
+/// A clean collection carries no `table_problems` key.
+#[tokio::test]
+async fn a_clean_collection_has_no_table_problems() {
+    let tmp = two_entry_project();
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), README, "collection");
+    let out = get(&ctx, json!({"id": id})).await.unwrap();
+    assert!(out.get("table_problems").is_none(), "{out}");
+}
+
+/// `entry_filter` with a body selector: the selected prose and the matching entries, no table,
+/// and never the augmentation refusal.
+#[tokio::test]
+async fn entry_filter_with_a_heading_gives_the_section_and_the_entries() {
+    let tmp = two_entry_project();
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), README, "collection");
+
+    for selector in [
+        json!({"heading": "# Decisions"}),
+        json!({"headings": ["# Decisions"]}),
+        json!({"full": true}),
+    ] {
+        let mut args = json!({"id": id, "entry_filter": {"status": {"eq": "open"}}});
+        args.as_object_mut()
+            .unwrap()
+            .extend(selector.as_object().unwrap().clone());
+        let out = get(&ctx, args).await.unwrap();
+        assert!(out.get("table").is_none(), "{selector}: {out}");
+        assert!(
+            out.to_string().contains("What we decided."),
+            "{selector}: {out}"
+        );
+        assert_eq!(out["entry_total"], json!(2), "{selector}: {out}");
+        let keys: Vec<&Value> = out["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| &e["key"])
+            .collect();
+        assert_eq!(keys, [&json!("2026-11-02-b")], "{selector}");
+    }
 }
 
 /// A readme no managed root holds cannot be given a repo-relative path, so its collection

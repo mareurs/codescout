@@ -558,18 +558,25 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "head_commit": head_commit,
     });
 
-    // A collection readme gains its entry table (`get_table`), unless a body selector asks for
-    // prose; its flat rows are what `entry_filter` filters, so the readme needs no augmentation.
-    let readme_table = if a.full.unwrap_or(false)
+    // A collection readme gains its entry table (`get_table`) unless a body selector asks for
+    // prose; its flat rows are what `entry_filter` filters, with a selector or without, so the
+    // readme needs no augmentation.
+    let body_selector = a.full.unwrap_or(false)
         || a.heading.is_some()
-        || a.headings.as_ref().is_some_and(|v| !v.is_empty())
-    {
+        || a.headings.as_ref().is_some_and(|v| !v.is_empty());
+    let readme_table = if body_selector && a.entry_filter.is_none() {
         None
     } else {
         super::get_table::readme_table(ctx, &row.abs_path)?
     };
     if let Some(t) = &readme_table {
-        out["table"] = json!(t.table);
+        if !body_selector {
+            out["table"] = json!(t.table);
+        }
+        // What the table and `entries` leave out, said wherever either is given.
+        if !t.problems.is_empty() {
+            out["table_problems"] = json!(t.problems);
+        }
     }
 
     if let Some(ref filter) = a.entry_filter {

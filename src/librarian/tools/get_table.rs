@@ -4,7 +4,8 @@
 //! collection loaded by FOLDER (`load_collection_dir`, so an archived collection works) from the
 //! session's checkout, and the response gains `table`, the markdown of every entry (archived ones
 //! included, marked in the `Archived` column). The same rows, flat, are what `entry_filter`
-//! filters. `get::call` decides when the branch runs (no `heading`, `headings` or `full`).
+//! filters. `get::call` decides when the branch runs: a call with no `heading`, `headings` or
+//! `full` gains `table`, and an `entry_filter` is served from the rows with or without one.
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +14,7 @@ use serde_json::Value;
 
 use super::lifecycle_update::{root_and_rel_path, unrooted_placement};
 use super::{LibrarianRecoverableError, ToolContext};
-use crate::librarian::lifecycle::collection::load_collection_dir;
+use crate::librarian::lifecycle::collection::{load_collection_dir, CollectionLoadError};
 use crate::librarian::lifecycle::layout::{place, Role};
 use crate::librarian::lifecycle::schema::TABLE_COLUMNS;
 use crate::librarian::lifecycle::table::{render_markdown, rows, EntryRow};
@@ -25,12 +26,15 @@ pub(super) struct ReadmeTable {
     /// The same entries in the same order, each a flat JSON object: the row's columns, and every
     /// field of the entry lifted to a top-level key (a column wins over a field of its name).
     pub rows: Vec<Value>,
+    /// The collection folder's problems, each `<problem>; <remedy>`: an entry that does not parse
+    /// is in neither `table` nor `rows`, and this is where the response says so.
+    pub problems: Vec<String>,
 }
 
 /// The table of the collection whose readme is at `full` (a catalog row's `abs_path`). `Ok(None)`
 /// when `full` is not a collection readme: `get` answers as it does for any document. Refused: a
-/// collection that does not load (the loader's `<problem>; <remedy>` text, never a table), and a
-/// readme no root of the session gives a repo-relative path for.
+/// collection that does not load (never a table; see [`load_refusal`]), and a readme no root of
+/// the session gives a repo-relative path for.
 pub(super) fn readme_table(ctx: &ToolContext, full: &Path) -> Result<Option<ReadmeTable>> {
     let Some((root, rel_path)) = load_root_and_rel_path(ctx, full)? else {
         return Ok(None);
@@ -40,7 +44,7 @@ pub(super) fn readme_table(ctx: &ToolContext, full: &Path) -> Result<Option<Read
         _ => return Ok(None),
     };
     let loaded = load_collection_dir(&root, &placement.collection_dir)
-        .map_err(|e| LibrarianRecoverableError::new(e.to_string()))?;
+        .map_err(|e| load_refusal(&e, &rel_path, &root))?;
     let entries = rows(&loaded.tree, &loaded.key, true).ok_or_else(|| {
         anyhow::anyhow!(
             "load_collection_dir returned a tree without its collection {}",
@@ -50,7 +54,32 @@ pub(super) fn readme_table(ctx: &ToolContext, full: &Path) -> Result<Option<Read
     Ok(Some(ReadmeTable {
         table: render_markdown(&entries),
         rows: entries.iter().map(flat_row).collect::<Result<_>>()?,
+        problems: loaded
+            .tree
+            .problems
+            .iter()
+            .map(|p| format!("{p}; fix the file named"))
+            .collect(),
     }))
+}
+
+/// The refusal for a collection that does not load, as `<problem>; <remedy>`. The table needs the
+/// readme in the session's checkout, so a missing one names that checkout and the call that still
+/// reads the catalogued file (`full=true`, which builds no table); a broken one names the same
+/// call as the way to read what to fix. `TreeProblem` texts carry no `; ` of their own.
+fn load_refusal(e: &CollectionLoadError, rel_path: &str, root: &Path) -> anyhow::Error {
+    let text = match e {
+        CollectionLoadError::NotACollectionDir(_) => format!(
+            "{rel_path} has no readme in this session's checkout {}, so no entry table can be \
+             built; pass full=true without entry_filter to read the catalogued file",
+            root.display()
+        ),
+        CollectionLoadError::Broken(_) => {
+            format!("{e}, reading the readme with full=true and no entry_filter")
+        }
+        other => other.to_string(),
+    };
+    LibrarianRecoverableError::new(text)
 }
 
 /// The root the collection of the row at `full` is loaded from, and the row's repo-relative path.
