@@ -120,6 +120,11 @@ pub struct SpannedCitation {
 /// or an entity gets one. A token inside a bare URL keeps its citation and its range, because the
 /// scanner reads it (`a_token_in_a_bare_url_is_scanned`); a rewrite must test it with
 /// [`in_url_word`].
+///
+/// A hit or bare token inside an inline link's text lies inside that link's `RelPathLink` range
+/// (`link_scan::extract::citation_spans`); a rewrite of the link must drop it. Here that is a bare
+/// token in `[see F-1](b.md)`: the grammar does not treat ordinary link text as opaque, so `F-1`
+/// has an exact range inside the link.
 pub fn extract_spanned(text: &str) -> Vec<SpannedCitation> {
     // A suffix start of `text` (`len - body.len()`), so a char boundary.
     let base = frontmatter_end(text);
@@ -190,6 +195,11 @@ pub fn extract_spanned(text: &str) -> Vec<SpannedCitation> {
 /// True when the whitespace-delimited word around `range` holds `://`: the range is part of a
 /// URL (or sits against one), and a rewrite must leave it alone. A range that is not on char
 /// boundaries of `text` counts as in a URL, so the answer errs towards no rewrite.
+///
+/// It recognises `://` only, which is the plan's definition of a bare URL (D-R15). So `www.x.org/R-91`
+/// and the `mailto:` and `doi:` forms are NOT flagged. A link whose destination is a URL
+/// (`[see F-1](https://h/)`) IS flagged, because the destination sits in the same word as the
+/// token; that false positive only produces a report line, never a rewrite.
 #[allow(dead_code)] // read by the cutover citation rewrite (Plan D task 4); tests read it now
 pub(crate) fn in_url_word(text: &str, range: &Range<usize>) -> bool {
     let (Some(before), Some(slice), Some(after)) = (
@@ -233,6 +243,8 @@ fn token_re() -> &'static Regex {
 /// boundaries are judged on the source around the match, because the parser splits one run of
 /// prose into several events at escapes, entities and emphasis markers.
 fn bare_tokens(text: &str, event_text: &str, range: &Range<usize>) -> Vec<(usize, String)> {
+    // Defensive under pulldown-cmark 0.13.3: no input found where a text event differs from its
+    // source slice; re-check on a parser upgrade.
     if text.get(range.clone()) != Some(event_text) {
         return Vec::new();
     }

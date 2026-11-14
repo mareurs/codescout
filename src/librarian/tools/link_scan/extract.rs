@@ -511,12 +511,18 @@ pub fn extract(text: &str) -> DocExtract {
 ///
 /// A range is a slice of `text`, and exists only where the hit's text is its own source slice.
 /// It is `None` for: a hit in inline code (`in_code`; the code span's content is not the bytes
-/// between its backticks), a text run an entity makes differ from its source (`&amp; F-1`), and
-/// a link that is not inline (`[t][x]` with `[x]: a.md`: its destination lies in another line).
-/// A backslash escape splits one run of prose into several text events (`R\-91` is Text `R` and
-/// Text `-91`), so no hit spans an escape. A hit in a bare URL has a range (this scanner reads
-/// plain text, URLs included); test it with `identity::grammar::in_url_word`. A path link's range
-/// is the whole `[text](dest)`.
+/// between its backticks), a hit at an escape edge (`source_range`: `F-1\_x` renders `F-1_x`),
+/// and a link that is not inline (`[t][x]` with `[x]: a.md`: its destination lies in another
+/// line). An entity is its own text event, so the text after it keeps its exact range
+/// (`&amp; F-1` gives `F-1` the range `6..9`). A backslash escape splits one run of prose into
+/// several text events (`R\-91` is Text `R` and Text `-91`), so no hit spans an escape. A hit in
+/// a bare URL has a range (this scanner reads plain text, URLs included); test it with
+/// `identity::grammar::in_url_word`. A path link's range is the whole `[text](dest)`.
+///
+/// A hit or bare token inside an inline link's text lies inside that link's `RelPathLink` range;
+/// a rewrite of the link must drop it. For `[see F-1](b.md)` this scanner's own `EntryToken` `F-1`
+/// and the grammar's bare token `F-1` both have exact ranges inside the link's range, and
+/// applying an edit for each would overlap.
 ///
 /// Never hits: frontmatter, fenced and indented code, HTML (a comment included), and link
 /// reference definitions (the parser consumes them and emits no event). A hit in inline code is
@@ -607,6 +613,8 @@ fn scan_events(text: &str, ranges: bool, sink: &mut impl FnMut(CitationSpan)) ->
                 }
                 // `rest` is a suffix of `content`, so it sits `content.len() - rest.len()`
                 // bytes into the event's source when the event is its own source slice.
+                // Defensive under pulldown-cmark 0.13.3: no input found where a text event
+                // differs from its source slice; re-check on a parser upgrade.
                 let src = (ranges && text.get(span.clone()) == Some(content.as_ref()))
                     .then(|| (text, span.start + (content.len() - rest.len())));
                 scan_tokens(sink, rest, line, src, false);
@@ -658,8 +666,9 @@ pub(crate) struct CitationSpan {
     pub raw: String,
     /// The line of the hit's event, as `extract` reports it.
     pub line: u32,
-    /// Bytes of `text`; None when the event's text is not its source slice (an escape or an
-    /// entity), for a hit in inline code, and for a link that is not inline.
+    /// Bytes of `text`. `None` at an escape edge (`source_range`), for a hit in inline code, and
+    /// for a link that is not inline. An entity is its own text event, so the text after it keeps
+    /// its exact range.
     pub range: Option<std::ops::Range<usize>>,
     /// True for a hit inside an inline code span: `extract` counts it, a rewrite never edits it.
     pub in_code: bool,
@@ -1745,7 +1754,7 @@ gamma
     }
 
     #[test]
-    fn an_escaped_or_entity_run_has_no_range() {
+    fn escapes_split_tokens_and_an_entity_neighbour_keeps_its_range() {
         // `R\-91` is Text `R` and Text `-91`: no token at all.
         assert!(citation_spans("R\\-91").is_empty());
         // So is an entity inside a token: `F&#45;1` is Text `F`, Text `-`, Text `1`.
@@ -1859,6 +1868,31 @@ gamma
         let text = "## F-1 — see F-2 and `F-3`\n";
         assert_eq!(sliced(text), vec![(CitationKind::EntryToken, "F-2")]);
     }
+    // Overlap pin: the link's range holds every hit and bare token in its text, so a rewrite of
+    // the link must drop them or two edits would overlap.
+    #[test]
+    fn a_token_in_a_path_links_text_lies_inside_the_links_range() {
+        let text = "x [see F-1](b.md) y";
+        let spans = citation_spans(text);
+        let link = spans
+            .iter()
+            .find(|s| s.kind == CitationKind::RelPathLink)
+            .and_then(|s| s.range.clone())
+            .expect("an inline link has a range");
+        assert_eq!(&text[link.clone()], "[see F-1](b.md)");
+        let token = spans
+            .iter()
+            .find(|s| s.kind == CitationKind::EntryToken)
+            .and_then(|s| s.range.clone())
+            .expect("the token in the link text has a range");
+        assert_eq!(&text[token.clone()], "F-1");
+        assert!(link.start <= token.start && token.end <= link.end);
+        // The grammar's bare token lies inside the same range.
+        let bare = crate::librarian::identity::grammar::extract_spanned(text);
+        assert_eq!(bare.len(), 1, "{bare:?}");
+        assert_eq!(&text[bare[0].range.clone()], "F-1");
+        assert!(link.start <= bare[0].range.start && bare[0].range.end <= link.end);
+    }
 
     // `cross_repo_re` is lowercase-only: a mixed-case qualifier is no qualifier, so the token
     // stands alone and no span covers `My_Notes:F-2`.
@@ -1907,7 +1941,9 @@ gamma
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
-            if path.extension().is_none_or(|e| e != "md") {
+            if !entry.file_type().is_some_and(|t| t.is_file())
+                || path.extension().is_none_or(|e| e != "md")
+            {
                 continue;
             }
             let text = std::fs::read_to_string(path).unwrap();
