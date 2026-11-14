@@ -241,7 +241,13 @@ pub fn new_entry(
         return Err(problems);
     };
 
-    let mut extra: BTreeMap<String, Value> = input.fields.clone();
+    // A null field is an absent one, as in `change_fields`.
+    let mut extra: BTreeMap<String, Value> = input
+        .fields
+        .iter()
+        .filter(|(_, v)| !v.is_null())
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     extra.insert("entry_kind".into(), Value::String(input.entry_kind.into()));
     extra.insert("status_since".into(), iso(today));
     extra.insert("created".into(), iso(today));

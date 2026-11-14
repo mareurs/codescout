@@ -315,6 +315,18 @@ fn fields_are_declared_typed_and_never_reserved() {
     assert!(with("status", json!("x"), &declared)
         .contains(&WriteProblem::FieldUndeclared("status".into())));
 }
+
+#[test]
+fn a_null_field_is_not_written() {
+    let mut i = input("friction", "Null field");
+    i.fields.insert("severity".into(), Value::Null);
+    let file = make(&i).unwrap();
+    let (fm, _) = read(&file.text);
+    assert!(!file.text.contains("severity"), "{}", file.text);
+    assert!(!fm.extra.contains_key("severity"));
+    assert!(!meta(&file.text).fields.contains_key("severity"));
+}
+
 #[test]
 fn a_reserved_entry_key_is_never_a_field_even_when_the_schema_declares_it() {
     for name in crate::librarian::lifecycle::entry::RESERVED {
@@ -518,6 +530,7 @@ fn a_terminal_entry_without_closed_is_repaired() {
     assert_eq!(m.closed, Some(d1()));
     assert_eq!(m.status_since, d1());
 }
+
 #[test]
 fn a_stale_closed_is_not_kept_when_a_non_terminal_entry_closes() {
     let text = doc("open").replacen("status: open\n", "status: open\nclosed: 2026-11-01\n", 1);
@@ -577,9 +590,17 @@ fn a_crlf_document_works() {
 #[test]
 fn body_and_unknown_keys_survive() {
     let body = "# Heading\n\ntext with --- and\n```\ncode\n```\n\n\ntrailing  \n";
-    let before = doc_with("open", None, Some(body));
+    let before = doc_with("open", None, Some(body)).replacen(
+        "status: open\n",
+        "status: open\nowners: [marius]\ntopic: x\n",
+        1,
+    );
+    assert!(before.contains("owners: [marius]") && before.contains("topic: x"));
     let after = change(&before, "fixed", None).unwrap();
     assert_eq!(read(&after).1, read(&before).1);
+    let (fm_after, _) = read(&after);
+    assert_eq!(fm_after.owners, vec!["marius".to_string()]);
+    assert_eq!(fm_after.topic.as_deref(), Some("x"));
     let m = meta(&after);
     assert_eq!(m.fields["severity"], json!("high"));
     assert_eq!(m.title, "Status moves");
