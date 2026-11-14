@@ -13,3 +13,4 @@ pub mod table;
 #[cfg(test)]
 pub(crate) mod testkit;
 pub mod tree;
+pub mod write;
