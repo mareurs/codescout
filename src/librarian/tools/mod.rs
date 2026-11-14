@@ -486,7 +486,9 @@ pub trait Tool: Send + Sync {
 }
 
 pub mod create;
-
+// Not a registered `Tool`: the entry mode of `create` (`collection` = a lifecycle collection's key),
+// called from `create::call`.
+pub(crate) mod create_lifecycle;
 pub mod update;
 
 pub mod link;
@@ -564,6 +566,10 @@ mod read_door_tests;
 /// Git fixtures (a repository with one commit, one with a linked worktree) shared by tool tests.
 #[cfg(test)]
 pub(crate) mod testfixture;
+
+/// Entry mode of `create` (see `create_lifecycle`).
+#[cfg(test)]
+mod create_lifecycle_tests;
 
 #[cfg(test)]
 mod containing_root_tests {

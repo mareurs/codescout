@@ -309,21 +309,24 @@ fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String>
 /// [`preflight`] runs it alone so the worktree write guard can sit behind it.
 ///
 /// Without `collection`, a plain create needs `rel_path`, `kind`, `title` and `body`; the first
-/// one missing is named in serde's own words, as when the four were required by the struct.
+/// one missing is named in serde's own words, as when the four were required by the struct. With
+/// `collection`, the entry-mode checks of `create_lifecycle::check_args` apply instead.
 fn parse_args(args: Value) -> Result<Args> {
     let a: Args = serde_json::from_value(args).map_err(plain_args_error)?;
-    if a.collection.is_none() {
-        let missing = [
-            ("rel_path", a.rel_path.is_none()),
-            ("kind", a.kind.is_none()),
-            ("title", a.title.is_none()),
-            ("body", a.body.is_none()),
-        ]
-        .into_iter()
-        .find_map(|(name, absent)| absent.then_some(name));
-        if let Some(name) = missing {
-            return Err(plain_args_error(format_args!("missing field `{name}`")));
-        }
+    if let Some(collection) = a.collection.as_deref() {
+        super::create_lifecycle::check_args(collection, &a)?;
+        return Ok(a);
+    }
+    let missing = [
+        ("rel_path", a.rel_path.is_none()),
+        ("kind", a.kind.is_none()),
+        ("title", a.title.is_none()),
+        ("body", a.body.is_none()),
+    ]
+    .into_iter()
+    .find_map(|(name, absent)| absent.then_some(name));
+    if let Some(name) = missing {
+        return Err(plain_args_error(format_args!("missing field `{name}`")));
     }
     Ok(a)
 }
@@ -364,10 +367,7 @@ fn undo_failed_create(cat: &crate::librarian::catalog::Catalog, id: &str, full: 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a = parse_args(args)?;
     if a.collection.is_some() {
-        return Err(LibrarianRecoverableError::new(
-            "doc(action=\"create\") does not take `collection` yet; omit it and pass rel_path, \
-             kind, title and body",
-        ));
+        return super::create_lifecycle::entry_mode(ctx, &a).await;
     }
 
     // F4: `params_path` is advertised on the shared `augment` schema object (honored
@@ -471,26 +471,12 @@ pub(super) enum WriteMode {
     Plain,
     /// The first writer of a path wins and is never harmed by a second: see
     /// [`insert_and_create_exclusive`].
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "entry and collection create (create_lifecycle) construct it"
-        )
-    )]
     Exclusive,
 }
 
 /// The bytes [`write_new`] writes.
 pub(super) enum Content {
     /// The file's bytes, given whole; they carry no `id:` (entry and collection create).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "entry and collection create (create_lifecycle) construct it"
-        )
-    )]
     Rendered(String),
     /// `write_new` builds the frontmatter from the [`NewArtifact`] fields plus `id: Some(id)`, and
     /// appends `body` (plain create).
@@ -3027,25 +3013,5 @@ mod tests {
                 "{args} -> {text}"
             );
         }
-    }
-
-    /// Entry mode is not wired yet: a `collection` call is refused rather than read as a plain
-    /// create with its `collection` ignored.
-    #[tokio::test]
-    async fn a_create_with_collection_is_refused_and_writes_nothing() {
-        let tmp = TempDir::new().unwrap();
-        let ctx = mk_ctx(tmp.path().to_path_buf());
-        let err = call(
-            &ctx,
-            json!({
-                "repo": "r", "collection": "decisions", "rel_path": "docs/x.md",
-                "kind": "decision", "title": "Pick X", "body": "the body"
-            }),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("collection"), "{err:#}");
-        assert!(!tmp.path().join("docs").exists());
-        assert_eq!(artifact_count(&ctx.catalog.lock()), 0);
     }
 }

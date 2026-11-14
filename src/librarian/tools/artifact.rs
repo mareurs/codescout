@@ -244,7 +244,7 @@ impl Tool for Artifact {
     }
 
     fn description(&self) -> &'static str {
-        "Document catalog: find/get/create/update/move/delete markdown documents (specs, plans, ADRs, trackers, bug files) with YAML frontmatter, plus their events, augmentations and entries. Defaults: scope=project; archived/superseded hidden unless the filter constrains status; kind/status shortcuts AND with filter. Trackers are kind=tracker documents that may carry an augmentation (persistent prompt + params) — call librarian(tracker_design) before creating one. Entries: append_entry assigns the next PREFIX-N id atomically — with entry_collection it appends a params row; without it the ledger is prose. Both write the `## PREFIX-N — title` section from anchor_heading+title+body, required with entry_collection. update_entry patches ONE row in place — use it rather than patch={params:…}, whose RFC 7396 array semantics replace the whole collection. rekey_prefix moves a whole PREFIX-N namespace at once — params ids, schema pattern, headings and citation rows together, dry-run by default; it is what update_entry's `id` refusal points at. Events: event_create appends an immutable record (kind inside the `event` object); event_list reads them newest-first. augment attaches or replaces the augmentation — merge=false (default) overwrites it wholesale, so fields you omit silently reset, merge=true patches only what you pass; gather collects refresh context without writing (write back with update, commit_refresh=true); list_stale lists augmentations older than threshold_hours. graph walks links; link adds a manual rel; graft folds one row's history into another; state_at shows a document as of a commit or timestamp."
+        "Document catalog: find/get/create/update/move/delete markdown documents (specs, plans, ADRs, trackers, bug files) with YAML frontmatter, plus their events, augmentations and entries. Defaults: scope=project; archived/superseded hidden unless the filter constrains status; kind/status shortcuts AND with filter. Trackers are kind=tracker documents that may carry an augmentation (persistent prompt + params) — call librarian(tracker_design) before creating one. Entries: append_entry assigns the next PREFIX-N id atomically: a params row with entry_collection, prose without. Both write the `## PREFIX-N — title` section from anchor_heading+title+body, required with entry_collection. update_entry patches ONE row in place; patch={params:…} would replace the whole array (RFC 7396). rekey_prefix renames a PREFIX-N namespace (params ids, schema pattern, headings, citation rows), dry-run by default. Events: event_create appends an immutable record (kind inside the `event` object); event_list reads them newest-first. augment attaches or replaces the augmentation — merge=false (default) overwrites it wholesale, so fields you omit silently reset, merge=true patches only what you pass; gather collects refresh context without writing (write back with update, commit_refresh=true); list_stale lists augmentations older than threshold_hours. graph walks links; link adds a manual rel; graft folds one row's history into another; state_at shows a document as of a commit or timestamp."
     }
     fn description_cap(&self) -> usize {
         1_800
@@ -352,6 +352,7 @@ impl Tool for Artifact {
                 "end_line": { "type": "integer", "description": "get: 1-indexed inclusive FILE end line" },
                 "new_rel_path": { "type": "string", "description": "move: destination path relative to repo root (e.g. 'docs/archive/foo.md'). Parent directories are created automatically. Fails if destination already exists. NOTE: a move MINTS A NEW ID (id = sha256(abs_path)); the artifact's events, links, observations and augmentation are grafted onto it and the old row is dropped. The response carries `id` (new), `previous_id`, `id_changed` and `history_grafted` — read the new id from there, re-point the listed citations, and never reuse a cached id across a move." },
                 "rel_path": { "type": "string", "description": "create: relative path for new file, e.g. 'docs/plans/my-plan.md' — relative to repo root, and NOT including the repo name (use the `repo` field for that). Also accepted on find as a shorthand, where it is lifted to filter={\"rel_path\": {\"contains\": <value>}} and the lift is reported under `corrections`." },
+                "collection": { "type": "string", "description": "create: a lifecycle collection's key; makes an entry in it (kind = entry kind, no rel_path)" },
                 "repo": { "type": "string", "description": "create: workspace root name (git repo basename). Omit to infer from active project — rel_path is then treated as project-relative and the subdir prefix is prepended automatically." },
                 "title": { "type": "string", "description": "create: artifact title. append_entry: the new entry's title — with `body` + `anchor_heading`, the server writes the section itself." },
                 "body": { "type": "string", "description": "create: markdown body. append_entry: the new entry's section body — see `anchor_heading`." },
@@ -1141,8 +1142,9 @@ mod tests {
     async fn every_action_labelled_schema_key_is_honored_by_that_action() {
         use crate::tools::param_probe::assert_all_honored;
 
-        // Floor is **action/key pairs**, not keys, and measured not chosen: 99 pairs over
-        // the 18 actions, read 2026-09-17 from `sweep`'s own `checked`. Was 95 over 17
+        // Floor is **action/key pairs**, not keys, and measured not chosen: 100 pairs over
+        // the 18 actions, read 2026-11-14 from `sweep`'s own `checked`: `create`'s
+        // `collection` adds one to the 99 read 2026-09-17. 99 was 95 over 17
         // actions (2026-09-11); `rekey_prefix` adds exactly four — `id`, `from`, `to`,
         // `force` — and 95 + 4 reconciles, which is the check that the new action's labels
         // are all being swept rather than silently skipped. The 80 before that was a correct
@@ -1155,7 +1157,7 @@ mod tests {
             "doc",
             &Artifact.input_schema(),
             &probe_spec(),
-            99,
+            100,
             // Pinned from `sweep`'s own `unlabelled`, read 2026-10-05: nothing is skipped for want
             // of a label here, so a key that loses its `<action>:` prefix reds this call.
             &[],

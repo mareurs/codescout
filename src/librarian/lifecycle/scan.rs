@@ -131,6 +131,18 @@ fn list_paths(project_root: &Path, git_for: GitFor) -> anyhow::Result<Vec<String
     }
     Ok(paths.into_iter().collect())
 }
+/// The repo-relative paths of the checkout at `root` that git lists, tracked or untracked and not
+/// ignored: every Markdown file and every file under `docs/trackers`. Reads no file. `root` must
+/// be the top level of its checkout, else an error: from a folder below it git lists only that
+/// subtree.
+pub(crate) fn list_checkout_paths(root: &Path) -> anyhow::Result<Vec<String>> {
+    list_checkout_paths_with(root, &git)
+}
+
+fn list_checkout_paths_with(root: &Path, git_for: GitFor) -> anyhow::Result<Vec<String>> {
+    require_top_level(root, git_for)?;
+    list_paths(root, git_for)
+}
 
 fn is_markdown(rel_path: &str) -> bool {
     rel_path.to_ascii_lowercase().ends_with(".md")
@@ -340,6 +352,43 @@ mod tests {
         write(dir.path(), "kept.md", "# kept\n");
         let loaded = load(dir.path()).unwrap();
         assert_eq!(rel_paths(&loaded), ["kept.md"]);
+    }
+    /// The paths the key check compares: tracked and untracked Markdown files and every file under
+    /// `docs/trackers`, not an ignored one.
+    #[test]
+    fn checkout_paths_are_the_tracked_and_untracked_files_and_not_the_ignored_ones() {
+        let dir = checkout();
+        write(dir.path(), "docs/issues/tracked.md", "# t\n");
+        run_git(dir.path(), &["add", "docs/issues/tracked.md"]);
+        run_git(dir.path(), &["commit", "-q", "-m", "one"]);
+        write(dir.path(), ".gitignore", "ignored.md\n");
+        write(dir.path(), "ignored.md", "# ignored\n");
+        write(dir.path(), "docs/untracked.md", "# u\n");
+        write(dir.path(), "docs/trackers/ledgers/l/notes.txt", "x");
+        write(dir.path(), "src/lib.rs", "");
+
+        let paths = list_checkout_paths_with(dir.path(), &hermetic).unwrap();
+
+        assert_eq!(
+            paths,
+            [
+                "docs/issues/tracked.md",
+                "docs/trackers/ledgers/l/notes.txt",
+                "docs/untracked.md",
+            ]
+        );
+    }
+
+    /// From a folder below the top level git would list only that subtree, so the listing is
+    /// refused there.
+    #[test]
+    fn checkout_paths_refuse_a_root_below_the_top_level() {
+        let dir = checkout();
+        write(dir.path(), "sub/a.md", "# a\n");
+
+        let err = list_checkout_paths_with(&dir.path().join("sub"), &hermetic).unwrap_err();
+
+        assert!(err.to_string().contains("is not the top level"), "{err:#}");
     }
 
     #[test]
