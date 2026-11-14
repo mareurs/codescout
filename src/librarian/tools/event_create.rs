@@ -348,39 +348,47 @@ const TWIN_WHAT: TwinWhat = TwinWhat {
 };
 
 /// The document at the write target when it is single-writer and takes this event kind, or the
-/// reason it takes no text twin. A document whose file cannot be read or whose frontmatter does
-/// not parse has no flag to read, so it is not single-writer.
+/// reason it takes no text twin. A document whose file cannot be read has its own reason, which
+/// names the cause by the document's label and never by its path. A document whose frontmatter
+/// does not parse has no flag to read, so it is not single-writer.
 fn single_writer_target(
     ctx: &ToolContext,
     cat: &crate::librarian::catalog::Catalog,
     artifact_id: &str,
     kind: &str,
-) -> std::result::Result<TwinDocument, &'static str> {
+) -> std::result::Result<TwinDocument, String> {
     const NOT_SINGLE_WRITER: &str = "not a single-writer document";
     if !TWIN_KINDS.contains(&kind) {
-        return Err("kind has no text twin");
+        return Err("kind has no text twin".to_string());
     }
     let Ok(Some(row)) = crate::librarian::catalog::artifact::get(cat, artifact_id) else {
-        return Err(NOT_SINGLE_WRITER);
+        return Err(NOT_SINGLE_WRITER.to_string());
     };
     let path = row.abs_path;
-    let Ok(text) =
-        crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx)).text(&path)
-    else {
-        return Err(NOT_SINGLE_WRITER);
-    };
+    let text =
+        match crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx)).text(&path) {
+            Ok(text) => text,
+            Err(e) => {
+                use crate::librarian::catalog::dual_write::{document_label, without_path};
+                let label = document_label(&path);
+                return Err(format!(
+                    "document unreadable: {}",
+                    without_path(&e.to_string(), &path, &label)
+                ));
+            }
+        };
     let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&text) else {
-        return Err(NOT_SINGLE_WRITER);
+        return Err(NOT_SINGLE_WRITER.to_string());
     };
     if fm.extra.get("single_writer") != Some(&Value::Bool(true)) {
-        return Err(NOT_SINGLE_WRITER);
+        return Err(NOT_SINGLE_WRITER.to_string());
     }
     // A ledger or an entry document ignores the flag: a section appended to it would be read as
     // an entry, or as a declared-field problem.
     if !crate::librarian::catalog::augmentation::raw_declared_prefixes(Some(&fm)).is_empty()
         || fm.extra.contains_key("entry_kind")
     {
-        return Err("ledger or entry document");
+        return Err("ledger or entry document".to_string());
     }
     Ok(TwinDocument { path, text })
 }
@@ -1291,6 +1299,70 @@ pub(crate) mod tests {
             );
             assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{label}");
             assert_eq!(event_rows(&ctx, "doc1"), 1, "{label}");
+        }
+    }
+
+    /// A target that cannot be read has no flag to read, but saying it is "not a single-writer
+    /// document" would be a wrong reason: the skip names the read failure, by the document's label
+    /// and never by its path, and the row is kept. A writer that maps a read error to
+    /// `not a single-writer document` fails the prefix check.
+    #[tokio::test]
+    async fn an_unreadable_target_skips_with_its_own_reason_and_keeps_the_row() {
+        let (tmp, ctx, path) = twin_fixture(FLAGGED);
+        std::fs::remove_file(&path).unwrap();
+        let mut cases: Vec<(&str, Box<dyn Fn()>)> = vec![
+            ("a directory at the path", {
+                let p = path.clone();
+                Box::new(move || std::fs::create_dir(&p).unwrap())
+            }),
+            ("no file at the path", Box::new(|| {})),
+        ];
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let p = path.clone();
+            std::fs::write(&p, FLAGGED).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let readable = std::fs::read(&p).is_ok();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+            std::fs::remove_file(&p).unwrap();
+            // Running as a user who ignores file modes (root): a mode-000 file is still readable.
+            if !readable {
+                cases.push((
+                    "a mode-000 file",
+                    Box::new(move || {
+                        std::fs::write(&p, FLAGGED).unwrap();
+                        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000))
+                            .unwrap();
+                    }),
+                ));
+            }
+        }
+        let mut rows = 0;
+        for (label, setup) in cases {
+            setup();
+            let r = note(&ctx, "doc1", "a thought").await.unwrap();
+            rows += 1;
+            let reason = r["text_twin"].as_str().unwrap_or_default();
+            assert!(
+                reason.starts_with("skipped: document unreadable: "),
+                "{label}: {r}"
+            );
+            assert!(
+                reason.contains("notes.md"),
+                "{label}: names the document: {r}"
+            );
+            assert!(
+                !reason.contains(&tmp.path().display().to_string()),
+                "{label}: no path in the reason: {r}"
+            );
+            assert_eq!(event_rows(&ctx, "doc1"), rows, "{label}: the row is kept");
+            // Back to no file at the path for the next case.
+            match std::fs::symlink_metadata(&path) {
+                Ok(m) if m.is_dir() => std::fs::remove_dir(&path).unwrap(),
+                Ok(_) => std::fs::remove_file(&path).unwrap(),
+                Err(_) => {}
+            }
         }
     }
 

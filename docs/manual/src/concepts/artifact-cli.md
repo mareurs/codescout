@@ -100,9 +100,9 @@ is a blockquote for a `note` whose payload is only text, and a fenced
 
 Both commands report a skipped text in `text_twin` as `skipped: <reason>`.
 `link` returns the bare string `ok` when the line was written. `event create`
-skips with
-`not a single-writer document`, `kind has no text twin`,
-`ledger or entry document` or `target not nameable: <why>`. `link` skips with
+skips with `not a single-writer document`, `document unreadable: <why>` or
+`kind has no text twin`. It also skips with `ledger or entry document` or
+`target not nameable: <why>`. `link` skips with
 `rel is not a label: <why>`, `target not nameable: <why>` or `already present`.
 
 ## Output modes
