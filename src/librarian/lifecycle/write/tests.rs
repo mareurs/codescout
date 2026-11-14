@@ -315,6 +315,20 @@ fn fields_are_declared_typed_and_never_reserved() {
     assert!(with("status", json!("x"), &declared)
         .contains(&WriteProblem::FieldUndeclared("status".into())));
 }
+#[test]
+fn a_reserved_entry_key_is_never_a_field_even_when_the_schema_declares_it() {
+    for name in crate::librarian::lifecycle::entry::RESERVED {
+        let mut declared = schema();
+        declared.fields.insert(name.into(), FieldType::Scalar);
+        let mut i = input("friction", "Reserved");
+        i.fields.insert(name.into(), json!("x"));
+        let problems = new_entry(&declared, DIR, None, &i, d("2026-11-14")).unwrap_err();
+        assert!(
+            problems.contains(&WriteProblem::FieldUndeclared(name.into())),
+            "{name}: {problems:?}"
+        );
+    }
+}
 
 #[test]
 fn a_valid_that_names_no_class_is_invalid() {
