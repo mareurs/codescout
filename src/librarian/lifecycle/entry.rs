@@ -17,7 +17,7 @@ use crate::librarian::statements::{parse_validity, Validity};
 
 /// Frontmatter keys `parse_entry` reads itself; every other `extra` key is a declared-field
 /// candidate and lands in `EntryMeta::fields`.
-const RESERVED: [&str; 6] = [
+pub(crate) const RESERVED: [&str; 6] = [
     "entry_kind",
     "status_since",
     "created",

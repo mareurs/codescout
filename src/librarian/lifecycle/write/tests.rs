@@ -43,3 +43,311 @@ fn a_crlf_readme_body_works() {
     let crlf = README.replace('\n', "\r\n");
     assert_eq!(entry_template(&crlf).as_deref(), Some(EXPECTED));
 }
+
+// ---- new_entry -------------------------------------------------------------------------------
+
+use crate::librarian::frontmatter::{self, Frontmatter};
+use crate::librarian::lifecycle::entry::{parse_entry, validate_entry, EntryMeta};
+use crate::librarian::lifecycle::layout::Lifecycle;
+use crate::librarian::lifecycle::naming::StemError;
+use crate::librarian::lifecycle::schema::{parse_schema, CollectionSchema, FieldType};
+use crate::librarian::lifecycle::testkit::{d, fm};
+use crate::librarian::statements::Validity;
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
+
+const SCHEMA_YAML: &str = "title: F\nentry_kinds: [friction, note]\nstatuses: {open: open, waiting: blocked, parked: deferred, fixed: terminal, wontfix: terminal}\ninitial_status: open\nfields:\n  severity: {type: enum, values: [low, high]}\n";
+const DIR: &str = "docs/trackers/ledgers/f";
+
+fn schema() -> CollectionSchema {
+    parse_schema(
+        Lifecycle::Ledger,
+        &fm(&format!("{SCHEMA_YAML}key_style: dated\n")),
+    )
+    .unwrap()
+}
+
+fn name_schema() -> CollectionSchema {
+    parse_schema(
+        Lifecycle::Ledger,
+        &fm(&format!("{SCHEMA_YAML}key_style: name\n")),
+    )
+    .unwrap()
+}
+
+fn input<'a>(kind: &'a str, title: &'a str) -> NewEntry<'a> {
+    NewEntry {
+        entry_kind: kind,
+        title,
+        status: None,
+        tags: Vec::new(),
+        valid: None,
+        revisit_by: None,
+        fields: BTreeMap::new(),
+        body: None,
+    }
+}
+
+fn make(input: &NewEntry<'_>) -> Result<EntryFile, Vec<WriteProblem>> {
+    new_entry(&schema(), DIR, None, input, d("2026-11-14"))
+}
+
+/// Parse a document the way a reader would: the frontmatter and the body after it.
+fn read(text: &str) -> (Frontmatter, String) {
+    let (fm, body) = frontmatter::parse(text).unwrap();
+    (fm.unwrap(), body.to_string())
+}
+
+fn meta(text: &str) -> EntryMeta {
+    parse_entry(&read(text).0).unwrap()
+}
+
+fn invalid(problems: &[WriteProblem]) -> Vec<EntryProblem> {
+    problems
+        .iter()
+        .find_map(|p| match p {
+            WriteProblem::Invalid(ps) => Some(ps.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_new_entry_reads_back_clean() {
+    let file = make(&input("friction", "Wrong default")).unwrap();
+    assert_eq!(
+        file.rel_path,
+        "docs/trackers/ledgers/f/2026-11-14-wrong-default.md"
+    );
+    assert_eq!(file.key.as_str(), "2026-11-14-wrong-default");
+    let m = meta(&file.text);
+    assert_eq!(m.status, "open");
+    assert_eq!(m.title, "Wrong default");
+    assert_eq!(m.entry_kind, "friction");
+    assert_eq!(m.created, d("2026-11-14"));
+    assert_eq!(m.status_since, d("2026-11-14"));
+    assert_eq!(m.closed, None);
+    assert_eq!(m.revisit_by, None);
+    assert!(validate_entry(&schema(), &m).is_empty());
+}
+
+#[test]
+fn the_file_carries_kind_entry_and_no_id() {
+    let file = make(&input("friction", "Wrong default")).unwrap();
+    let (fm, _) = read(&file.text);
+    assert_eq!(fm.kind.as_deref(), Some("entry"));
+    assert_eq!(fm.id, None);
+}
+
+#[test]
+fn tags_valid_and_fields_are_written() {
+    let mut i = input("friction", "Tagged");
+    i.tags = vec!["a".into(), "b".into()];
+    i.valid = Some("dated 2026-11-14");
+    i.fields.insert("severity".into(), json!("high"));
+    let m = meta(&make(&i).unwrap().text);
+    assert_eq!(m.tags, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(m.valid, Some(Validity::Dated("2026-11-14".into())));
+    assert_eq!(m.fields["severity"], json!("high"));
+    assert_eq!(m.fields.len(), 1);
+}
+
+#[test]
+fn a_terminal_status_sets_closed_today() {
+    let mut i = input("friction", "Done already");
+    i.status = Some("fixed");
+    let m = meta(&make(&i).unwrap().text);
+    assert_eq!(m.status, "fixed");
+    assert_eq!(m.closed, Some(d("2026-11-14")));
+}
+
+#[test]
+fn an_undeclared_kind_or_status_is_refused_naming_the_word() {
+    let mut i = input("bug", "X");
+    i.status = Some("nope");
+    let problems = make(&i).unwrap_err();
+    assert!(problems.contains(&WriteProblem::KindUndeclared("bug".into())));
+    assert!(problems.contains(&WriteProblem::StatusUndeclared("nope".into())));
+    assert!(!problems
+        .iter()
+        .any(|p| matches!(p, WriteProblem::Invalid(_))));
+}
+
+#[test]
+fn a_blocked_or_deferred_status_needs_revisit_by() {
+    for status in ["waiting", "parked"] {
+        let mut i = input("friction", "Later");
+        i.status = Some(status);
+        let problems = make(&i).unwrap_err();
+        assert!(
+            invalid(&problems).contains(&EntryProblem::RevisitMissing {
+                status: status.into()
+            }),
+            "{status}: {problems:?}"
+        );
+        i.revisit_by = Some(d("2026-12-01"));
+        let m = meta(&make(&i).unwrap().text);
+        assert_eq!(m.status, status);
+        assert_eq!(m.revisit_by, Some(d("2026-12-01")));
+    }
+}
+
+#[test]
+fn a_revisit_by_on_an_open_or_terminal_status_is_refused() {
+    for status in ["open", "fixed"] {
+        let mut i = input("friction", "Not later");
+        i.status = Some(status);
+        i.revisit_by = Some(d("2026-12-01"));
+        let problems = make(&i).unwrap_err();
+        assert!(
+            problems.contains(&WriteProblem::RevisitNotNeeded(status.into())),
+            "{status}: {problems:?}"
+        );
+    }
+}
+
+#[test]
+fn the_body_is_the_input_else_the_template_else_empty() {
+    let body_of = |template: Option<&str>, body: Option<&str>| {
+        let mut i = input("friction", "Bodies");
+        i.body = body;
+        let file = new_entry(&schema(), DIR, template, &i, d("2026-11-14")).unwrap();
+        read(&file.text).1
+    };
+    assert_eq!(
+        body_of(Some("template text"), Some("input text")),
+        frontmatter::render_body("input text")
+    );
+    assert_eq!(
+        body_of(Some("template text"), None),
+        frontmatter::render_body("template text")
+    );
+    assert_eq!(body_of(None, None), frontmatter::render_body(""));
+}
+
+#[test]
+fn a_title_that_is_not_one_line_with_a_slug_is_a_title_problem() {
+    for title in ["???", "   ", "日本語", "", "two\nlines", "two\rlines"] {
+        let problems = make(&input("friction", title)).unwrap_err();
+        assert!(
+            problems.contains(&WriteProblem::Title(title.into())),
+            "{title:?}: {problems:?}"
+        );
+    }
+}
+
+#[test]
+fn a_hard_title_reads_back_identical() {
+    let title = "Fix: \"quote\" # hash";
+    let file = make(&input("friction", title)).unwrap();
+    assert_eq!(meta(&file.text).title, title);
+}
+
+#[test]
+fn a_template_starting_with_a_fence_stays_body() {
+    let template = "---\nnot frontmatter\n---\ntext";
+    let file = new_entry(
+        &schema(),
+        DIR,
+        Some(template),
+        &input("friction", "Fenced"),
+        d("2026-11-14"),
+    )
+    .unwrap();
+    let (_, body) = read(&file.text);
+    assert!(body.contains(template), "{body:?}");
+    assert_eq!(meta(&file.text).title, "Fenced");
+}
+
+#[test]
+fn a_name_style_collection_refuses_the_reserved_stem_and_a_hex_shaped_one() {
+    let go = |title: &str| {
+        new_entry(
+            &name_schema(),
+            DIR,
+            None,
+            &input("friction", title),
+            d("2026-11-14"),
+        )
+        .unwrap_err()
+    };
+    assert!(go("readme")
+        .iter()
+        .any(|p| matches!(p, WriteProblem::Stem(StemError::ReservedName(_)))));
+    let hex = format!("{}{}", "0123456789", "abcdef");
+    assert!(go(&hex)
+        .iter()
+        .any(|p| matches!(p, WriteProblem::Stem(StemError::BadKey(_)))));
+    let ok = new_entry(
+        &name_schema(),
+        DIR,
+        None,
+        &input("friction", "Plain name"),
+        d("2026-11-14"),
+    )
+    .unwrap();
+    assert_eq!(ok.key.as_str(), "plain-name");
+}
+
+#[test]
+fn fields_are_declared_typed_and_never_reserved() {
+    let with = |name: &str, value: Value, schema: &CollectionSchema| {
+        let mut i = input("friction", "Fields");
+        i.fields.insert(name.into(), value);
+        new_entry(schema, DIR, None, &i, d("2026-11-14")).unwrap_err()
+    };
+    let s = schema();
+    let bad_type = with("severity", json!("medium"), &s);
+    assert!(
+        invalid(&bad_type)
+            .iter()
+            .any(|p| matches!(p, EntryProblem::FieldType { field, .. } if field == "severity")),
+        "{bad_type:?}"
+    );
+    assert!(
+        with("colour", json!("red"), &s).contains(&WriteProblem::FieldUndeclared("colour".into()))
+    );
+    assert!(
+        with("created", json!("x"), &s).contains(&WriteProblem::FieldUndeclared("created".into()))
+    );
+    let mut declared = schema();
+    declared.fields.insert("status".into(), FieldType::Scalar);
+    assert!(with("status", json!("x"), &declared)
+        .contains(&WriteProblem::FieldUndeclared("status".into())));
+}
+
+#[test]
+fn a_valid_that_names_no_class_is_invalid() {
+    for valid in ["forever", "dated 2026-02-30"] {
+        let mut i = input("friction", "Validity");
+        i.valid = Some(valid);
+        let problems = make(&i).unwrap_err();
+        assert!(
+            invalid(&problems)
+                .iter()
+                .any(|p| matches!(p, EntryProblem::Unparsed(_))),
+            "{valid}: {problems:?}"
+        );
+    }
+}
+
+#[test]
+fn a_four_backtick_fence_is_not_closed_by_three_backticks() {
+    let readme = "## Entry template\n````\n```\n## Other\n````\nafter\n## End\nx\n";
+    assert_eq!(
+        entry_template(readme).as_deref(),
+        Some("````\n```\n## Other\n````\nafter")
+    );
+}
+
+#[test]
+fn problems_print_with_their_own_display_text() {
+    let inner = EntryProblem::RevisitMissing {
+        status: "waiting".into(),
+    };
+    let text = WriteProblem::Invalid(vec![inner.clone()]).to_string();
+    assert!(text.contains(&inner.to_string()), "{text}");
+    let stem = StemError::ReservedName("readme".into());
+    let text = WriteProblem::Stem(stem.clone()).to_string();
+    assert!(text.contains(&stem.to_string()), "{text}");
+}
