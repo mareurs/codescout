@@ -321,7 +321,7 @@ pub(crate) fn commit_after_file_write(
 /// What became of the bytes (a section and/or the high-water mark) that were already on disk
 /// when the catalog `COMMIT` failed.
 #[derive(Debug)]
-enum SectionRollback {
+pub(crate) enum SectionRollback {
     /// The bytes this call wrote were still there, and the file is back to its pre-call
     /// state.
     Restored,
@@ -339,7 +339,7 @@ enum SectionRollback {
 /// the markdown — and a peer session editing the same ledger is the ordinary case on a
 /// shared checkout. An unconditional restore would silently discard their edit in order to
 /// repair ours, turning a recoverable failure into someone else's data loss.
-fn restore_section_after_failed_commit(
+pub(crate) fn restore_section_after_failed_commit(
     path: &std::path::Path,
     original: &str,
     written: &str,

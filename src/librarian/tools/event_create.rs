@@ -4,6 +4,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{LibrarianRecoverableError, ToolContext};
+use crate::librarian::catalog::dual_write::SectionRollback;
+use crate::librarian::catalog::event_text::{splice_event, EventText};
 use crate::librarian::catalog::{event_edges, events, sources};
 
 fn any_value_schema(_g: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -330,6 +332,114 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
     parse_args(args.clone()).map(|_| ())
 }
 
+/// The event kinds whose fact has a text twin (an `## Events` section of a single-writer document).
+const TWIN_KINDS: &[&str] = &["note", "verdict", "intent", "reviewed", "external_signal"];
+
+/// The document an event's text twin goes into: its path and the bytes read from it.
+struct TwinDocument {
+    path: std::path::PathBuf,
+    text: String,
+}
+
+/// Bytes this call wrote into a document, with the bytes it replaced.
+struct TwinWrite {
+    path: std::path::PathBuf,
+    original: String,
+    written: String,
+}
+
+impl TwinWrite {
+    /// The catalog write failed after this file write: put the file back if it still holds what
+    /// this call wrote, and return an error that says what became of the file.
+    fn undo(&self, cause: impl std::fmt::Display) -> anyhow::Error {
+        let rollback = crate::librarian::catalog::dual_write::restore_section_after_failed_commit(
+            &self.path,
+            &self.original,
+            &self.written,
+        );
+        anyhow::anyhow!(
+            "event_create: the catalog write failed after `{}` was written, so no event was \
+             recorded: {cause}. {}",
+            crate::librarian::catalog::dual_write::document_label(&self.path),
+            twin_rollback_sentence(&rollback)
+        )
+    }
+}
+
+/// The document at the write target when it is single-writer and takes this event kind, or the
+/// reason it takes no text twin. A document whose file cannot be read or whose frontmatter does
+/// not parse has no flag to read, so it is not single-writer.
+fn single_writer_target(
+    ctx: &ToolContext,
+    cat: &crate::librarian::catalog::Catalog,
+    artifact_id: &str,
+    kind: &str,
+) -> std::result::Result<TwinDocument, &'static str> {
+    const NOT_SINGLE_WRITER: &str = "not a single-writer document";
+    if !TWIN_KINDS.contains(&kind) {
+        return Err("kind has no text twin");
+    }
+    let Ok(Some(row)) = crate::librarian::catalog::artifact::get(cat, artifact_id) else {
+        return Err(NOT_SINGLE_WRITER);
+    };
+    let path = row.abs_path;
+    let Ok(text) =
+        crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx)).text(&path)
+    else {
+        return Err(NOT_SINGLE_WRITER);
+    };
+    let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&text) else {
+        return Err(NOT_SINGLE_WRITER);
+    };
+    if fm.extra.get("single_writer") != Some(&Value::Bool(true)) {
+        return Err(NOT_SINGLE_WRITER);
+    }
+    // A ledger or an entry document ignores the flag: a section appended to it would be read as
+    // an entry, or as a declared-field problem.
+    if !crate::librarian::catalog::augmentation::raw_declared_prefixes(Some(&fm)).is_empty()
+        || fm.extra.contains_key("entry_kind")
+    {
+        return Err("ledger or entry document");
+    }
+    Ok(TwinDocument { path, text })
+}
+
+/// The grammar form of each `also_mutates` id, or the reason the twin is skipped: a target that
+/// the grammar cannot name (outside the key space, shared key, no git repository) skips the whole
+/// twin, and the row stays.
+fn twin_mutates_forms(
+    cat: &crate::librarian::catalog::Catalog,
+    doc_path: &std::path::Path,
+    ids: &[String],
+) -> std::result::Result<Vec<String>, String> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(root) = crate::librarian::current_project::lookup_git_root(doc_path) else {
+        return Err("target not nameable: the document lies in no git repository".to_string());
+    };
+    ids.iter()
+        .map(|id| {
+            crate::librarian::catalog::cite_text::grammar_form_of(&cat.conn, &root, id)
+                .map_err(|e| format!("target not nameable: {e:#}"))
+        })
+        .collect()
+}
+
+/// What a caller is told about the document after the catalog write failed: one sentence that
+/// claims only what the rollback did.
+fn twin_rollback_sentence(rollback: &SectionRollback) -> String {
+    match rollback {
+        SectionRollback::Restored => "The document was put back as it was.".to_string(),
+        SectionRollback::ForeignChange => "The document was changed by another writer after \
+            this call wrote it, so it was left as found and still holds the new section."
+            .to_string(),
+        SectionRollback::Failed(e) => {
+            format!("Putting the document back failed ({e}); the new section may still be in it.")
+        }
+    }
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a = parse_args(args)?;
 
@@ -451,7 +561,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     });
 
-    for art in a.also_mutates.unwrap_or_default() {
+    let mutates_ids: Vec<String> = a.also_mutates.clone().unwrap_or_default();
+    for art in mutates_ids.iter().cloned() {
         edges.push(event_edges::EdgeRow {
             src_event_id: id.clone(),
             dst_event_id: None,
@@ -461,7 +572,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         });
     }
 
-    if let Some(target) = a.resolves_intent_event_id {
+    if let Some(target) = a.resolves_intent_event_id.clone() {
         edges.push(event_edges::EdgeRow {
             src_event_id: id.clone(),
             dst_event_id: Some(target),
@@ -471,6 +582,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         });
     }
 
+    let text_twin: String;
     {
         let cat = ctx.catalog.lock();
         let tx = cat.conn.unchecked_transaction()?;
@@ -490,7 +602,66 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             anyhow::bail!("test injection: forced failure after event insert");
         }
         event_edges::insert_many_in_tx(&tx, &edges)?;
-        tx.commit()?;
+
+        // The text twin: the file is written before the commit, inside the same lock, and put
+        // back when the commit fails. A rule that does not apply skips the twin and keeps the
+        // row; a write that is refused or fails is an error, and the transaction drops with no
+        // row recorded.
+        let mut twin_file: Option<TwinWrite> = None;
+        match single_writer_target(ctx, &cat, &a.artifact_id, &a.kind) {
+            Err(reason) => text_twin = format!("skipped: {reason}"),
+            Ok(doc) => match twin_mutates_forms(&cat, &doc.path, &mutates_ids) {
+                Err(reason) => text_twin = format!("skipped: {reason}"),
+                Ok(mutates) => {
+                    let event_text = EventText {
+                        id: id.clone(),
+                        kind: a.kind.clone(),
+                        created_at_ms: now,
+                        author: a.author.clone(),
+                        anchor_commit: a.anchor_commit.clone(),
+                        head_commit: a.head_commit.clone(),
+                        parent: parent_id.clone(),
+                        resolves: a.resolves_intent_event_id.clone(),
+                        source: a.source.as_ref().map(|s| (s.kind.clone(), s.uri.clone())),
+                        mutates,
+                        payload: a.payload.clone(),
+                    };
+                    let written = splice_event(&doc.text, &event_text).map_err(|e| {
+                        LibrarianRecoverableError::new(format!(
+                            "event_create: the event could not be added to the document, so \
+                             nothing was recorded: {e:#}"
+                        ))
+                    })?;
+                    crate::librarian::util::write_catalogued_file(
+                        &super::managed_roots(ctx),
+                        &doc.path,
+                        &written,
+                    )?;
+                    let file = TwinWrite {
+                        path: doc.path,
+                        original: doc.text,
+                        written,
+                    };
+                    if let Err(e) = crate::librarian::catalog::dual_write::record_written_file(
+                        &tx,
+                        &a.artifact_id,
+                        &file.path.to_string_lossy(),
+                        &file.written,
+                    ) {
+                        return Err(file.undo(e));
+                    }
+                    text_twin = "written".to_string();
+                    twin_file = Some(file);
+                }
+            },
+        }
+
+        if let Err(e) = tx.commit() {
+            return Err(match twin_file {
+                Some(file) => file.undo(e),
+                None => e.into(),
+            });
+        }
 
         if a.kind == "note" {
             if let Some(text) = a.payload.get("text").and_then(|v| v.as_str()) {
@@ -511,6 +682,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "parent_event_id": parent_id,
         "anchor_commit": a.anchor_commit,
         "head_commit": a.head_commit,
+        "text_twin": text_twin,
     }))
 }
 
@@ -975,5 +1147,436 @@ pub(crate) mod tests {
             count, 0,
             "field_patch on unwritable field must not insert an event row"
         );
+    }
+    // ---- the text twin of a note, verdict, intent, reviewed or external_signal event ----
+
+    use crate::librarian::catalog::event_text::parse_event_sections;
+
+    const FLAGGED: &str = "---\nsingle_writer: true\n---\n\n# Notes\n\nbody\n";
+
+    /// A real file under a fresh temp dir and an artifact row `doc1` whose `abs_path` is that file.
+    fn twin_fixture(text: &str) -> (TempDir, ToolContext, std::path::PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let path = tmp.path().join("notes.md");
+        std::fs::write(&path, text).unwrap();
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(
+                &cat,
+                &TestArtifactRowBuilder::new("doc1")
+                    .with_abs_path(path.clone())
+                    .build(),
+            )
+            .unwrap();
+        }
+        (tmp, ctx, path)
+    }
+
+    fn event_rows(ctx: &ToolContext, artifact_id: &str) -> i64 {
+        let cat = ctx.catalog.lock();
+        cat.conn
+            .query_row(
+                "SELECT count(*) FROM events WHERE artifact_id = ?1",
+                rusqlite::params![artifact_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    fn row_sha(ctx: &ToolContext, artifact_id: &str) -> String {
+        let cat = ctx.catalog.lock();
+        crate::librarian::catalog::artifact::get(&cat, artifact_id)
+            .unwrap()
+            .unwrap()
+            .file_sha256
+    }
+
+    async fn note(ctx: &ToolContext, artifact_id: &str, text: &str) -> Result<Value> {
+        call(
+            ctx,
+            json!({"artifact_id": artifact_id, "kind": "note", "payload": {"text": text}}),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_note_on_a_single_writer_document_gets_a_section_and_a_row() {
+        let (_tmp, ctx, path) = twin_fixture(FLAGGED);
+        let r = note(&ctx, "doc1", "first thought").await.unwrap();
+        assert_eq!(r["text_twin"], "written");
+        let id = r["event_id"].as_str().unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.starts_with("---\nsingle_writer: true\n---\n"),
+            "the frontmatter is untouched: {text}"
+        );
+        let sections = parse_event_sections(&text);
+        assert_eq!(sections.len(), 1, "{text}");
+        assert_eq!(sections[0].id, id);
+        assert_eq!(sections[0].kind, "note");
+        assert_eq!(sections[0].payload, json!({"text": "first thought"}));
+        assert_eq!(event_rows(&ctx, "doc1"), 1);
+        assert_eq!(
+            row_sha(&ctx, "doc1"),
+            crate::librarian::util::sha_of_bytes(text.as_bytes()),
+            "the row describes the bytes the call wrote"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_flag_is_set_through_doc_update_extra() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let v = crate::librarian::tools::create::call(
+            &ctx,
+            json!({
+                "repo": "r", "rel_path": "docs/specs/notes.md", "kind": "spec",
+                "title": "Notes", "body": "# Notes\n\nbody\n"
+            }),
+        )
+        .await
+        .unwrap();
+        let id = v["id"].as_str().unwrap().to_string();
+        let path = tmp.path().join("docs/specs/notes.md");
+
+        let before = note(&ctx, &id, "before the flag").await.unwrap();
+        assert!(
+            before["text_twin"]
+                .as_str()
+                .unwrap()
+                .starts_with("skipped:"),
+            "{before}"
+        );
+
+        crate::librarian::tools::update::call(
+            &ctx,
+            json!({"id": id, "patch": {"extra": {"single_writer": true}}}),
+        )
+        .await
+        .unwrap();
+        let after = note(&ctx, &id, "after the flag").await.unwrap();
+        assert_eq!(after["text_twin"], "written");
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("after the flag"), "{text}");
+        assert!(!text.contains("before the flag"), "{text}");
+        assert_eq!(event_rows(&ctx, &id), 2, "both events keep their row");
+    }
+
+    #[tokio::test]
+    async fn a_note_on_an_unflagged_document_keeps_only_the_row() {
+        for (label, text) in [
+            ("no flag", "---\nkind: spec\n---\n\n# Plain\n"),
+            ("flag false", "---\nsingle_writer: false\n---\n\n# Plain\n"),
+            (
+                "flag a string",
+                "---\nsingle_writer: \"true\"\n---\n\n# Plain\n",
+            ),
+            ("no frontmatter", "# Plain\n"),
+        ] {
+            let (_tmp, ctx, path) = twin_fixture(text);
+            let r = note(&ctx, "doc1", "a thought").await.unwrap();
+            assert_eq!(
+                r["text_twin"], "skipped: not a single-writer document",
+                "{label}"
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{label}");
+            assert_eq!(event_rows(&ctx, "doc1"), 1, "{label}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_flagged_ledger_or_entry_document_gets_no_text() {
+        for (label, text) in [
+            (
+                "declared entry_prefix",
+                "---\nsingle_writer: true\nentry_prefix: F\n---\n\n# Ledger\n",
+            ),
+            (
+                "entry_kind",
+                "---\nsingle_writer: true\nentry_kind: friction\n---\n\n# Entry\n",
+            ),
+        ] {
+            let (_tmp, ctx, path) = twin_fixture(text);
+            let r = note(&ctx, "doc1", "a thought").await.unwrap();
+            assert_eq!(
+                r["text_twin"], "skipped: ledger or entry document",
+                "{label}"
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{label}");
+            assert_eq!(event_rows(&ctx, "doc1"), 1, "{label}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_kind_without_a_text_twin_keeps_only_the_row() {
+        let (_tmp, ctx, path) = twin_fixture(FLAGGED);
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(&cat, &art("other")).unwrap();
+        }
+        let r = call(
+            &ctx,
+            json!({
+                "artifact_id": "doc1", "kind": "superseded_by",
+                "payload": {"target_artifact_id": "other"}
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["text_twin"], "skipped: kind has no text twin");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), FLAGGED);
+        assert_eq!(event_rows(&ctx, "doc1"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_verdict_writes_a_fenced_payload_and_a_resolves_id() {
+        let (_tmp, ctx, path) = twin_fixture(FLAGGED);
+        let intent = call(
+            &ctx,
+            json!({
+                "artifact_id": "doc1", "kind": "intent",
+                "payload": {"hypothesis": "X causes Y"}
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(intent["text_twin"], "written");
+        let intent_id = intent["event_id"].as_str().unwrap().to_string();
+        let verdict = call(
+            &ctx,
+            json!({
+                "artifact_id": "doc1", "kind": "verdict",
+                "payload": {"outcome": "confirmed"},
+                "resolves_intent_event_id": intent_id
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(verdict["text_twin"], "written");
+        let verdict_id = verdict["event_id"].as_str().unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("```event-payload\n"), "{text}");
+        let sections = parse_event_sections(&text);
+        assert_eq!(sections.len(), 2, "{text}");
+        assert_eq!(sections[0].id, intent_id);
+        assert_eq!(sections[0].kind, "intent");
+        assert_eq!(sections[1].id, verdict_id);
+        assert_eq!(sections[1].kind, "verdict");
+        assert_eq!(sections[1].payload, json!({"outcome": "confirmed"}));
+        assert_eq!(sections[1].resolves.as_deref(), Some(intent_id.as_str()));
+        assert_eq!(sections[1].parent.as_deref(), Some(intent_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn two_notes_keep_one_events_heading_and_call_order() {
+        let (_tmp, ctx, path) = twin_fixture(FLAGGED);
+        let first = note(&ctx, "doc1", "first").await.unwrap();
+        let second = note(&ctx, "doc1", "second").await.unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.matches("## Events").count(), 1, "{text}");
+        let sections = parse_event_sections(&text);
+        let ids: Vec<&str> = sections.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                first["event_id"].as_str().unwrap(),
+                second["event_id"].as_str().unwrap()
+            ],
+            "{text}"
+        );
+        assert_eq!(sections[1].payload, json!({"text": "second"}));
+        assert_eq!(
+            sections[1].parent.as_deref(),
+            first["event_id"].as_str(),
+            "the second note chains off the first"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_commit_restores_the_file() {
+        let (_tmp, ctx, path) = twin_fixture(FLAGGED);
+        let sha_before = row_sha(&ctx, "doc1");
+        // A deferred foreign-key violation raised by the `events` INSERT: every statement and the
+        // file write succeed, and only the COMMIT fails.
+        ctx.catalog
+            .lock()
+            .conn
+            .execute_batch(
+                "CREATE TABLE commit_tripwire(
+                     missing TEXT REFERENCES artifact(id) DEFERRABLE INITIALLY DEFERRED
+                 );
+                 CREATE TRIGGER commit_tripwire_trg AFTER INSERT ON events
+                 BEGIN
+                     INSERT INTO commit_tripwire(missing) VALUES ('no-such-artifact');
+                 END;",
+            )
+            .unwrap();
+
+        let err = note(&ctx, "doc1", "never recorded").await.unwrap_err();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            FLAGGED,
+            "the file is back to its old bytes"
+        );
+        assert_eq!(event_rows(&ctx, "doc1"), 0, "no row remains");
+        assert_eq!(row_sha(&ctx, "doc1"), sha_before, "the row is untouched");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("put back as it was"), "{msg}");
+        assert!(
+            !msg.contains(&path.display().to_string()),
+            "no absolute path in the error: {msg}"
+        );
+    }
+
+    #[test]
+    fn the_rollback_sentence_claims_only_what_happened() {
+        let restored = twin_rollback_sentence(&SectionRollback::Restored);
+        assert!(restored.contains("put back as it was"), "{restored}");
+        let foreign = twin_rollback_sentence(&SectionRollback::ForeignChange);
+        assert!(foreign.contains("left as found"), "{foreign}");
+        assert!(!foreign.contains("put back as it was"), "{foreign}");
+        let failed =
+            twin_rollback_sentence(&SectionRollback::Failed(std::io::Error::other("boom")));
+        assert!(failed.contains("boom"), "{failed}");
+        assert!(failed.contains("may still be in it"), "{failed}");
+        assert!(!failed.contains("put back as it was"), "{failed}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_file_write_leaves_no_row() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let real = tmp.path().join("real.md");
+        std::fs::write(&real, FLAGGED).unwrap();
+        let link = tmp.path().join("link.md");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        {
+            let cat = ctx.catalog.lock();
+            art_insert(
+                &cat,
+                &TestArtifactRowBuilder::new("doc1")
+                    .with_abs_path(link.clone())
+                    .build(),
+            )
+            .unwrap();
+        }
+
+        let err = note(&ctx, "doc1", "never recorded").await.unwrap_err();
+
+        assert_eq!(event_rows(&ctx, "doc1"), 0, "no row remains: {err:#}");
+        assert_eq!(
+            std::fs::read_to_string(&real).unwrap(),
+            FLAGGED,
+            "nothing was written through the link"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_insertion_point_refuses_the_call_and_records_nothing() {
+        // An unclosed code fence swallows the section: the event would not read back.
+        let text = format!("{FLAGGED}\n```\nunclosed\n");
+        let (_tmp, ctx, path) = twin_fixture(&text);
+        let err = note(&ctx, "doc1", "never recorded").await.unwrap_err();
+        assert!(format!("{err:#}").contains("nothing was added"), "{err:#}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(event_rows(&ctx, "doc1"), 0);
+    }
+
+    /// A git root `repo/` that excludes `contrib/**` from the key space, with the flagged
+    /// `docs/notes.md` (`doc1`), a nameable `docs/target.md` (`target`) and an excluded
+    /// `contrib/x.md` (`outside`).
+    fn repo_fixture() -> (TempDir, ToolContext, std::path::PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join(".codescout")).unwrap();
+        std::fs::write(
+            repo.join(".codescout/key-space.toml"),
+            "exclude = [\"contrib/**\"]\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        std::fs::create_dir_all(repo.join("contrib")).unwrap();
+        let notes = repo.join("docs/notes.md");
+        std::fs::write(&notes, FLAGGED).unwrap();
+        std::fs::write(repo.join("docs/target.md"), "# T\n").unwrap();
+        std::fs::write(repo.join("contrib/x.md"), "# X\n").unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        {
+            let cat = ctx.catalog.lock();
+            for (id, rel) in [
+                ("doc1", "docs/notes.md"),
+                ("target", "docs/target.md"),
+                ("outside", "contrib/x.md"),
+            ] {
+                art_insert(
+                    &cat,
+                    &TestArtifactRowBuilder::new(id)
+                        .with_abs_path(repo.join(rel))
+                        .build(),
+                )
+                .unwrap();
+            }
+        }
+        (tmp, ctx, notes)
+    }
+
+    async fn note_mutating(ctx: &ToolContext, targets: &[&str]) -> Result<Value> {
+        call(
+            ctx,
+            json!({
+                "artifact_id": "doc1", "kind": "note",
+                "payload": {"text": "changed things"}, "also_mutates": targets
+            }),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_mutates_target_inside_the_key_space_is_written_as_its_key() {
+        let (_tmp, ctx, notes) = repo_fixture();
+        let r = note_mutating(&ctx, &["target"]).await.unwrap();
+        assert_eq!(r["text_twin"], "written");
+        let text = std::fs::read_to_string(&notes).unwrap();
+        assert!(text.contains("**Mutates:** [[target]]"), "{text}");
+        assert!(
+            !text.contains("target.md") && !text.contains("/repo/"),
+            "{text}"
+        );
+        let sections = parse_event_sections(&text);
+        assert_eq!(sections[0].mutates, ["[[target]]"]);
+    }
+
+    #[tokio::test]
+    async fn a_mutates_target_outside_the_key_space_skips_the_twin_and_keeps_the_row() {
+        let (_tmp, ctx, notes) = repo_fixture();
+        for targets in [&["outside"][..], &["target", "outside"][..]] {
+            let r = note_mutating(&ctx, targets).await.unwrap();
+            let twin = r["text_twin"].as_str().unwrap();
+            assert!(
+                twin.starts_with("skipped: target not nameable: "),
+                "{targets:?}: {twin}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&notes).unwrap(),
+                FLAGGED,
+                "{targets:?}: the whole twin is skipped, not half of it"
+            );
+            let id = r["event_id"].as_str().unwrap();
+            let cat = ctx.catalog.lock();
+            let edges = event_edges::outgoing(&cat, id).unwrap();
+            assert_eq!(
+                edges.iter().filter(|e| e.rel == "mutates").count(),
+                targets.len(),
+                "{targets:?}: the mutates edges stay"
+            );
+        }
+        assert_eq!(event_rows(&ctx, "doc1"), 2, "the rows stay");
     }
 }
