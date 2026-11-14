@@ -352,15 +352,24 @@ impl TwinWrite {
     /// The catalog write failed after this file write: put the file back if it still holds what
     /// this call wrote, and return an error that says what became of the file.
     fn undo(&self, cause: impl std::fmt::Display) -> anyhow::Error {
-        let rollback = crate::librarian::catalog::dual_write::restore_section_after_failed_commit(
-            &self.path,
-            &self.original,
-            &self.written,
-        );
+        use crate::librarian::catalog::dual_write::{
+            document_label, restore_section_after_failed_commit, without_path,
+        };
+        let label = document_label(&self.path);
+        // Every lower-layer error that enters the text is stripped of the document's path first
+        // (`without_path`), as `dual_write` does: the catalog error, and the io error a failed
+        // restore carries.
+        let cause = without_path(&cause.to_string(), &self.path, &label);
+        let rollback =
+            match restore_section_after_failed_commit(&self.path, &self.original, &self.written) {
+                SectionRollback::Failed(io) => SectionRollback::Failed(std::io::Error::other(
+                    without_path(&io.to_string(), &self.path, &label),
+                )),
+                other => other,
+            };
         anyhow::anyhow!(
-            "event_create: the catalog write failed after `{}` was written, so no event was \
+            "event_create: the catalog write failed after `{label}` was written, so no event was \
              recorded: {cause}. {}",
-            crate::librarian::catalog::dual_write::document_label(&self.path),
             twin_rollback_sentence(&rollback)
         )
     }
@@ -632,11 +641,24 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                              nothing was recorded: {e:#}"
                         ))
                     })?;
+                    let label = crate::librarian::catalog::dual_write::document_label(&doc.path);
                     crate::librarian::util::write_catalogued_file(
                         &super::managed_roots(ctx),
                         &doc.path,
                         &written,
-                    )?;
+                    )
+                    .map_err(|e| {
+                        // The refusal and the io error write `path.display()` (and a link's
+                        // target) into their text; a response names the document by its label.
+                        let e = crate::librarian::catalog::dual_write::without_path(
+                            &format!("{e:#}"),
+                            &doc.path,
+                            &label,
+                        );
+                        LibrarianRecoverableError::new(format!(
+                            "event_create: cannot write {label}, so no event was recorded: {e}"
+                        ))
+                    })?;
                     let file = TwinWrite {
                         path: doc.path,
                         original: doc.text,
@@ -1452,7 +1474,10 @@ pub(crate) mod tests {
     async fn a_failed_file_write_leaves_no_row() {
         let tmp = TempDir::new().unwrap();
         let ctx = mk_ctx(tmp.path().to_path_buf());
-        let real = tmp.path().join("real.md");
+        // The link's target lies in a directory of its own, so the target path is not covered by
+        // stripping the link's own directory.
+        std::fs::create_dir(tmp.path().join("sub")).unwrap();
+        let real = tmp.path().join("sub/real.md");
         std::fs::write(&real, FLAGGED).unwrap();
         let link = tmp.path().join("link.md");
         std::os::unix::fs::symlink(&real, &link).unwrap();
@@ -1475,6 +1500,54 @@ pub(crate) mod tests {
             FLAGGED,
             "nothing was written through the link"
         );
+        let hint = err
+            .downcast_ref::<LibrarianRecoverableError>()
+            .and_then(|e| e.hint.clone())
+            .unwrap_or_default();
+        let shown = format!("{err:#} {hint}");
+        assert!(
+            shown.contains("link.md"),
+            "the error names the document: {shown}"
+        );
+        for (what, path) in [
+            ("the link path", link.display().to_string()),
+            ("the link's target path", real.display().to_string()),
+            ("the temp-dir root", tmp.path().display().to_string()),
+        ] {
+            assert!(!shown.contains(&path), "the error holds {what}: {shown}");
+        }
+    }
+
+    /// Both lower-layer errors a failed restore can carry (a missing file, a link) write the
+    /// path into their text, and so can the cause; none may reach the caller.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_restore_names_the_document_and_holds_no_path() {
+        let tmp = TempDir::new().unwrap();
+        let gone = tmp.path().join("gone.md");
+        let real = tmp.path().join("sub");
+        std::fs::create_dir(&real).unwrap();
+        let real = real.join("real.md");
+        std::fs::write(&real, "x").unwrap();
+        let link = tmp.path().join("link.md");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        for (label, path) in [("a missing file", gone), ("a link", link)] {
+            let file = TwinWrite {
+                path: path.clone(),
+                original: "old".into(),
+                written: "new".into(),
+            };
+            let err = file.undo(format!("boom at {}", path.display()));
+            let text = format!("{err:#}");
+            assert!(text.contains("may still be in it"), "{label}: {text}");
+            for (what, p) in [
+                ("the document path", path.display().to_string()),
+                ("the link's target", real.display().to_string()),
+                ("the temp-dir root", tmp.path().display().to_string()),
+            ] {
+                assert!(!text.contains(&p), "{label}: holds {what}: {text}");
+            }
+        }
     }
 
     #[tokio::test]

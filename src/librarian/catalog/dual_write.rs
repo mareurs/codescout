@@ -374,7 +374,7 @@ pub(crate) fn restore_section_after_failed_commit(
 /// lower layer builds (the read door's `io_at`, `refused()`, `write_catalogued_file`'s refusal)
 /// write `path.display()` into their text. Applied to every such error before it enters a hint.
 /// A path the lower layer spells differently (a link's target, a canonical form) is not seen.
-fn without_path(text: &str, path: &std::path::Path, label: &str) -> String {
+pub(crate) fn without_path(text: &str, path: &std::path::Path, label: &str) -> String {
     let mut out = text.replace(&path.display().to_string(), label);
     if let Some(dir) = path.parent().map(|d| d.display().to_string()) {
         if dir.len() > 1 {
