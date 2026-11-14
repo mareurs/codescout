@@ -128,6 +128,24 @@ fn undo_twin(twin: &Option<TwinWrite>, e: anyhow::Error) -> anyhow::Error {
     }
 }
 
+/// `e` with a sentence that says the destination was already changed. A `supersedes` link writes
+/// the destination's `status: superseded` before the source document and the row, so an error
+/// after that write must not claim less than happened.
+fn note_destination_change(e: anyhow::Error, dst_label: &str) -> anyhow::Error {
+    let sentence = format!(
+        "The destination {dst_label} was already changed to `status: superseded` (the catalog \
+         row still says the old status). Repeat the call after fixing the cause: the status \
+         write is idempotent."
+    );
+    match e.downcast_ref::<LibrarianRecoverableError>() {
+        Some(lower) => anyhow::Error::new(LibrarianRecoverableError {
+            message: format!("{}. {sentence}", lower.message.trim_end_matches('.')),
+            hint: lower.hint.clone(),
+        }),
+        None => anyhow::anyhow!("{}. {sentence}", format!("{e:#}").trim_end_matches('.')),
+    }
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a = parse_args(args)?;
     let now = chrono::Utc::now().timestamp_millis();
@@ -175,6 +193,19 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // leave the catalog untouched rather than recording a transition that never reached
     // the file. Writing the row first and the file second would reproduce the very
     // divergence this fixes, just with a smaller window.
+    //
+    // The preflight runs the source half of the plan first, read-only, and discards its bytes: an
+    // unreadable or symlinked source, or a source that cannot take the line (an unclosed code
+    // fence), then fails BEFORE the destination is written, so the call never half-applies on the
+    // source's content. The real plan stays after the destination write because the two documents
+    // can be one file, and bytes planned before that write would put the old status back.
+    let dst_label = if superseding {
+        let cat = ctx.catalog.lock();
+        plan_relation_line(ctx, &cat, &src_id, &a)?;
+        crate::librarian::catalog::dual_write::document_label(&dst.abs_path)
+    } else {
+        String::new()
+    };
     if superseding {
         crate::librarian::tools::update::write_field_to_frontmatter(
             ctx,
@@ -185,16 +216,15 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     }
 
     let cat = ctx.catalog.lock();
-    let text_twin: String;
-    {
+    let twin_result: Result<String> = (|| {
         // The relation line goes into the source document before the row, inside the same lock
         // and the same transaction, and is put back when the commit fails. A rule that does not
         // apply skips the line and keeps the row; a write that is refused or fails is an error,
         // and the transaction drops with no row recorded.
         let tx = cat.conn.unchecked_transaction()?;
         let mut twin_file: Option<TwinWrite> = None;
-        match plan_relation_line(ctx, &cat, &src_id, &a)? {
-            Twin::Skip(reason) => text_twin = format!("skipped: {reason}"),
+        let text_twin = match plan_relation_line(ctx, &cat, &src_id, &a)? {
+            Twin::Skip(reason) => format!("skipped: {reason}"),
             Twin::Write(file) => {
                 let label = crate::librarian::catalog::dual_write::document_label(&file.path);
                 crate::librarian::util::write_catalogued_file(
@@ -218,10 +248,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 ) {
                     return Err(file.undo(&TWIN_WHAT, e));
                 }
-                text_twin = "written".to_string();
                 twin_file = Some(file);
+                "written".to_string()
             }
-        }
+        };
 
         let row = links::LinkRow {
             src_id: src_id.clone(),
@@ -235,7 +265,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         if let Err(e) = tx.commit() {
             return Err(undo_twin(&twin_file, e.into()));
         }
-    }
+        Ok(text_twin)
+    })();
+    // From here the destination's `status: superseded` is on disk, so an error says so.
+    let text_twin = match twin_result {
+        Ok(text_twin) => text_twin,
+        Err(e) if superseding => return Err(note_destination_change(e, &dst_label)),
+        Err(e) => return Err(e),
+    };
 
     if superseding {
         let mut dst = dst;
@@ -1113,5 +1150,160 @@ mod tests {
         assert!(!msg.contains(&r.root.display().to_string()), "{msg}");
         assert_eq!(std::fs::read_to_string(&r.src).unwrap(), text);
         assert_eq!(link_rows(&r.ctx), 0);
+    }
+
+    // ---- a supersedes link checks the source can take the line before it writes the destination ----
+
+    async fn supersedes(ctx: &ToolContext, src: &str, dst: &str) -> Result<Value> {
+        call(
+            ctx,
+            json!({"src_id": src, "dst_id": dst, "rel": "supersedes"}),
+        )
+        .await
+    }
+
+    fn dst_text(r: &Repo) -> String {
+        std::fs::read_to_string(r.root.join("docs/dst.md")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_supersedes_link_whose_source_cannot_take_the_line_leaves_the_destination_alone() {
+        // An unclosed code fence swallows the new line.
+        let r = repo();
+        let text = format!("{SRC_TEXT}\n```\nunclosed\n");
+        std::fs::write(&r.src, &text).unwrap();
+
+        let err = supersedes(&r.ctx, "src", "dst").await.unwrap_err();
+
+        let msg = shown(&err);
+        assert!(msg.contains("no link was recorded"), "{msg}");
+        assert_eq!(dst_text(&r), DST_TEXT, "the destination is byte-identical");
+        assert_eq!(std::fs::read_to_string(&r.src).unwrap(), text);
+        assert_eq!(link_rows(&r.ctx), 0);
+        let row = artifact::get(&r.ctx.catalog.lock(), "dst")
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, "active", "the catalog status did not move");
+        assert!(
+            !msg.contains("already changed"),
+            "nothing was written, so the error claims no destination change: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_supersedes_link_whose_source_file_is_missing_leaves_the_destination_alone() {
+        let r = repo();
+        std::fs::remove_file(&r.src).unwrap();
+
+        let err = supersedes(&r.ctx, "src", "dst").await.unwrap_err();
+
+        assert!(shown(&err).contains("no link was recorded"), "{err:#}");
+        assert_eq!(dst_text(&r), DST_TEXT, "the destination is byte-identical");
+        assert_eq!(link_rows(&r.ctx), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_supersedes_link_whose_source_is_a_symlink_leaves_the_destination_alone() {
+        let r = repo();
+        std::fs::create_dir(r.root.join("sub")).unwrap();
+        let real = r.root.join("sub/real.md");
+        std::fs::write(&real, SRC_TEXT).unwrap();
+        let link_path = r.root.join("docs/linked.md");
+        std::os::unix::fs::symlink(&real, &link_path).unwrap();
+        artifact::upsert(
+            &r.ctx.catalog.lock(),
+            &TestArtifactRowBuilder::new("linked")
+                .with_abs_path(link_path)
+                .build(),
+        )
+        .unwrap();
+
+        let err = supersedes(&r.ctx, "linked", "dst").await.unwrap_err();
+
+        assert!(shown(&err).contains("no link was recorded"), "{err:#}");
+        assert_eq!(dst_text(&r), DST_TEXT, "the destination is byte-identical");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), SRC_TEXT);
+        assert_eq!(link_rows(&r.ctx), 0);
+    }
+
+    /// The real plan stays AFTER the destination write: here the source and the destination are
+    /// one file, so a plan made once before that write would build its bytes from the text without
+    /// the new status, and writing them would put `status: draft` back.
+    #[tokio::test]
+    async fn a_self_supersedes_keeps_both_the_new_status_and_the_line() {
+        let r = repo();
+
+        let v = supersedes(&r.ctx, "dst", "dst").await.unwrap();
+
+        assert_eq!(v["text_twin"], json!("written"), "{v}");
+        let text = dst_text(&r);
+        assert!(text.contains("status: superseded"), "{text}");
+        assert!(!text.contains("status: draft"), "{text}");
+        assert!(
+            text.ends_with("## Relations\n\n**Supersedes:** [[dst]]\n"),
+            "{text}"
+        );
+        assert_eq!(link_rows(&r.ctx), 1);
+    }
+
+    /// A write failure is the one the preflight cannot see: the destination is already changed,
+    /// and the error says so, by the document's label.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_write_failure_after_the_destination_write_names_the_destination_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = repo();
+        std::fs::set_permissions(&r.src, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().write(true).open(&r.src).is_ok() {
+            // Running as a user who ignores file modes (root): the write cannot be made to fail.
+            return;
+        }
+
+        let err = supersedes(&r.ctx, "src", "dst").await.unwrap_err();
+
+        let msg = shown(&err);
+        assert!(msg.contains("doc(link): cannot write `[[src]]`"), "{msg}");
+        assert!(
+            msg.contains("`[[dst]]` was already changed to `status: superseded`"),
+            "the error names the destination's status change: {msg}"
+        );
+        assert!(
+            !msg.contains(&r.root.display().to_string()),
+            "no absolute path in the error: {msg}"
+        );
+        assert!(dst_text(&r).contains("status: superseded"));
+        assert_eq!(link_rows(&r.ctx), 0, "no row remains");
+    }
+
+    /// The same sentence on every kind of error, and a lower layer's hint stays a hint.
+    #[test]
+    fn the_destination_note_is_added_to_a_recoverable_error_and_to_a_plain_one() {
+        let recoverable = note_destination_change(
+            LibrarianRecoverableError::with_hint("cannot write the source", "fix the source"),
+            "`[[dst]]`",
+        );
+        let lower = recoverable
+            .downcast_ref::<LibrarianRecoverableError>()
+            .expect("stays recoverable");
+        assert!(
+            lower.message.starts_with("cannot write the source"),
+            "{lower}"
+        );
+        assert!(
+            lower
+                .message
+                .contains("`[[dst]]` was already changed to `status: superseded`"),
+            "{lower}"
+        );
+        assert_eq!(lower.hint.as_deref(), Some("fix the source"));
+
+        let plain = note_destination_change(anyhow::anyhow!("disk full"), "`[[dst]]`");
+        let text = format!("{plain:#}");
+        assert!(text.starts_with("disk full"), "{text}");
+        assert!(
+            text.contains("`[[dst]]` was already changed to `status: superseded`"),
+            "{text}"
+        );
     }
 }
