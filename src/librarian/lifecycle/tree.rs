@@ -79,9 +79,11 @@ pub enum TreeProblem {
     /// A tracker file whose frontmatter block does not parse; it is left out.
     Frontmatter { rel_path: String, detail: String },
 }
+
 /// One line that starts with the repo-relative path of the file at fault, then what is wrong.
-/// Several problems of one file join with ` | `, so a remedy's `; ` stays unique to a caller that
-/// appends one.
+/// Several problems of one file join with ` | `. An inner text may carry a `; remedy` of its own
+/// (`SchemaError::FieldNameReserved`, `KeyError`); each `; ` is written `, ` here, so the `; ` a
+/// caller appends between a problem and its remedy is the only one in the text.
 impl std::fmt::Display for TreeProblem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn bar<E: std::fmt::Display>(errors: &[E]) -> String {
@@ -91,41 +93,35 @@ impl std::fmt::Display for TreeProblem {
                 .collect::<Vec<_>>()
                 .join(" | ")
         }
-        match self {
+        let text = match self {
             TreeProblem::Placement(PlacementError::NotMarkdown(path)) => {
-                write!(f, "{path}: is not a markdown file")
+                format!("{path}: is not a markdown file")
             }
             TreeProblem::Placement(PlacementError::OutsideCollection(path)) => {
-                write!(
-                    f,
-                    "{path}: sits directly under a lifecycle folder, in no collection"
-                )
+                format!("{path}: sits directly under a lifecycle folder, in no collection")
             }
             TreeProblem::Placement(PlacementError::BadKey { rel_path, error }) => {
-                write!(f, "{rel_path}: its name is not a valid key ({error})")
+                format!("{rel_path}: its name is not a valid key ({error})")
             }
             TreeProblem::NestedCollection(path) => {
-                write!(
-                    f,
-                    "{path}: sits below a subfolder that holds its own readme"
-                )
+                format!("{path}: sits below a subfolder that holds its own readme")
             }
-            TreeProblem::DuplicateReadme(path) => write!(
-                f,
+            TreeProblem::DuplicateReadme(path) => format!(
                 "{path}: is another readme in its collection folder (only the first in path \
                  order is the readme)"
             ),
             TreeProblem::OrphanEntry(path) => {
-                write!(f, "{path}: no collection readme above this file")
+                format!("{path}: no collection readme above this file")
             }
             TreeProblem::Schema { rel_path, errors } => {
-                write!(f, "{rel_path}: {}", bar(errors))
+                format!("{rel_path}: {}", bar(errors))
             }
             TreeProblem::Entry {
                 rel_path, errors, ..
-            } => write!(f, "{rel_path}: {}", bar(errors)),
-            TreeProblem::Frontmatter { rel_path, detail } => write!(f, "{rel_path}: {detail}"),
-        }
+            } => format!("{rel_path}: {}", bar(errors)),
+            TreeProblem::Frontmatter { rel_path, detail } => format!("{rel_path}: {detail}"),
+        };
+        f.write_str(&text.replace("; ", ", "))
     }
 }
 
@@ -873,6 +869,22 @@ mod tests {
             assert!(text.len() > path.len() + 2, "{text}");
             assert!(!text.contains('\n'), "{text}");
         }
+        // The inner texts of a real `KeyError` and a real `SchemaError` carry a `; remedy` of
+        // their own; the one `; ` of a caller's problem-and-remedy must stay unique.
+        for problem in &all {
+            assert!(!problem.to_string().contains("; "), "{problem}");
+        }
+        assert!(
+            all[2].to_string().contains(", rename the file"),
+            "{}",
+            all[2]
+        );
+        assert!(TreeProblem::Schema {
+            rel_path: path.into(),
+            errors: vec![SchemaError::FieldNameReserved { name: "key".into() }],
+        }
+        .to_string()
+        .contains("no write can set), give the field another name"));
         // Several problems of one file join with a bar, never with `; ` (a remedy's separator).
         let schema = all[6].to_string();
         assert!(schema.contains("`exit_when` is required"), "{schema}");

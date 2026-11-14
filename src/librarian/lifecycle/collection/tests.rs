@@ -1,4 +1,6 @@
 use super::*;
+use crate::librarian::lifecycle::layout::PlacementError;
+use crate::librarian::lifecycle::schema::SchemaError;
 use crate::librarian::lifecycle::testkit::{entry, k, LEDGER, STREAM, STREAM_NO_EXIT};
 use crate::librarian::lifecycle::tree::TreeProblem;
 use std::fs;
@@ -303,6 +305,20 @@ fn a_dir_that_is_not_a_collection_is_refused() {
 
 #[test]
 fn every_load_error_text_names_its_remedy() {
+    // Real inner texts: a schema error and a key error each carry a `; remedy` of their own.
+    let inner: Vec<String> = [
+        TreeProblem::Schema {
+            rel_path: "docs/trackers/ledgers/x/readme.md".into(),
+            errors: vec![SchemaError::FieldNameReserved { name: "key".into() }],
+        },
+        TreeProblem::Placement(PlacementError::BadKey {
+            rel_path: "docs/trackers/ledgers/x/Bad_Name.md".into(),
+            error: Key::parse("Bad_Name").unwrap_err(),
+        }),
+    ]
+    .iter()
+    .map(ToString::to_string)
+    .collect();
     let all = [
         CollectionLoadError::BadKey("../x".into()),
         CollectionLoadError::NotFound("x".into()),
@@ -315,7 +331,7 @@ fn every_load_error_text_names_its_remedy() {
         },
         CollectionLoadError::NotACollectionDir("docs".into()),
         CollectionLoadError::Unreadable("docs/trackers/ledgers/x/readme.md: denied".into()),
-        CollectionLoadError::Broken(vec!["a: one".into(), "b: two".into()]),
+        CollectionLoadError::Broken(inner),
     ];
     // No wildcard: a new variant fails to compile here until a case is added above.
     let _exhaustive = |e: &CollectionLoadError| match e {
@@ -337,6 +353,21 @@ fn every_load_error_text_names_its_remedy() {
             "the remedy of {text:?} must start with one of {OPENERS:?}"
         );
     }
+}
+
+#[test]
+fn a_readme_with_a_reserved_field_name_is_broken_with_one_separator() {
+    let readme = "---\ntitle: T\nentry_kinds: [k]\nstatuses: {open: open, done: terminal}\ninitial_status: open\nfields:\n  status: {type: scalar}\n---\n";
+    let t = checkout(&[("docs/trackers/ledgers/x/readme.md", readme)]);
+    let err = load_collection(t.path(), "x").unwrap_err();
+    let text = err.to_string();
+    assert!(
+        matches!(&err, CollectionLoadError::Broken(p) if p.len() == 1 && p[0].contains("reserved")),
+        "{text}"
+    );
+    assert_eq!(text.split("; ").count(), 2, "{text}");
+    assert!(text.contains("give the field another name"), "{text}");
+    assert!(text.ends_with("; fix each problem named"), "{text}");
 }
 
 #[test]
