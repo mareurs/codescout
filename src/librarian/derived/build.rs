@@ -308,7 +308,7 @@ struct Document {
 
 /// The repo name of `commit`: its `.codescout/repo.toml` blob (`committed`), or the literal
 /// `repo` (`unconfirmed`) when it has none. Never a suggestion from the file system.
-fn repo_name_of(
+pub(crate) fn repo_name_of(
     repo: &git2::Repository,
     commit: &git2::Commit,
 ) -> anyhow::Result<(RepoName, &'static str)> {

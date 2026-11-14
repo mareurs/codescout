@@ -10,6 +10,7 @@ pub mod observations;
 pub mod audit_doc_refs;
 pub mod backfill_chunks;
 pub mod constitution_check;
+pub mod cutover;
 pub mod derive_shadow;
 pub mod doc;
 pub mod doc_augment;
