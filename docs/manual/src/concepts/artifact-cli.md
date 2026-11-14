@@ -57,6 +57,53 @@ behaviour — the CLI is a thin wrapper that calls the same code paths.
 Mirrors the `doc(action="augment")` MCP tool. Accepts `--prompt`, `--params`
 (JSON), and `--merge` for params-only RFC 7396 merge-patch.
 
+## Text in the document
+
+`link` and `event create` write to the document as well as to the catalog.
+The catalog row stays the source of reads. The text is written first, and a
+failed text write is an error that records no row.
+
+A link adds one relation line to the source document, under a `## Relations`
+heading at the end of the body:
+
+```markdown
+## Relations
+
+**Depends on:** [[retrieval-rewrite]]
+```
+
+The label is the rel with `_`, `-` and spaces read as word breaks: lowercase,
+first letter capitalised. `depends_on` gives `Depends on`. The same link run
+twice leaves one line and one row. A rel that cannot make a valid label keeps
+the row and skips the line.
+
+An event is written as text only when the document has `single_writer: true`
+in its frontmatter (a YAML boolean; the string `"true"` does not count) and
+the kind is `note`, `verdict`, `intent`, `reviewed` or `external_signal`. A
+ledger, or a document with `entry_kind`, ignores the flag. Each event is one
+section under a `## Events` heading at the end of the body:
+
+```markdown
+## Events
+
+### note — 2026-11-14T09:30:00Z — alice
+<!-- event {"id":"…","kind":"note","created_at_ms":…,"author":"alice"} -->
+
+> The first thought.
+```
+
+The heading reads `### <kind> — <UTC time> — <author>`; the author is
+`unknown` when none is known. The comment line holds the event as JSON. A
+`**Mutates:** [[key]]` line follows it when the event names a target. The body
+is a blockquote for a `note` whose payload is only text, and a fenced
+`event-payload` JSON block for every other event.
+
+Both commands report the outcome in `text_twin`. `link` returns the bare string
+`ok` when the line was written. When the text was skipped, the response says
+why: `skipped: not a single-writer document`, `skipped: kind has no text twin`,
+`skipped: ledger or entry document`, `skipped: already present`, or a refusal
+to name the target.
+
 ## Output modes
 
 ```bash

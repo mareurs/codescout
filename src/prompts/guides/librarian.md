@@ -339,6 +339,13 @@ doc(action="event_list",   id="...", kinds=["note", "verdict"])
 Event kinds: `note`, `reviewed`, `status_change`, `field_patch`, `superseded_by`,
 `external_signal`, `intent`, `verdict`.
 
+A document with `single_writer: true` in its frontmatter (a YAML boolean) also keeps its
+`note`, `verdict`, `intent`, `reviewed` and `external_signal` events as text. Each event is
+one `### <kind> — <UTC time> — <author>` section under a `## Events` heading at the end of
+the body. The text goes in before the row commits, and the response names the outcome in
+`text_twin`: `written`, or `skipped: <reason>`. A failed text write is an error and records
+no row. A ledger and an entry document ignore the flag.
+
 **`field_patch` is where body forensics live.** Every body write records one, with
 `payload={field: "body", prev_bytes, new_bytes, edits_count, mode, forced,
 replaced_subsections}`. `prev_bytes`/`new_bytes` are whole-file aggregates, so a
@@ -356,6 +363,13 @@ doc(action="graph", id="...", depth=2, rels=["implements", "supersedes"])
 ```
 
 Returns BFS traversal of linked artifacts up to `depth` (1–3).
+
+`doc(action="link")` also writes one line `**<Label>:** [[key]]` under a `## Relations`
+heading at the end of the source document. The label is the rel in sentence case:
+`depends_on` gives `Depends on`. The line goes in before the row. A plain link whose line is
+written returns `"ok"`. A skipped line returns `{ok: true, text_twin: "skipped: <reason>"}`,
+and a `supersedes` link always returns an object with `text_twin`. The same link twice
+leaves one line and one row.
 
 ---
 
