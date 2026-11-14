@@ -747,6 +747,35 @@ mod tests {
         assert_eq!(r.collisions, vec![mono], "{r:?}");
         assert!(r.unreadable.is_empty(), "{r:?}");
     }
+    /// `scan` sorts and dedups every vector at the end, so a repo judged twice cannot be seen in
+    /// its report. This drives `visit_project` directly and reads the vector before that cleanup.
+    #[test]
+    fn two_projects_in_one_repo_are_judged_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let this = tmp.path().join("this");
+        make_repo(&this, Some("alpha"), "a");
+        let mono = tmp.path().join("work/mono");
+        make_repo(&mono, Some("alpha"), "b");
+        std::fs::remove_file(mono.join(".codescout/project.toml")).unwrap();
+        for p in ["svc1", "svc2"] {
+            std::fs::create_dir_all(mono.join(p).join(".codescout")).unwrap();
+            std::fs::write(mono.join(p).join(".codescout/project.toml"), "").unwrap();
+        }
+        let name = n("alpha");
+        let never = || false;
+        let mut state = Scan {
+            name: &name,
+            this_git_root: &this,
+            this_canonical: canonical(&this),
+            this_side: None,
+            expired: &never,
+            judged: BTreeSet::new(),
+            report: ScanReport::default(),
+        };
+        state.visit_project(&mono.join("svc1"), tmp.path());
+        state.visit_project(&mono.join("svc2"), tmp.path());
+        assert_eq!(state.report.collisions, vec![mono], "{:?}", state.report);
+    }
 
     #[test]
     fn the_directory_limit_outranks_the_depth_limit_in_the_scope() {
