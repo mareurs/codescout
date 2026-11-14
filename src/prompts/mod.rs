@@ -4179,6 +4179,32 @@ mod redesign_invariants {
             );
         }
     }
+    /// The runtime guide must say where the vector cache is, how it fills, how to remove it and
+    /// what the reindex response reports. A guide that omits the removal steps invites the
+    /// unsafe form ("delete it at any time"): deleting a SQLite file another process holds open
+    /// can corrupt it, so the safe form names every file and says to stop the processes first.
+    #[test]
+    fn the_runtime_guide_documents_the_vector_cache() {
+        let runtime = crate::prompts::topic_body("librarian-runtime").expect("guide registered");
+        for token in [
+            "vector-cache.db",
+            "vector-cache.db-wal",
+            "vector-cache.db-shm",
+            "embed_cache",
+            "reembed",
+            "stop every codescout process",
+        ] {
+            assert!(
+                runtime.contains(token),
+                "librarian-runtime does not mention `{token}`, so the vector cache is undocumented"
+            );
+        }
+        assert!(
+            !runtime.contains("at any time"),
+            "librarian-runtime tells the reader to delete the cache `at any time`; removing a \
+             SQLite file that a running process holds open can corrupt it"
+        );
+    }
 
     #[test]
     fn every_iron_law_has_do_instead() {
