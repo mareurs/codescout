@@ -597,8 +597,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // `closed` stamp below never reaches an entry; the row takes the status, title and tags the
     // file now holds. `None`: every other document, and an entry patch that changes no
     // frontmatter, take the generic path unchanged.
-    let entry = match super::lifecycle_update::root_and_rel_path(&super::managed_roots(ctx), &full)?
-    {
+    let entry = match super::root_and_rel_path(&super::managed_roots(ctx), &full)? {
         Some((root, rel_path)) => super::lifecycle_update::entry_update(
             &root,
             &rel_path,

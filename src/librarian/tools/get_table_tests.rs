@@ -357,6 +357,38 @@ async fn the_table_is_built_from_the_sessions_checkout() {
     assert!(t.contains("[[2026-11-02-wt]] Wt"), "{t}");
     assert!(!t.contains("2026-11-01-main"), "{t}");
 }
+/// A main-checkout session reading the readme row of a collection in a NESTED worktree checkout
+/// (`<main>/.worktrees/x/docs/trackers/...`) gets that worktree's table: the first managed root
+/// (main) gives `.worktrees/x/docs/trackers/...`, which places as nothing, so the root is narrowed
+/// to the worktree that holds the file.
+#[tokio::test]
+async fn a_main_session_gets_the_table_of_a_readme_in_a_nested_worktree() {
+    let (_tmp, main, worktree) = repo_with_worktree();
+    write(&worktree, README, LEDGER);
+    write(
+        &worktree,
+        "docs/trackers/ledgers/d/2026-11-02-wt.md",
+        &entry("Wt", "open", "2026-11-02", ""),
+    );
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_root(Root {
+            name: "r".into(),
+            path: main.clone(),
+        })
+        .with_current_project(std::sync::Arc::new(CurrentProject {
+            abs_path: main.clone(),
+            git_root: main.clone(),
+            main_root: None,
+            umbrella: None,
+        }))
+        .build();
+    let id = seed(&ctx, &worktree, README, "collection");
+
+    let out = get(&ctx, json!({"id": id})).await.unwrap();
+
+    let t = table(&out);
+    assert!(t.contains("[[2026-11-02-wt]] Wt"), "{t}");
+}
 
 /// A readme whose schema fails gives the loader's readable problems, never a table.
 #[tokio::test]

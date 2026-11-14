@@ -563,13 +563,49 @@ async fn an_update_in_a_worktree_reads_the_schema_from_the_worktree() {
     let text = refusal(&ctx, &id, json!({"status": "parked"})).await;
     assert!(text.contains("\"parked\" is not declared"), "{text}");
 }
+/// A main-checkout session updating an entry whose row lives in a NESTED worktree checkout
+/// (`<main>/.worktrees/x/docs/trackers/...`) takes the entry route against the worktree's
+/// collection: the first managed root (main) gives `.worktrees/x/docs/trackers/...`, which places
+/// as nothing, so the root is narrowed to the worktree that holds the file.
+#[tokio::test]
+async fn a_main_session_update_of_an_entry_in_a_nested_worktree_takes_the_entry_route() {
+    let (_tmp, main, worktree) = repo_with_worktree();
+    write(&worktree, README, LEDGER);
+    let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+        .with_root(Root {
+            name: "r".into(),
+            path: main.clone(),
+        })
+        .with_current_project(std::sync::Arc::new(CurrentProject {
+            abs_path: main.clone(),
+            git_root: main.clone(),
+            main_root: None,
+            umbrella: None,
+        }))
+        .build();
+    let id = seed(&ctx, &worktree, ENTRY, &open_entry(), "entry", "open");
+
+    let text = refusal(&ctx, &id, json!({"status": "bogus"})).await;
+    assert!(text.contains("\"bogus\" is not declared"), "{text}");
+    assert_eq!(read(&worktree, ENTRY), open_entry(), "nothing written");
+
+    update(&ctx, &id, json!({"status": "done"})).await.unwrap();
+
+    let text = read(&worktree, ENTRY);
+    assert!(has_line(&text, "status: done"), "{text}");
+    assert!(
+        has_line(&text, &format!("status_since: {}", today())),
+        "{text}"
+    );
+    assert!(has_line(&text, &format!("closed: {}", today())), "{text}");
+}
 
 /// The catalog spells a Windows path `//?/C:/…` and `current_project` spells its root
 /// `\\?\C:\…`; the entry route must see one below the other (the spelling mismatch of
 /// `comparable_path`). Fed as plain strings, so it runs on any host.
 #[test]
 fn a_catalog_spelling_is_below_a_native_verbatim_root_on_windows() {
-    use super::lifecycle_update::rel_path_below;
+    use super::rel_path_below;
     let rel = rel_path_below(
         r"\\?\C:\Users\dev\proj",
         "//?/C:/Users/dev/proj/docs/trackers/ledgers/d/2026-11-01-pick-x.md",
@@ -604,7 +640,7 @@ fn a_catalog_spelling_is_below_a_native_verbatim_root_on_windows() {
 /// the root is dropped.
 #[test]
 fn on_unix_the_path_below_a_root_keeps_its_bytes() {
-    use super::lifecycle_update::rel_path_below;
+    use super::rel_path_below;
     assert_eq!(
         rel_path_below("/p/", "/p/docs/a.md", false).as_deref(),
         Some("docs/a.md")
@@ -617,7 +653,7 @@ fn on_unix_the_path_below_a_root_keeps_its_bytes() {
 /// in silence; any other file outside every root keeps the generic path.
 #[test]
 fn a_lifecycle_file_below_no_managed_root_is_refused() {
-    use super::lifecycle_update::root_and_rel_path;
+    use super::root_and_rel_path;
     let roots = [std::path::PathBuf::from("/proj")];
     let outside = Path::new("/elsewhere/docs/trackers/ledgers/d/2026-11-01-pick-x.md");
     let text = format!("{:#}", root_and_rel_path(&roots, outside).unwrap_err());

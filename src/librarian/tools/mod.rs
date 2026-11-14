@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::librarian::catalog::Catalog;
 use crate::librarian::classify::CompiledRule;
+use crate::librarian::lifecycle::layout::{place, Placement, PlacementError};
 #[cfg(test)]
 use crate::librarian::workspace::Root;
 use crate::librarian::workspace::WorkspaceConfig;
@@ -344,7 +345,7 @@ fn comparable_path(path: &std::path::Path) -> Vec<u8> {
 }
 
 /// The Windows half of [`comparable_path`], on a string: `\` becomes `/` and a leading `//?/`
-/// goes. A plain function so the rule can be tested on any host; `lifecycle_update` reads a
+/// goes. A plain function so the rule can be tested on any host; [`rel_path_below`] reads a
 /// catalogued path below its root with it.
 fn windows_comparable(raw: &str) -> String {
     let slashed = raw.replace('\\', "/");
@@ -377,6 +378,85 @@ pub(crate) fn containing_root<'a>(
         target == root || (target.starts_with(&root) && target.get(root.len()) == Some(&b'/'))
     })
 }
+
+/// The root `full` is read against, and `full` below it as a `/` path: the first of `roots`
+/// that contains it, matched by `containing_root`, so the catalog's Windows spelling
+/// (`//?/C:/…`) is found below a root spelled `\\?\C:\…`. `managed_roots` lists the session's
+/// git root first, so a worktree session reads its own checkout. When the path below that root
+/// places as nothing but the file sits in a lifecycle tree, the root is narrowed to the nearest
+/// repository that holds the file (`util::door_root` within that one root): a nested worktree
+/// checkout (`<main>/.worktrees/x/docs/trackers/…`) is read as its own checkout. `Ok(None)`: the
+/// generic path runs. A file in a lifecycle tree that no root gives a path for is refused, never
+/// `Ok(None)`.
+fn root_and_rel_path(
+    roots: &[std::path::PathBuf],
+    full: &std::path::Path,
+) -> Result<Option<(std::path::PathBuf, String)>> {
+    let below = |root: &std::path::Path| match (root.to_str(), full.to_str()) {
+        (Some(r), Some(f)) => rel_path_below(r, f, cfg!(windows)),
+        _ => None,
+    };
+    if let Some(root) = containing_root(roots, full) {
+        if let Some(rel) = below(root) {
+            if place(&rel).is_none() && unrooted_placement(full).is_some() {
+                let inner = crate::librarian::util::door_root(std::slice::from_ref(root), full);
+                if let Some((inner, inner_rel)) = inner.and_then(|i| below(&i).map(|r| (i, r))) {
+                    if place(&inner_rel).is_some() {
+                        return Ok(Some((inner, inner_rel)));
+                    }
+                }
+            }
+            return Ok(Some((root.clone(), rel)));
+        }
+    }
+    // No root gives a path to place. A file that sits in a lifecycle tree is refused rather than
+    // updated on the generic path, which would skip every lifecycle check in silence.
+    if unrooted_placement(full).is_some() {
+        return Err(LibrarianRecoverableError::new(format!(
+            "{} is a lifecycle tracker file that no managed root of this session holds at a \
+             UTF-8 path, so its collection cannot be loaded; use a session whose project holds \
+             the file",
+            full.display()
+        )));
+    }
+    Ok(None)
+}
+
+/// What `layout::place` makes of `full`, a path no root gives a repo-relative form of, read from
+/// its first `docs/trackers/` segment that places; `None` when no such segment places (the file
+/// is in no lifecycle tree).
+fn unrooted_placement(full: &std::path::Path) -> Option<Result<Placement, PlacementError>> {
+    let lossy = full.to_string_lossy();
+    let spelled = if cfg!(windows) {
+        windows_comparable(&lossy)
+    } else {
+        lossy.into_owned()
+    };
+    spelled
+        .match_indices("docs/trackers/")
+        .filter(|(i, _)| *i == 0 || spelled[..*i].ends_with('/'))
+        .find_map(|(i, _)| place(&spelled[i..]))
+}
+
+/// `full` below `root`, both as spelled, as a repo-relative path; `None` when `root` does not
+/// contain it (a component boundary, not a string prefix) or is `full` itself. `windows`: read
+/// both as `comparable_path` does on Windows (`\` is `/`, a leading `//?/` goes); else the bytes
+/// are compared as they are, as `comparable_path` does on Unix.
+fn rel_path_below(root: &str, full: &str, windows: bool) -> Option<String> {
+    let spell = |s: &str| {
+        if windows {
+            windows_comparable(s)
+        } else {
+            s.to_string()
+        }
+    };
+    let (root, full) = (spell(root), spell(full));
+    let rel = full
+        .strip_prefix(root.trim_end_matches('/'))?
+        .strip_prefix('/')?;
+    (!rel.is_empty()).then(|| rel.to_string())
+}
+
 /// The actions a tool's schema advertises: its `action` enum.
 ///
 /// The enum is the one list of valid actions that a test already holds against each tool's

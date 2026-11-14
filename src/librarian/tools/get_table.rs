@@ -12,8 +12,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::Value;
 
-use super::lifecycle_update::{root_and_rel_path, unrooted_placement};
-use super::{LibrarianRecoverableError, ToolContext};
+use super::{root_and_rel_path, unrooted_placement, LibrarianRecoverableError, ToolContext};
 use crate::librarian::lifecycle::collection::{load_collection_dir, CollectionLoadError};
 use crate::librarian::lifecycle::layout::{place, Role};
 use crate::librarian::lifecycle::schema::TABLE_COLUMNS;

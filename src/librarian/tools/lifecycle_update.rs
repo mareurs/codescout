@@ -7,7 +7,7 @@
 //! `body_edits` or `commit_refresh` alone).
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Result;
 use chrono::NaiveDate;
@@ -19,7 +19,7 @@ use super::update::UpdatePatch;
 use super::LibrarianRecoverableError;
 use crate::librarian::lifecycle::collection::load_collection_dir;
 use crate::librarian::lifecycle::entry::parse_date;
-use crate::librarian::lifecycle::layout::{place, Placement, PlacementError, Role};
+use crate::librarian::lifecycle::layout::{place, Role};
 use crate::librarian::lifecycle::schema::StatusClass;
 use crate::librarian::lifecycle::write::{read_entry, update_entry, UpdateSpec, WriteProblem};
 
@@ -34,70 +34,6 @@ pub(super) struct EntryUpdate {
 
 fn refuse(text: impl Into<String>) -> anyhow::Error {
     LibrarianRecoverableError::new(text)
-}
-
-/// The root `full` is read against, and `full` below it as a `/` path: the first of `roots`
-/// that contains it, matched by `containing_root`, so the catalog's Windows spelling
-/// (`//?/C:/…`) is found below a root spelled `\\?\C:\…`. `managed_roots` lists the session's
-/// git root first, so a worktree session reads its own checkout. `Ok(None)`: the generic path
-/// runs. A file in a lifecycle tree that no root gives a path for is refused, never `Ok(None)`.
-pub(super) fn root_and_rel_path(
-    roots: &[PathBuf],
-    full: &Path,
-) -> Result<Option<(PathBuf, String)>> {
-    if let Some(root) = super::containing_root(roots, full) {
-        if let (Some(r), Some(f)) = (root.to_str(), full.to_str()) {
-            if let Some(rel) = rel_path_below(r, f, cfg!(windows)) {
-                return Ok(Some((root.clone(), rel)));
-            }
-        }
-    }
-    // No root gives a path to place. A file that sits in a lifecycle tree is refused rather than
-    // updated on the generic path, which would skip every lifecycle check in silence.
-    if unrooted_placement(full).is_some() {
-        return Err(refuse(format!(
-            "{} is a lifecycle tracker file that no managed root of this session holds at a \
-             UTF-8 path, so its collection cannot be loaded; use a session whose project holds \
-             the file",
-            full.display()
-        )));
-    }
-    Ok(None)
-}
-
-/// What `layout::place` makes of `full`, a path no root gives a repo-relative form of, read from
-/// its first `docs/trackers/` segment that places; `None` when no such segment places (the file
-/// is in no lifecycle tree).
-pub(super) fn unrooted_placement(full: &Path) -> Option<Result<Placement, PlacementError>> {
-    let lossy = full.to_string_lossy();
-    let spelled = if cfg!(windows) {
-        super::windows_comparable(&lossy)
-    } else {
-        lossy.into_owned()
-    };
-    spelled
-        .match_indices("docs/trackers/")
-        .filter(|(i, _)| *i == 0 || spelled[..*i].ends_with('/'))
-        .find_map(|(i, _)| place(&spelled[i..]))
-}
-
-/// `full` below `root`, both as spelled, as a repo-relative path; `None` when `root` does not
-/// contain it (a component boundary, not a string prefix) or is `full` itself. `windows`: read
-/// both as `comparable_path` does on Windows (`\` is `/`, a leading `//?/` goes); else the bytes
-/// are compared as they are, as `comparable_path` does on Unix.
-pub(super) fn rel_path_below(root: &str, full: &str, windows: bool) -> Option<String> {
-    let spell = |s: &str| {
-        if windows {
-            super::windows_comparable(s)
-        } else {
-            s.to_string()
-        }
-    };
-    let (root, full) = (spell(root), spell(full));
-    let rel = full
-        .strip_prefix(root.trim_end_matches('/'))?
-        .strip_prefix('/')?;
-    (!rel.is_empty()).then(|| rel.to_string())
 }
 
 /// The `extra` of a patch, split as `update_entry` takes it.
