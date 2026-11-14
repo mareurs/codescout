@@ -1074,6 +1074,13 @@ mod tests {
             1,
             "audit shard I/O is out of this fix's scope: an fsync of a directory, no content",
         ),
+        (
+            "tools/create.rs",
+            "std::fs::OpenOptions::new()",
+            1,
+            "the exclusive create of a new artifact's file (write side, create_new; no content is \
+             read)",
+        ),
     ];
 
     /// Production code of a Rust source: every `#[cfg(test)]` item blanked, and every string,
