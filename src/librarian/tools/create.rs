@@ -2872,8 +2872,10 @@ mod tests {
         assert_eq!(slug_of(&ctx.catalog.lock(), id).as_deref(), Some("pick-x"));
     }
 
-    /// `write_new` in `Exclusive` mode names the refused path by its `rel_path`, whether the file
-    /// or only the row is there.
+    /// `write_new` in `Exclusive` mode names the refused path by its `rel_path`. The first half
+    /// (a row, no file) reaches `insert_new` and its `Exists` mapping; the second half (a file, no
+    /// row) is caught by the `exists` pre-check before the race path. The race path's mapping is
+    /// `exclusive_refusal_maps_only_a_present_leaf_or_an_existing_row_to_path_exists`.
     #[tokio::test]
     async fn exclusive_write_refuses_an_existing_file_or_row_naming_the_rel_path() {
         let tmp = TempDir::new().unwrap();
@@ -2899,6 +2901,7 @@ mod tests {
             Some(stale.clone())
         );
 
+        // The pre-check refuses this one: the file is there before the call starts.
         artifact::delete(&ctx.catalog.lock(), &stale.id).unwrap();
         std::fs::create_dir_all(full.parent().unwrap()).unwrap();
         std::fs::write(&full, "planted bytes").unwrap();
@@ -2913,6 +2916,53 @@ mod tests {
         assert_eq!(err.to_string(), format!("path exists: {rel}"));
         assert_eq!(std::fs::read(&full).unwrap(), b"planted bytes");
         assert_eq!(artifact_count(&ctx.catalog.lock()), 0);
+    }
+
+    /// The race path's mapping, called directly: the pre-check in `write_new` hides it, since a
+    /// file that is there before the call never reaches `create_new`. An `AlreadyExists` with the
+    /// leaf present (a racer's file) and an `InsertError::Exists` are the recoverable
+    /// `path exists: <rel_path>`; an `AlreadyExists` with no leaf (`create_dir_all` meeting a file
+    /// where a directory belongs) passes through unchanged.
+    #[test]
+    fn exclusive_refusal_maps_only_a_present_leaf_or_an_existing_row_to_path_exists() {
+        let tmp = TempDir::new().unwrap();
+        let rel = "d/pick-x.md";
+        let is_path_exists = |e: &anyhow::Error| {
+            e.downcast_ref::<LibrarianRecoverableError>()
+                .is_some_and(|r| r.message == format!("path exists: {rel}"))
+        };
+
+        let leaf = tmp.path().join("d/pick-x.md");
+        std::fs::create_dir_all(leaf.parent().unwrap()).unwrap();
+        std::fs::write(&leaf, "a racer's bytes").unwrap();
+        let racer_file = exclusive_refusal(
+            anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::AlreadyExists)),
+            &leaf,
+            rel,
+        );
+        assert!(is_path_exists(&racer_file), "{racer_file:#}");
+
+        let blocker = tmp.path().join("blocker");
+        std::fs::write(&blocker, "a file where a directory should be").unwrap();
+        let no_leaf = blocker.join("pick-x.md");
+        let passed = exclusive_refusal(
+            anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::AlreadyExists)),
+            &no_leaf,
+            rel,
+        );
+        assert!(!is_path_exists(&passed), "{passed:#}");
+        assert_eq!(
+            passed.downcast_ref::<std::io::Error>().map(|e| e.kind()),
+            Some(std::io::ErrorKind::AlreadyExists),
+            "passed through unchanged: {passed:#}"
+        );
+
+        let row_exists = exclusive_refusal(
+            anyhow::Error::new(artifact::InsertError::Exists),
+            &no_leaf,
+            rel,
+        );
+        assert!(is_path_exists(&row_exists), "{row_exists:#}");
     }
 
     /// A slug failure inside the exclusive transaction rolls the row back before any directory or
