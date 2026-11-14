@@ -313,8 +313,10 @@ pub(crate) fn parse_event_sections(doc: &str) -> Vec<EventText> {
 /// already there. A document with no `## Events` heading gets one at the end of its body. The
 /// frontmatter block is left byte for byte.
 ///
-/// Refuses an `id` that `doc` already holds, and a `mutates` form that is not one `[[…]]` token
-/// without whitespace (such a form could start a line of its own).
+/// Refuses an `id` that `doc` already holds, a `mutates` form that is not one `[[…]]` token
+/// without whitespace (such a form could start a line of its own), and a document in which the
+/// new section would not read back (for example an unclosed code fence before the insertion
+/// point). The check re-parses the result and compares ids only.
 pub(crate) fn splice_event(doc: &str, e: &EventText) -> Result<String> {
     let (_, body) = frontmatter::parse(doc)?;
     if parse_event_sections(doc).iter().any(|x| x.id == e.id) {
@@ -357,7 +359,22 @@ pub(crate) fn splice_event(doc: &str, e: &EventText) -> Result<String> {
             }
         }
     };
-    Ok(frontmatter::replace_body(doc, &new_body).unwrap_or(new_body))
+    let out = frontmatter::replace_body(doc, &new_body).unwrap_or(new_body);
+    // An open code fence, or other text that swallows the new section, would make the event
+    // invisible to the parser, and a retry would then add it again.
+    if parse_event_sections(&out)
+        .iter()
+        .filter(|x| x.id == e.id)
+        .count()
+        != 1
+    {
+        bail!(
+            "event {} would not be readable back from this document (an unclosed code fence \
+             before the insertion point is the usual cause); nothing was added",
+            e.id
+        );
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -658,5 +675,26 @@ mod tests {
             1,
             "control: the parser is live and sees only the real entry: {with_entry}"
         );
+    }
+    #[test]
+    fn a_document_with_an_unclosed_fence_refuses_an_event_that_would_not_read_back() {
+        // The open fence runs to the end of the body, so anything spliced after it is code text.
+        let unclosed = "# T\n\n```\nunclosed\n";
+        let err = splice_event(unclosed, &note("ev-1", "x")).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("ev-1"), "{msg}");
+        assert!(msg.contains("would not be readable back"), "{msg}");
+
+        let events_after = "# T\n\n```\nunclosed\n\n## Events\n";
+        let err = splice_event(events_after, &note("ev-1", "x")).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("would not be readable back"),
+            "{err:#}"
+        );
+
+        // A closed fence before the insertion point is no problem.
+        let closed = "# T\n\n```\nclosed\n```\n";
+        let doc = splice_event(closed, &note("ev-1", "x")).unwrap();
+        assert_eq!(ids(&doc), vec!["ev-1"]);
     }
 }
