@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::dual_write::{TwinWhat, TwinWrite};
-use crate::librarian::catalog::event_text::{splice_event, EventText};
+use crate::librarian::catalog::event_text::{splice_event, EventSource, EventText};
 use crate::librarian::catalog::{event_edges, events, sources};
 
 fn any_value_schema(_g: &mut schemars::SchemaGenerator) -> schemars::Schema {
@@ -589,7 +589,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         head_commit: a.head_commit.clone(),
                         parent: parent_id.clone(),
                         resolves: a.resolves_intent_event_id.clone(),
-                        source: a.source.as_ref().map(|s| (s.kind.clone(), s.uri.clone())),
+                        source: a.source.as_ref().map(|s| EventSource {
+                            kind: s.kind.clone(),
+                            uri: s.uri.clone(),
+                            payload: s.payload.clone(),
+                        }),
                         mutates,
                         payload: a.payload.clone(),
                     };
@@ -1374,6 +1378,41 @@ pub(crate) mod tests {
             first["event_id"].as_str(),
             "the second note chains off the first"
         );
+    }
+
+    /// The source's payload is stored in the `sources` row; the section keeps it too, or after the
+    /// rows stop being read it would exist nowhere. A writer that drops `payload` from the comment
+    /// fails the text check.
+    #[tokio::test]
+    async fn a_source_payload_is_written_into_the_section() {
+        let (_tmp, ctx, path) = twin_fixture(FLAGGED);
+        let r = call(
+            &ctx,
+            json!({
+                "artifact_id": "doc1", "kind": "note", "payload": {"text": "seen"},
+                "source": {"kind": "manual", "uri": "https://example.org/a",
+                           "payload": {"sha": "abc", "n": [1, 2]}}
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r["text_twin"], "written", "{r}");
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains(
+                r#""source":{"kind":"manual","uri":"https://example.org/a","payload":{"sha":"abc","n":[1,2]}}"#
+            ),
+            "{text}"
+        );
+        let sections = parse_event_sections(&text);
+        assert_eq!(sections.len(), 1, "{text}");
+        let source = sections[0]
+            .source
+            .as_ref()
+            .expect("the section has a source");
+        assert_eq!(source.kind, "manual");
+        assert_eq!(source.payload, Some(json!({"sha": "abc", "n": [1, 2]})));
     }
 
     #[tokio::test]

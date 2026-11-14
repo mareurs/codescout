@@ -51,8 +51,8 @@ pub(crate) struct EventText {
     pub head_commit: Option<String>,
     pub parent: Option<String>,
     pub resolves: Option<String>,
-    /// `(kind, uri)` of the event's source.
-    pub source: Option<(String, String)>,
+    /// The event's source: kind, uri and the source's payload.
+    pub source: Option<EventSource>,
     /// Grammar forms such as `[[key]]`, each one token without whitespace.
     pub mutates: Vec<String>,
     pub payload: Value,
@@ -75,13 +75,17 @@ struct CommentJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resolves: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source: Option<SourceJson>,
+    source: Option<EventSource>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SourceJson {
-    kind: String,
-    uri: String,
+/// The source of an event, as the comment line writes it: the `sources` row's kind and uri, and its
+/// payload when it has one. A comment written without `payload` reads back with `None`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct EventSource {
+    pub kind: String,
+    pub uri: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<Value>,
 }
 
 /// The text a heading shows for `s`: control characters (line ends included) become spaces, so
@@ -137,13 +141,10 @@ pub(crate) fn render_event_section(e: &EventText) -> String {
         head_commit: e.head_commit.clone(),
         parent: e.parent.clone(),
         resolves: e.resolves.clone(),
-        source: e.source.as_ref().map(|(kind, uri)| SourceJson {
-            kind: kind.clone(),
-            uri: uri.clone(),
-        }),
+        source: e.source.clone(),
     };
     let json = serde_json::to_string(&comment)
-        .expect("a struct of strings and one integer always serializes")
+        .expect("strings, one integer and a JSON value always serialize")
         .replace('>', "\\u003e");
     let author = e
         .author
@@ -277,7 +278,7 @@ fn read_section(lines: &[Line<'_>]) -> Option<EventText> {
         head_commit: meta.head_commit,
         parent: meta.parent,
         resolves: meta.resolves,
-        source: meta.source.map(|s| (s.kind, s.uri)),
+        source: meta.source,
         mutates,
         payload,
     })
@@ -474,7 +475,11 @@ mod tests {
             head_commit: Some("d4e5f6".to_owned()),
             parent: Some("ev-3".to_owned()),
             resolves: Some("ev-2".to_owned()),
-            source: Some(("file".to_owned(), "docs/x.md".to_owned())),
+            source: Some(EventSource {
+                kind: "file".to_owned(),
+                uri: "docs/x.md".to_owned(),
+                payload: None,
+            }),
             mutates: vec!["[[a]]".to_owned(), "[[b:F-1]]".to_owned()],
             payload: json!({ "text": "two\nlines" }),
         };
@@ -484,6 +489,63 @@ mod tests {
             "the mutates line follows the comment: {doc}"
         );
         assert_eq!(parse_event_sections(&doc), vec![full]);
+    }
+
+    /// A source payload of each JSON shape survives render and parse, and the comment stays one
+    /// line that no payload text can close (`-->` and a line end inside a string). A renderer or a
+    /// parser that drops `payload` fails the equality.
+    #[test]
+    fn a_source_payload_round_trips_in_every_shape() {
+        for payload in [
+            json!({"sha": "abc", "n": 2}),
+            json!("a plain string --> with an arrow\nand a line end"),
+            json!({"outer": {"list": [1, {"deep": [true, null]}], "s": "<!-- x -->"}}),
+        ] {
+            let mut e = note("ev-1", "x");
+            e.source = Some(EventSource {
+                kind: "manual".to_owned(),
+                uri: "https://example.org/a".to_owned(),
+                payload: Some(payload.clone()),
+            });
+            let doc = splice_event("# T\n", &e).unwrap();
+            assert_eq!(
+                lines_starting(&doc, "<!-- event "),
+                1,
+                "the comment stays one line: {doc}"
+            );
+            assert_eq!(parse_event_sections(&doc), vec![e], "{payload}: {doc}");
+        }
+    }
+
+    /// A comment written before `source.payload` existed (kind and uri only) still parses, with no
+    /// payload. Removing `#[serde(default)]` from the field fails it.
+    #[test]
+    fn a_source_without_a_payload_still_parses() {
+        let doc = concat!(
+            "# T\n\n## Events\n\n",
+            "### note — 2026-11-14T06:30:00Z — alice\n",
+            "<!-- event {\"id\":\"ev-1\",\"kind\":\"note\",\"created_at_ms\":1794637800000,",
+            "\"author\":\"alice\",\"source\":{\"kind\":\"manual\",\"uri\":\"u\"}} -->\n",
+            "\n> x\n",
+        );
+        let parsed = parse_event_sections(doc);
+        assert_eq!(parsed.len(), 1, "{doc}");
+        assert_eq!(
+            parsed[0].source,
+            Some(EventSource {
+                kind: "manual".to_owned(),
+                uri: "u".to_owned(),
+                payload: None,
+            })
+        );
+        let mut rendered = note("ev-1", "x");
+        rendered.source = parsed[0].source.clone();
+        assert!(
+            !splice_event("# T\n", &rendered)
+                .unwrap()
+                .contains("payload"),
+            "no payload writes no `payload` key"
+        );
     }
 
     #[test]
