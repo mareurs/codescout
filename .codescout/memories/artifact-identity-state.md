@@ -16,6 +16,8 @@ Plan D scout written 2026-11-14: `docs/research/2026-11-14-artifact-identity-pla
 
 Plan C2 LANDED 2026-11-14 (subagent-driven; operator chose it, then "merge locally"): `experiments` fast-forwarded `e1bd818b7` to `5fc3680f4`; worktree and branch removed. Gate on the merged tree: lean 9996/9996, default 10090/10090, python 1836, fmt and clippy 0. Record of rulings R1-R19, deferred findings, decisions (the operator said "choose yourself": I-2 link merge conflicts accepted for now and revisited before Plan E; I-4 truncating writes `a806db1ec4ea162b` fixed BEFORE Plan D; M-5 accepted), Plan D/E preconditions: `docs/research/2026-11-14-artifact-identity-plan-c2-execution-state.md` (id `bf5a4e67591b53e0`). Bugs filed: `84e6e61e03beace6`, `b2ec2d2e35fbbf30`, `46099dbdb68e0d7b`, `133504302d03e590`. Next: the atomic write door (`a806db1ec4ea162b`), then C3, then the Plan D plan, then E.
 
+Atomic write plan WRITTEN 2026-11-14: `docs/superpowers/plans/2026-11-14-atomic-catalogued-write-door.md` (3 tasks plus the gate; rulings A-R1..A-R6). The door will call the existing `util::fs::atomic_write` with a writability probe (a read-only file stays refused); the Plan C2 stopgap sentence is removed; an inventory files bugs for other writers outside the door. Waiting for the operator's review and execution choice.
+
 ## Rules that bite when resuming
 
 - A full gate runs only on an UNTOUCHED tree (no implementer holds an open round); see session-log F-16.
