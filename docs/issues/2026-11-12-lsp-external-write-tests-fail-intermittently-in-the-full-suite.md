@@ -11,7 +11,7 @@ tags:
 closed: 2026-11-12
 opened: 2026-11-12
 severity: medium
-unverified: 'Mitigated, not shown fixed: 20 clean full-suite iterations against an earlier rate of 2 in 15, so about a 6% chance of that result if nothing had changed. Why the server answers `null` was not established. The null answers still happen on the fixed code for all I know: the retry hides them, and they were not counted. The mutation check on the retry was one run of one mutant (both resync sites removed). Two earlier attempts to reproduce the failure (18 loaded iterations of the rename tests alone, 12 loaded module-parallel iterations) did not reproduce it; only the whole suite did, so the condition may be the suite''s own parallelism and not load. The original failure rate was 2 of 6 lane runs on the branch and 1 of 6 on experiments.'
+unverified: 'Mitigated, not shown fixed, and the mitigation covers the rename tests only: 20 clean full-suite iterations against an earlier rate of 2 in 15, so about a 6% chance of that result if nothing had changed. A peer session (aadfcca23) recorded one failure of `goto_definition_follows_a_write_made_outside_codescout` (empty result, `src/lsp/client.rs:4262`) in the lean lane of a Plan B2 branch tree that does not contain 4603d77cf (checked with `git merge-base --is-ancestor`, rc 1). 4603d77cf changes only the rename helper, so no run measured whether goto-definition still fails on the fixed code; one failure in four gates is a sample, not a rate. Why the server answers `null` was not established. The null answers still happen on the fixed code for all I know: the retry hides them, and they were not counted. The mutation check on the retry was one run of one mutant (both resync sites removed). Two earlier attempts to reproduce the failure (18 loaded iterations of the rename tests alone, 12 loaded module-parallel iterations) did not reproduce it; only the whole suite did, so the condition may be the suite''''s own parallelism and not load. The original failure rate was 2 of 6 lane runs on the branch and 1 of 6 on experiments.'
 ---
 
 # BUG: The LSP external-write tests fail intermittently in the full suite
@@ -128,6 +128,9 @@ Mitigated on 2026-11-12 by `4603d77cf`: 20 of 20 full-suite iterations without a
 **Reopen trigger:** any failure of an `rename_edit_*`, `*_follows_a_write_made_outside_codescout`, `references_into_another_file_*` or `document_symbols_reflects_*` test in a gate run after `4603d77cf`. Keep the log of that run and read the panic text first: `rename_after_an_external_write` asserts three different things, and each points at a different cause (the rename must edit `lib.rs`; `other.rs` must be edited for a prepend; every `other.rs` range must read `target_fn` on disk). A failure on the third is a stale-copy defect in `resync_all_drifted`, not a flake.
 
 Open, none blocking: why rust-analyzer answers `null` (`9391e97eeb937e90` holds the product side); the `usage.db` row tests that failed in the same stress runs (`6767d5eaafa320c7`); the process friction of the discarded run (bug-fix-session-log F-238).
+
+
+Scope of the mitigation (added 2026-11-14): `4603d77cf` fixes the rename helper only. The peer failure recorded in `aadfcca23` is a goto-definition test with an empty result, on a tree without `4603d77cf`. No run has stressed the goto-definition, references and `document_symbols` tests on the fixed code, so the 20 of 20 result says nothing about them. To measure it, run the full default lane with `--stress-count 20` inside one slot lease, with `cargo clean -p codescout` first (bug-fix-session-log F-238), and count failures per test name, not per iteration.
 
 ## References
 
