@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 18
-entry_high_water_W: 11
+entry_high_water_F: 23
+entry_high_water_W: 12
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -118,6 +118,11 @@ entry_high_water_W: 11
 | F-16 | 2026-11-13 | med | shared-checkout | mitigated | **A background gate ran while an implementer edited the same worktree, so its green could not be trusted** — the output carries no commit id; discarded and rerun on an untouched tree |
 | F-17 | 2026-11-14 | med | plan-prose | open | **The A-R2 writability probe trips the read-door source gate** — `OpenOptions::new` in `src/librarian/util.rs` counts as a raw read; Task 1 Step 4 does not run that test |
 | F-18 | 2026-11-14 | med | plan-prose | open | **An atomic replace needs a writable directory; the plan calls the new refusal a failed write and mis-predicts its test as already green** — in-place `fs::write` needs only the file's permission |
+| F-19 | 2026-11-14 | high | architectural | open | **Plan C3's age eviction deletes the vectors of stable content** — the stamp and marker skips mean a stable file's rows are never hit, so they age out at 90 days |
+| F-20 | 2026-11-14 | med | plan-prose | open | **Plan C3 R5 understates the cold-cache hole: every stamped artifact is unqueued, not 26.6% of chunks** — the cache starts empty for the whole corpus; the scout's "first reindex embeds it anyway" is refuted |
+| F-21 | 2026-11-14 | med | plan-prose | open | **Plan C3 Task 2's text-scan guard does not survive rustfmt** — the chained call is about 113 columns, so `.with_vector_cache(model, ` matches 0 times after formatting |
+| F-22 | 2026-11-14 | med | plan-prose | open | **Plan C3 contradicts two SQLite documents: WITHOUT ROWID with 3 KB blobs, and "delete the file at any time"** — withoutrowid.html § 4; howtocorrupt.html § 2.5 |
+| F-23 | 2026-11-14 | low | plan-prose | open | **Plan C3: five small drifts between its text and the code** — guide claims a model switch-back reads the cache; R11 "one extra embed" ignores concurrency; a failed open is sticky; two tests cannot fail as named |
 
 ## Wins Index
 
@@ -134,6 +139,7 @@ entry_high_water_W: 11
 | W-9 | 2026-11-12 | high | independent Opus review of a scout report before planning | a flock the CLI never takes; a vector table that breaks the schema's determinism rule; a cache key that ignores model, budget and dimension; four missed writers | validated |
 | W-10 | 2026-11-13 | high | two independent Opus reviews of a plan before execution | cross-repo cites written as unqualified keys; a duplicate-key check counting worktree shadow rows; a renumber check reading the survivor body; tasks that end red on clippy; gates that stay green while the code refuses the recipe | validated |
 | W-11 | 2026-11-14 | med | independent review of a plan: read every named test and caller | a probe that turns the read-door source gate red after the Task 1 commit; a test predicted green that is red | validated |
+| W-12 | 2026-11-14 | high | independent review of a plan: read each fill and eviction rule against the path that reaches it | a cache that starts empty and evicts stable content at 90 days while every test passes; a guard rustfmt breaks | validated |
 
 ---
 
@@ -957,6 +963,147 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 **Status:** validated
 
 ---
+
+## F-19 — Plan C3's age eviction deletes the vectors of stable content, because nothing ever touches a row the stamp skips
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of plan `docs/superpowers/plans/2026-11-14-artifact-identity-plan-c3-vector-cache.md` (uncommitted draft) before execution.
+
+**When:** checking C3-R4 (age eviction, `VECTOR_CACHE_RETENTION_DAYS = 90`) against the reindex queue.
+
+**Expected:** a row stays while its content is live, so the spec's "a rebuild reuses them" (spec L230) holds for the cutover rebuild.
+
+**Got:** a row's `last_used` is set only by a put or a hit (plan Task 1 Step 3, get/flush rules). A stable file is never looked up: an artifact whose `embedded_sha256` stamp equals its file hash is not queued at all (`src/librarian/indexer.rs:671-697`, `needs_embed`), and a queued chunk with a current marker skips the seam (`src/librarian/tools/reindex.rs:628`, `item.up_to_date && !reembed`). So 90 days after its embed, any reindex that touched the cache (in any repo: the file is per user) deletes the vectors of every file that did not change or move. The cache then holds only content embedded in the last 90 days, and a rebuild or a move of older content re-embeds. Every plan test embeds fresh content inside one run, so all stay green. The plan states R4's cost only as "a switch back to a model unused for 90 days misses".
+
+**Probable cause:** "unused" was defined as "not hit", but the stamp and marker skips mean stable content is never asked for.
+
+**Workaround:** none needed yet (review only). Plan change, controller's choice: (a) no eviction in C3, follow-up with a live-set rule; or (b) at the end of a reindex, touch `(model_key, embedded_input_hash)` for every marked chunk under the reindexed targets, in one transaction; plus a test that a row whose hash is a live marker survives an eviction at day 91.
+
+**Severity:** high
+
+**Status:** open
+
+**Rests on:** an LRU clock advances only on reads, and a cache behind a skip is never read.
+
+**Fix idea / Pointer:** plan C3-R4, Task 1 (evict), Task 3 (eviction call and test), Review Focus 6.
+
+## F-20 — Plan C3 R5 understates the cold-cache hole: an artifact with a current stamp is not queued at all
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of the Plan C3 draft before execution.
+
+**When:** checking C3-R5's cost sentence ("a chunk that carries a marker never reaches the cache ... 26.6% of this repo's chunks carry a marker") and the scout's "an unmarked chunk ... the first reindex after C3 embeds it anyway (`catalog/mod.rs:504-513`)".
+
+**Expected:** unmarked chunks (73%) reach the cache on the first reindex after C3; only marked ones are a hole.
+
+**Got:** the queue is gated per ARTIFACT, not per chunk: `index_repo_sync` queues an artifact only when `needs_embed` (its `embedded_sha256` stamp differs from the file hash) or `force_embed` (`src/librarian/indexer.rs:671-697`). The v14 migration adds the marker column and clears no stamp (`catalog/mod.rs:504-513`; the only `embedded_sha256 = NULL` is `clear_kept_row`, `indexer.rs:1042`). So every artifact embedded before C3 and unchanged since is not queued, marked or not. On the day C3 ships the cache is empty for the whole existing corpus, and the first move or rebuild of any such file re-embeds. The scout's claim is refuted; the plan's 26.6% understates the hole by about four times. The fill lever that exists is one `reindex` with `reembed=true` per project (R9: it skips reads and writes every row), at full embed cost; `backfill-chunks` selects only artifacts without rows or vectors and does not fill it.
+
+**Probable cause:** the cost was reasoned from the chunk marker, not from the artifact stamp that gates the queue before the marker is consulted.
+
+**Workaround:** none needed yet. Plan change: rewrite R5's cost ("every artifact whose stamp is current is not queued, so the cache starts empty; a `reembed=true` reindex fills it"), and say so in the manual section.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** a cache filled only on the embed path holds nothing that the skip in front of that path keeps out.
+
+**Fix idea / Pointer:** plan C3-R5, Task 5 manual text; follow-up (b) seeding.
+
+## F-21 — Plan C3 Task 2's text-scan guard counts a one-line call that rustfmt splits
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of the Plan C3 draft before execution.
+
+**When:** checking Task 2's guard `every_production_construction_site_attaches_the_vector_cache_with_its_model`, which counts `src.matches(".with_vector_cache(model, ")` in `src/librarian/mod.rs`.
+
+**Expected:** the chained call stays on one line, as `.with_concurrency(env.embed_concurrency.unwrap_or(1))` does.
+
+**Got:** both construction sites chain at 16 columns of indent (`src/librarian/mod.rs:342` and `:629`). `.with_vector_cache(model, std::sync::Arc::new(vector_cache::VectorCache::beside(Some(&db_path))))` is 97 characters, so the line is about 113 columns. The repo has no `rustfmt.toml` (checked), so `max_width` is 100, and rustfmt puts each argument on its own line. After `./scripts/fmt-mine.sh` the text `.with_vector_cache(model, ` matches 0 times and the guard fails against 2 `with_budget` sites; written unformatted, the gate's fmt step fails instead. `VectorCache::beside(Some(&db_path))` alone fits (about 90 columns at 20 indent) and survives.
+
+**Probable cause:** a text-scan guard pinned to a call layout that the formatter owns.
+
+**Workaround:** none needed yet. Plan change: match on whitespace-stripped source (`src.split_whitespace().collect::<String>()` then `.with_vector_cache(model,`), or bind `let vector_cache = Arc::new(VectorCache::beside(Some(&db_path)));` before the chain and count `.with_vector_cache(model, vector_cache)`.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** a source-text gate must survive the formatter that the gate itself runs.
+
+**Fix idea / Pointer:** plan Task 2 Step 1 (guard) and Step 3 (wiring).
+
+## F-22 — Plan C3 contradicts two SQLite documents: WITHOUT ROWID for 3 KB rows, and deleting an open database file
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of the Plan C3 draft before execution.
+
+**When:** checking C3-R8 (`vec(...) WITHOUT ROWID`, a 768-float BLOB per row) and the Task 5 manual text "You can delete `vector-cache.db` at any time".
+
+**Expected:** both follow SQLite's own guidance.
+
+**Got:** (1) sqlite.org/withoutrowid.html § 4: WITHOUT ROWID "is likely to be helpful for tables that ... do not store large strings or BLOBs", with a rule of thumb of rows under about 1/20 of a page (about 200 bytes at 4 KiB), because content is also stored in interior nodes and fan-out drops. A row here is about 3,100 bytes (768 x 4 plus the key), about 15 times the rule. A rowid table with the same composite PRIMARY KEY keeps the key index small and the blob in the leaves. (2) sqlite.org/howtocorrupt.html § 2.5: unlinking an open database file and creating a new one with the same name makes two processes share one WAL, and "a rollback or recovery for one of the databases might use content from the other database, resulting in corruption". The MCP server holds the cache open for its whole life (`try_build_runtime_with` is called once, `src/server.rs:441`), so "at any time" names exactly that case. The plan's only shape check on a hit is `blob.len() == dim * 4`, which a wrong overflow page does not change.
+
+**Probable cause:** storage rules carried from the scout without a check against SQLite's documents.
+
+**Workaround:** none needed yet. Plan change: drop `WITHOUT ROWID` in C3-R8 (or measure both); manual text "Stop every codescout process, then delete `vector-cache.db`, `vector-cache.db-wal` and `vector-cache.db-shm`."
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** a storage choice cites the engine's own guidance, not the shape of the previous table.
+
+**Fix idea / Pointer:** plan C3-R8, Task 1 Step 3 (open), Task 5 Step 3 (manual text).
+
+## F-23 — Plan C3: five small drifts between its rulings, guide text and tests and the code
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of the Plan C3 draft before execution.
+
+**When:** reading the rulings, the guide paragraph and the Task 1-3 test lists against the code.
+
+**Expected:** each sentence and each test name says what the code will do.
+
+**Got:** five smaller drifts.
+1. Guide paragraph (Task 5): "a switch back to an earlier model take[s] vectors from it and call[s] no embedder". A same-dimension switch is applied only by `reembed=true` (an ordinary reindex does not queue stamped artifacts, `indexer.rs:671-697`), and R9 makes `reembed=true` skip cache reads. Only a dimension change, which drops vectors and goes through `backfill-chunks`, reads the cache.
+2. R11: "at most one extra embed per process". The drain runs `buffer_unordered(svc.concurrency())` (`reindex.rs:635`); each future calls `get` before any embed returns, so with `LIBRARIAN_EMBED_CONCURRENCY=N` up to N lookups see dimension 0.
+3. R13: a failed open is `Unavailable` for the life of the `VectorCache`, which in the MCP server is the life of the process (`src/server.rs:441`). A transient `SQLITE_BUSY` at first creation (the WAL switch and the schema `BEGIN IMMEDIATE`) or a corrupt file the operator deletes keeps the cache off until restart. No test covers a busy open, and none pins the 250 ms production timeout (the lock test passes 50 ms explicitly).
+4. `the_note_names_reused_vectors`: the "nothing needed a new vector" branch requires `total_unchanged > 0` (`reindex.rs:976`); the one-file move fixture has 0 unchanged, so the negative half cannot fail. Add an unchanged sibling file.
+5. `a_backfill_flushes_the_cache_after_each_page` runs one page (`store_backfill` uses batch 100, `indexer.rs:4832`), so an end-of-run flush passes it. Use batch 1 with two artifacts and assert `transactions() == 2`.
+
+**Probable cause:** sentences carried from the scout's gain list and from single-process, concurrency-1 fixtures.
+
+**Workaround:** none needed yet. Plan edits as named in each item.
+
+**Severity:** low
+
+**Status:** open
+
+**Rests on:** a negative assertion is evidence only in a fixture where the other branch is reachable.
+
+**Fix idea / Pointer:** plan Task 5 guide text; C3-R11; C3-R13; Task 3 and Task 4 test lists.
+
+## W-12 — Reading the queue gate, the drain and the eviction rule together showed Plan C3's cache would miss the spec's rebuild case
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of plan `docs/superpowers/plans/2026-11-14-artifact-identity-plan-c3-vector-cache.md` before any implementer ran.
+
+**Pattern:** read the queue gate (`index_repo_sync`), the drain, the backfill and the seam methods together, and read each eviction and fill rule against the path that would have to reach it, instead of testing each rule alone.
+
+**What it confirmed:** the plan's three corrections of the scout hold at the bytes: `reindex_cli` is `#[cfg(test)]` (`src/librarian/mod.rs:600-601`, callers only at `:826, :828, :1005, :1036`); `index_repo` has no production caller (`indexer.rs:2117`, called from `mod.rs:731` and three tests); `RemoteEmbedder::dimensions()` reads `cached_dims`, 0 until the first embed (`crates/codescout-embed/src/remote.rs:458-463`, set at `:615-616`). The seam fits: a hit can ride `unwritten` into `flush_vectors` and land under the chunk's own id, and the marker is pushed only on a landed upsert (`reindex.rs:49-101`), so a cached vector is marked after it lands like any other. `reembed` is threaded as the plan says (`reindex.rs:628`). The read-door gate does not see `rusqlite::Connection::open` or `create_dir_all` (`path_reads`, `read_door.rs:1325`), and no plan constant is cap-shaped (`tests/result_caps.rs:680`). `librarian-runtime` is a pull-only guide with no declared section, so no size cap applies to its edit.
+
+**What it caught:** F-19 (age eviction removes stable content), F-20 (the cache starts empty for the whole stamped corpus), F-21 (a guard that rustfmt breaks), F-22 (two SQLite-document contradictions), F-23 (five smaller drifts).
+
+**Counterfactual:** without the joint read, every Task 1-4 test passes (each embeds fresh content inside one run) and the cache ships; the first measurement of the spec's "a rebuild reuses them" would be the cutover rebuild, which would re-embed nearly the whole corpus. Task 2's guard would go red at the Task 6 gate after four commits.
+
+**Status:** validated
 
 ## Template for new entries
 
