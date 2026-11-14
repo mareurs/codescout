@@ -9,8 +9,8 @@ topic: tracker organization
 entry_prefix:
 - F
 - W
-entry_high_water_F: 3
-entry_high_water_W: 4
+entry_high_water_F: 5
+entry_high_water_W: 5
 ---
 # Session Log — Tracker Organization
 
@@ -113,6 +113,8 @@ entry_high_water_W: 4
 | F-1 | 2026-11-11 | med | stale-claim | open | **frictions/ is not one-file-per-entry** — FR-N are defined in index.md; only issue-clusters/ has the shape |
 | F-2 | 2026-11-12 | med | stale-claim | mitigated | **A plan and its spec claimed three things the code contradicts** — "as it does today", a one-finding expectation, and "cannot be shown failing" |
 | F-3 | 2026-11-14 | med | stale-claim | open | **"L-B2 is blocked until identity Plan C exists" named the wrong plan** — the key-addressed tools need the Plan E flip; every doc action still takes a 16-hex id |
+| F-4 | 2026-11-14 | med | process-gap | open | **Ten green task reviews, red gate** — the read-door scanner flags a write-only `OpenOptions` and runs only in the full gate |
+| F-5 | 2026-11-14 | med | stale-claim | mitigated | **The routing rule "place(rel_path) gives Role::Entry" held only for rows directly under a managed root** — a nested-worktree row skipped the lifecycle route silently; fixed for Unix, Windows parked |
 | F-<n> | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
 
 ## Wins Index
@@ -123,6 +125,7 @@ entry_high_water_W: 4
 | W-2 | 2026-11-11 | med | measure the repo under the new model with an ignored census test before building tools on it | a migration sized from the estimate of about 76 trackers would have missed 81 flat files plus 261 in subfolders, and the loose temp tracker would surface only at migration time | validated |
 | W-3 | 2026-11-11 | med | measure the ledger before ruling on two spec ambiguities | a 14-day default grace would have made doctor report 69 stale terminal entries on day one against a ledger swept about monthly | validated |
 | W-4 | 2026-11-12 | med | an Opus plan review with the code open, before the first dispatch | a correct implementation would have failed the plan's own first check test, and a behaviour change of an existing check would have shipped unannounced | validated |
+| W-5 | 2026-11-14 | med | a whole-branch Opus review after ten task reviews, with the deferred Minors and the Review Focus in the brief | I-1 would have shipped as a silent skip of the lifecycle route for nested-worktree rows, and I-2 as a lost body edit on `extra:{}` | validated |
 | W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
 
 ---
@@ -433,6 +436,49 @@ be reshaped after the plan was written.
 **Fix:** correct the memory. The decision on how to sequence L-B2 against Plan E goes to the operator.
 
 **Follow-up (2026-11-14):** the addressing-free write rules now exist as pure library functions in `src/librarian/lifecycle/write.rs` (merged, spec `0904b912ffaffdf6`). Only the wiring to `doc` waits on Plan E. The open design inputs for L-B2 are in that spec's § Open for the L-B2 plan.
+
+**Follow-up 2 (2026-11-14):** tools part 1 is built on the id-addressed `doc` tools (spec `afc72d5722d1d601`, plan `67870a11f0ed7a0e`, landed on `integration/identity-lifecycle-20261114` at `18e0ad3c2`, not on `experiments`): `doc(create)` for an entry and a collection, `doc(update)` on an entry, `doc(get)` table on a readme. The key-addressed form and `doc(move)` as a key rename still wait on Plan E. See F-4, F-5 and W-5 for what the build taught.
+
+## F-4 — Ten per-task reviews were green and the gate was red: a test that only the full gate runs caught a write-only OpenOptions
+
+**Valid:** dated 2026-11-14
+
+**Observed:** Tools part 1 (plan `67870a11f0ed7a0e`) ran ten tasks, each with an Opus task review that passed. The first full gate on the unmerged branch (`3c74bb536`) was red in both nextest lanes with one failure: `librarian::read_door::tests::no_librarian_production_read_bypasses_the_read_door`. The scanner matches the path `OpenOptions::new` and cannot tell a write from a read. Task 6's exclusive create (`create.rs`, `.write(true).create_new(true)`) tripped it. The fix was one `ALLOWED` entry in `read_door.rs`, the same shape as the existing `workspace.rs` and `catalog/audit/shard.rs` entries.
+
+**Expected:** that ten green task reviews, each with focused tests run by the implementer, left only integration issues for the whole-branch review.
+
+**Cost:** one fix-wave item and one extra gate cycle (about 7 minutes of gate time plus the dispatch). No code reached `experiments` or `integration` red. The task reviewers were told not to re-run the suite, so no per-task review could have seen it.
+
+**Rests on:** the gate output (`GATE EXITS -> FMT=0 CLIPPY=0 LEAN=100 DEFAULT=100`, one FAIL line per lane, panic text at `read_door.rs:1500`), read on 2026-11-14.
+
+**Fix:** an implementer who adds an `OpenOptions`, `fs::read` or `File::open` call under `src/librarian/` should run the read-door test alone at the task, not at the gate. `scripts/with-slot.sh cargo test --lib no_librarian_production_read_bypasses_the_read_door` takes about two seconds. Not yet written into the implementer brief template.
+
+## W-5 — A whole-branch Opus review after ten task reviews found the two cross-task defects the task reviews could not see
+
+**Valid:** dated 2026-11-14
+
+**Pattern:** After the last task review, one Opus reviewer read the whole branch (21 commits) with the ledger's deferred Minors and the plan's Review Focus. It found two Important issues. Each one lives across tasks, so no task-scoped review could see it.
+
+- I-1: a main-checkout session that updates an entry (or reads a collection table) whose catalog row sits in a nested worktree (`<main>/.worktrees/x/docs/trackers/...`) made the relative path from the first containing root, `place()` returned None, and the update took the generic path silently. It combined Task 9's route with Task 10's route and the write door's `door_root`.
+- I-2: `patch={extra:{}, body_edits:[…]}` on an entry was refused as an empty update. The same patch worked before Task 9. The reviewer also triaged the 30 deferred Minors into fix and park, and ruled on the one the controller flagged.
+
+**Counterfactual:** without the whole-branch pass, I-1 would have shipped as a silent skip of the lifecycle route. It becomes live as soon as Plan D creates entries in worktrees. I-2 would have shipped as a regression for entries: an agent sending an empty `extra` would lose its body edit and read a false message. The fix wave (6 commits, one scoped re-review) cost about 40 minutes.
+
+**Rests on:** the final review report and the re-review report, both read on 2026-11-14; the fix wave commits `d37c2756b`..`fedc27ccc`.
+
+## F-5 — The plan's routing rule held only for rows directly under a managed root: a nested-worktree entry skipped the lifecycle route
+
+**Valid:** dated 2026-11-14
+
+**Observed:** The plan's routing rule was "doc(update) routes by `layout::place(rel_path)` giving `Role::Entry`". The implementation derived `rel_path` from a catalog row's `abs_path` and the first containing managed root, `managed_roots` lists the session's git root first. For a row in a nested worktree (`<main>/.worktrees/x/docs/trackers/<collection>/<entry>.md`; this repo nests its worktrees under `.worktrees/`) the relative path became `.worktrees/x/docs/trackers/...`. `place` needs the path to start with `docs/trackers/`, so it returned None and the generic path ran, which wrote an undeclared status with no `status_since`. The write door did not stop it: `door_root` narrows to the nearest `.git`, and a worktree's `.git` file counts. The Task 9 review found the Windows spelling form of this class (`//?/C:/..` against `\\?\C:\..`) and fixed that one. Task 10 reused the helper. The whole-branch review found the nested-worktree form.
+
+**Expected:** that a lifecycle-looking file always takes the lifecycle route or is refused loudly (the Task 9 ruling against silent fallback).
+
+**Cost:** no data lost, and no worse than before the branch. It would have become live when Plan D creates entries in worktrees. The fix (`5bfeeee11`) narrows the root with `util::door_root` when the first root does not place but a nearer repository does. Two limits remain: a lifecycle-looking path with no `.git` between the root and the file still takes the generic path, and on Windows the narrowing probably does not apply (same spelling problem; unverified, no test).
+
+**Rests on:** the final review report (I-1), the re-review report (F2 verdict and Minor 3), `src/librarian/tools/mod.rs` `root_and_rel_path` and `util.rs` `door_root`, read on 2026-11-14.
+
+**Fix:** done for the Unix case. The Windows case is parked in the parked-items memory `tracker-lifecycle-parked-items` (§ Parked from tools part 1).
 
 ## Template for new entries
 
