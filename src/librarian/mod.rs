@@ -31,6 +31,7 @@ pub mod preview;
 pub(crate) mod read_door;
 pub mod reindex_progress;
 pub mod session_registry;
+pub mod vector_cache;
 pub(crate) mod windows_spelling;
 #[cfg(all(test, windows))]
 mod windows_spelling_tests;
