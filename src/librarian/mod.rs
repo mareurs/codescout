@@ -962,11 +962,14 @@ kind = "spec"
             svc.vector_cache().expect("a cache is attached").path(),
             Some(tmp.path().join("vector-cache.db").as_path())
         );
-        assert!(svc
-            .model_key()
-            .expect("a cache brings a key")
-            .as_str()
-            .starts_with("any-model|"));
+        assert_eq!(
+            svc.model_key().expect("a cache brings a key"),
+            &vector_cache::ModelKey::new(
+                "any-model",
+                codescout_embed::chunk_size_for_model("any-model")
+            ),
+            "the key is the configured model and the budget the service segments at"
+        );
         assert_eq!(
             svc.embedder.dimensions(),
             0,

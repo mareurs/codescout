@@ -6,7 +6,7 @@ use anyhow::Result;
 use codescout_embed::Embedder;
 use std::sync::Arc;
 
-/// What [`EmbeddingService::embed_artifact_cached`] returns.
+#[must_use = "the vector and the cache report are lost when this is dropped"]
 pub struct CachedEmbed {
     /// The vector, or the embedder's error. A cache problem is never an error here.
     pub vector: Result<Vec<f32>>,
@@ -111,7 +111,10 @@ impl EmbeddingService {
         self.seam.as_ref().map(|s| &s.model)
     }
 
-    pub fn vector_cache(&self) -> Option<&VectorCache> {
+    /// For inspection only (status, path, tests). A caller must not stage rows around the
+    /// seam: `embed_artifact_cached` is the one writer.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn vector_cache(&self) -> Option<&VectorCache> {
         self.seam.as_ref().map(|s| s.cache.as_ref())
     }
 
@@ -367,6 +370,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::test_support::CountingEmbedder;
     use super::*;
+    use crate::librarian::vector_cache::COMPOSITION_VERSION;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// An embedder that **refuses** any input longer than `max_chars`, standing in for the
@@ -773,7 +777,7 @@ mod tests {
         let cache = Arc::new(VectorCache::in_memory());
         let svc = cached(&emb, &cache);
 
-        svc.embed_artifact_cached(Some("t"), "b", true).await;
+        let _staged = svc.embed_artifact_cached(Some("t"), "b", true).await;
         let second = svc.embed_artifact_cached(Some("t"), "b", true).await;
 
         assert!(!second.from_cache);
@@ -785,7 +789,7 @@ mod tests {
         let emb = CountingEmbedder::new(4);
         let cache = Arc::new(VectorCache::in_memory());
         let first = cached(&emb, &cache);
-        first.embed_artifact_cached(Some("t"), "b", true).await;
+        let _stored = first.embed_artifact_cached(Some("t"), "b", true).await;
         assert_eq!(first.flush_cache().stored, 1);
 
         let other_model = EmbeddingService::new(emb.clone()).with_vector_cache("m2", cache.clone());
@@ -811,7 +815,7 @@ mod tests {
         let emb = CountingEmbedder::new(4);
         let cache = Arc::new(VectorCache::in_memory());
         let svc = cached(&emb, &cache);
-        svc.embed_artifact_cached(Some("A"), "body", true).await;
+        let _stored = svc.embed_artifact_cached(Some("A"), "body", true).await;
         assert_eq!(svc.flush_cache().stored, 1);
 
         let b = svc.embed_artifact_cached(Some("B"), "body", true).await;
@@ -857,6 +861,95 @@ mod tests {
             svc.flush_cache(),
             FlushOutcome {
                 stored: 0,
+                failed: 0
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn the_stored_vector_is_made_from_the_title_and_body_it_is_keyed_by() {
+        // The other cached tests use a double whose vector ignores the text. This one does not:
+        // a seam that hashed (title, body) but embedded something else would store a vector
+        // under a key it does not belong to.
+        let emb = CountingEmbedder::lengths(4);
+        let cache = Arc::new(VectorCache::in_memory());
+        let svc = cached(&emb, &cache);
+        let expected = EmbeddingService::new(CountingEmbedder::lengths(4))
+            .embed_artifact(Some("t"), "b")
+            .await
+            .unwrap();
+
+        let first = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert_eq!(emb.seen(), vec!["t\n\nb".to_owned()]);
+        assert_eq!(svc.flush_cache().stored, 1);
+        assert_eq!(first.vector.unwrap(), expected);
+
+        let hit = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(hit.from_cache);
+        assert_eq!(
+            hit.vector.unwrap(),
+            expected,
+            "the hit is the vector of the text"
+        );
+
+        // The title is in the text, so another title gives another vector, and its own row.
+        let other = svc
+            .embed_artifact_cached(Some("longer title"), "b", true)
+            .await;
+        assert!(!other.from_cache);
+        let other_vector = other.vector.unwrap();
+        assert_ne!(other_vector, expected);
+        assert_eq!(svc.flush_cache().stored, 1);
+        let other_hit = svc
+            .embed_artifact_cached(Some("longer title"), "b", true)
+            .await;
+        assert!(other_hit.from_cache);
+        assert_eq!(other_hit.vector.unwrap(), other_vector);
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_row_is_a_failed_lookup_and_the_next_flush_repairs_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vector-cache.db");
+        let cache = Arc::new(VectorCache::open(&path));
+        seed(&cache, "t", "b", &[9.0; 4]);
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.execute_batch("UPDATE vec SET vector = zeroblob(5)")
+            .unwrap();
+        let emb = CountingEmbedder::new(4);
+        let svc = cached(&emb, &cache);
+
+        let got = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(
+            got.cache_failed,
+            "a row of the wrong size is a cache failure"
+        );
+        assert!(!got.from_cache);
+        assert_eq!(got.vector.unwrap(), vec![1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(svc.flush_cache().stored, 1);
+
+        let again = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(again.from_cache, "the flush replaced the corrupt row");
+        assert!(!again.cache_failed);
+        assert_eq!(again.vector.unwrap(), vec![1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(emb.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_vector_is_staged_when_the_live_dimension_is_unknown() {
+        // Declares 0 and returns 4 wide: the width check lets it through, as it must for an
+        // embedder that has not learned its width.
+        let emb = CountingEmbedder::declaring(0, 4);
+        let cache = Arc::new(VectorCache::in_memory());
+        let svc = cached(&emb, &cache);
+
+        let got = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(!got.cache_failed);
+        assert_eq!(got.vector.unwrap().len(), 4);
+        assert_eq!(
+            svc.flush_cache(),
+            FlushOutcome {
+                stored: 1,
                 failed: 0
             }
         );
@@ -923,15 +1016,17 @@ mod tests {
 
     #[tokio::test]
     async fn the_text_sent_to_the_embedder_is_pinned_to_the_composition_version() {
+        // Whitespace in the inputs: a trim or a normalisation of the join would change them.
         let emb = CountingEmbedder::new(4);
         let svc = EmbeddingService::new(emb.clone());
-        svc.embed_artifact(Some("T"), "B").await.unwrap();
-        svc.embed_artifact(None, "B").await.unwrap();
+        svc.embed_artifact(Some(" T "), " B\n").await.unwrap();
+        svc.embed_artifact(None, " B\n").await.unwrap();
         assert_eq!(
             emb.seen(),
-            vec!["T\n\nB".to_owned(), "\n\nB".to_owned()],
+            vec![" T \n\n B\n".to_owned(), "\n\n B\n".to_owned()],
             "{BUMP_COMPOSITION_VERSION}"
         );
+        assert_eq!(COMPOSITION_VERSION, 1, "{BUMP_COMPOSITION_VERSION}");
     }
 
     #[tokio::test]
@@ -954,6 +1049,7 @@ mod tests {
             vec!["0.999760", "0.021907", "0.000000", "0.000000"],
             "{BUMP_COMPOSITION_VERSION}"
         );
+        assert_eq!(COMPOSITION_VERSION, 1, "{BUMP_COMPOSITION_VERSION}");
     }
 
     /// Same device as the budget and concurrency guards. Each chained call is one short line
