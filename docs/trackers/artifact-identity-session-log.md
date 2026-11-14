@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 16
-entry_high_water_W: 10
+entry_high_water_F: 18
+entry_high_water_W: 11
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -116,6 +116,8 @@ entry_high_water_W: 10
 | F-14 | 2026-11-12 | med | plan-prose | open | **Key-space census after the B1 exclusions: 26 duplicate-key groups (54 files), 17 invalid-key files, 9 of them not renamable** — 14 groups are plan and spec pairs kept in scope; the spec does not yet say so |
 | F-15 | 2026-11-12 | med | architectural | open | **Shadow diff of experiments HEAD: the closed grammar sees 26 of the old catalog's 3812 file-grain edges; the rest is migration work, not a builder defect** — 4764 of 4770 only-old edge rows have a text form the grammar does not read; 4924 Unexplained of 5678 rows |
 | F-16 | 2026-11-13 | med | shared-checkout | mitigated | **A background gate ran while an implementer edited the same worktree, so its green could not be trusted** — the output carries no commit id; discarded and rerun on an untouched tree |
+| F-17 | 2026-11-14 | med | plan-prose | open | **The A-R2 writability probe trips the read-door source gate** — `OpenOptions::new` in `src/librarian/util.rs` counts as a raw read; Task 1 Step 4 does not run that test |
+| F-18 | 2026-11-14 | med | plan-prose | open | **An atomic replace needs a writable directory; the plan calls the new refusal a failed write and mis-predicts its test as already green** — in-place `fs::write` needs only the file's permission |
 
 ## Wins Index
 
@@ -131,6 +133,7 @@ entry_high_water_W: 10
 | W-8 | 2026-11-12 | high | whole-branch Opus review after per-task reviews | a hook that refuses pure moves of colliding files; a dismissed dialog stored as a permanent decline; a nudge on read-only activations | validated |
 | W-9 | 2026-11-12 | high | independent Opus review of a scout report before planning | a flock the CLI never takes; a vector table that breaks the schema's determinism rule; a cache key that ignores model, budget and dimension; four missed writers | validated |
 | W-10 | 2026-11-13 | high | two independent Opus reviews of a plan before execution | cross-repo cites written as unqualified keys; a duplicate-key check counting worktree shadow rows; a renumber check reading the survivor body; tasks that end red on clippy; gates that stay green while the code refuses the recipe | validated |
+| W-11 | 2026-11-14 | med | independent review of a plan: read every named test and caller | a probe that turns the read-door source gate red after the Task 1 commit; a test predicted green that is red | validated |
 
 ---
 
@@ -884,6 +887,76 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 **Evidence:** the plan's own history (9febe63d3, a5b5afdae, 3e2feac9e) on the C1 branch; the condensed review `plan-c1-review.md` in the session scratchpad.
 
 **Status:** validated
+
+## F-17 — The A-R2 writability probe trips the read-door source gate in src/librarian
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of plan `docs/superpowers/plans/2026-11-14-atomic-catalogued-write-door.md` (bug a806db1ec4ea162b) before execution.
+
+**When:** checking ruling A-R2 (probe writability with `OpenOptions::new().write(true).open(path)` inside `write_catalogued_file`, `src/librarian/util.rs:85`).
+
+**Expected:** the plan names no test outside `util`, `dual_write`, `tools::link`, `event_create`, `augmentation_sidecar` and `identity` that the probe affects.
+
+**Got:** `no_librarian_production_read_bypasses_the_read_door` (`src/librarian/read_door.rs:1414`) scans every production `.rs` file under `src/librarian` and counts any path that names `fs::OpenOptions`, `OpenOptions::new` or `File::options` as a raw content read (`path_reads`, `read_door.rs:1326-1338`). Only `read_door.rs` itself and the `ALLOWED` list (`read_door.rs:1037`) are exempt. A probe written as A-R2 says, in `util.rs`, turns that test red. Task 1 Step 4 does not run it, so the red first shows at the Task 4 gate, after the Task 1 commit.
+
+**Probable cause:** the plan was written from the door and its callers; the source gate is a separate test that judges spelling, not intent.
+
+**Workaround:** none needed yet (review only). Plan change: put the probe in `crate::util::fs` beside `atomic_write` (outside the gate's scan), or add an `ALLOWED` entry for `librarian/util.rs` with a reason ("write-only open, no content read"); add `cargo test --lib read_door` to Task 1 Step 4.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** a source gate that judges spelling counts every new spelling of its pattern, whatever the intent.
+
+**Fix idea / Pointer:** plan Task 1 Step 3 and Step 4; ruling A-R2.
+
+---
+
+## F-18 — An atomic replace needs a writable directory, which the in-place write did not
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of plan `docs/superpowers/plans/2026-11-14-atomic-catalogued-write-door.md` before execution.
+
+**When:** checking the Task 1 test `a_write_that_cannot_stage_leaves_the_old_bytes` (directory mode 0555, writable file) and the Step 2 claim "against the current code the staging test already passes".
+
+**Expected:** the current door fails in a read-only directory, so the test is a regression guard.
+
+**Got:** the current door is `std::fs::write` (`src/librarian/util.rs:92`), which opens the EXISTING file with `O_TRUNC`; that needs write permission on the file only, not on the directory. So on the current code the write succeeds and the test (which expects an error) is RED. After the change, `atomic_write` needs to create a sibling staging file (`create_staging_file`, `src/util/fs.rs:343-377`) and rename it (`fs.rs:493`), which needs write and search permission on the DIRECTORY. A writable document in a directory the writer cannot write was updatable before and is refused after. The plan presents this case as "a failed write" (Review Focus 1) and has no ruling with its cost. Same class: a file that is a bind-mount point (rename gives `EBUSY`), extra free space equal to the document size, owner/group/ACL/xattr not kept (the new inode belongs to the writer).
+
+**Probable cause:** the plan treats in-place and replace as equal in what they may write; they differ in which permission they need.
+
+**Workaround:** none needed yet. Plan change: correct Step 2's prediction; add a ruling (for example A-R7) that names the lost capability and its cost, and keep the test as the pin of the new behaviour.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** an atomic replace changes the permission a write needs from the file to its directory.
+
+**Fix idea / Pointer:** plan Task 1 Step 1/Step 2; Rulings.
+
+---
+
+## W-11 — Reading the five read-only tests and the 19 callers confirmed the plan's Task 1 claims and found two gaps
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent review of plan `docs/superpowers/plans/2026-11-14-atomic-catalogued-write-door.md` before execution.
+
+**Pattern:** before execution, read each test the plan says will "still pass" and each caller the plan says the compiler will judge, instead of trusting the plan's list.
+
+**What it confirmed:** all 19 references to `write_catalogued_file` pass text (`String`, `&String`, `&str`, `format!`), so A-R3 `impl AsRef<str>` holds. The five mode-0444 tests (`dual_write.rs:929`, `link.rs:1119` and `:1278`, `event_create.rs:1591`, `link_dir_tests.rs:2912`) all write through the door, and after Task 1 each fails at the A-R2 probe with an `io::Error`, as the plan says. The probe is load-bearing for `doc_move_completes_and_reports_when_only_the_id_repair_write_fails`: without it `atomic_write` replaces the 0444 file in its writable directory, the id repair succeeds and the test fails. That test is run by Task 1 Step 4 only because the filter `tools::link` is a substring of `tools::link_dir_tests`.
+
+**What it caught:** F-17 (the probe trips the read-door source gate) and F-18 (directory permission); and that the link test `a_write_failure_after_the_destination_write_names_the_destination_change` asserts no "partly written" sentence, though Task 2 lists it.
+
+**Counterfactual:** without the scout, Task 1 commits a change whose first red shows in the Task 4 gate (F-17), and Step 2's report states a wrong RED/GREEN split (F-18).
+
+**Status:** validated
+
+---
 
 ## Template for new entries
 
