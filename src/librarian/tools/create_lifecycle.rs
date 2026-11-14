@@ -362,7 +362,7 @@ fn schema_refusal(problems: &[SchemaError]) -> anyhow::Error {
 }
 
 /// Place `rel_path` as the readme of a live collection, or refuse it. Returns the placement and
-/// the normalised path.
+/// the canonical path, `<collection_dir>/readme.md`.
 fn place_readme(rel_path: &str) -> Result<(Placement, String)> {
     let rel = crate::librarian::util::normalize_rel_path(rel_path);
     validate_rel_path(&rel).map_err(|e| {
@@ -413,6 +413,9 @@ fn place_readme(rel_path: &str) -> Result<(Placement, String)> {
              archived by moving it; give {READMES_AT}"
         )));
     }
+    // The canonical spelling (`collection_dir` drops `.` and empty components), so the file, its
+    // id and its row are the ones a reindex of it gives.
+    let rel = format!("{}/readme.md", placement.collection_dir);
     Ok((placement, rel))
 }
 

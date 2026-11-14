@@ -537,6 +537,38 @@ async fn creates_a_ledger_collection_that_load_collection_reads() {
     .unwrap();
     assert!(entry["abs_path"].as_str().unwrap().contains(NEW_DIR));
 }
+/// A `rel_path` spelled with a `.` component or a doubled separator is written and catalogued at
+/// the canonical path: the row's id and `abs_path` are the ones a reindex of the file gives, so
+/// no second row is ever made for it.
+#[tokio::test]
+async fn a_non_canonical_rel_path_writes_and_catalogues_the_canonical_path() {
+    for spelled in [
+        "docs/./trackers/ledgers/frictions/readme.md",
+        "docs/trackers//ledgers/frictions/readme.md",
+    ] {
+        let tmp = checkout(&[]);
+        let ctx = mk_ctx(tmp.path());
+
+        let v = call(&ctx, collection_at(spelled, ledger_schema()))
+            .await
+            .unwrap();
+
+        let canonical = tmp.path().join(NEW_README);
+        assert!(canonical.is_file(), "{spelled}");
+        let abs = v["abs_path"].as_str().unwrap();
+        assert!(
+            !abs.contains("/./") && !abs.contains("//"),
+            "{spelled}: {abs}"
+        );
+        assert!(abs.ends_with(NEW_README), "{spelled}: {abs}");
+        assert_eq!(
+            v["id"],
+            json!(crate::librarian::ids::artifact_id_from_abs(&canonical)),
+            "{spelled}"
+        );
+        assert_eq!(artifact_count(&ctx), 1, "{spelled}");
+    }
+}
 
 #[tokio::test]
 async fn the_readme_has_kind_collection_and_no_id() {
