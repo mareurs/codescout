@@ -463,3 +463,388 @@ fn the_advertised_surface_is_net_neutral() {
 
 /// `doc`'s description plus its serialised schema without `collection`, measured at 0e7c82334.
 const DOC_SURFACE_BEFORE_COLLECTION: usize = 19_512;
+
+// ---------------------------------------------------------------------------------------------
+// Collection mode: `kind: "collection"` and a `rel_path` make a collection readme.
+// ---------------------------------------------------------------------------------------------
+
+const NEW_DIR: &str = "docs/trackers/ledgers/frictions";
+const NEW_README: &str = "docs/trackers/ledgers/frictions/readme.md";
+
+/// The schema keys of a valid ledger.
+fn ledger_schema() -> Value {
+    json!({
+        "entry_kinds": ["friction"],
+        "statuses": {"open": "open", "done": "terminal"},
+        "initial_status": "open"
+    })
+}
+
+/// A collection create at `rel_path` with `extra` as the schema keys.
+fn collection_at(rel_path: &str, extra: Value) -> Value {
+    json!({
+        "repo": "r", "kind": "collection", "rel_path": rel_path, "title": "Frictions",
+        "extra": extra, "body": "What goes wrong while we work.\n"
+    })
+}
+
+fn new_ledger(extra: Value) -> Value {
+    collection_at(NEW_README, extra)
+}
+
+/// A refused collection call wrote nothing: none of `dirs` exists and the catalog has no row.
+fn assert_no_collection_written(root: &Path, ctx: &ToolContext, dirs: &[&str]) {
+    for dir in dirs {
+        assert!(!root.join(dir).exists(), "{dir} was made");
+    }
+    assert_eq!(artifact_count(ctx), 0);
+}
+
+/// One `<problem>; <remedy>` text: exactly one `; `.
+fn assert_one_remedy(text: &str) {
+    assert_eq!(text.matches("; ").count(), 1, "{text}");
+}
+
+#[tokio::test]
+async fn creates_a_ledger_collection_that_load_collection_reads() {
+    use crate::librarian::lifecycle::collection::load_collection_dir;
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+
+    let v = call(&ctx, new_ledger(ledger_schema())).await.unwrap();
+
+    let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["abs_path", "id", "key"], "{v}");
+    assert_eq!(v["key"], json!("frictions"));
+    assert!(v["abs_path"].as_str().unwrap().ends_with(NEW_README), "{v}");
+    let loaded = load_collection_dir(tmp.path(), NEW_DIR).unwrap();
+    assert_eq!(loaded.key.as_str(), "frictions");
+    assert_eq!(loaded.schema().entry_kinds, ["friction"]);
+    let row = artifact::get(&ctx.catalog.lock(), v["id"].as_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.kind, "collection");
+    assert_eq!(row.status, "active", "P-R8");
+    assert_eq!(row.title.as_deref(), Some("Frictions"));
+
+    // The collection takes an entry at once, by its key.
+    let entry = call(
+        &ctx,
+        json!({"repo": "r", "collection": "frictions", "kind": "friction", "title": "Slow gate"}),
+    )
+    .await
+    .unwrap();
+    assert!(entry["abs_path"].as_str().unwrap().contains(NEW_DIR));
+}
+
+#[tokio::test]
+async fn the_readme_has_kind_collection_and_no_id() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+
+    call(&ctx, new_ledger(ledger_schema())).await.unwrap();
+
+    let text = std::fs::read_to_string(tmp.path().join(NEW_README)).unwrap();
+    let (fm, body) = frontmatter::parse(&text).unwrap();
+    let fm = fm.unwrap();
+    assert_eq!(fm.kind.as_deref(), Some("collection"), "{text}");
+    assert_eq!(fm.id, None, "{text}");
+    assert!(!text.contains("\nid:"), "{text}");
+    assert_eq!(fm.title.as_deref(), Some("Frictions"));
+    assert!(body.contains("What goes wrong while we work."), "{body}");
+}
+
+#[tokio::test]
+async fn a_stream_without_exit_when_is_refused_and_writes_nothing() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    let dir = "docs/trackers/streams/campaign";
+
+    let text = refusal(
+        &ctx,
+        collection_at(&format!("{dir}/readme.md"), ledger_schema()),
+    )
+    .await;
+
+    assert!(text.contains("exit_when"), "{text}");
+    assert_one_remedy(&text);
+    assert_no_collection_written(tmp.path(), &ctx, &[dir]);
+
+    // The same schema with its exit condition is a stream.
+    let mut schema = ledger_schema();
+    schema["exit_when"] = json!("the campaign ships");
+    call(&ctx, collection_at(&format!("{dir}/readme.md"), schema))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn an_unknown_status_class_is_refused() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    let mut schema = ledger_schema();
+    schema["statuses"] = json!({"open": "open", "done": "terminal", "odd": "finished"});
+
+    let text = refusal(&ctx, new_ledger(schema)).await;
+
+    assert!(text.contains("finished"), "{text}");
+    assert_one_remedy(&text);
+    assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+}
+
+#[tokio::test]
+async fn several_schema_problems_are_joined_into_one_text() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    let mut schema = ledger_schema();
+    schema["statuses"] = json!({"open": "open", "odd": "finished"});
+    schema["review_evry"] = json!("30d");
+
+    let text = refusal(&ctx, new_ledger(schema)).await;
+
+    assert!(text.contains("review_evry"), "{text}");
+    assert!(text.contains("finished"), "{text}");
+    assert!(text.contains(" | "), "{text}");
+    assert_one_remedy(&text);
+    assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+}
+
+#[tokio::test]
+async fn a_nested_path_is_refused() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    for rel in [
+        "docs/trackers/ledgers/frictions/sub/readme.md",
+        "docs/trackers/ledgers/frictions/notes.md",
+        "docs/trackers/ledgers/frictions/README.md",
+    ] {
+        let text = refusal(&ctx, collection_at(rel, ledger_schema())).await;
+        assert!(text.contains(rel), "{text}");
+        assert_one_remedy(&text);
+        assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+    }
+}
+
+#[tokio::test]
+async fn an_archive_path_is_refused() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    for rel in [
+        "docs/trackers/ledgers/archive/frictions/readme.md",
+        "docs/trackers/ledgers/archive/readme.md",
+    ] {
+        let text = refusal(&ctx, collection_at(rel, ledger_schema())).await;
+        assert!(text.contains("archive"), "{text}");
+        assert_one_remedy(&text);
+        assert_no_collection_written(
+            tmp.path(),
+            &ctx,
+            &["docs/trackers/ledgers/archive", NEW_DIR],
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_folder_that_already_holds_files_is_refused() {
+    let notes = format!("{NEW_DIR}/notes.md");
+    let tmp = checkout(&[(&notes, "# Notes\n")]);
+    let ctx = mk_ctx(tmp.path());
+
+    let text = refusal(&ctx, new_ledger(ledger_schema())).await;
+
+    assert!(text.contains(NEW_DIR), "{text}");
+    assert_one_remedy(&text);
+    assert!(!tmp.path().join(NEW_README).exists());
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(&notes)).unwrap(),
+        "# Notes\n"
+    );
+    assert_eq!(artifact_count(&ctx), 0);
+}
+
+#[tokio::test]
+async fn an_empty_existing_folder_takes_the_collection() {
+    let tmp = checkout(&[]);
+    std::fs::create_dir_all(tmp.path().join(NEW_DIR)).unwrap();
+    let ctx = mk_ctx(tmp.path());
+
+    call(&ctx, new_ledger(ledger_schema())).await.unwrap();
+
+    assert!(tmp.path().join(NEW_README).is_file());
+}
+
+#[tokio::test]
+async fn a_path_outside_the_lifecycle_folders_is_refused() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    for (rel, dir) in [
+        (
+            "docs/trackers/misc/frictions/readme.md",
+            "docs/trackers/misc",
+        ),
+        ("docs/frictions/readme.md", "docs/frictions"),
+        (
+            "docs/trackers/frictions/readme.md",
+            "docs/trackers/frictions",
+        ),
+        ("docs/trackers/ledgers/readme.md", "docs/trackers/ledgers"),
+        ("docs/trackers/ledgers/Bad_Name/readme.md", "docs/trackers"),
+    ] {
+        let text = refusal(&ctx, collection_at(rel, ledger_schema())).await;
+        assert!(text.contains(rel), "{text}");
+        assert_one_remedy(&text);
+        assert_no_collection_written(tmp.path(), &ctx, &[dir]);
+    }
+}
+
+#[tokio::test]
+async fn a_path_with_a_parent_component_is_refused() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+
+    let text = refusal(
+        &ctx,
+        collection_at(
+            "docs/trackers/ledgers/../ledgers/frictions/readme.md",
+            ledger_schema(),
+        ),
+    )
+    .await;
+
+    assert!(text.contains(".."), "{text}");
+    assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+}
+
+#[tokio::test]
+async fn a_readme_key_equal_to_an_existing_stem_is_refused() {
+    let issue = "docs/issues/frictions.md";
+    let tmp = checkout(&[(issue, "# BUG: x\n")]);
+    let ctx = mk_ctx(tmp.path());
+
+    let text = refusal(&ctx, new_ledger(ledger_schema())).await;
+
+    assert!(text.contains(issue), "names the other path: {text}");
+    assert!(text.contains(NEW_README), "names the new path: {text}");
+    assert_one_remedy(&text);
+    assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+}
+
+#[tokio::test]
+async fn an_archived_collection_blocks_a_live_one_with_its_key() {
+    let archived = "docs/trackers/ledgers/archive/frictions/readme.md";
+    let tmp = checkout(&[(archived, "---\ntitle: Old\n---\n")]);
+    let ctx = mk_ctx(tmp.path());
+
+    let text = refusal(&ctx, new_ledger(ledger_schema())).await;
+
+    assert!(text.contains(archived), "{text}");
+    assert_one_remedy(&text);
+    assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+}
+
+#[tokio::test]
+async fn a_title_with_a_newline_or_no_text_is_refused() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    for title in ["Frictions\nand more", "Frictions\r", "   "] {
+        let mut args = new_ledger(ledger_schema());
+        args["title"] = json!(title);
+        let text = refusal(&ctx, args.clone()).await;
+        assert!(text.contains("title"), "{title:?}: {text}");
+        assert_one_remedy(&text);
+        args["action"] = json!("create");
+        let pre = format!("{:#}", preflight(&args).unwrap_err());
+        assert_eq!(pre, text, "preflight gives the same refusal");
+        assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+    }
+}
+
+#[tokio::test]
+async fn title_id_and_kind_in_extra_name_their_own_remedy() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    for key in ["title", "id", "kind"] {
+        let mut schema = ledger_schema();
+        schema[key] = json!("x");
+        let text = refusal(&ctx, new_ledger(schema)).await;
+        assert!(text.contains(&format!("extra.{key}")), "{key}: {text}");
+        assert_one_remedy(&text);
+        assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+    }
+}
+
+#[tokio::test]
+async fn a_collection_takes_no_owners_topic_time_scope_augment_or_status() {
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    for (key, value) in [
+        ("owners", json!(["me"])),
+        ("topic", json!("t")),
+        ("time_scope", json!("2026-W46")),
+        ("augment", json!({"prompt": "p"})),
+        ("status", json!("done")),
+    ] {
+        let mut args = new_ledger(ledger_schema());
+        args[key] = value;
+        let text = refusal(&ctx, args.clone()).await;
+        assert!(text.contains(key), "{key}: {text}");
+        assert_one_remedy(&text);
+        args["action"] = json!("create");
+        let pre = format!("{:#}", preflight(&args).unwrap_err());
+        assert_eq!(pre, text, "preflight gives the same refusal");
+    }
+    assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+}
+
+#[test]
+fn a_collection_call_without_rel_path_or_title_is_refused_by_preflight() {
+    for (args, says) in [
+        (
+            json!({"action": "create", "kind": "collection", "title": "T"}),
+            "`rel_path`",
+        ),
+        (
+            json!({"action": "create", "kind": "collection", "rel_path": NEW_README}),
+            "`title`",
+        ),
+    ] {
+        let text = format!("{:#}", preflight(&args).unwrap_err());
+        assert!(text.contains(says), "{args} -> {text}");
+        assert!(!text.contains("missing field"), "{args} -> {text}");
+        assert_one_remedy(&text);
+    }
+    // `body` is optional: the readme prose may be empty.
+    preflight(&json!({
+        "action": "create", "kind": "collection", "rel_path": NEW_README, "title": "T"
+    }))
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_collection_create_obeys_requirements_toml() {
+    let tmp = checkout(&[(
+        ".codescout/requirements.toml",
+        "[[require]]\nkind = \"collection\"\nsections = [\"Purpose\"]\nmin_section_chars = 40\n",
+    )]);
+    let ctx = mk_ctx(tmp.path());
+
+    let text = refusal(&ctx, new_ledger(ledger_schema())).await;
+
+    assert!(text.contains("## Purpose"), "{text}");
+    assert_no_collection_written(tmp.path(), &ctx, &[NEW_DIR]);
+}
+
+#[tokio::test]
+async fn a_root_below_the_git_top_level_refuses_a_collection() {
+    let tmp = checkout(&[]);
+    let sub = tmp.path().join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let ctx = mk_ctx(&sub);
+
+    let text = refusal(&ctx, new_ledger(ledger_schema())).await;
+
+    assert!(text.contains("top level"), "{text}");
+    assert_one_remedy(&text);
+    assert_no_collection_written(&sub, &ctx, &[NEW_DIR]);
+}

@@ -6,7 +6,7 @@ use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::artifact::{self, ArtifactRow};
 use crate::librarian::frontmatter::Frontmatter;
 
-fn validate_rel_path(rel: &str) -> Result<()> {
+pub(super) fn validate_rel_path(rel: &str) -> Result<()> {
     use std::path::{Component, Path};
     let p = Path::new(rel);
     if p.is_absolute() {
@@ -310,11 +310,16 @@ fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String>
 ///
 /// Without `collection`, a plain create needs `rel_path`, `kind`, `title` and `body`; the first
 /// one missing is named in serde's own words, as when the four were required by the struct. With
-/// `collection`, the entry-mode checks of `create_lifecycle::check_args` apply instead.
+/// `collection`, the entry-mode checks of `create_lifecycle::check_args` apply instead; with
+/// `kind` `"collection"`, the collection-mode checks of `check_collection_args` (no `body` needed).
 fn parse_args(args: Value) -> Result<Args> {
     let a: Args = serde_json::from_value(args).map_err(plain_args_error)?;
     if let Some(collection) = a.collection.as_deref() {
         super::create_lifecycle::check_args(collection, &a)?;
+        return Ok(a);
+    }
+    if a.kind.as_deref() == Some("collection") {
+        super::create_lifecycle::check_collection_args(&a)?;
         return Ok(a);
     }
     let missing = [
@@ -368,6 +373,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let mut a = parse_args(args)?;
     if a.collection.is_some() {
         return super::create_lifecycle::entry_mode(ctx, &a).await;
+    }
+    if a.kind.as_deref() == Some("collection") {
+        return super::create_lifecycle::collection_mode(ctx, &a).await;
     }
 
     // F4: `params_path` is advertised on the shared `augment` schema object (honored
