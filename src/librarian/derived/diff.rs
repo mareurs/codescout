@@ -11,8 +11,10 @@
 //! # What is compared, and how the old rows are scoped
 //!
 //! The old catalog is machine-global: one file, many repositories and worktrees, absolute paths.
-//! An old `artifact` row is kept only when its `abs_path` is under the git root (compared by path
-//! components, so `/work/proj2/x.md` is not under `/work/proj`), made git-root-relative with `/`,
+//! An old `artifact` row is kept only when its `abs_path` is under the git root, or under
+//! another spelling of it that the caller gives ([`RootMap`]; the git root is tried first). The
+//! test compares path components, so `/work/proj2/x.md` is not under `/work/proj`. The path is
+//! made git-root-relative with `/`,
 //! and it does not sit under `<git_root>/.worktrees/` (a shadow copy). Every other row is counted
 //! and then ignored, each in exactly one bucket, tested in this order: `ignored_other_roots` (a
 //! path outside the git root, or one with a `..` component after it), `ignored_worktrees`,
@@ -135,14 +137,28 @@
 //! open of a cleanly closed WAL database (no `-wal`, no `-shm`) in a writable directory
 //! succeeds and makes SQLite itself create both side files, and in a read-only directory it is
 //! refused with `attempt to write a readonly database`. The old catalog is a WAL database, so
-//! [`open_old_read_only`] alone can leave two new files beside it; `cli::derive_shadow` refuses
-//! that case before it opens anything. A WAL database that another process holds open already
+//! [`open_old_read_only`] alone can leave two new files beside it. `cli::derive_shadow` opens
+//! such a catalog with [`open_old_immutable`] instead (below). A WAL database that another
+//! process holds open already
 //! has both files; reading it writes nothing to the catalog or its `-wal`, but SQLite updates
 //! read marks in the `-shm` file (measured: a `mode=ro` reader ran BEGIN, a count and ROLLBACK;
 //! the main file and the `-wal` were byte-identical afterwards and the `-shm` was not).
+//!
+//! # The immutable open
+//!
+//! [`open_old_immutable`] opens `file:<url>?mode=ro&immutable=1`. SQLite then takes no lock and
+//! creates no `-wal` or `-shm`, so a cleanly closed WAL catalog opens and nothing appears beside
+//! it, and the main file's bytes and mtime stay as they are. The price is that SQLite ignores a
+//! `-wal` beside the file and reads the main file alone: rows that lie only in the `-wal` are
+//! missing from the answer, and no error says so (pinned by
+//! `an_immutable_open_would_read_stale_rows_so_a_wal_with_rows_is_refused`). So the open refuses
+//! when `<path>-wal`, `<path>-shm` or `<path>-journal` exists ([`side_files_present`]): without a
+//! `-wal` the main file holds every row. A process that starts after the check, and writes, can
+//! still make the answer out of date; a caller that needs a complete answer compares
+//! [`file_stamp`] before and after it reads.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context};
@@ -312,30 +328,44 @@ impl ShadowDiff {
     }
 }
 
-/// The old catalog has rows, and none of them lies under the git root. Every derived document
+/// The old catalog has rows, and none of them lies under the git root or an old root. Every
+/// derived document
 /// would then be "only in the derived index", a conclusion drawn from no evidence about this
 /// repository: the usual cause is a root spelled differently on the two sides (the old indexer
 /// stores `abs_path` as the caller held it, possibly through a symlink; the CLI canonicalizes
 /// the root). [`diff_with_rules`] returns it as the error, so the CLI prints it as `NOT
 /// COMPARED`. An old catalog with no rows at all is not this error: it compares, and every
-/// derived document is only in the derived index.
+/// derived document is only in the derived index. The text names no path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoOldRowsUnderRoot {
-    pub git_root: std::path::PathBuf,
+    /// How many `--old-root` paths were given.
+    pub old_roots: usize,
     /// Old rows under some other root.
     pub other_roots: usize,
 }
 
 impl std::fmt::Display for NoOldRowsUnderRoot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "no old row lies under {} ({} {} under other roots; is the root spelled through a \
-             symlink?)",
-            self.git_root.display(),
-            self.other_roots,
-            if self.other_roots == 1 { "row" } else { "rows" }
-        )
+        let rows = if self.other_roots == 1 {
+            "row lies"
+        } else {
+            "rows lie"
+        };
+        if self.old_roots == 0 {
+            write!(
+                f,
+                "no old row lies under the git root ({} {rows} under other roots; is the root \
+                 spelled through a symlink? pass --old-root <the other spelling>)",
+                self.other_roots
+            )
+        } else {
+            write!(
+                f,
+                "no old row lies under the git root or under any of the {} --old-root paths \
+                 given ({} {rows} under other roots)",
+                self.old_roots, self.other_roots
+            )
+        }
     }
 }
 
@@ -346,8 +376,9 @@ impl OldCatalog {
     /// checking that every table and column the diff reads is there. A file that is not a
     /// database, a missing table and a missing column are errors that name SQLite's reason.
     ///
-    /// Nothing here checks how the connection was opened, and a writable one is accepted: Plan D
-    /// must pass a connection opened read-only.
+    /// Nothing here checks how the connection was opened, and a writable one is accepted: a
+    /// caller must pass a connection opened read-only ([`open_old_immutable`],
+    /// [`open_old_read_only`]).
     pub fn from_connection(conn: Connection) -> anyhow::Result<OldCatalog> {
         conn.busy_timeout(BUSY_TIMEOUT)
             .context("setting the old catalog's busy timeout")?;
@@ -362,6 +393,127 @@ impl OldCatalog {
         }
         Ok(OldCatalog { conn })
     }
+    /// The connection the diff reads through. A caller reads rows with it and never writes.
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.conn
+    }
+}
+
+/// The spellings of one repository's root that old `abs_path` values can carry: the git root the
+/// derived index is built for, then each old root (`--old-root`), in order. The old indexer
+/// stores `abs_path` as its caller held it, so a root reached through a symlink, or a checkout
+/// that has since moved, has another spelling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootMap {
+    pub git_root: PathBuf,
+    pub old_roots: Vec<PathBuf>,
+}
+
+impl RootMap {
+    /// A map with the git root only.
+    pub fn new(git_root: PathBuf) -> Self {
+        Self::with_old_roots(git_root, Vec::new())
+    }
+
+    /// A map with the git root and the other spellings.
+    pub fn with_old_roots(git_root: PathBuf, old_roots: Vec<PathBuf>) -> Self {
+        RootMap {
+            git_root,
+            old_roots,
+        }
+    }
+
+    /// `scope_of` against the git root, then each old root in order; the first answer that is
+    /// not `OtherRoot` wins.
+    pub(crate) fn scope(&self, abs_path: &str) -> Scope {
+        for root in self.spellings() {
+            match scope_of(root, abs_path) {
+                Scope::OtherRoot => {}
+                found => return found,
+            }
+        }
+        Scope::OtherRoot
+    }
+
+    /// The git root first, then the old roots.
+    pub fn spellings(&self) -> Vec<&Path> {
+        std::iter::once(self.git_root.as_path())
+            .chain(self.old_roots.iter().map(PathBuf::as_path))
+            .collect()
+    }
+}
+
+/// The suffixes of the files SQLite keeps beside a database while a process has it open or after
+/// one stopped without closing it.
+const SIDE_FILE_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
+
+/// What an operator reads when [`open_old_immutable`] refuses. It names no path: the caller
+/// knows which file it asked for.
+const SIDE_FILE_REFUSAL: &str = "a -wal, -shm or -journal file lies beside the old catalog. \
+     Another process holds it open, or one stopped without closing it. Stop every codescout \
+     process, run sqlite3 <old catalog file> 'PRAGMA wal_checkpoint(TRUNCATE)', and run this \
+     again.";
+
+/// `<path>-wal`, `<path>-shm` or `<path>-journal` exists (`symlink_metadata`). A side file that
+/// cannot be inspected counts as present.
+pub fn side_files_present(path: &Path) -> bool {
+    SIDE_FILE_SUFFIXES.iter().any(|suffix| {
+        let mut side = path.as_os_str().to_owned();
+        side.push(suffix);
+        match std::fs::symlink_metadata(PathBuf::from(side)) {
+            Ok(_) => true,
+            Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+        }
+    })
+}
+
+/// The length and modification time of the file at `path`, for the re-check after a load.
+pub fn file_stamp(path: &Path) -> std::io::Result<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path)?;
+    Ok((meta.len(), meta.modified()?))
+}
+
+/// Refuse when [`side_files_present`]; else open `file:<url>?mode=ro&immutable=1`.
+///
+/// `immutable=1` tells SQLite that nothing changes the file while it is open, so SQLite takes no
+/// lock, reads no `-wal`, and creates no `-wal` or `-shm`: a cleanly closed WAL catalog opens and
+/// nothing appears beside it. Reading it ignores a `-wal` and so can return rows that are out of
+/// date without an error. The refusal of every side file is what makes the answer complete: a
+/// catalog with no `-wal` holds every row in the main file. Only a catalog that no process is
+/// writing may be opened this way.
+///
+/// The error text names no path.
+pub fn open_old_immutable(path: &Path) -> anyhow::Result<OldCatalog> {
+    if !path.is_absolute() {
+        bail!("the path of the old catalog must be absolute");
+    }
+    if side_files_present(path) {
+        bail!(SIDE_FILE_REFUSAL);
+    }
+    let url = url::Url::from_file_path(path)
+        .map_err(|()| anyhow!("the path of the old catalog cannot be written as a file URL"))?;
+    let conn = Connection::open_with_flags(
+        format!("{url}?mode=ro&immutable=1"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|e| {
+        // SQLite's own message for a failed open repeats the URL, an absolute path.
+        let why = match &e {
+            rusqlite::Error::SqliteFailure(code, _) => code.to_string(),
+            other => other.to_string(),
+        };
+        anyhow!(
+            "the old catalog cannot be opened read-only{}: {why}",
+            if path.exists() {
+                ""
+            } else {
+                " (the file does not exist)"
+            }
+        )
+    })?;
+    OldCatalog::from_connection(conn)
 }
 
 /// Open the old catalog at `path` read-only, and check that it holds what the diff reads.
@@ -389,38 +541,40 @@ pub fn open_old_read_only(path: &Path) -> anyhow::Result<OldCatalog> {
 }
 
 /// [`diff_with_rules`] without rules: a `tags` difference is never attributed to a rule.
-pub fn diff(old: &OldCatalog, derived: &Connection, git_root: &Path) -> anyhow::Result<ShadowDiff> {
-    diff_with_rules(old, derived, git_root, &[])
+pub fn diff(old: &OldCatalog, derived: &Connection, roots: &RootMap) -> anyhow::Result<ShadowDiff> {
+    diff_with_rules(old, derived, roots, &[])
 }
 
-/// Compare the old catalog with the derived index `derived`, for the repository at `git_root`.
+/// Compare the old catalog with the derived index `derived`, for the repository whose root
+/// `roots` spells. An old row is in scope when its `abs_path` lies under the git root or under
+/// one of the old roots.
 /// `rules` are the rules the derived index was built with (`build::rules_from_commit`), used only
 /// to attribute a `tags` difference to a rule.
 ///
 /// Errors: [`NoOldRowsUnderRoot`] (downcast it) when the old catalog has rows and none lies under
-/// `git_root`; a SQLite error from either side.
+/// the git root or an old root; a SQLite error from either side.
 pub fn diff_with_rules(
     old: &OldCatalog,
     derived: &Connection,
-    git_root: &Path,
+    roots: &RootMap,
     rules: &[CompiledRule],
 ) -> anyhow::Result<ShadowDiff> {
     // One read snapshot, so the four queries below see one state of a catalog that other
     // processes keep writing. It is dropped without a commit: no row is written (SQLite's read
     // marks in a WAL catalog's `-shm` are not ours to avoid).
     let snapshot = old
-        .conn
+        .connection()
         .unchecked_transaction()
         .context("starting a read snapshot of the old catalog")?;
     let mut counts = DiffCounts::default();
 
-    let old_docs = load_old_documents(&snapshot, git_root, &mut counts)?;
+    let old_docs = load_old_documents(&snapshot, roots, &mut counts)?;
     // Rows exist, none lies under the root: the root is probably spelled differently on the two
     // sides, and every derived document would get a cause from no evidence. An old catalog with
     // no row at all (or only worktree copies and GC leftovers) is not this case.
     if old_docs.is_empty() && counts.ignored_other_roots > 0 {
         return Err(NoOldRowsUnderRoot {
-            git_root: git_root.to_path_buf(),
+            old_roots: roots.old_roots.len(),
             other_roots: counts.ignored_other_roots,
         }
         .into());
@@ -586,7 +740,7 @@ fn render_set(set: &BTreeSet<String>) -> String {
 /// not in scope counted in `counts`.
 fn load_old_documents(
     conn: &Connection,
-    git_root: &Path,
+    roots: &RootMap,
     counts: &mut DiffCounts,
 ) -> anyhow::Result<BTreeMap<String, OldDoc>> {
     let mut stmt = conn
@@ -596,7 +750,7 @@ fn load_old_documents(
     let mut docs = BTreeMap::new();
     while let Some(r) = rows.next()? {
         let abs_path: String = r.get(1)?;
-        let rel_path = match scope_of(git_root, &abs_path) {
+        let rel_path = match roots.scope(&abs_path) {
             Scope::OtherRoot => {
                 counts.ignored_other_roots += 1;
                 continue;
@@ -1295,8 +1449,13 @@ mod tests {
         OldCatalog::from_connection(conn).unwrap()
     }
 
+    /// The root map of a test that gives no old root.
+    fn roots() -> RootMap {
+        RootMap::new(PathBuf::from(ROOT))
+    }
+
     fn run(old: &OldCatalog, b: &Built) -> ShadowDiff {
-        diff(old, &b.conn, Path::new(ROOT)).unwrap()
+        diff(old, &b.conn, &roots()).unwrap()
     }
 
     fn document(path: &str, cause: DiffCause) -> DiffRow {
@@ -1712,19 +1871,133 @@ mod tests {
             old_row("id-y", "/elsewhere/proj/b.md"),
         ];
         let old = old_with(&rows, &[], &[], &[]);
-        let err = diff(&old, &b.conn, Path::new(ROOT)).expect_err("nothing lies under the root");
+        let err = diff(&old, &b.conn, &roots()).expect_err("nothing lies under the root");
         assert_eq!(
             err.downcast_ref::<NoOldRowsUnderRoot>(),
             Some(&NoOldRowsUnderRoot {
-                git_root: Path::new(ROOT).to_path_buf(),
+                old_roots: 0,
                 other_roots: 2
             })
         );
         assert_eq!(
             err.to_string(),
-            "no old row lies under /work/proj (2 rows under other roots; is the root spelled \
-             through a symlink?)"
+            "no old row lies under the git root (2 rows lie under other roots; is the root \
+             spelled through a symlink? pass --old-root <the other spelling>)"
         );
+    }
+
+    #[test]
+    fn rows_under_an_old_root_are_compared_as_if_under_the_git_root() {
+        let b = built(&[("a.md", "# A\n")]);
+        let (mut rows, chunks) = mirrors(&b.conn, &[("id-a", "a.md")]);
+        rows[0].abs_path = "/old/spelling/a.md".to_owned();
+        let old = old_with(&rows, &[], &[], &chunks);
+        let map =
+            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")]);
+        let d = diff(&old, &b.conn, &map).unwrap();
+        assert_eq!(d.counts.matched_documents, 1, "{d:#?}");
+        assert_eq!(d.counts.ignored_other_roots, 0, "{d:#?}");
+        assert!(d.rows().next().is_none(), "{d:#?}");
+    }
+
+    #[test]
+    fn the_git_root_is_tried_before_an_old_root() {
+        // An old root nested in the git root: `/work/proj/sub/a.md` is `sub/a.md` under the
+        // git root and `a.md` under the old root. The git root answers first, so the two
+        // rows below name two files and do not collide.
+        let b = built(&[("a.md", "# A\n"), ("sub/a.md", "# A\n")]);
+        let (rows, chunks) = mirrors(&b.conn, &[("id-1", "sub/a.md"), ("id-2", "a.md")]);
+        let old = old_with(&rows, &[], &[], &chunks);
+        let nested = RootMap::with_old_roots(
+            PathBuf::from(ROOT),
+            vec![PathBuf::from(format!("{ROOT}/sub"))],
+        );
+        let d = diff(&old, &b.conn, &nested).unwrap();
+        assert_eq!(d.counts.old_path_collisions, 0, "{d:#?}");
+        assert_eq!(d.counts.matched_documents, 2, "{d:#?}");
+        assert!(d.rows().next().is_none(), "{d:#?}");
+
+        // Two spellings of one file collide, and the lowest id is kept.
+        let b = built(&[("a.md", "# A\n")]);
+        let (mut rows, chunks) = mirrors(&b.conn, &[("id-b", "a.md")]);
+        let mut twin = old_row("id-a", "/old/spelling/a.md");
+        twin.title = Some("Other".to_owned());
+        rows.insert(0, twin);
+        let old = old_with(&rows, &[], &[], &chunks);
+        let map =
+            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")]);
+        let d = diff(&old, &b.conn, &map).unwrap();
+        assert_eq!(d.counts.old_path_collisions, 1, "{d:#?}");
+        assert_eq!(d.counts.old_documents, 1, "{d:#?}");
+        // `id-a` (the lowest id) is kept: the title it holds is the one the diff reports.
+        assert!(
+            d.changed
+                .iter()
+                .any(|r| r.field.as_deref() == Some("title") && r.old.as_deref() == Some("Other")),
+            "{d:#?}"
+        );
+    }
+
+    #[test]
+    fn a_root_map_lists_the_git_root_first_and_judges_each_spelling() {
+        let map = RootMap::with_old_roots(
+            PathBuf::from("/work/proj"),
+            vec![PathBuf::from("/old/a"), PathBuf::from("/old/b")],
+        );
+        assert_eq!(
+            map.spellings(),
+            vec![
+                Path::new("/work/proj"),
+                Path::new("/old/a"),
+                Path::new("/old/b")
+            ]
+        );
+        assert!(matches!(map.scope("/old/b/x/y.md"), Scope::Inside(p) if p == "x/y.md"));
+        assert!(matches!(
+            map.scope("/old/b/.worktrees/w/y.md"),
+            Scope::Worktree
+        ));
+        assert!(matches!(map.scope("/old/c/y.md"), Scope::OtherRoot));
+        assert!(matches!(
+            RootMap::new(PathBuf::from("/work/proj")).scope("/old/b/y.md"),
+            Scope::OtherRoot
+        ));
+    }
+
+    #[test]
+    fn no_row_under_the_root_or_an_old_root_is_refused_without_a_path() {
+        let b = built(&[("a.md", "# A\n")]);
+        let old = old_with(&[old_row("id-x", "/elsewhere/proj/a.md")], &[], &[], &[]);
+        let map =
+            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")]);
+        let err = diff(&old, &b.conn, &map).expect_err("nothing lies under either root");
+        assert_eq!(
+            err.downcast_ref::<NoOldRowsUnderRoot>(),
+            Some(&NoOldRowsUnderRoot {
+                old_roots: 1,
+                other_roots: 1
+            })
+        );
+        let text = err.to_string();
+        assert!(text.contains("--old-root"), "{text}");
+        assert!(!text.contains(ROOT), "the git root is in the text: {text}");
+        assert!(
+            !text.contains("/old/spelling"),
+            "the old root is in the text: {text}"
+        );
+        assert!(!text.contains('/'), "a path is in the text: {text}");
+    }
+
+    #[test]
+    fn the_symlink_hint_stays_when_no_old_root_is_given() {
+        let text = NoOldRowsUnderRoot {
+            old_roots: 0,
+            other_roots: 3,
+        }
+        .to_string();
+        assert!(text.contains("symlink"), "{text}");
+        assert!(text.contains("--old-root"), "{text}");
+        assert!(!text.contains(ROOT), "{text}");
     }
 
     #[test]
@@ -1851,7 +2124,7 @@ mod tests {
 
             let old = open_old_read_only(&path)
                 .unwrap_or_else(|e| panic!("read_only_on_disk={read_only_on_disk}: {e:#}"));
-            let d = diff(&old, &b.conn, Path::new(ROOT)).unwrap();
+            let d = diff(&old, &b.conn, &roots()).unwrap();
             assert!(d.rows().next().is_none(), "{d:#?}");
             // The connection itself refuses a write, whatever the file's permissions say.
             let err = old
@@ -1949,6 +2222,177 @@ mod tests {
         );
         assert_eq!(names, vec![std::ffi::OsString::from("catalog.db")]);
     }
+    /// The names in `dir`, sorted.
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn an_immutable_open_of_a_clean_wal_catalog_creates_nothing_and_changes_no_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = clean_wal_catalog(dir.path(), &[old_row("id-a", &format!("{ROOT}/a.md"))]);
+        let bytes = std::fs::read(&path).unwrap();
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(
+            !side_files_present(&path),
+            "a clean catalog has no side file"
+        );
+
+        let old = open_old_immutable(&path).expect("a clean WAL catalog opens");
+        let rows: i64 = old
+            .connection()
+            .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "the open reads the rows");
+        let err = old
+            .connection()
+            .execute("DELETE FROM artifact", [])
+            .expect_err("a write through the immutable connection must fail");
+        assert!(
+            err.to_string().contains("readonly"),
+            "the connection is read-only: {err}"
+        );
+        drop(old);
+
+        assert_eq!(names_in(dir.path()), vec!["catalog.db".to_owned()]);
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bytes,
+            "the file's bytes changed"
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            mtime,
+            "the file's mtime changed"
+        );
+    }
+
+    #[test]
+    fn an_immutable_open_is_refused_for_each_side_file() {
+        for suffix in ["-wal", "-shm", "-journal"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = clean_wal_catalog(dir.path(), &[]);
+            let mut side = path.clone().into_os_string();
+            side.push(suffix);
+            std::fs::write(&side, b"").unwrap();
+            assert!(side_files_present(&path), "{suffix}");
+
+            let err = match open_old_immutable(&path) {
+                Ok(_) => panic!("{suffix}: an immutable open must be refused"),
+                Err(e) => e,
+            };
+            let text = format!("{err:#}");
+            assert!(
+                text.contains("Stop every codescout process"),
+                "{suffix}: {text}"
+            );
+            assert!(
+                text.contains("PRAGMA wal_checkpoint(TRUNCATE)"),
+                "{suffix}: {text}"
+            );
+            assert!(
+                !text.contains(&dir.path().display().to_string()),
+                "{suffix}: the text holds an absolute path: {text}"
+            );
+            let mut want = vec!["catalog.db".to_owned(), format!("catalog.db{suffix}")];
+            want.sort();
+            assert_eq!(
+                names_in(dir.path()),
+                want,
+                "{suffix}: no other file appears"
+            );
+        }
+    }
+
+    #[test]
+    fn an_immutable_open_would_read_stale_rows_so_a_wal_with_rows_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.db");
+        // This connection stands for a server that is still running: its rows lie only in the
+        // `-wal` (the schema is checkpointed into the main file first, so a stale read finds
+        // the tables and misses the row).
+        let holder = Connection::open(&path).unwrap();
+        holder.pragma_update(None, "journal_mode", "WAL").unwrap();
+        fill_old_catalog(&holder, &[], &[], &[], &[]);
+        holder
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+            .unwrap();
+        holder.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        holder
+            .execute(
+                "INSERT INTO artifact (id, abs_path, kind, status, owners, tags, file_sha256) \
+                 VALUES ('id-w', '/work/proj/w.md', 'doc', 'active', '[]', '[]', 'x')",
+                [],
+            )
+            .unwrap();
+
+        // The premise, measured: an immutable open ignores the `-wal` and reads no row.
+        let raw = Connection::open_with_flags(
+            format!("file:{}?mode=ro&immutable=1", path.display()),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )
+        .unwrap();
+        let stale: i64 = raw
+            .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stale, 0, "an immutable open reads the main file only");
+        drop(raw);
+
+        // The refusal is what keeps the diff from running on that stale answer.
+        let err = match open_old_immutable(&path) {
+            Ok(_) => panic!("a catalog whose rows lie in the -wal must be refused"),
+            Err(e) => e,
+        };
+        assert!(
+            format!("{err:#}").contains("Stop every codescout process"),
+            "{err:#}"
+        );
+        let live: i64 = holder
+            .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(live, 1, "the holder still sees its row");
+    }
+
+    #[test]
+    fn an_immutable_open_reads_a_path_with_a_space_and_a_percent() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("my catalogs%20here");
+        std::fs::create_dir(&folder).unwrap();
+        let path = folder.join("old catalog#1.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            fill_old_catalog(
+                &conn,
+                &[old_row("id-a", &format!("{ROOT}/a.md"))],
+                &[],
+                &[],
+                &[],
+            );
+        }
+        let old = open_old_immutable(&path).expect("the open decodes the path as given");
+        let rows: i64 = old
+            .connection()
+            .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn a_relative_path_is_refused_by_the_immutable_open() {
+        let err = match open_old_immutable(Path::new("catalog.db")) {
+            Ok(_) => panic!("a relative path must be refused"),
+            Err(e) => e,
+        };
+        assert!(
+            format!("{err:#}").contains("absolute"),
+            "the refusal says why: {err:#}"
+        );
+    }
 
     #[test]
     fn old_rows_outside_the_git_root_are_ignored_and_counted_and_worktree_copies_are_excluded() {
@@ -2030,12 +2474,12 @@ mod tests {
             .unwrap();
         assert_eq!(tags_of, r#"["ruled"]"#);
         let (mut rows, chunks) = mirrors(&b.conn, &[("id-a", "src/a.md")]);
-        let root = Path::new(ROOT);
+        let root = roots();
 
         // The old catalog was indexed under other rules: it lacks the tag.
         rows[0].tags = "[]".to_owned();
         let old = old_with(&rows, &[], &[], &chunks);
-        let with = diff_with_rules(&old, &b.conn, root, &b.rules).unwrap();
+        let with = diff_with_rules(&old, &b.conn, &root, &b.rules).unwrap();
         assert_eq!(
             with.changed,
             vec![field(
@@ -2047,13 +2491,13 @@ mod tests {
             )]
         );
         // Without the rules nothing says where the tag came from.
-        let without = diff(&old, &b.conn, root).unwrap();
+        let without = diff(&old, &b.conn, &root).unwrap();
         assert_eq!(without.changed[0].cause, DiffCause::Unexplained);
 
         // The old row has a tag of its own as well: the difference is not all the rule's.
         rows[0].tags = r#"["extra"]"#.to_owned();
         let old = old_with(&rows, &[], &[], &chunks);
-        let mixed = diff_with_rules(&old, &b.conn, root, &b.rules).unwrap();
+        let mixed = diff_with_rules(&old, &b.conn, &root, &b.rules).unwrap();
         assert_eq!(mixed.changed[0].cause, DiffCause::Unexplained);
     }
 

@@ -11,12 +11,13 @@
 //! Exit codes: `0` whenever the comparison ran, whatever it found; `2` and `NOT COMPARED —
 //! <reason>` on stdout when it could not run (every error `compare` returns becomes one):
 //!
-//! - the old catalog: no `--old-db` and no local data directory to look for
-//!   `librarian/catalog.db` in; a file that does not exist (it is never created) or cannot be
-//!   opened or read (not a database, a table or column the diff reads is missing, a query
-//!   fails); a WAL catalog with no `-wal` and `-shm` beside it, the usual case when no codescout
-//!   server has it open ([`refuse_if_open_would_write`]); a catalog with rows of which none lies
-//!   under the git root (a root spelled differently on the two sides);
+//! - the old catalog: no `--old-db`, no `LIBRARIAN_DB` and no local data directory to look for
+//!   `librarian/catalog.db` in ([`resolve_old_catalog`]); a file that does not exist (it is never
+//!   created) or cannot be opened or read (not a database, a table or column the diff reads is
+//!   missing, a query fails); a `-wal`, `-shm` or `-journal` file beside it that is not the pair
+//!   a running server keeps ([`open_old`]); a catalog with rows of which none lies under the git
+//!   root or an `--old-root` (a root spelled differently on the two sides); an `--old-root` that
+//!   is not an absolute path;
 //! - the repository: a `--project` that cannot be resolved; no git repository at or above it, or
 //!   one that cannot be opened; a `--rev` that names no commit; a `.codescout/librarian.toml` or
 //!   `.codescout/key-space.toml` in that commit that does not parse or is a symlink;
@@ -42,7 +43,8 @@ use crate::librarian::derived::build::{
     build_full, key_space_from_commit, rules_from_commit, BuildInput,
 };
 use crate::librarian::derived::diff::{
-    diff_with_rules, open_old_read_only, DiffCause, DiffRow, ShadowDiff, Subject,
+    diff_with_rules, open_old_immutable, open_old_read_only, DiffCause, DiffRow, OldCatalog,
+    RootMap, ShadowDiff, Subject,
 };
 use crate::librarian::derived::scan::open_commit;
 use crate::librarian::derived::schema;
@@ -55,10 +57,15 @@ pub struct DeriveShadowArgs {
     /// The commit whose derived index is compared (a ref or a sha).
     #[arg(long, default_value = "HEAD")]
     pub rev: String,
-    /// The old catalog to read (default: `catalog.db` in the `librarian` directory of the
-    /// machine's local data directory).
+    /// The old catalog to read (default: `LIBRARIAN_DB`, else `catalog.db` in the `librarian`
+    /// directory of the machine's local data directory).
     #[arg(long)]
     pub old_db: Option<PathBuf>,
+    /// Another spelling of the git root that old rows carry, as an absolute path (repeatable).
+    /// The old indexer stores each path as its caller held it: through a symlink, or in a
+    /// checkout that has moved.
+    #[arg(long = "old-root")]
+    pub old_root: Vec<PathBuf>,
     /// Print the whole diff as one JSON object instead of counts and samples.
     #[arg(long)]
     pub json: bool,
@@ -77,6 +84,19 @@ pub struct Outcome {
 /// rows it left out, and `--json` carries every row.
 // cap-class: NOT_A_CAP — a printed sample of a report whose full counts are printed beside it; the omitted rows are counted in the text and `--json` lists every one, so nothing is presented as complete
 const MAX_PRINTED_ROWS_PER_CAUSE: usize = 20;
+
+/// The old catalog both `derive-shadow` and `cutover` read: the flag, else `LIBRARIAN_DB`, else
+/// `librarian/catalog.db` in the local data directory. The librarian server resolves its own
+/// catalog the same way, so two dry runs read one catalog.
+pub(crate) fn resolve_old_catalog(
+    arg: Option<&Path>,
+    librarian_db: Option<std::ffi::OsString>,
+    data_dir: Option<PathBuf>,
+) -> Option<PathBuf> {
+    arg.map(Path::to_path_buf)
+        .or_else(|| librarian_db.map(PathBuf::from))
+        .or_else(|| data_dir.map(|dir| dir.join("librarian").join("catalog.db")))
+}
 
 /// The `-wal` / `-shm` file names SQLite uses beside `path`.
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
@@ -98,33 +118,32 @@ fn is_wal_database(path: &Path) -> Option<bool> {
     Some(header[18] == 2 || header[19] == 2)
 }
 
-/// Refuse to open a WAL database that has no `-wal` and `-shm` beside it. SQLite does not refuse
-/// a read-only open of one in a writable directory: it creates both files, and a command that
-/// promises to create nothing beside the catalog must not do that. The case is a catalog no
-/// process has open (a process that has it open keeps both files). Measured with the bundled
-/// SQLite: the open succeeds and leaves `catalog.db-wal` and `catalog.db-shm` behind; in a
-/// read-only directory it is refused with `attempt to write a readonly database`.
+/// Is there a file `<path><suffix>` (a link counts)?
+fn has_side_file(path: &Path, suffix: &str) -> bool {
+    std::fs::symlink_metadata(sidecar(path, suffix)).is_ok()
+}
+
+/// Open the old catalog without creating or writing a file beside it.
 ///
-/// With both files present the open writes nothing to the catalog or its `-wal`, but SQLite
-/// updates read marks in the `-shm` (see `derived::diff`), so "writes nothing beside the
-/// catalog" is not what this command can promise.
-///
-/// The guard is best-effort. It checks that both files exist and then the caller opens: if the
-/// last server closes the catalog between the two steps, SQLite removes the side files and the
-/// read-only open creates them again. Plan D must not rely on this guard alone.
-fn refuse_if_open_would_write(path: &Path) -> Result<()> {
-    if is_wal_database(path) != Some(true) {
-        return Ok(());
+/// A WAL database that a codescout server holds open has its `-wal` and `-shm`, and no
+/// `-journal`: it is read through [`open_old_read_only`], which writes nothing to the catalog or
+/// its `-wal` (SQLite updates read marks in the `-shm`, see `derived::diff`) and sees the rows
+/// that lie in the `-wal`. Every other catalog is opened immutable ([`open_old_immutable`]): a
+/// WAL catalog that no process holds opens and nothing appears beside it, and a catalog with
+/// one side file, or a `-journal`, is refused, because an immutable open would ignore the rows
+/// in its `-wal`. The server can still start while this command runs, and the answer is then
+/// out of date; `derived::diff` states the cost.
+fn open_old(path: &Path) -> Result<OldCatalog> {
+    let held = is_wal_database(path) == Some(true)
+        && has_side_file(path, "-wal")
+        && has_side_file(path, "-shm")
+        && !has_side_file(path, "-journal");
+    if held {
+        return open_old_read_only(path);
     }
-    if sidecar(path, "-wal").exists() && sidecar(path, "-shm").exists() {
-        return Ok(());
-    }
-    bail!(
-        "{path} is a WAL database and {path}-wal and {path}-shm are not both beside it (no \
-         process has it open): SQLite would create them to read it, and this command creates \
-         nothing beside the catalog. Run it while a codescout server has the catalog open",
-        path = path.display()
-    )
+    let absolute =
+        std::path::absolute(path).with_context(|| format!("cannot resolve {}", path.display()))?;
+    open_old_immutable(&absolute).with_context(|| format!("old catalog {}", path.display()))
 }
 
 /// The reason on one line: a context chain spans several.
@@ -183,12 +202,17 @@ fn compare(
     // The old catalog first: it is the cheap check, and a missing one needs no build.
     let old_path = args.old_db.as_deref().or(default_old_db).ok_or_else(|| {
         anyhow!(
-            "no --old-db was given and this machine has no local data directory to look for \
-             librarian/catalog.db in"
+            "no --old-db was given, LIBRARIAN_DB is not set, and this machine has no local data \
+             directory to look for librarian/catalog.db in"
         )
     })?;
-    refuse_if_open_would_write(old_path)?;
-    let old = open_old_read_only(old_path)?;
+    if let Some(relative) = args.old_root.iter().find(|p| !p.is_absolute()) {
+        bail!(
+            "--old-root takes an absolute path, and {} is not one",
+            relative.display()
+        );
+    }
+    let old = open_old(old_path)?;
 
     let start = args.project.clone().unwrap_or_else(|| cwd.to_path_buf());
     let start = std::fs::canonicalize(&start)
@@ -228,7 +252,12 @@ fn compare(
         },
     )
     .with_context(|| format!("building the derived index of {}", args.rev))?;
-    let shadow = diff_with_rules(&old, &conn, &root, &rules)?;
+    let shadow = diff_with_rules(
+        &old,
+        &conn,
+        &RootMap::with_old_roots(root.clone(), args.old_root.clone()),
+        &rules,
+    )?;
     drop(conn);
 
     let compared = Compared {
@@ -337,7 +366,11 @@ pub async fn run(args: DeriveShadowArgs) -> Result<()> {
     use std::io::Write;
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let default_old_db = dirs::data_local_dir().map(|d| d.join("librarian").join("catalog.db"));
+    let default_old_db = resolve_old_catalog(
+        None,
+        std::env::var_os("LIBRARIAN_DB"),
+        dirs::data_local_dir(),
+    );
     let out = evaluate(
         &args,
         &cwd,
@@ -389,7 +422,16 @@ mod tests {
             project: None,
             rev: "HEAD".to_owned(),
             old_db,
+            old_root: Vec::new(),
             json,
+        }
+    }
+
+    /// [`args`] with `--old-root` given once per entry of `roots`.
+    fn args_with_old_roots(old_db: PathBuf, roots: &[&str]) -> DeriveShadowArgs {
+        DeriveShadowArgs {
+            old_root: roots.iter().map(PathBuf::from).collect(),
+            ..args(Some(old_db), false)
         }
     }
 
@@ -548,13 +590,13 @@ mod tests {
     }
 
     #[test]
-    fn a_wal_catalog_no_process_holds_open_is_not_compared_and_nothing_appears_beside_it() {
+    fn a_wal_catalog_no_process_holds_open_is_compared_and_nothing_appears_beside_it() {
         let f = fixture(&[("a.md", "# A\n")]);
         let path = f.old_dir.path().join("catalog.db");
         {
             let conn = Connection::open(&path).unwrap();
             conn.pragma_update(None, "journal_mode", "WAL").unwrap();
-            fill_old_catalog(&conn, &[], &[], &[], &[]);
+            fill_old_catalog(&conn, &[old(&f, "id-a", "a.md")], &[], &[], &[]);
         }
         assert_eq!(
             listing(f.old_dir.path()),
@@ -562,14 +604,136 @@ mod tests {
             "a cleanly closed WAL database leaves no side files (the premise of this test)"
         );
         let bytes = std::fs::read(&path).unwrap();
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
 
         let out = eval(&f, &args(Some(path.clone()), false), None);
 
-        assert_eq!(out.code, 2, "{}", out.stdout);
-        assert!(out.stdout.starts_with("NOT COMPARED — "), "{}", out.stdout);
-        assert!(out.stdout.contains("WAL database"), "{}", out.stdout);
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains("documents: old 1 (in scope), derived 1, on both sides 1"),
+            "{}",
+            out.stdout
+        );
         assert_eq!(listing(f.old_dir.path()), vec!["catalog.db".to_owned()]);
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), mtime);
+    }
+
+    #[test]
+    fn a_wal_catalog_with_one_side_file_is_not_compared() {
+        for suffix in ["-wal", "-shm"] {
+            let f = fixture(&[("a.md", "# A\n")]);
+            let path = f.old_dir.path().join("catalog.db");
+            {
+                let conn = Connection::open(&path).unwrap();
+                conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+                fill_old_catalog(&conn, &[old(&f, "id-a", "a.md")], &[], &[], &[]);
+            }
+            let mut side = path.clone().into_os_string();
+            side.push(suffix);
+            std::fs::write(&side, b"").unwrap();
+            let before = listing(f.old_dir.path());
+            assert_eq!(before.len(), 2, "{suffix}: the premise");
+
+            let out = eval(&f, &args(Some(path.clone()), false), None);
+
+            assert_eq!(out.code, 2, "{suffix}: {}", out.stdout);
+            assert!(out.stdout.starts_with("NOT COMPARED — "), "{}", out.stdout);
+            assert!(
+                out.stdout.contains("Stop every codescout process"),
+                "{suffix}: {}",
+                out.stdout
+            );
+            assert_eq!(listing(f.old_dir.path()), before, "{suffix}");
+        }
+    }
+
+    #[test]
+    fn a_leftover_journal_is_not_compared() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[old(&f, "id-a", "a.md")]);
+        std::fs::write(f.old_dir.path().join("catalog.db-journal"), b"").unwrap();
+        let before = listing(f.old_dir.path());
+
+        let out = eval(&f, &args(Some(path), false), None);
+
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout.contains("Stop every codescout process"),
+            "{}",
+            out.stdout
+        );
+        assert_eq!(listing(f.old_dir.path()), before);
+    }
+
+    #[test]
+    fn rows_under_an_old_root_are_compared() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[old_row("id-a", "/old/spelling/a.md")]);
+
+        // Without the flag the run cannot say where the row belongs.
+        let without = eval(&f, &args(Some(path.clone()), false), None);
+        assert_eq!(without.code, 2, "{}", without.stdout);
+
+        let out = eval(&f, &args_with_old_roots(path, &["/old/spelling"]), None);
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains("documents: old 1 (in scope), derived 1, on both sides 1"),
+            "{}",
+            out.stdout
+        );
+        assert!(
+            out.stdout.contains("old rows ignored: 0 in other roots"),
+            "{}",
+            out.stdout
+        );
+    }
+
+    #[test]
+    fn an_old_root_that_maps_no_row_is_not_compared_and_names_the_flag() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[old_row("id-x", "/elsewhere/other-repo/a.md")]);
+        let out = eval(&f, &args_with_old_roots(path, &["/old/spelling"]), None);
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert_eq!(
+            out.stdout,
+            "NOT COMPARED — no old row lies under the git root or under any of the 1 \
+             --old-root paths given (1 row lies under other roots)\n"
+        );
+    }
+
+    #[test]
+    fn a_relative_old_root_is_refused() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[]);
+        let out = eval(&f, &args_with_old_roots(path, &["old/spelling"]), None);
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(out.stdout.starts_with("NOT COMPARED — "), "{}", out.stdout);
+        assert!(out.stdout.contains("--old-root"), "{}", out.stdout);
+        assert!(out.stdout.contains("absolute"), "{}", out.stdout);
+    }
+
+    #[test]
+    fn resolve_old_catalog_prefers_the_flag_then_librarian_db_then_the_data_dir() {
+        use std::ffi::OsString;
+        let flag = PathBuf::from("/flag/catalog.db");
+        let env = || Some(OsString::from("/env/catalog.db"));
+        let data = || Some(PathBuf::from("/data"));
+        assert_eq!(
+            resolve_old_catalog(Some(&flag), env(), data()),
+            Some(flag.clone())
+        );
+        assert_eq!(
+            resolve_old_catalog(None, env(), data()),
+            Some(PathBuf::from("/env/catalog.db"))
+        );
+        assert_eq!(
+            resolve_old_catalog(None, None, data()),
+            Some(PathBuf::from("/data/librarian/catalog.db"))
+        );
+        assert_eq!(resolve_old_catalog(None, None, None), None);
     }
 
     #[test]
@@ -660,11 +824,14 @@ mod tests {
         assert_eq!(out.code, 2, "{}", out.stdout);
         assert_eq!(
             out.stdout,
-            format!(
-                "NOT COMPARED — no old row lies under {} (1 row under other roots; is the root \
-                 spelled through a symlink?)\n",
-                f.root.display()
-            )
+            "NOT COMPARED — no old row lies under the git root (1 row lies under other \
+             roots; is the root spelled through a symlink? pass --old-root <the other \
+             spelling>)\n"
+        );
+        assert!(
+            !out.stdout.contains(&f.root.display().to_string()),
+            "the refusal names no path: {}",
+            out.stdout
         );
     }
 
@@ -677,7 +844,7 @@ mod tests {
         std::os::unix::fs::symlink(&f.root, &link).unwrap();
         // The old indexer stored the path as its caller held it: through the link.
         let path = old_file(&f, &[old_row("id-a", &format!("{}/a.md", link.display()))]);
-        let out = eval(&f, &args(Some(path), false), None);
+        let out = eval(&f, &args(Some(path.clone()), false), None);
         assert_eq!(out.code, 2, "{}", out.stdout);
         assert!(
             out.stdout
@@ -686,6 +853,19 @@ mod tests {
             out.stdout
         );
         assert!(out.stdout.contains("symlink"), "{}", out.stdout);
+        assert!(out.stdout.contains("--old-root"), "{}", out.stdout);
+        assert!(
+            !out.stdout.contains(&f.root.display().to_string()),
+            "the refusal names no path: {}",
+            out.stdout
+        );
+        // The flag is the remedy the text names: the link spelling maps the row.
+        let fixed = eval(
+            &f,
+            &args_with_old_roots(path, &[link.to_str().unwrap()]),
+            None,
+        );
+        assert_eq!(fixed.code, 0, "{}", fixed.stdout);
     }
 
     #[test]
