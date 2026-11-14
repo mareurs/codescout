@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{LibrarianRecoverableError, ToolContext};
-use crate::librarian::catalog::dual_write::SectionRollback;
+use crate::librarian::catalog::dual_write::{TwinWhat, TwinWrite};
 use crate::librarian::catalog::event_text::{splice_event, EventText};
 use crate::librarian::catalog::{event_edges, events, sources};
 
@@ -340,40 +340,12 @@ struct TwinDocument {
     path: std::path::PathBuf,
     text: String,
 }
-
-/// Bytes this call wrote into a document, with the bytes it replaced.
-struct TwinWrite {
-    path: std::path::PathBuf,
-    original: String,
-    written: String,
-}
-
-impl TwinWrite {
-    /// The catalog write failed after this file write: put the file back if it still holds what
-    /// this call wrote, and return an error that says what became of the file.
-    fn undo(&self, cause: impl std::fmt::Display) -> anyhow::Error {
-        use crate::librarian::catalog::dual_write::{
-            document_label, restore_section_after_failed_commit, without_path,
-        };
-        let label = document_label(&self.path);
-        // Every lower-layer error that enters the text is stripped of the document's path first
-        // (`without_path`), as `dual_write` does: the catalog error, and the io error a failed
-        // restore carries.
-        let cause = without_path(&cause.to_string(), &self.path, &label);
-        let rollback =
-            match restore_section_after_failed_commit(&self.path, &self.original, &self.written) {
-                SectionRollback::Failed(io) => SectionRollback::Failed(std::io::Error::other(
-                    without_path(&io.to_string(), &self.path, &label),
-                )),
-                other => other,
-            };
-        anyhow::anyhow!(
-            "event_create: the catalog write failed after `{label}` was written, so no event was \
-             recorded: {cause}. {}",
-            twin_rollback_sentence(&rollback)
-        )
-    }
-}
+/// How `event_create` names itself and its text in the error that follows a failed catalog write.
+const TWIN_WHAT: TwinWhat = TwinWhat {
+    caller: "event_create",
+    recorded: "event",
+    added: "section",
+};
 
 /// The document at the write target when it is single-writer and takes this event kind, or the
 /// reason it takes no text twin. A document whose file cannot be read or whose frontmatter does
@@ -433,20 +405,6 @@ fn twin_mutates_forms(
                 .map_err(|e| format!("target not nameable: {e:#}"))
         })
         .collect()
-}
-
-/// What a caller is told about the document after the catalog write failed: one sentence that
-/// claims only what the rollback did.
-fn twin_rollback_sentence(rollback: &SectionRollback) -> String {
-    match rollback {
-        SectionRollback::Restored => "The document was put back as it was.".to_string(),
-        SectionRollback::ForeignChange => "The document was changed by another writer after \
-            this call wrote it, so it was left as found and still holds the new section."
-            .to_string(),
-        SectionRollback::Failed(e) => {
-            format!("Putting the document back failed ({e}); the new section may still be in it.")
-        }
-    }
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -670,7 +628,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         &file.path.to_string_lossy(),
                         &file.written,
                     ) {
-                        return Err(file.undo(e));
+                        return Err(file.undo(&TWIN_WHAT, e));
                     }
                     text_twin = "written".to_string();
                     twin_file = Some(file);
@@ -680,7 +638,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
         if let Err(e) = tx.commit() {
             return Err(match twin_file {
-                Some(file) => file.undo(e),
+                Some(file) => file.undo(&TWIN_WHAT, e),
                 None => e.into(),
             });
         }
@@ -1455,20 +1413,6 @@ pub(crate) mod tests {
         );
     }
 
-    #[test]
-    fn the_rollback_sentence_claims_only_what_happened() {
-        let restored = twin_rollback_sentence(&SectionRollback::Restored);
-        assert!(restored.contains("put back as it was"), "{restored}");
-        let foreign = twin_rollback_sentence(&SectionRollback::ForeignChange);
-        assert!(foreign.contains("left as found"), "{foreign}");
-        assert!(!foreign.contains("put back as it was"), "{foreign}");
-        let failed =
-            twin_rollback_sentence(&SectionRollback::Failed(std::io::Error::other("boom")));
-        assert!(failed.contains("boom"), "{failed}");
-        assert!(failed.contains("may still be in it"), "{failed}");
-        assert!(!failed.contains("put back as it was"), "{failed}");
-    }
-
     #[cfg(unix)]
     #[tokio::test]
     async fn a_failed_file_write_leaves_no_row() {
@@ -1537,7 +1481,7 @@ pub(crate) mod tests {
                 original: "old".into(),
                 written: "new".into(),
             };
-            let err = file.undo(format!("boom at {}", path.display()));
+            let err = file.undo(&TWIN_WHAT, format!("boom at {}", path.display()));
             let text = format!("{err:#}");
             assert!(text.contains("may still be in it"), "{label}: {text}");
             for (what, p) in [

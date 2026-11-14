@@ -309,6 +309,66 @@ pub(crate) fn parse_event_sections(doc: &str) -> Vec<EventText> {
     out
 }
 
+/// The title of a level-2 home heading: `Events` for `## Events`.
+fn home_title(home: &str) -> &str {
+    home.trim_start_matches('#').trim()
+}
+
+/// `doc` with `block` (text that ends in one newline) added at the end of the section under the
+/// level-2 heading `home` (for example `## Events`), after one blank line. A document with no such
+/// heading gets it at the end of its body, then the block. `body` is the body of `doc` (what
+/// `frontmatter::parse` returned), and the frontmatter block is left byte for byte. A heading
+/// inside a code fence is not the home. It does not check that the block reads back: an unclosed
+/// fence before the insertion point swallows it, and each caller checks its own block.
+pub(crate) fn splice_under_home(doc: &str, body: &str, home: &str, block: &str) -> String {
+    let lines = scan(body);
+    let title = home_title(home);
+    let at = lines.iter().position(|l| heading_of(l) == Some((2, title)));
+    let new_body = match at {
+        None => {
+            let head = body.trim_end_matches(['\n', '\r']);
+            if head.is_empty() {
+                // After the closing delimiter the caller owns the leading blank line.
+                let lead = if body.len() == doc.len() { "" } else { "\n" };
+                format!("{lead}{home}\n\n{block}")
+            } else {
+                format!("{head}\n\n{home}\n\n{block}")
+            }
+        }
+        Some(ix) => {
+            let end = lines[ix + 1..]
+                .iter()
+                .find(|l| matches!(heading_of(l), Some((level, _)) if level <= 2))
+                .map_or(body.len(), |l| l.start);
+            let head = body[..end].trim_end_matches(['\n', '\r']);
+            let tail = &body[end..];
+            if tail.is_empty() {
+                format!("{head}\n\n{block}")
+            } else {
+                format!("{head}\n\n{block}\n{tail}")
+            }
+        }
+    };
+    frontmatter::replace_body(doc, &new_body).unwrap_or(new_body)
+}
+
+/// The lines under the level-2 heading `home` in `body`, up to the next heading of level 2 or
+/// above, with code-fence lines left out; each keeps a `\r` it ends with. Empty when `body` has no
+/// such heading outside a fence.
+pub(crate) fn home_lines<'a>(body: &'a str, home: &str) -> Vec<&'a str> {
+    let lines = scan(body);
+    let title = home_title(home);
+    let Some(ix) = lines.iter().position(|l| heading_of(l) == Some((2, title))) else {
+        return Vec::new();
+    };
+    lines[ix + 1..]
+        .iter()
+        .take_while(|l| !matches!(heading_of(l), Some((level, _)) if level <= 2))
+        .filter(|l| !l.fenced)
+        .map(|l| l.text)
+        .collect()
+}
+
 /// `doc` with the section for `e` added at the end of its `## Events` section, after the events
 /// already there. A document with no `## Events` heading gets one at the end of its body. The
 /// frontmatter block is left byte for byte.
@@ -329,37 +389,7 @@ pub(crate) fn splice_event(doc: &str, e: &EventText) -> Result<String> {
     {
         bail!("mutates form {form:?} is not one [[…]] token without whitespace");
     }
-    let section = render_event_section(e);
-    let lines = scan(body);
-    let home = lines
-        .iter()
-        .position(|l| heading_of(l) == Some((2, "Events")));
-    let new_body = match home {
-        None => {
-            let head = body.trim_end_matches(['\n', '\r']);
-            if head.is_empty() {
-                // After the closing delimiter the caller owns the leading blank line.
-                let lead = if body.len() == doc.len() { "" } else { "\n" };
-                format!("{lead}{EVENTS_HEADING}\n\n{section}")
-            } else {
-                format!("{head}\n\n{EVENTS_HEADING}\n\n{section}")
-            }
-        }
-        Some(ix) => {
-            let end = lines[ix + 1..]
-                .iter()
-                .find(|l| matches!(heading_of(l), Some((level, _)) if level <= 2))
-                .map_or(body.len(), |l| l.start);
-            let head = body[..end].trim_end_matches(['\n', '\r']);
-            let tail = &body[end..];
-            if tail.is_empty() {
-                format!("{head}\n\n{section}")
-            } else {
-                format!("{head}\n\n{section}\n{tail}")
-            }
-        }
-    };
-    let out = frontmatter::replace_body(doc, &new_body).unwrap_or(new_body);
+    let out = splice_under_home(doc, body, EVENTS_HEADING, &render_event_section(e));
     // An open code fence, or other text that swallows the new section, would make the event
     // invisible to the parser, and a retry would then add it again.
     if parse_event_sections(&out)

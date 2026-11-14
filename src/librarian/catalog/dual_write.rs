@@ -383,6 +383,65 @@ pub(crate) fn without_path(text: &str, path: &std::path::Path, label: &str) -> S
     }
     out
 }
+/// How a tool names itself, what it failed to record and what it added to a document, in the
+/// text of an error that follows a text twin whose catalog write failed.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TwinWhat {
+    /// The tool, as it opens its error text: `event_create`.
+    pub caller: &'static str,
+    /// What was not recorded: `event` in "so no event was recorded".
+    pub recorded: &'static str,
+    /// What the call added to the document: `section` in "the new section may still be in it".
+    pub added: &'static str,
+}
+
+/// Bytes a call wrote into a document before its catalog `COMMIT`, with the bytes they replaced.
+/// Kept so a failed catalog write can put the document back ([`TwinWrite::undo`]).
+pub(crate) struct TwinWrite {
+    pub path: std::path::PathBuf,
+    pub original: String,
+    pub written: String,
+}
+
+impl TwinWrite {
+    /// The catalog write failed after this file write: put the file back if it still holds what
+    /// this call wrote, and return an error that says what became of the file.
+    pub(crate) fn undo(&self, what: &TwinWhat, cause: impl std::fmt::Display) -> anyhow::Error {
+        let label = document_label(&self.path);
+        // Every lower-layer error that enters the text is stripped of the document's path first
+        // (`without_path`): the catalog error, and the io error a failed restore carries.
+        let cause = without_path(&cause.to_string(), &self.path, &label);
+        let rollback =
+            match restore_section_after_failed_commit(&self.path, &self.original, &self.written) {
+                SectionRollback::Failed(io) => SectionRollback::Failed(std::io::Error::other(
+                    without_path(&io.to_string(), &self.path, &label),
+                )),
+                other => other,
+            };
+        anyhow::anyhow!(
+            "{}: the catalog write failed after `{label}` was written, so no {} was recorded: \
+             {cause}. {}",
+            what.caller,
+            what.recorded,
+            twin_rollback_sentence(&rollback, what.added)
+        )
+    }
+}
+
+/// What a caller is told about the document after the catalog write failed: one sentence that
+/// claims only what the rollback did. `added` names what the call put in the document.
+pub(crate) fn twin_rollback_sentence(rollback: &SectionRollback, added: &str) -> String {
+    match rollback {
+        SectionRollback::Restored => "The document was put back as it was.".to_string(),
+        SectionRollback::ForeignChange => format!(
+            "The document was changed by another writer after this call wrote it, so it was \
+             left as found and still holds the new {added}."
+        ),
+        SectionRollback::Failed(e) => {
+            format!("Putting the document back failed ({e}); the new {added} may still be in it.")
+        }
+    }
+}
 
 /// The remedy for a section that is still on disk when a retry cannot be trusted to adopt it:
 /// delete it first. "Can", not "will": a retry usually finds the section, and fails to only when
@@ -1171,5 +1230,57 @@ mod tests {
             "no absolute path of the document: {text}"
         );
     }
+
+    #[test]
+    fn the_rollback_sentence_claims_only_what_happened() {
+        let restored = twin_rollback_sentence(&SectionRollback::Restored, "section");
+        assert!(restored.contains("put back as it was"), "{restored}");
+        let foreign = twin_rollback_sentence(&SectionRollback::ForeignChange, "section");
+        assert!(foreign.contains("left as found"), "{foreign}");
+        assert!(foreign.contains("holds the new section"), "{foreign}");
+        assert!(!foreign.contains("put back as it was"), "{foreign}");
+        let failed = twin_rollback_sentence(
+            &SectionRollback::Failed(std::io::Error::other("boom")),
+            "relation line",
+        );
+        assert!(failed.contains("boom"), "{failed}");
+        assert!(
+            failed.contains("the new relation line may still be in it"),
+            "the sentence names what the call added: {failed}"
+        );
+        assert!(!failed.contains("put back as it was"), "{failed}");
+    }
+
+    /// The error that follows a failed catalog write names the tool, what it did not record and
+    /// what it added, from the caller's `TwinWhat`; nothing of the first caller is left in it.
+    #[test]
+    fn an_undo_error_speaks_for_its_own_caller() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doc.md");
+        std::fs::write(&path, "written\n").unwrap();
+        let file = TwinWrite {
+            path: path.clone(),
+            original: "original\n".into(),
+            written: "written\n".into(),
+        };
+        let what = TwinWhat {
+            caller: "doc(link)",
+            recorded: "link",
+            added: "relation line",
+        };
+        let text = format!("{:#}", file.undo(&what, "disk full"));
+        assert!(
+            text.starts_with("doc(link): the catalog write failed after `doc.md` was written, so no link was recorded: disk full."),
+            "{text}"
+        );
+        assert!(
+            text.ends_with("The document was put back as it was."),
+            "{text}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "original\n");
+        assert!(!text.contains("event"), "{text}");
+        assert!(!text.contains(&dir.path().display().to_string()), "{text}");
+    }
+
     // mutation: render the write error without `without_path`.
 }

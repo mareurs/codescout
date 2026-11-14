@@ -18,6 +18,7 @@ pub mod events;
 pub mod find;
 pub mod gc;
 pub mod graft;
+pub(crate) mod link_text;
 pub mod links;
 mod migrate_v6;
 pub mod observations;

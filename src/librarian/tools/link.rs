@@ -3,7 +3,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{LibrarianRecoverableError, ToolContext};
-use crate::librarian::catalog::{artifact, links};
+use crate::librarian::catalog::dual_write::{TwinWhat, TwinWrite};
+use crate::librarian::catalog::link_text::{label_for_rel, splice_relation};
+use crate::librarian::catalog::{artifact, links, Catalog};
 
 #[derive(Deserialize)]
 struct Args {
@@ -23,6 +25,107 @@ fn parse_args(args: Value) -> Result<Args> {
 /// See `artifact::preflight`.
 pub(crate) fn preflight(args: &Value) -> Result<()> {
     parse_args(args.clone()).map(|_| ())
+}
+
+/// How `doc(link)` names itself and its text in the error that follows a failed catalog write.
+const TWIN_WHAT: TwinWhat = TwinWhat {
+    caller: "doc(link)",
+    recorded: "link",
+    added: "relation line",
+};
+
+/// What `call` does about the relation line in the source document.
+enum Twin {
+    /// A rule leaves the line out, for this reason; the row is still recorded.
+    Skip(String),
+    /// The source document's new bytes, and the bytes they replace.
+    Write(TwinWrite),
+}
+
+/// Decide the relation line for `a` in the source document `src_id` without writing anything.
+///
+/// A rule that leaves the line out is a [`Twin::Skip`] with its reason: a rel that gives no label,
+/// a source or target the grammar cannot name (`grammar_form_of` refuses: outside the key space,
+/// a shared key, no git repository), or the identical line already in the document. A document
+/// that cannot be read, or whose text cannot take the line, is an error: the writer owns the
+/// document, so a line it cannot add is a failed write and records nothing.
+fn plan_relation_line(ctx: &ToolContext, cat: &Catalog, src_id: &str, a: &Args) -> Result<Twin> {
+    use crate::librarian::catalog::dual_write::document_label;
+
+    let label = match label_for_rel(&a.rel) {
+        Ok(label) => label,
+        Err(why) => return Ok(Twin::Skip(format!("rel is not a label: {why}"))),
+    };
+    let row = artifact::get(cat, src_id)?.ok_or_else(|| {
+        LibrarianRecoverableError::new(format!("src artifact `{src_id}` not found"))
+    })?;
+    let path = row.abs_path;
+    let Some(root) = crate::librarian::current_project::lookup_git_root(&path) else {
+        return Ok(Twin::Skip(
+            "target not nameable: the document lies in no git repository".to_string(),
+        ));
+    };
+    let form =
+        match crate::librarian::catalog::cite_text::grammar_form_of(&cat.conn, &root, &a.dst_id) {
+            Ok(form) => form,
+            Err(e) => return Ok(Twin::Skip(format!("target not nameable: {e:#}"))),
+        };
+    let doc_label = document_label(&path);
+    // The read goes through the write door's leaf rule: a link is never written through, so it is
+    // not read either.
+    let text = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
+        .text_for_write(&path)
+        .map_err(|e| {
+            lower_error(
+                e.into_anyhow(),
+                &path,
+                &doc_label,
+                format!("doc(link): cannot read {doc_label}, so no link was recorded"),
+            )
+        })?;
+    match splice_relation(&text, &label, &form) {
+        Ok(None) => Ok(Twin::Skip("already present".to_string())),
+        Ok(Some(written)) => Ok(Twin::Write(TwinWrite {
+            path,
+            original: text,
+            written,
+        })),
+        Err(e) => Err(LibrarianRecoverableError::new(format!(
+            "doc(link): the relation line could not be added to {doc_label}, so no link was \
+             recorded: {e:#}"
+        ))),
+    }
+}
+
+/// `lead`, then the text of the lower layer's error `e` with the document's path replaced by
+/// `label` (the read door and the write door write `path.display()` into their text). A hint the
+/// lower layer gave stays a hint, scrubbed the same way.
+fn lower_error(
+    e: anyhow::Error,
+    path: &std::path::Path,
+    label: &str,
+    lead: String,
+) -> anyhow::Error {
+    use crate::librarian::catalog::dual_write::without_path;
+    match e.downcast_ref::<LibrarianRecoverableError>() {
+        Some(lower) => anyhow::Error::new(LibrarianRecoverableError {
+            message: format!("{lead}: {}", without_path(&lower.message, path, label)),
+            hint: lower.hint.as_deref().map(|h| without_path(h, path, label)),
+        }),
+        None => LibrarianRecoverableError::new(format!(
+            "{lead}: {}",
+            without_path(&format!("{e:#}"), path, label)
+        )),
+    }
+}
+
+/// The error for a catalog write that failed after the source document was written: the file is
+/// put back and the error says what became of it. With no file written, the error as it is.
+fn undo_twin(twin: &Option<TwinWrite>, e: anyhow::Error) -> anyhow::Error {
+    match twin {
+        Some(file) => file.undo(&TWIN_WHAT, format!("{e:#}")),
+        None => e,
+    }
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -81,41 +184,79 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         )?;
     }
 
+    let cat = ctx.catalog.lock();
+    let text_twin: String;
     {
-        let cat = ctx.catalog.lock();
-        links::insert(
-            &cat,
-            &links::LinkRow {
-                src_id: src_id.clone(),
-                dst_id: a.dst_id.clone(),
-                rel: a.rel.clone(),
-                created_at: now,
-            },
-        )?;
+        // The relation line goes into the source document before the row, inside the same lock
+        // and the same transaction, and is put back when the commit fails. A rule that does not
+        // apply skips the line and keeps the row; a write that is refused or fails is an error,
+        // and the transaction drops with no row recorded.
+        let tx = cat.conn.unchecked_transaction()?;
+        let mut twin_file: Option<TwinWrite> = None;
+        match plan_relation_line(ctx, &cat, &src_id, &a)? {
+            Twin::Skip(reason) => text_twin = format!("skipped: {reason}"),
+            Twin::Write(file) => {
+                let label = crate::librarian::catalog::dual_write::document_label(&file.path);
+                crate::librarian::util::write_catalogued_file(
+                    &super::managed_roots(ctx),
+                    &file.path,
+                    &file.written,
+                )
+                .map_err(|e| {
+                    lower_error(
+                        e,
+                        &file.path,
+                        &label,
+                        format!("doc(link): cannot write {label}, so no link was recorded"),
+                    )
+                })?;
+                if let Err(e) = crate::librarian::catalog::dual_write::record_written_file(
+                    &tx,
+                    &src_id,
+                    &file.path.to_string_lossy(),
+                    &file.written,
+                ) {
+                    return Err(file.undo(&TWIN_WHAT, e));
+                }
+                text_twin = "written".to_string();
+                twin_file = Some(file);
+            }
+        }
 
-        if superseding {
-            let mut dst = dst;
-            dst.status = "superseded".into();
-            dst.updated_at = now;
-            artifact::upsert(&cat, &dst)?;
-
-            let _ = crate::librarian::catalog::events::insert(
-                &cat,
-                &crate::librarian::catalog::events::EventRow {
-                    id: ulid::Ulid::new().to_string(),
-                    artifact_id: src_id.clone(),
-                    kind: "superseded_by".into(),
-                    payload: serde_json::json!({"target_artifact_id": a.dst_id}).to_string(),
-                    anchor_commit: None,
-                    head_commit: None,
-                    author: None,
-                    created_at: now,
-                },
-            );
+        let row = links::LinkRow {
+            src_id: src_id.clone(),
+            dst_id: a.dst_id.clone(),
+            rel: a.rel.clone(),
+            created_at: now,
+        };
+        if let Err(e) = links::insert_with(&tx, &row) {
+            return Err(undo_twin(&twin_file, e));
+        }
+        if let Err(e) = tx.commit() {
+            return Err(undo_twin(&twin_file, e.into()));
         }
     }
 
     if superseding {
+        let mut dst = dst;
+        dst.status = "superseded".into();
+        dst.updated_at = now;
+        artifact::upsert(&cat, &dst)?;
+
+        let _ = crate::librarian::catalog::events::insert(
+            &cat,
+            &crate::librarian::catalog::events::EventRow {
+                id: ulid::Ulid::new().to_string(),
+                artifact_id: src_id.clone(),
+                kind: "superseded_by".into(),
+                payload: serde_json::json!({"target_artifact_id": a.dst_id}).to_string(),
+                anchor_commit: None,
+                head_commit: None,
+                author: None,
+                created_at: now,
+            },
+        );
+
         // Deliberately not the bare `json!("ok")` of a no-echo write. The status moved on
         // a SECOND artifact that the caller never named, as a side effect of a different
         // verb — "genuinely new info" by the write-response rule, and the absence of it is
@@ -127,10 +268,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                 "status": "superseded",
                 "previous_status": previous_status,
             },
+            "text_twin": text_twin,
         }));
     }
 
-    Ok(json!("ok"))
+    // A plain link whose line was written has nothing new to tell, so it stays the bare `"ok"`
+    // of a no-echo write. A skipped line is new information (the row has no text twin), so the
+    // response says why.
+    if text_twin == "written" {
+        return Ok(json!("ok"));
+    }
+    Ok(json!({"ok": true, "text_twin": text_twin}))
 }
 
 #[cfg(test)]
@@ -403,6 +551,8 @@ mod tests {
         );
     }
 
+    /// A synthetic row names no file and no git repository, so the link has no text twin: the row
+    /// is still recorded, and the response says why the line was skipped.
     #[tokio::test]
     async fn basic_link_insert() {
         let cat = Catalog::open_in_memory().unwrap();
@@ -417,7 +567,13 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(v, json!("ok"));
+        assert_eq!(v["ok"], json!(true), "response: {v}");
+        assert!(
+            v["text_twin"]
+                .as_str()
+                .is_some_and(|t| t.starts_with("skipped: target not nameable")),
+            "response: {v}"
+        );
         let out = links::outgoing(&ctx.catalog.lock(), "a").unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rel, "implements");
@@ -520,7 +676,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(v, json!("ok"));
+        assert_eq!(v["ok"], json!(true), "response: {v}");
 
         // Only one edge row should exist.
         let count: i64 = ctx
@@ -551,5 +707,411 @@ mod tests {
             err.to_string().contains("not found"),
             "expected 'not found' error, got: {err}"
         );
+    }
+
+    // ---- the relation line: the text twin of a manual link ----
+
+    use crate::librarian::lifecycle::relations::relations;
+    use tempfile::TempDir;
+
+    const SRC_TEXT: &str = "---\ntitle: S\n---\n\n# S\n\nbody\n";
+    const DST_TEXT: &str = "---\nstatus: draft\ntitle: D\n---\n\n# D\n\nbody\n";
+
+    struct Repo {
+        _tmp: TempDir,
+        ctx: ToolContext,
+        root: std::path::PathBuf,
+        src: std::path::PathBuf,
+    }
+
+    /// A temp git repository holding `docs/src.md` and `docs/dst.md`, with artifact rows `src` and
+    /// `dst` whose `abs_path` is each real file, so `grammar_form_of` names `dst` as `[[dst]]`.
+    fn repo() -> Repo {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        let ctx = mk_ctx_rooted(root.clone());
+        let src = root.join("docs/src.md");
+        std::fs::write(&src, SRC_TEXT).unwrap();
+        std::fs::write(root.join("docs/dst.md"), DST_TEXT).unwrap();
+        for (id, rel) in [("src", "docs/src.md"), ("dst", "docs/dst.md")] {
+            artifact::upsert(
+                &ctx.catalog.lock(),
+                &TestArtifactRowBuilder::new(id)
+                    .with_abs_path(root.join(rel))
+                    .build(),
+            )
+            .unwrap();
+        }
+        Repo {
+            _tmp: tmp,
+            ctx,
+            root,
+            src,
+        }
+    }
+
+    fn link_rows(ctx: &ToolContext) -> i64 {
+        ctx.catalog
+            .lock()
+            .conn
+            .query_row("SELECT count(*) FROM artifact_link", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn row_sha(ctx: &ToolContext, id: &str) -> String {
+        artifact::get(&ctx.catalog.lock(), id)
+            .unwrap()
+            .unwrap()
+            .file_sha256
+    }
+
+    async fn link(ctx: &ToolContext, rel: &str) -> Result<Value> {
+        call(ctx, json!({"src_id": "src", "dst_id": "dst", "rel": rel})).await
+    }
+
+    /// The error as a caller sees it: the message, the hint and the chain.
+    fn shown(err: &anyhow::Error) -> String {
+        let hint = err
+            .downcast_ref::<LibrarianRecoverableError>()
+            .and_then(|e| e.hint.clone())
+            .unwrap_or_default();
+        format!("{err:#} {hint}")
+    }
+
+    #[tokio::test]
+    async fn a_link_writes_a_relation_line_and_a_row() {
+        let r = repo();
+        let sha_before = row_sha(&r.ctx, "src");
+
+        link(&r.ctx, "implements").await.unwrap();
+
+        let text = std::fs::read_to_string(&r.src).unwrap();
+        assert_eq!(
+            text,
+            format!("{SRC_TEXT}\n## Relations\n\n**Implements:** [[dst]]\n"),
+            "the line sits under one `## Relations` heading at the end of the body"
+        );
+        let read = relations(&text);
+        assert_eq!(read.len(), 1, "{read:?}");
+        assert_eq!(read[0].label, "Implements");
+        let out = links::outgoing(&r.ctx.catalog.lock(), "src").unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rel, "implements");
+        assert_ne!(
+            row_sha(&r.ctx, "src"),
+            sha_before,
+            "the row follows the file"
+        );
+        assert_eq!(
+            row_sha(&r.ctx, "src"),
+            crate::librarian::util::sha_of_bytes(text.as_bytes()),
+            "the row records the sha of the bytes the call wrote"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_plain_link_still_returns_the_bare_ok_when_the_twin_is_written() {
+        let r = repo();
+        let v = link(&r.ctx, "see-also").await.unwrap();
+        assert_eq!(v, json!("ok"));
+        assert!(std::fs::read_to_string(&r.src)
+            .unwrap()
+            .contains("**See also:** [[dst]]"));
+    }
+
+    #[tokio::test]
+    async fn a_supersedes_link_writes_the_supersedes_line_and_keeps_the_frontmatter_write() {
+        let r = repo();
+
+        let v = link(&r.ctx, "supersedes").await.unwrap();
+
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert_eq!(v["superseded"]["status"], json!("superseded"), "{v}");
+        assert_eq!(v["text_twin"], json!("written"), "{v}");
+        let src = std::fs::read_to_string(&r.src).unwrap();
+        assert!(
+            src.ends_with("## Relations\n\n**Supersedes:** [[dst]]\n"),
+            "{src}"
+        );
+        let read = relations(&src);
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].label, "Supersedes");
+        assert!(crate::librarian::lifecycle::relations::is_backward(
+            &read[0].label
+        ));
+        let dst = std::fs::read_to_string(r.root.join("docs/dst.md")).unwrap();
+        assert!(
+            dst.contains("status: superseded"),
+            "the destination frontmatter write is kept: {dst}"
+        );
+        let events: i64 = r
+            .ctx
+            .catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT count(*) FROM events WHERE artifact_id='src' AND kind='superseded_by'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(events, 1);
+        assert_eq!(link_rows(&r.ctx), 1);
+    }
+
+    #[tokio::test]
+    async fn a_supersedes_link_reports_a_skipped_twin_too() {
+        // No git repository: the frontmatter write and the row stay, and the response says why
+        // the source has no line.
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx_rooted(tmp.path().to_path_buf());
+        let src = mk_file_artifact(&ctx, "s.md").await;
+        let dst = mk_file_artifact(&ctx, "d.md").await;
+        let v = call(
+            &ctx,
+            json!({"src_id": src, "dst_id": dst, "rel": "supersedes"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(v["ok"], json!(true), "{v}");
+        assert_eq!(
+            v["text_twin"],
+            json!("skipped: target not nameable: the document lies in no git repository"),
+            "{v}"
+        );
+        assert_eq!(link_rows(&ctx), 1);
+    }
+
+    #[tokio::test]
+    async fn a_link_to_a_target_outside_the_key_space_keeps_the_row_and_skips_the_line() {
+        let r = repo();
+        let cfg = r.root.join(".codescout");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join("key-space.toml"), "exclude = [\"contrib/**\"]\n").unwrap();
+        std::fs::create_dir_all(r.root.join("contrib")).unwrap();
+        std::fs::write(r.root.join("contrib/x.md"), "x\n").unwrap();
+        artifact::upsert(
+            &r.ctx.catalog.lock(),
+            &TestArtifactRowBuilder::new("outside")
+                .with_abs_path(r.root.join("contrib/x.md"))
+                .build(),
+        )
+        .unwrap();
+
+        let v = call(
+            &r.ctx,
+            json!({"src_id": "src", "dst_id": "outside", "rel": "implements"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(v["ok"], json!(true), "{v}");
+        let twin = v["text_twin"].as_str().unwrap();
+        assert!(
+            twin.starts_with("skipped: target not nameable: ") && twin.contains("key-space.toml"),
+            "{twin}"
+        );
+        assert!(
+            !twin.contains(&r.root.display().to_string()),
+            "no absolute path in the response: {twin}"
+        );
+        assert_eq!(std::fs::read_to_string(&r.src).unwrap(), SRC_TEXT);
+        assert_eq!(link_rows(&r.ctx), 1, "the row stays");
+    }
+
+    #[tokio::test]
+    async fn a_rel_that_is_not_a_label_keeps_the_row_and_skips_the_line() {
+        let r = repo();
+        let v = link(&r.ctx, "depends2").await.unwrap();
+        assert_eq!(v["ok"], json!(true), "{v}");
+        let twin = v["text_twin"].as_str().unwrap();
+        assert!(twin.starts_with("skipped: rel is not a label: "), "{twin}");
+        assert_eq!(std::fs::read_to_string(&r.src).unwrap(), SRC_TEXT);
+        let out = links::outgoing(&r.ctx.catalog.lock(), "src").unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rel, "depends2");
+    }
+
+    #[tokio::test]
+    async fn the_same_link_twice_leaves_one_line() {
+        let r = repo();
+        assert_eq!(link(&r.ctx, "implements").await.unwrap(), json!("ok"));
+        let after_first = std::fs::read_to_string(&r.src).unwrap();
+
+        let second = link(&r.ctx, "implements").await.unwrap();
+
+        assert_eq!(
+            second,
+            json!({"ok": true, "text_twin": "skipped: already present"})
+        );
+        let text = std::fs::read_to_string(&r.src).unwrap();
+        assert_eq!(text, after_first, "the second call writes nothing");
+        assert_eq!(text.matches("**Implements:** [[dst]]").count(), 1, "{text}");
+        assert_eq!(text.matches("## Relations").count(), 1, "{text}");
+        assert_eq!(link_rows(&r.ctx), 1);
+    }
+
+    #[tokio::test]
+    async fn a_second_relation_joins_the_one_section() {
+        let r = repo();
+        link(&r.ctx, "implements").await.unwrap();
+        link(&r.ctx, "rests_on").await.unwrap();
+        let text = std::fs::read_to_string(&r.src).unwrap();
+        assert!(
+            text.ends_with("**Implements:** [[dst]]\n\n**Rests on:** [[dst]]\n"),
+            "{text}"
+        );
+        assert_eq!(text.matches("## Relations").count(), 1, "{text}");
+        assert_eq!(relations(&text).len(), 2);
+        assert_eq!(link_rows(&r.ctx), 2);
+    }
+
+    #[tokio::test]
+    async fn a_failed_commit_restores_the_source_file() {
+        let r = repo();
+        let sha_before = row_sha(&r.ctx, "src");
+        // A deferred foreign-key violation raised by the `artifact_link` INSERT: every statement
+        // and the file write succeed, and only the COMMIT fails.
+        r.ctx
+            .catalog
+            .lock()
+            .conn
+            .execute_batch(
+                "CREATE TABLE commit_tripwire(
+                     missing TEXT REFERENCES artifact(id) DEFERRABLE INITIALLY DEFERRED
+                 );
+                 CREATE TRIGGER commit_tripwire_trg AFTER INSERT ON artifact_link
+                 BEGIN
+                     INSERT INTO commit_tripwire(missing) VALUES ('no-such-artifact');
+                 END;",
+            )
+            .unwrap();
+
+        let err = link(&r.ctx, "implements").await.unwrap_err();
+
+        assert_eq!(
+            std::fs::read_to_string(&r.src).unwrap(),
+            SRC_TEXT,
+            "the file is back to its old bytes"
+        );
+        assert_eq!(link_rows(&r.ctx), 0, "no row remains");
+        assert_eq!(row_sha(&r.ctx, "src"), sha_before, "the row is untouched");
+        let msg = shown(&err);
+        assert!(msg.contains("doc(link): the catalog write failed"), "{msg}");
+        assert!(msg.contains("no link was recorded"), "{msg}");
+        assert!(msg.contains("put back as it was"), "{msg}");
+        assert!(
+            !msg.contains(&r.root.display().to_string()),
+            "no absolute path in the error: {msg}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_refused_file_write_is_an_error_and_records_no_row() {
+        let r = repo();
+        // The source row names a link; the link's target lies in a directory of its own, so the
+        // target path is not covered by stripping the link's own directory.
+        std::fs::create_dir(r.root.join("sub")).unwrap();
+        let real = r.root.join("sub/real.md");
+        std::fs::write(&real, SRC_TEXT).unwrap();
+        let link_path = r.root.join("docs/linked.md");
+        std::os::unix::fs::symlink(&real, &link_path).unwrap();
+        artifact::upsert(
+            &r.ctx.catalog.lock(),
+            &TestArtifactRowBuilder::new("linked")
+                .with_abs_path(link_path.clone())
+                .build(),
+        )
+        .unwrap();
+
+        let err = call(
+            &r.ctx,
+            json!({"src_id": "linked", "dst_id": "dst", "rel": "implements"}),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(link_rows(&r.ctx), 0, "no row remains: {err:#}");
+        assert_eq!(
+            std::fs::read_to_string(&real).unwrap(),
+            SRC_TEXT,
+            "nothing was written through the link"
+        );
+        let msg = shown(&err);
+        assert!(msg.contains("no link was recorded"), "{msg}");
+        assert!(
+            msg.contains("[[linked]]"),
+            "the error names the document: {msg}"
+        );
+        for (what, path) in [
+            ("the link path", link_path.display().to_string()),
+            ("the link's target path", real.display().to_string()),
+            ("the temp-dir root", r.root.display().to_string()),
+        ] {
+            assert!(!msg.contains(&path), "the error holds {what}: {msg}");
+        }
+    }
+
+    /// The read passes and the write fails with an io error that names the path: the error is
+    /// an error, no row is recorded, and the document is named by its label.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_file_write_is_an_error_and_records_no_row() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = repo();
+        std::fs::set_permissions(&r.src, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().write(true).open(&r.src).is_ok() {
+            // Running as a user who ignores file modes (root): the write cannot be made to fail.
+            return;
+        }
+
+        let err = link(&r.ctx, "implements").await.unwrap_err();
+
+        let msg = shown(&err);
+        assert!(msg.contains("doc(link): cannot write `[[src]]`"), "{msg}");
+        assert!(msg.contains("no link was recorded"), "{msg}");
+        assert!(
+            !msg.contains(&r.root.display().to_string()),
+            "no absolute path in the error: {msg}"
+        );
+        assert_eq!(link_rows(&r.ctx), 0, "no row remains");
+        assert_eq!(std::fs::read_to_string(&r.src).unwrap(), SRC_TEXT);
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_source_file_is_an_error_and_not_a_skip() {
+        let r = repo();
+        std::fs::remove_file(&r.src).unwrap();
+
+        let err = link(&r.ctx, "implements").await.unwrap_err();
+
+        assert_eq!(link_rows(&r.ctx), 0, "no row remains");
+        let msg = shown(&err);
+        assert!(msg.contains("doc(link): cannot read `[[src]]`"), "{msg}");
+        assert!(
+            msg.contains("not on disk"),
+            "the lower layer's remedy hint is kept: {msg}"
+        );
+        assert!(!msg.contains(&r.root.display().to_string()), "{msg}");
+    }
+
+    #[tokio::test]
+    async fn a_document_that_cannot_take_the_line_is_an_error_and_records_no_row() {
+        // An unclosed code fence swallows the new line: it would not read back.
+        let r = repo();
+        let text = format!("{SRC_TEXT}\n```\nunclosed\n");
+        std::fs::write(&r.src, &text).unwrap();
+
+        let err = link(&r.ctx, "implements").await.unwrap_err();
+
+        let msg = shown(&err);
+        assert!(msg.contains("nothing was added"), "{msg}");
+        assert!(msg.contains("no link was recorded"), "{msg}");
+        assert!(!msg.contains(&r.root.display().to_string()), "{msg}");
+        assert_eq!(std::fs::read_to_string(&r.src).unwrap(), text);
+        assert_eq!(link_rows(&r.ctx), 0);
     }
 }
