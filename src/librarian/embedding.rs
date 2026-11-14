@@ -6,6 +6,7 @@ use anyhow::Result;
 use codescout_embed::Embedder;
 use std::sync::Arc;
 
+/// What [`EmbeddingService::embed_artifact_cached`] returns.
 #[must_use = "the vector and the cache report are lost when this is dropped"]
 pub struct CachedEmbed {
     /// The vector, or the embedder's error. A cache problem is never an error here.
@@ -20,6 +21,30 @@ pub struct CachedEmbed {
 struct CacheSeam {
     cache: Arc<VectorCache>,
     model: ModelKey,
+}
+
+/// Writes the vectors a run staged in the vector cache when it drops, however the run ends.
+///
+/// A run that embeds through [`EmbeddingService::embed_artifact_cached`] leaves through a `?`,
+/// a panic or a dropped future at places that each follow some embeds, so a flush written at the
+/// end of the function is skipped by exactly the runs that need it. The explicit flushes beside
+/// each store write give one cache transaction per page or batch; this guard is the backstop for
+/// every other way out. A run that reaches its report has flushed after its last write, so the
+/// flush here finds nothing staged and does nothing, as long as one run at a time uses the cache.
+/// Today the CLI calls the backfill once per process and `index_repo` has no production caller
+/// (its only caller is test code), so the other user of a shared cache would be a concurrent
+/// reindex call.
+/// The flush outcome is not reported.
+///
+/// The cache is one per process, so the guard also writes the rows another call staged and had
+/// not flushed yet. They are valid vectors, and a later flush would write them anyway.
+#[must_use = "the flush runs when the guard drops: bind it to a name, not `_`"]
+pub struct FlushCacheOnDrop<'a>(&'a EmbeddingService);
+
+impl Drop for FlushCacheOnDrop<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.flush_cache();
+    }
 }
 
 pub struct EmbeddingService {
@@ -196,6 +221,12 @@ impl EmbeddingService {
         self.seam
             .as_ref()
             .map_or_else(FlushOutcome::default, |s| s.cache.flush())
+    }
+
+    /// A guard that writes the staged vectors when it drops, however the caller's run ends.
+    /// Take it right after [`Self::rearm_cache`]; it does nothing without a cache.
+    pub fn flush_on_drop(&self) -> FlushCacheOnDrop<'_> {
+        FlushCacheOnDrop(self)
     }
 
     /// Embed one text on the **document** side.
@@ -1051,6 +1082,50 @@ mod tests {
         );
         assert_eq!(COMPOSITION_VERSION, 1, "{BUMP_COMPOSITION_VERSION}");
     }
+    #[tokio::test]
+    async fn the_segmentation_of_spaced_multi_line_text_is_pinned_to_the_composition_version() {
+        // The test above cuts one line with no whitespace, so it reaches only the hard cut. This
+        // one has lines, spaces and one long line with spaces, so it reaches the line packing and
+        // the cut between words. The first text is exactly the budget, so it goes whole.
+        let emb = CountingEmbedder::lengths(4);
+        let svc = EmbeddingService::with_budget(emb.clone(), 40);
+        let at_budget = svc
+            .embed_artifact(Some("T"), "the quick brown fox jumps over a lazy")
+            .await
+            .unwrap();
+        let body = "first line of the notes\nsecond line, a bit more\n\
+                    a long line with many words that is cut between words and never inside one\n\
+                    tail";
+        let pooled = svc.embed_artifact(Some("Notes"), body).await.unwrap();
+
+        assert_eq!(
+            emb.seen(),
+            vec![
+                // Exactly the budget: one call, whole.
+                "T\n\nthe quick brown fox jumps over a lazy".to_owned(),
+                // Whole lines pack up to the budget.
+                "Notes\n\nfirst line of the notes\n".to_owned(),
+                "second line, a bit more\n".to_owned(),
+                // The long line is cut after the last space inside the budget window.
+                "a long line with many words that is cut ".to_owned(),
+                "between words and never inside one\n".to_owned(),
+                "tail".to_owned(),
+            ],
+            "{BUMP_COMPOSITION_VERSION}"
+        );
+        let rounded = |v: &[f32]| -> Vec<String> { v.iter().map(|x| format!("{x:.6}")).collect() };
+        assert_eq!(
+            rounded(&at_budget),
+            vec!["40.000000", "1.000000", "0.000000", "0.000000"],
+            "a text at the budget is not pooled: {BUMP_COMPOSITION_VERSION}"
+        );
+        assert_eq!(
+            rounded(&pooled),
+            vec!["0.999305", "0.037287", "0.000000", "0.000000"],
+            "{BUMP_COMPOSITION_VERSION}"
+        );
+        assert_eq!(COMPOSITION_VERSION, 1, "{BUMP_COMPOSITION_VERSION}");
+    }
 
     /// Same device as the budget and concurrency guards. Each chained call is one short line
     /// that rustfmt leaves alone, so plain substrings keep matching after formatting.
@@ -1104,8 +1179,17 @@ mod tests {
     /// two sites of the indexer (the backfill and `index_repo`), so a site that loses its call
     /// cannot pass: the absence check on bare calls alone is monotone under removal.
     ///
-    /// Named blind spot: production code that sits after an inline `mod tests {` is not
-    /// scanned. The behavioural test of each site covers it.
+    /// Named blind spots:
+    /// - Production code that sits after an inline `mod tests {` is not scanned. The behavioural
+    ///   test of each site covers it.
+    /// - Only `embed_artifact` is counted. A direct `embedder.embed(` call on the service's
+    ///   embedder also bypasses the cache, and this scan does not see it.
+    /// - A file that is test-only and has no `mod tests {` line (for example
+    ///   `src/librarian/tools/read_door_tests.rs`) is scanned as production, so an
+    ///   `embed_artifact` call in it would be counted.
+    /// - The two bare calls counted in `embedding.rs` are not checked to sit inside
+    ///   `embed_artifact_cached`: a third bare call in another function there would fail the
+    ///   count, but moving one of the two out of the seam would pass.
     #[test]
     fn every_embed_call_outside_the_seam_is_the_dimension_probe() {
         use std::collections::BTreeMap;

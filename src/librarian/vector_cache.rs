@@ -19,13 +19,16 @@ pub const VECTOR_CACHE_FILE: &str = "vector-cache.db";
 
 /// Version of how (title, text) becomes the stored vector in `EmbeddingService::embed_artifact`:
 /// the join, the segmentation and the pooling. Bump it when any of them changes.
+/// A change to what the embedder sends on the document side under the same model string
+/// (a prefix, a truncation, a request parameter) has the same effect: bump it then too.
 pub const COMPOSITION_VERSION: u32 = 1;
 
 /// How long a statement waits for a lock held by another process. Short on purpose:
 /// a cache must not stall a reindex.
 const PRODUCTION_BUSY_MS: u64 = 250;
 
-/// The `PRAGMA user_version` this code writes and reads. A newer file is left alone.
+/// The `PRAGMA user_version` this code writes and reads. A newer file and a file with a
+/// negative version are left alone.
 const FORMAT_VERSION: i64 = 1;
 
 /// A plain rowid table: a row is about 3 KB, too wide for `WITHOUT ROWID`.
@@ -81,6 +84,11 @@ impl CacheStatus {
 }
 
 /// What one run did with the cache. Reports print it.
+///
+/// `hits` counts the vectors the cache supplied to this run. `stored` and `errors` come from
+/// flushes: a flush writes every row staged in the cache, and the cache is one per process, so
+/// a flush can include rows staged by a cancelled or a concurrent call. Treat them as what the
+/// flushes of this run wrote and dropped, not as a count of this run's own embeds.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CacheTally {
     pub status: CacheStatus,
@@ -135,7 +143,8 @@ struct Inner {
 /// Open the file (or memory), set the pragmas and make sure the table exists.
 ///
 /// The version is read before any pragma that could write, so a file of a newer
-/// format or a file that is not a database is left as it is. A file at the current
+/// format, a file with a negative version or a file that is not a database is left as
+/// it is. A file at the current
 /// version takes no write lock here. A new file is initialised under the write lock,
 /// which re-reads the version first.
 fn open_connection(path: Option<&Path>, busy: Duration) -> Result<Connection, String> {
@@ -152,8 +161,8 @@ fn open_connection(path: Option<&Path>, busy: Duration) -> Result<Connection, St
     .map_err(|e| e.to_string())?;
     conn.busy_timeout(busy).map_err(|e| e.to_string())?;
     let version = read_version(&conn)?;
-    if version > FORMAT_VERSION {
-        return Err(newer_format(version));
+    if let Some(why) = unsupported_format(version) {
+        return Err(why);
     }
     conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(|e| e.to_string())?;
@@ -176,6 +185,19 @@ fn newer_format(version: i64) -> String {
     format!("format version {version} is newer than {FORMAT_VERSION}")
 }
 
+/// Why a file of this `user_version` is left alone, or `None` when this code may use
+/// it: version 0 (new) and `FORMAT_VERSION` are ours. A newer version belongs to a
+/// newer binary. A negative one is no version this code or any release wrote.
+fn unsupported_format(version: i64) -> Option<String> {
+    if version > FORMAT_VERSION {
+        Some(newer_format(version))
+    } else if version < 0 {
+        Some(format!("format version {version} is not a valid version"))
+    } else {
+        None
+    }
+}
+
 /// Create the table and set the version, under the write lock.
 ///
 /// The unlocked read said the file is new. Another process may have finished the job
@@ -185,8 +207,8 @@ fn initialise(conn: &Connection) -> Result<(), String> {
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     let version = read_version(&tx)?;
-    if version > FORMAT_VERSION {
-        return Err(newer_format(version));
+    if let Some(why) = unsupported_format(version) {
+        return Err(why);
     }
     if version == 0 {
         tx.execute_batch(&format!(
@@ -712,6 +734,42 @@ mod tests {
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
         assert_eq!(v, 99);
+        drop(raw);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    #[test]
+    fn a_file_with_a_negative_version_is_unavailable_and_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(VECTOR_CACHE_FILE);
+        {
+            let raw = Connection::open(&path).unwrap();
+            raw.pragma_update(None, "user_version", -5).unwrap();
+        }
+        let before = std::fs::read(&path).unwrap();
+        let c = VectorCache::open(&path);
+        assert_eq!(c.get(&key(), 2, "h1"), CacheLookup::Failed);
+        assert_eq!(
+            c.status(),
+            CacheStatus::Unavailable,
+            "a version this code never wrote is not a cache of this format"
+        );
+        assert!(!c.stage(&key(), "h1", &[1.0, 2.0]));
+        let raw = Connection::open(&path).unwrap();
+        let v: i64 = raw
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, -5);
+        let tables: i64 = raw
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'vec'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            tables, 0,
+            "no table is created in a file of an unknown format"
+        );
         drop(raw);
         assert_eq!(std::fs::read(&path).unwrap(), before);
     }

@@ -100,7 +100,8 @@ async fn flush_vectors<'q>(
                 }
                 *landed.entry(item.artifact_id.as_str()).or_insert(0) += 1;
                 // Marked only now that the vector is in the store, so a failed upsert leaves
-                // the chunk unmarked and the next run embeds it again.
+                // the chunk unmarked and the next run lands it again: from the cache when a
+                // cache is attached and the row was flushed, from the embedder otherwise.
                 marks.push((item.chunk_id.as_str(), item.input_hash.as_str()));
             }
             Err(e) => embed_errors.push(format!("{}: upsert failed: {e}", item.chunk_id)),
@@ -292,10 +293,13 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args)?;
 
     // A cache whose file failed to open is tried again by this call: the server keeps one cache
-    // for its life, and a failed open must not turn it off for good (C3-R13).
-    if let Some(svc) = ctx.embedding.as_ref() {
+    // for its life, and a failed open must not turn it off for good (C3-R13). The guard writes what
+    // the call staged however it ends. A cancelled call (the client went away mid-drain) would
+    // otherwise leave its rows in that shared cache for the next call to write and count.
+    let _flush_on_exit = ctx.embedding.as_ref().map(|svc| {
         svc.rearm_cache();
-    }
+        svc.flush_on_drop()
+    });
 
     let effective_scope = a.scope.unwrap_or_else(|| {
         if ctx.current_project.is_some() {
@@ -642,6 +646,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             // `reembed=true` ignores every marker: it is the escape for a marker that lies
             // (a store that lost its points, a model or backend switch).
             let reembed = a.reembed.unwrap_or(false);
+            // One cache transaction per store batch holds at any concurrency: a future stages its
+            // row in the poll that returns its result, and `next()` returns one result per poll,
+            // so a flush in the loop body sees only the rows of results already taken.
             let queue = &embed_queue;
             let embeddings = stream::iter(0..queue.len())
                 .map(|index| async move {
@@ -2048,11 +2055,17 @@ mod tests {
     }
 
     /// A ledger of four entries (several chunks) with no file name inside, so a moved file keeps
-    /// every chunk text. `token` keeps the texts of two ledgers apart.
+    /// every chunk text. `token` keeps the texts of two ledgers apart. The titles differ in
+    /// length, so with an embedder whose vector tells the length of its text, every chunk has a
+    /// vector of its own and a vector filed under the wrong chunk id shows.
     fn cached_ledger(token: &str) -> String {
         let tokens: Vec<String> = (1..=4).map(|i| format!("{token}-{i}")).collect();
-        let entries: Vec<(&str, &str, usize)> =
-            tokens.iter().map(|t| (t.as_str(), "title", 1)).collect();
+        let titles: Vec<String> = (1..=4).map(|i| format!("title{}", "x".repeat(i))).collect();
+        let entries: Vec<(&str, &str, usize)> = tokens
+            .iter()
+            .zip(&titles)
+            .map(|(t, title)| (t.as_str(), title.as_str(), 1))
+            .collect();
         ledger_text(&entries)
     }
 
@@ -2095,7 +2108,7 @@ mod tests {
 
     impl Ledger {
         fn with_cache(cache: Arc<VectorCache>) -> Self {
-            let emb = CountingEmbedder::new(4);
+            let emb = CountingEmbedder::lengths(4);
             let store = RecordingStore::new(None);
             let service = caching_service(&emb, &cache);
             Self::over(emb, cache, store, Some(service))
@@ -2104,7 +2117,7 @@ mod tests {
         /// The service of `external_store_ctx`: no cache attached. The cache the test keeps is
         /// attached later by `attach_cache`.
         fn cacheless() -> Self {
-            let emb = CountingEmbedder::new(4);
+            let emb = CountingEmbedder::lengths(4);
             let store = RecordingStore::new(None);
             Self::over(emb, Arc::new(VectorCache::in_memory()), store, None)
         }
@@ -2158,15 +2171,40 @@ mod tests {
         fn chunk_ids(&self, name: &str) -> Vec<String> {
             chunk_ids_in(&self.ctx, &self.file(name))
         }
+
+        /// `(chunk_id, content)` of the file's catalogued chunks, in chunk order.
+        fn chunk_rows(&self, name: &str) -> Vec<(String, String)> {
+            let id = self.artifact_id(name);
+            let cat = self.ctx.catalog.lock();
+            crate::librarian::catalog::chunk::chunks_for(&cat, &id)
+                .unwrap()
+                .into_iter()
+                .map(|row| (row.chunk_id, row.content))
+                .collect()
+        }
+    }
+
+    /// The one text in `seen` that ends with `content`: what the embedder was given for the chunk
+    /// that holds `content` (a title or an entry heading may come before it, nothing after).
+    fn embedded_text_for<'a>(seen: &'a [String], content: &str) -> &'a str {
+        let hits: Vec<&String> = seen.iter().filter(|t| t.ends_with(content)).collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "exactly one embedded text ends with the chunk's content: {hits:?}"
+        );
+        hits[0]
     }
 
     /// A file moved by git changes its path and so its artifact id and chunk ids, and keeps its
     /// text. Every chunk text is in the cache from the first run, so the second run must make no
-    /// embed call and must file each cached vector under the chunk's NEW id.
+    /// embed call and must file each cached vector under the chunk's NEW id, with the vector made
+    /// from that chunk's own text (the fixture's vector tells the length of its text).
     ///
     /// Mutations: a seam that reads the cache and never upserts the hit leaves the store without
     /// the new chunk ids (the store assertion); a drain that still calls `embed_artifact` fails
-    /// `calls()`.
+    /// `calls()`; a drain that files each cached vector under the next chunk's id fails the
+    /// per-chunk vector assertion.
     #[tokio::test]
     async fn a_moved_file_is_not_embedded_again_and_its_vectors_land_under_the_new_chunk_ids() {
         let l = Ledger::with_cache(Arc::new(VectorCache::in_memory()));
@@ -2198,13 +2236,27 @@ mod tests {
             n,
             "every chunk of the moved file is catalogued"
         );
-        for chunk_id in &new_ids {
+        // The counting embedder's vector tells the length of the text it was made from, so a
+        // vector stored under another chunk's id is a different vector. The expected length of
+        // each chunk comes from the text the embedder saw for that chunk's content in run 1.
+        let seen = l.emb.seen();
+        let mut lengths = std::collections::HashSet::new();
+        for (chunk_id, content) in l.chunk_rows("new.md") {
+            let chars = embedded_text_for(&seen, &content).chars().count();
+            lengths.insert(chars);
             assert_eq!(
-                l.store.inner.chunk(chunk_id),
-                Some((new_artifact.clone(), vec![1.0, 0.0, 0.0, 0.0])),
-                "the cached vector is filed under the new chunk id and the new artifact"
+                l.store.inner.chunk(&chunk_id),
+                Some((new_artifact.clone(), vec![chars as f32, 1.0, 0.0, 0.0])),
+                "the cached vector of this chunk's text is filed under the new chunk id and the \
+                 new artifact"
             );
         }
+        assert_eq!(
+            lengths.len(),
+            n,
+            "precondition: every chunk has its own length, so a vector under another chunk's \
+             id shows"
+        );
         for old in &old_ids {
             assert!(
                 !new_ids.contains(old),
@@ -2256,8 +2308,12 @@ mod tests {
     /// nothing and the cache stays empty. `reembed=true` is what fills it, and then a moved file
     /// hits.
     ///
-    /// Mutation: a drain that calls the seam for a chunk whose marker is current embeds again in
-    /// run 2.
+    /// Mutation D: an attached cache makes a stamped artifact queue again (`needs_embed` is true
+    /// although the stamp matches). Run 2 then embeds every chunk, so `embedded` is not 0.
+    ///
+    /// The chunk-marker skip is not reachable here: a stamped artifact is never queued, so no
+    /// marker is read in run 2. `appending_an_entry_embeds_only_the_chunk_that_is_new` and
+    /// `renaming_an_entry_re_embeds_its_mid_entry_chunks` pin that skip.
     #[tokio::test]
     async fn a_cache_attached_after_the_content_was_embedded_stays_empty_until_reembed() {
         let mut l = Ledger::cacheless();
@@ -2306,8 +2362,15 @@ mod tests {
         );
     }
 
-    /// A vector that came from the cache is marked like any landed vector, so the next run skips
-    /// its chunk and the artifact is stamped.
+    /// A vector that came from the cache is marked like any landed vector and counts toward the
+    /// artifact stamp, so the next run queues nothing for the moved file.
+    ///
+    /// The stamp is what keeps run 3 from queueing the artifact at all; the chunk markers alone
+    /// would still skip every chunk and leave the other counts at zero, so the stamp and
+    /// `embed_skipped_chunks == 0` are what pin that a hit counts in `landed`.
+    ///
+    /// Mutation M1: a hit is not counted in `landed`. The artifact is then not stamped, run 3
+    /// queues it, and the markers skip every chunk (`embed_skipped_chunks == n`).
     #[tokio::test]
     async fn a_hit_chunk_is_marked_embedded_so_the_next_run_skips_it() {
         let l = Ledger::with_cache(Arc::new(VectorCache::in_memory()));
@@ -2320,11 +2383,26 @@ mod tests {
             n,
             "every landed chunk of the moved file is marked, hit or not"
         );
+        let stamp = {
+            let cat = l.ctx.catalog.lock();
+            crate::librarian::catalog::artifact::embedded_sha256(&cat, &l.artifact_id("new.md"))
+                .unwrap()
+        };
+        assert!(
+            stamp.is_some(),
+            "every chunk of the moved file landed from the cache, so the artifact is stamped: \
+             {second}"
+        );
 
         let third = l.run(json!({})).await;
         assert_eq!(num(&third, "embedded"), 0, "{third}");
         assert_eq!(cache_num(&third, "hits"), 0, "{third}");
         assert_eq!(cache_num(&third, "stored"), 0, "{third}");
+        assert_eq!(
+            num(&third, "embed_skipped_chunks"),
+            0,
+            "a stamped artifact is not queued, so no chunk is even skipped: {third}"
+        );
         assert_eq!(l.emb.calls(), n);
     }
 
@@ -2443,6 +2521,71 @@ mod tests {
             "every embedded vector is in the cache"
         );
         assert_eq!(cache_num(&v, "stored"), embedded, "{v}");
+    }
+    /// An embedder that answers `after` texts, then reports that it stalled and never answers
+    /// again: a reindex that is cancelled while it waits on its embedding server.
+    struct StallingEmbedder {
+        after: usize,
+        asked: std::sync::atomic::AtomicUsize,
+        stalled: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl codescout_embed::Embedder for StallingEmbedder {
+        fn dimensions(&self) -> usize {
+            4
+        }
+        async fn embed(&self, texts: &[&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+            let before = self
+                .asked
+                .fetch_add(texts.len(), std::sync::atomic::Ordering::SeqCst);
+            if before >= self.after {
+                self.stalled.notify_one();
+                std::future::pending::<()>().await;
+            }
+            Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+        }
+    }
+
+    /// A reindex that is cancelled after it embedded some chunks and before its first store
+    /// batch is full still writes the vectors it staged: the server keeps one cache for its life,
+    /// so rows left staged would be written, and counted, by the next call.
+    ///
+    /// Mutation: removing the flush-on-drop guard from `call` leaves the cache empty.
+    #[tokio::test]
+    async fn a_reindex_that_is_dropped_mid_run_writes_the_vectors_it_staged() {
+        let tmp = TempDir::new().unwrap();
+        let proj = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        std::fs::create_dir_all(proj.join("docs/specs")).unwrap();
+        std::fs::write(proj.join("docs/specs/old.md"), cached_ledger("W")).unwrap();
+        let answered = 2;
+        let stalled = Arc::new(tokio::sync::Notify::new());
+        let emb = Arc::new(StallingEmbedder {
+            after: answered,
+            asked: Default::default(),
+            stalled: stalled.clone(),
+        });
+        let cache = Arc::new(VectorCache::in_memory());
+        let svc = EmbeddingService::new(emb.clone()).with_vector_cache("test-model", cache.clone());
+        let ctx = external_store_ctx_with(&[("proj", &proj)], RecordingStore::new(None), svc);
+        assert_eq!(cache.len(), 0, "precondition: the cache starts empty");
+
+        tokio::select! {
+            biased;
+            r = call(&ctx, json!({})) => panic!("the run must stall in the embedder, got {r:?}"),
+            _ = stalled.notified() => {}
+        }
+
+        assert_eq!(
+            emb.asked.load(std::sync::atomic::Ordering::SeqCst),
+            answered + 1,
+            "precondition: the run stalled on the embed after the ones it answered"
+        );
+        assert_eq!(
+            cache.len(),
+            answered,
+            "the vectors staged before the cancel are in the cache after the run is dropped"
+        );
     }
 
     /// A cache file that is not a database must not fail the reindex: every vector comes from the

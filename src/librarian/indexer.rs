@@ -1614,7 +1614,9 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct BackfillReport {
     /// Chunk vectors written to the store, whether the embedder made them or the vector cache
-    /// supplied them (`embed_cache.hits` counts the second kind).
+    /// supplied them. `embed_cache.hits` is how many vectors the cache supplied. It can count
+    /// vectors that are not in `embedded`, because a store run that rolls an artifact back still
+    /// counts its hits.
     pub embedded: usize,
     /// Artifacts whose body yielded no embeddable chunk (blank, or
     /// frontmatter-only). These are correctly vectorless and will stay so.
@@ -1651,7 +1653,8 @@ pub struct BackfillReport {
     pub embed_errors: Vec<String>,
     /// What the vector cache did in this run: `hits` is how many vectors it supplied instead of
     /// the embedder, `stored` how many fresh vectors it kept, `errors` how many cache operations
-    /// failed (each one degrades to an embed). A store run drops the vectors of an artifact that
+    /// failed (a failed lookup degrades to an embed and a failed write drops that batch's rows;
+    /// each is counted in `errors`). A store run drops the vectors of an artifact that
     /// had a failed chunk, so they are not in `embedded`; the cache still keeps the fresh ones,
     /// and the retry reads them back. `status` is read at the end of the run, `off` without a
     /// cache.
@@ -1762,7 +1765,7 @@ async fn backfill_chunk_vectors_with(
     // guard writes what the run staged however the run ends: this function leaves through a `?`
     // at many places, and one taken after a page's embeds would drop what that page staged.
     svc.rearm_cache();
-    let _flush_on_exit = FlushCacheOnExit(svc);
+    let _flush_on_exit = svc.flush_on_drop();
 
     let flush = batch.max(1);
     let mut report = BackfillReport::default();
@@ -2140,22 +2143,6 @@ async fn upsert_tuples(
     upsert_in_batches(store, project_id, &items).await
 }
 
-/// Writes the vectors a run staged in the vector cache when the run ends, however it ends.
-///
-/// The backfill and `index_repo` leave through a `?` at many places, each after some embeds, so
-/// a flush written at the end of the function would be skipped by exactly the runs that need
-/// it. The explicit flushes beside each store write give one cache transaction per page or
-/// batch; this guard is the backstop for every other way out (an error, a panic, a dropped
-/// future). A run that reaches its report has flushed after its last write, so the flush here
-/// finds nothing staged and does nothing, and its outcome is not reported.
-struct FlushCacheOnExit<'a>(&'a crate::librarian::embedding::EmbeddingService);
-
-impl Drop for FlushCacheOnExit<'_> {
-    fn drop(&mut self) {
-        let _ = self.0.flush_cache();
-    }
-}
-
 const EMBED_CONCURRENCY: usize = 8;
 
 /// High-level async entry point: sync walk + optional async embedding with bounded concurrency.
@@ -2208,7 +2195,7 @@ pub async fn index_repo(
         // The guard writes what the run staged however the run ends: the loop below leaves at
         // its first failed embed or store write, and the tallies are not reported (C3-R12).
         svc.rearm_cache();
-        let _flush_on_exit = FlushCacheOnExit(svc);
+        let _flush_on_exit = svc.flush_on_drop();
         let futures_iter = embed_queue.into_iter().map(|item| async move {
             // Through the vector cache. `index_repo` has no `reembed`, so it always reads it.
             let vec = svc
@@ -7336,7 +7323,8 @@ kind = "memory"
     }
 
     /// One cache transaction beside each page's write. An end-of-run flush is one transaction
-    /// and fails this.
+    /// and fails this, and so does a flush per artifact: a page holds two artifacts here, so a
+    /// page's flush is half as many transactions as artifacts.
     #[tokio::test]
     async fn a_backfill_flushes_the_cache_once_per_page() {
         use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
@@ -7350,14 +7338,16 @@ kind = "memory"
             &[
                 ("a.md", "# A\n\nalpha text\n\n## A two\n\nalpha more\n"),
                 ("b.md", "# B\n\nbravo text\n\n## B two\n\nbravo more\n"),
+                ("c.md", "# C\n\ncharlie text\n\n## C two\n\ncharlie more\n"),
+                ("d.md", "# D\n\ndelta text\n\n## D two\n\ndelta more\n"),
             ],
         );
 
-        // Batch 1 is one artifact per page: two pages.
+        // Batch 2 is two artifacts per page: four artifacts, two pages.
         let report = backfill_chunk_vectors_with(
             &m,
             &svc,
-            1,
+            2,
             None,
             false,
             BackfillTarget::Store {
@@ -7369,9 +7359,13 @@ kind = "memory"
         .await
         .unwrap();
 
-        assert_eq!(report.artifacts, 2);
-        assert!(report.embedded >= 4, "{report:?}");
-        assert_eq!(cache.transactions(), 2, "one flush per page");
+        assert_eq!(report.artifacts, 4);
+        assert!(report.embedded >= 8, "{report:?}");
+        assert_eq!(
+            cache.transactions(),
+            2,
+            "one flush per page of two artifacts, not one per artifact (4) or one per run (1)"
+        );
         assert_eq!(cache.len(), report.embedded);
         assert_eq!(report.embed_cache.stored, report.embedded);
     }
