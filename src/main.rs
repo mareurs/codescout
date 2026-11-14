@@ -235,11 +235,13 @@ enum Commands {
     /// or its `-wal`) and prints counts and the first rows of each cause (`--json`: every row).
     /// The old catalog is `--old-db`, else `LIBRARIAN_DB`, else `librarian/catalog.db` in the
     /// local data directory. Give `--old-root <path>` (repeatable, absolute) for each other
-    /// spelling of this repository's root that old rows carry, such as a symlink.
+    /// spelling of this repository's root that old rows carry, such as a symlink. A root above
+    /// the repository is refused.
     /// Reads git objects, not the working tree. Exits 0 whenever it compared, 2 and prints
     /// `NOT COMPARED — <reason>` when it could not: no old catalog, one it cannot read, a
-    /// `-wal`, `-shm` or `-journal` file beside it that no running server explains (stop every
-    /// codescout process and checkpoint it, or run this while a server holds it), none of whose
+    /// `-wal` or `-shm` file, or a `-journal` file with bytes, beside it that no running server
+    /// explains (stop every codescout process and checkpoint it, or run this while a server
+    /// holds it), none of whose
     /// rows lies under this repository or an `--old-root`, no git repository, a `--project` that
     /// cannot be resolved, a `--rev` that names no commit, a commit whose `.codescout/repo.toml`,
     /// `librarian.toml` or `key-space.toml` does not parse or is a symlink, or a scratch

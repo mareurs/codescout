@@ -152,8 +152,10 @@
 //! `-wal` beside the file and reads the main file alone: rows that lie only in the `-wal` are
 //! missing from the answer, and no error says so (pinned by
 //! `an_immutable_open_would_read_stale_rows_so_a_wal_with_rows_is_refused`). So the open refuses
-//! when `<path>-wal`, `<path>-shm` or `<path>-journal` exists ([`side_files_present`]): without a
-//! `-wal` the main file holds every row. A process that starts after the check, and writes, can
+//! when `<path>-wal`, `<path>-shm` or a non-empty `<path>-journal` exists
+//! ([`side_files_present`]): without a `-wal` the main file holds every row. SQLite keeps the side
+//! files beside a symlink's target, so the open resolves the path first (`canonicalize`, once) and
+//! checks and opens the resolved path. A process that starts after the check, and writes, can
 //! still make the answer out of date; a caller that needs a complete answer compares
 //! [`file_stamp`] before and after it reads.
 
@@ -412,15 +414,38 @@ pub struct RootMap {
 impl RootMap {
     /// A map with the git root only.
     pub fn new(git_root: PathBuf) -> Self {
-        Self::with_old_roots(git_root, Vec::new())
+        RootMap {
+            git_root,
+            old_roots: Vec::new(),
+        }
     }
 
     /// A map with the git root and the other spellings.
-    pub fn with_old_roots(git_root: PathBuf, old_roots: Vec<PathBuf>) -> Self {
-        RootMap {
+    ///
+    /// An old root that lies above the git root is refused, by path components: every old row of
+    /// another repository under it would then count as a file of this one. An old root equal to
+    /// the git root, inside it, or beside it is accepted (the git root is tried first). A root that
+    /// exists is also judged by where it points, so a link to a directory above the git root is
+    /// refused as well. The text of the refusal names no path. Every caller that builds a map
+    /// passes through here, so `derive-shadow` and `cutover` share the rule.
+    pub fn with_old_roots(git_root: PathBuf, old_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+        let above = |root: &Path| git_root.starts_with(root) && git_root != root;
+        for root in &old_roots {
+            if !root.is_absolute() {
+                bail!("an --old-root must be an absolute path");
+            }
+            let resolved = std::fs::canonicalize(root).ok();
+            if above(root) || resolved.as_deref().is_some_and(above) {
+                bail!(
+                    "an --old-root lies above the git root, so it would take in the rows of \
+                     other repositories; give the other spelling of the git root itself"
+                );
+            }
+        }
+        Ok(RootMap {
             git_root,
             old_roots,
-        }
+        })
     }
 
     /// `scope_of` against the git root, then each old root in order; the first answer that is
@@ -449,22 +474,30 @@ const SIDE_FILE_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
 
 /// What an operator reads when [`open_old_immutable`] refuses. It names no path: the caller
 /// knows which file it asked for.
-const SIDE_FILE_REFUSAL: &str = "a -wal, -shm or -journal file lies beside the old catalog. \
-     Another process holds it open, or one stopped without closing it. Stop every codescout \
-     process, run sqlite3 <old catalog file> 'PRAGMA wal_checkpoint(TRUNCATE)', and run this \
-     again.";
+const SIDE_FILE_REFUSAL: &str = "a -wal or -shm file, or a -journal file that is not empty, lies \
+     beside the old catalog. Another process holds it open, or one stopped without closing it. \
+     Stop every codescout process, run sqlite3 <old catalog file> 'PRAGMA \
+     wal_checkpoint(TRUNCATE)', and run this again.";
 
 /// `<path>-wal`, `<path>-shm` or `<path>-journal` exists (`symlink_metadata`). A side file that
 /// cannot be inspected counts as present.
 pub fn side_files_present(path: &Path) -> bool {
-    SIDE_FILE_SUFFIXES.iter().any(|suffix| {
-        let mut side = path.as_os_str().to_owned();
-        side.push(suffix);
-        match std::fs::symlink_metadata(PathBuf::from(side)) {
-            Ok(_) => true,
-            Err(e) => e.kind() != std::io::ErrorKind::NotFound,
-        }
-    })
+    SIDE_FILE_SUFFIXES
+        .iter()
+        .any(|suffix| side_file_present(path, suffix))
+}
+
+/// Does `<path><suffix>` count as a side file? A link, or a file that cannot be inspected, does.
+/// A `-journal` of zero length does not: SQLite empties a journal it keeps (journal mode
+/// `PERSIST`) and a leftover empty one holds nothing to roll back. A `-journal` with bytes may be
+/// a hot journal, and `PRAGMA wal_checkpoint(TRUNCATE)` does not clear that.
+pub(crate) fn side_file_present(path: &Path, suffix: &str) -> bool {
+    let mut side = path.as_os_str().to_owned();
+    side.push(suffix);
+    match std::fs::symlink_metadata(PathBuf::from(side)) {
+        Ok(meta) => !(suffix == "-journal" && meta.is_file() && meta.len() == 0),
+        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+    }
 }
 
 /// The length and modification time of the file at `path`, for the re-check after a load.
@@ -487,10 +520,14 @@ pub fn open_old_immutable(path: &Path) -> anyhow::Result<OldCatalog> {
     if !path.is_absolute() {
         bail!("the path of the old catalog must be absolute");
     }
-    if side_files_present(path) {
+    // SQLite resolves a symlink and keeps `-wal` and `-shm` beside the target, so the side-file
+    // check and the URL both use the resolved path, from one `canonicalize`. A path that cannot
+    // be resolved (a missing file) is used as given, and the open then reports it.
+    let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if side_files_present(&resolved) {
         bail!(SIDE_FILE_REFUSAL);
     }
-    let url = url::Url::from_file_path(path)
+    let url = url::Url::from_file_path(&resolved)
         .map_err(|()| anyhow!("the path of the old catalog cannot be written as a file URL"))?;
     let conn = Connection::open_with_flags(
         format!("{url}?mode=ro&immutable=1"),
@@ -1893,7 +1930,8 @@ mod tests {
         rows[0].abs_path = "/old/spelling/a.md".to_owned();
         let old = old_with(&rows, &[], &[], &chunks);
         let map =
-            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")]);
+            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")])
+                .unwrap();
         let d = diff(&old, &b.conn, &map).unwrap();
         assert_eq!(d.counts.matched_documents, 1, "{d:#?}");
         assert_eq!(d.counts.ignored_other_roots, 0, "{d:#?}");
@@ -1911,7 +1949,8 @@ mod tests {
         let nested = RootMap::with_old_roots(
             PathBuf::from(ROOT),
             vec![PathBuf::from(format!("{ROOT}/sub"))],
-        );
+        )
+        .unwrap();
         let d = diff(&old, &b.conn, &nested).unwrap();
         assert_eq!(d.counts.old_path_collisions, 0, "{d:#?}");
         assert_eq!(d.counts.matched_documents, 2, "{d:#?}");
@@ -1925,7 +1964,8 @@ mod tests {
         rows.insert(0, twin);
         let old = old_with(&rows, &[], &[], &chunks);
         let map =
-            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")]);
+            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")])
+                .unwrap();
         let d = diff(&old, &b.conn, &map).unwrap();
         assert_eq!(d.counts.old_path_collisions, 1, "{d:#?}");
         assert_eq!(d.counts.old_documents, 1, "{d:#?}");
@@ -1943,7 +1983,8 @@ mod tests {
         let map = RootMap::with_old_roots(
             PathBuf::from("/work/proj"),
             vec![PathBuf::from("/old/a"), PathBuf::from("/old/b")],
-        );
+        )
+        .unwrap();
         assert_eq!(
             map.spellings(),
             vec![
@@ -1969,7 +2010,8 @@ mod tests {
         let b = built(&[("a.md", "# A\n")]);
         let old = old_with(&[old_row("id-x", "/elsewhere/proj/a.md")], &[], &[], &[]);
         let map =
-            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")]);
+            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")])
+                .unwrap();
         let err = diff(&old, &b.conn, &map).expect_err("nothing lies under either root");
         assert_eq!(
             err.downcast_ref::<NoOldRowsUnderRoot>(),
@@ -2279,7 +2321,7 @@ mod tests {
             let path = clean_wal_catalog(dir.path(), &[]);
             let mut side = path.clone().into_os_string();
             side.push(suffix);
-            std::fs::write(&side, b"").unwrap();
+            std::fs::write(&side, b"x").unwrap();
             assert!(side_files_present(&path), "{suffix}");
 
             let err = match open_old_immutable(&path) {
@@ -2392,6 +2434,142 @@ mod tests {
             format!("{err:#}").contains("absolute"),
             "the refusal says why: {err:#}"
         );
+    }
+    /// SQLite resolves a symlink and keeps `-wal` and `-shm` beside the TARGET. A check built from
+    /// the path as given looks beside the link, finds nothing, and an immutable open then reads
+    /// the main file alone.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_catalog_a_writer_holds_is_refused_through_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let real_dir = dir.path().join("real");
+        let link_dir = dir.path().join("link");
+        std::fs::create_dir(&real_dir).unwrap();
+        std::fs::create_dir(&link_dir).unwrap();
+        let real = clean_wal_catalog(&real_dir, &[]);
+        let link = link_dir.join("catalog.db");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        // A running server opened the catalog through the link; its row lies only in the `-wal`.
+        let holder = Connection::open(&link).unwrap();
+        holder.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        holder
+            .execute(
+                "INSERT INTO artifact (id, abs_path, kind, status, owners, tags, file_sha256) \
+                 VALUES ('id-w', '/work/proj/w.md', 'doc', 'active', '[]', '[]', 'x')",
+                [],
+            )
+            .unwrap();
+
+        // The premise, measured: the side files lie beside the target, not beside the link, and
+        // an immutable read through the link sees no row.
+        assert_eq!(names_in(&link_dir), vec!["catalog.db".to_owned()]);
+        assert!(names_in(&real_dir).contains(&"catalog.db-wal".to_owned()));
+        let raw = Connection::open_with_flags(
+            format!("file:{}?mode=ro&immutable=1", link.display()),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+        )
+        .unwrap();
+        let stale: i64 = raw
+            .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stale, 0, "the immutable read through the link is stale");
+        drop(raw);
+
+        let err = match open_old_immutable(&link) {
+            Ok(_) => panic!("a symlinked catalog with rows in its -wal must be refused"),
+            Err(e) => e,
+        };
+        let text = format!("{err:#}");
+        assert!(text.contains("Stop every codescout process"), "{text}");
+        assert!(!text.contains('/'), "the text holds a path: {text}");
+        let live: i64 = holder
+            .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(live, 1, "the holder still sees its row");
+    }
+
+    #[test]
+    fn a_zero_length_journal_is_not_a_side_file_and_a_journal_with_bytes_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = clean_wal_catalog(dir.path(), &[old_row("id-a", &format!("{ROOT}/a.md"))]);
+        let journal = dir.path().join("catalog.db-journal");
+
+        std::fs::write(&journal, b"").unwrap();
+        assert!(
+            !side_files_present(&path),
+            "an empty journal is no hot journal"
+        );
+        let old = open_old_immutable(&path).expect("an empty journal does not stop the open");
+        drop(old);
+        assert_eq!(
+            names_in(dir.path()),
+            vec!["catalog.db".to_owned(), "catalog.db-journal".to_owned()],
+            "the open neither created nor removed a file"
+        );
+
+        std::fs::write(&journal, b"x").unwrap();
+        assert!(side_files_present(&path), "a journal with bytes is hot");
+        assert!(open_old_immutable(&path).is_err());
+    }
+
+    #[test]
+    fn an_old_root_above_the_git_root_is_refused_without_a_path() {
+        for above in ["/work", "/work/", "/"] {
+            let err = RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from(above)])
+                .expect_err(above);
+            let text = err.to_string();
+            assert!(text.contains("--old-root"), "{above}: {text}");
+            assert!(
+                !text.contains('/'),
+                "{above}: the text holds a path: {text}"
+            );
+        }
+        // Accepted: the git root itself (however spelled), a root inside it, and a sibling.
+        for fine in [
+            ROOT,
+            "/work/proj/",
+            "/work/proj/sub",
+            "/work/proj2",
+            "/elsewhere",
+        ] {
+            let map = RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from(fine)])
+                .unwrap_or_else(|e| panic!("{fine}: {e}"));
+            assert_eq!(map.old_roots, vec![PathBuf::from(fine)]);
+        }
+    }
+
+    /// An old root that is a link to a directory above the git root takes in the same rows.
+    #[cfg(unix)]
+    #[test]
+    fn an_old_root_that_links_to_a_directory_above_the_git_root_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let top = std::fs::canonicalize(dir.path()).unwrap();
+        let proj = top.join("proj");
+        std::fs::create_dir(&proj).unwrap();
+        let link = top.join("alias");
+        std::os::unix::fs::symlink(&top, &link).unwrap();
+        let err = RootMap::with_old_roots(proj.clone(), vec![link]).expect_err("above");
+        assert!(err.to_string().contains("--old-root"), "{err}");
+        // A link to the git root itself is the symlink case the flag exists for.
+        let same = top.join("same");
+        std::os::unix::fs::symlink(&proj, &same).unwrap();
+        RootMap::with_old_roots(proj, vec![same]).expect("a link to the git root is fine");
+    }
+
+    #[test]
+    fn a_failed_immutable_open_names_no_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.db");
+        let err = match open_old_immutable(&path) {
+            Ok(_) => panic!("a missing catalog must not open"),
+            Err(e) => e,
+        };
+        let text = format!("{err:#}");
+        assert!(text.contains("does not exist"), "{text}");
+        assert!(!text.contains('/'), "the text holds a path: {text}");
+        assert!(!path.exists(), "the open created the file");
+        assert!(names_in(dir.path()).is_empty());
     }
 
     #[test]

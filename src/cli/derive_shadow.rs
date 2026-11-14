@@ -43,8 +43,8 @@ use crate::librarian::derived::build::{
     build_full, key_space_from_commit, rules_from_commit, BuildInput,
 };
 use crate::librarian::derived::diff::{
-    diff_with_rules, open_old_immutable, open_old_read_only, DiffCause, DiffRow, OldCatalog,
-    RootMap, ShadowDiff, Subject,
+    diff_with_rules, open_old_immutable, open_old_read_only, side_file_present, DiffCause, DiffRow,
+    OldCatalog, RootMap, ShadowDiff, Subject,
 };
 use crate::librarian::derived::scan::open_commit;
 use crate::librarian::derived::schema;
@@ -86,8 +86,13 @@ pub struct Outcome {
 const MAX_PRINTED_ROWS_PER_CAUSE: usize = 20;
 
 /// The old catalog both `derive-shadow` and `cutover` read: the flag, else `LIBRARIAN_DB`, else
-/// `librarian/catalog.db` in the local data directory. The librarian server resolves its own
-/// catalog the same way, so two dry runs read one catalog.
+/// `librarian/catalog.db` in the local data directory, so two dry runs read one catalog.
+///
+/// This is not the librarian server's resolution. The server reads `LIBRARIAN_DB` from its own
+/// environment (the MCP configuration), which can differ from the operator's shell, so a run
+/// with the variable unset here can read another file than the server uses; pass `--old-db` to
+/// name the file. With no local data directory the server falls back to
+/// `/tmp/librarian/catalog.db` and this function returns `None`.
 pub(crate) fn resolve_old_catalog(
     arg: Option<&Path>,
     librarian_db: Option<std::ffi::OsString>,
@@ -96,13 +101,6 @@ pub(crate) fn resolve_old_catalog(
     arg.map(Path::to_path_buf)
         .or_else(|| librarian_db.map(PathBuf::from))
         .or_else(|| data_dir.map(|dir| dir.join("librarian").join("catalog.db")))
-}
-
-/// The `-wal` / `-shm` file names SQLite uses beside `path`.
-fn sidecar(path: &Path, suffix: &str) -> PathBuf {
-    let mut name = path.as_os_str().to_owned();
-    name.push(suffix);
-    PathBuf::from(name)
 }
 
 /// Does the SQLite file at `path` say it is a WAL database? Bytes 18 and 19 of the header are
@@ -118,32 +116,31 @@ fn is_wal_database(path: &Path) -> Option<bool> {
     Some(header[18] == 2 || header[19] == 2)
 }
 
-/// Is there a file `<path><suffix>` (a link counts)?
-fn has_side_file(path: &Path, suffix: &str) -> bool {
-    std::fs::symlink_metadata(sidecar(path, suffix)).is_ok()
-}
-
 /// Open the old catalog without creating or writing a file beside it.
 ///
+/// The path is resolved through symlinks first, because SQLite keeps `-wal` and `-shm` beside the
+/// target, and every decision below looks there.
+///
 /// A WAL database that a codescout server holds open has its `-wal` and `-shm`, and no
-/// `-journal`: it is read through [`open_old_read_only`], which writes nothing to the catalog or
-/// its `-wal` (SQLite updates read marks in the `-shm`, see `derived::diff`) and sees the rows
-/// that lie in the `-wal`. Every other catalog is opened immutable ([`open_old_immutable`]): a
-/// WAL catalog that no process holds opens and nothing appears beside it, and a catalog with
-/// one side file, or a `-journal`, is refused, because an immutable open would ignore the rows
-/// in its `-wal`. The server can still start while this command runs, and the answer is then
-/// out of date; `derived::diff` states the cost.
+/// non-empty `-journal`: it is read through [`open_old_read_only`], which writes nothing to the
+/// catalog or its `-wal` (SQLite updates read marks in the `-shm`, see `derived::diff`) and sees
+/// the rows that lie in the `-wal`. Every other catalog is opened immutable
+/// ([`open_old_immutable`]): a WAL catalog that no process holds opens and nothing appears beside
+/// it, and a catalog with one side file, or a non-empty `-journal`, is refused, because an
+/// immutable open would ignore the rows in its `-wal`. The server can still start while this
+/// command runs, and the answer is then out of date; `derived::diff` states the cost.
 fn open_old(path: &Path) -> Result<OldCatalog> {
-    let held = is_wal_database(path) == Some(true)
-        && has_side_file(path, "-wal")
-        && has_side_file(path, "-shm")
-        && !has_side_file(path, "-journal");
-    if held {
-        return open_old_read_only(path);
-    }
     let absolute =
         std::path::absolute(path).with_context(|| format!("cannot resolve {}", path.display()))?;
-    open_old_immutable(&absolute).with_context(|| format!("old catalog {}", path.display()))
+    let resolved = std::fs::canonicalize(&absolute).unwrap_or(absolute);
+    let held = is_wal_database(&resolved) == Some(true)
+        && side_file_present(&resolved, "-wal")
+        && side_file_present(&resolved, "-shm")
+        && !side_file_present(&resolved, "-journal");
+    if held {
+        return open_old_read_only(&resolved);
+    }
+    open_old_immutable(&resolved).with_context(|| format!("old catalog {}", path.display()))
 }
 
 /// The reason on one line: a context chain spans several.
@@ -219,6 +216,8 @@ fn compare(
         .with_context(|| format!("cannot resolve {}", start.display()))?;
     let root = lookup_git_root(&start)
         .ok_or_else(|| anyhow!("{} is not inside a git repository", start.display()))?;
+    // Judged before anything is built: an old root above the git root is refused here.
+    let roots = RootMap::with_old_roots(root.clone(), args.old_root.clone())?;
     let repo = git2::Repository::open(&root)
         .with_context(|| format!("opening the git repository at {}", root.display()))?;
     let commit = open_commit(&repo, &args.rev)?;
@@ -252,12 +251,7 @@ fn compare(
         },
     )
     .with_context(|| format!("building the derived index of {}", args.rev))?;
-    let shadow = diff_with_rules(
-        &old,
-        &conn,
-        &RootMap::with_old_roots(root.clone(), args.old_root.clone()),
-        &rules,
-    )?;
+    let shadow = diff_with_rules(&old, &conn, &roots, &rules)?;
     drop(conn);
 
     let compared = Compared {
@@ -653,7 +647,8 @@ mod tests {
     fn a_leftover_journal_is_not_compared() {
         let f = fixture(&[("a.md", "# A\n")]);
         let path = old_file(&f, &[old(&f, "id-a", "a.md")]);
-        std::fs::write(f.old_dir.path().join("catalog.db-journal"), b"").unwrap();
+        // A journal with bytes may be a hot journal: reading around it could miss a rollback.
+        std::fs::write(f.old_dir.path().join("catalog.db-journal"), b"x").unwrap();
         let before = listing(f.old_dir.path());
 
         let out = eval(&f, &args(Some(path), false), None);
@@ -665,6 +660,73 @@ mod tests {
             out.stdout
         );
         assert_eq!(listing(f.old_dir.path()), before);
+    }
+
+    #[test]
+    fn a_zero_length_journal_is_not_a_hot_journal_and_the_catalog_is_compared() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[old(&f, "id-a", "a.md")]);
+        std::fs::write(f.old_dir.path().join("catalog.db-journal"), b"").unwrap();
+        let before = listing(f.old_dir.path());
+
+        let out = eval(&f, &args(Some(path), false), None);
+
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        assert_eq!(listing(f.old_dir.path()), before);
+    }
+
+    #[test]
+    fn an_old_root_above_the_git_root_is_not_compared_and_names_the_flag() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let path = old_file(&f, &[old(&f, "id-a", "a.md")]);
+        let above = f.root.parent().unwrap().to_str().unwrap().to_owned();
+        let out = eval(&f, &args_with_old_roots(path, &[above.as_str()]), None);
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(out.stdout.starts_with("NOT COMPARED — "), "{}", out.stdout);
+        assert!(out.stdout.contains("--old-root"), "{}", out.stdout);
+        assert!(
+            !out.stdout.contains(&above),
+            "the refusal names no path: {}",
+            out.stdout
+        );
+    }
+
+    /// The server keeps `-wal` and `-shm` beside the symlink's target; the decision whether a
+    /// server holds the catalog must look there.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_catalog_a_server_holds_open_is_compared_through_its_target() {
+        let f = fixture(&[("a.md", "# A\n")]);
+        let real_dir = tempfile::tempdir().unwrap();
+        let real = real_dir.path().join("catalog.db");
+        {
+            let conn = Connection::open(&real).unwrap();
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+            fill_old_catalog(&conn, &[old(&f, "id-a", "a.md")], &[], &[], &[]);
+        }
+        let link = f.old_dir.path().join("catalog.db");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        // The server opened it through the link, and its second row lies only in the `-wal`.
+        let holder = Connection::open(&link).unwrap();
+        holder.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        holder
+            .execute(
+                "INSERT INTO artifact (id, abs_path, kind, status, owners, tags, file_sha256) \
+                 VALUES ('id-w', ?1, 'doc', 'active', '[]', '[]', 'x')",
+                [format!("{}/w.md", f.root.display())],
+            )
+            .unwrap();
+        assert_eq!(listing(f.old_dir.path()), vec!["catalog.db".to_owned()]);
+
+        let out = eval(&f, &args(Some(link), false), None);
+
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains("documents: old 2 (in scope), derived 1, on both sides 1"),
+            "the row only the -wal holds is read: {}",
+            out.stdout
+        );
     }
 
     #[test]
