@@ -96,8 +96,9 @@ fn date_cell(d: Option<NaiveDate>) -> String {
     d.map(|d| d.to_string()).unwrap_or_default()
 }
 
-/// The rows as a GFM table with the columns `Entry | Kind | Status | Created | Closed`. The
-/// entry cell is `[[<key>]] <title>`.
+/// The rows as a GFM table with the columns `Entry | Kind | Status | Created | Closed |
+/// Archived`. The entry cell is `[[<key>]] <title>`; the `Archived` cell is `yes` for an archived
+/// row and empty otherwise.
 ///
 /// Guaranteed: each row cites its own entry key once, as a wiki link; a title (or any other
 /// text cell) cannot add a wiki-link citation or break its row, because `|` and `[` are
@@ -107,17 +108,19 @@ fn date_cell(d: Option<NaiveDate>) -> String {
 /// `grammar::extract`, and a bare token resolves only inside the document that hosts the table.
 /// A caller that writes the table into a file must decide whether to neutralise bare tokens first.
 pub fn render_markdown(rows: &[EntryRow]) -> String {
-    let mut out =
-        String::from("| Entry | Kind | Status | Created | Closed |\n|---|---|---|---|---|\n");
+    let mut out = String::from(
+        "| Entry | Kind | Status | Created | Closed | Archived |\n|---|---|---|---|---|---|\n",
+    );
     for r in rows {
         out.push_str(&format!(
-            "| [[{}]] {} | {} | {} | {} | {} |\n",
+            "| [[{}]] {} | {} | {} | {} | {} | {} |\n",
             r.key,
             cell(&r.title),
             cell(&r.entry_kind),
             cell(&r.status),
             r.created,
             date_cell(r.closed),
+            if r.archived { "yes" } else { "" },
         ));
     }
     out
@@ -213,7 +216,7 @@ mod tests {
             ),
         ]);
         let md = render_markdown(&rows(&tree, &k("l"), false).unwrap());
-        assert!(md.starts_with("| Entry | Kind | Status | Created | Closed |"));
+        assert!(md.starts_with("| Entry | Kind | Status | Created | Closed | Archived |\n"));
         assert!(md.contains("[[2026-10-01-old]] t"));
         let cites = grammar::extract(&md);
         assert_eq!(cites.len(), 1);
@@ -312,8 +315,8 @@ mod tests {
         ]);
         let r = rows(&tree, &k("l"), false).unwrap();
         let md = render_markdown(&r);
-        assert!(md.contains("| [[2026-10-01-a]] t | f | open | 2026-10-01 |  |"));
-        assert!(md.contains("| [[2026-10-01-b]] t | f | fixed | 2026-10-01 | 2026-10-04 |"));
+        assert!(md.contains("| [[2026-10-01-a]] t | f | open | 2026-10-01 |  |  |\n"));
+        assert!(md.contains("| [[2026-10-01-b]] t | f | fixed | 2026-10-01 | 2026-10-04 |  |\n"));
         assert_eq!(grammar::extract(&md).len(), 2);
     }
 
@@ -414,8 +417,8 @@ mod tests {
         let md = table_of(&titled("\"a | b\""));
         let row = md.lines().nth(2).unwrap();
         assert!(row.contains("a \\| b"), "{row}");
-        assert_eq!(separators(row), 6, "{row}");
-        assert_eq!(cells(&md), 10, "{md}");
+        assert_eq!(separators(row), 7, "{row}");
+        assert_eq!(cells(&md), 12, "{md}");
     }
 
     #[test]
@@ -423,7 +426,7 @@ mod tests {
         // The title is `a\|b`: the backslash must not turn the pipe escape into an escaped backslash.
         let md = table_of(&titled("\"a\\\\|b\""));
         let row = md.lines().nth(2).unwrap();
-        assert_eq!(cells(&md), 10, "{row}");
+        assert_eq!(cells(&md), 12, "{row}");
     }
 
     #[test]
@@ -454,7 +457,7 @@ mod tests {
             md.contains("[[2026-10-01-old]] first second third"),
             "{md:?}"
         );
-        assert_eq!(cells(&md), 10);
+        assert_eq!(cells(&md), 12);
     }
 
     #[test]
@@ -474,7 +477,42 @@ mod tests {
         let md = render_markdown(&[row]);
         assert_eq!(md.lines().count(), 3, "{md:?}");
         assert_eq!(grammar::extract(&md).len(), 1, "{md}");
-        assert_eq!(cells(&md), 10, "{md}");
+        assert_eq!(cells(&md), 12, "{md}");
+    }
+    /// P-R5: the table lists archived entries too (`doc(get)` asks for them), so a reader must
+    /// tell them apart: the `Archived` column says `yes` for an archived row and nothing else.
+    #[test]
+    fn the_archived_column_prints_yes_for_an_archived_row() {
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-02-live.md",
+                &entry_created("open", "2026-10-02", ""),
+            ),
+            doc(
+                "docs/trackers/ledgers/l/archive/2026-10-01-gone.md",
+                &entry_created("fixed", "2026-10-01", "closed: 2026-10-03\n"),
+            ),
+        ]);
+        let md = render_markdown(&rows(&tree, &k("l"), true).unwrap());
+        let lines: Vec<&str> = md.lines().collect();
+        assert_eq!(
+            lines[..2],
+            [
+                "| Entry | Kind | Status | Created | Closed | Archived |",
+                "|---|---|---|---|---|---|"
+            ],
+            "{md}"
+        );
+        assert_eq!(
+            lines[2],
+            "| [[2026-10-02-live]] t | f | open | 2026-10-02 |  |  |"
+        );
+        assert_eq!(
+            lines[3],
+            "| [[2026-10-01-gone]] t | f | fixed | 2026-10-01 | 2026-10-03 | yes |"
+        );
+        assert_eq!(cells(&md), 18, "{md}");
     }
 
     /// Prints a census of this repository's tracked markdown under the lifecycle model. Run by hand.
