@@ -199,6 +199,34 @@ pub(crate) fn require_shadow_file(cat: &Catalog, ctx: &ToolContext, id: &str) ->
     ))
 }
 
+/// True when a write to `id` from a worktree session lands on an overlay shadow whose file is not
+/// in the worktree: `id` is a main-checkout artifact and no file exists at its shadow path. Unlike
+/// [`require_shadow_file`] it does not pass a target that is already forked, because a committed
+/// shadow row does not put the file on disk. False outside a worktree session, for an unknown id
+/// and for a row that is not the main checkout's, so a missing file there stays the caller's
+/// error. Reads only; forks nothing.
+pub(crate) fn shadow_file_missing(cat: &Catalog, ctx: &ToolContext, id: &str) -> Result<bool> {
+    let Some(cp) = ctx.current_project.as_deref() else {
+        return Ok(false);
+    };
+    let Some(main_root) = cp.main_root.as_ref() else {
+        return Ok(false);
+    };
+    let Some(row) = artifact::get(cat, id)? else {
+        return Ok(false);
+    };
+    if !is_main_checkout_artifact(cp, &row.abs_path) {
+        return Ok(false);
+    }
+    let (_, shadow_path) = shadow_coordinates(cp, main_root.as_path(), &row);
+    // Only an absent path: a dangling symlink or an unreadable directory is the read door's to
+    // refuse, as an error.
+    Ok(matches!(
+        std::fs::symlink_metadata(&shadow_path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound
+    ))
+}
+
 /// The overlay write gate. A mutating action targeting a MAIN-root artifact
 /// from a worktree session forks it: shadow row at the worktree path (seeded
 /// from the main row), `worktree_fork` event carrying the base snapshot,
