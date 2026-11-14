@@ -193,6 +193,38 @@ async fn a_body_only_edit_of_an_entry_applies() {
         "frontmatter untouched: {text}"
     );
 }
+/// An empty `extra` changes no frontmatter: with body edits it takes the generic path and the
+/// edit lands (an empty map is not a frontmatter change to refuse as `EmptyUpdate`); alone it is
+/// still refused as an update that changes nothing, and nothing is written.
+#[tokio::test]
+async fn an_empty_extra_with_body_edits_applies_and_alone_is_refused() {
+    let tmp = project(&[]);
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), ENTRY, &open_entry(), "entry", "open");
+
+    update(
+        &ctx,
+        &id,
+        json!({
+            "extra": {},
+            "body_edits": [{"heading": "## Decision", "action": "replace", "content": "We pick Y."}]
+        }),
+    )
+    .await
+    .unwrap();
+
+    let text = read(tmp.path(), ENTRY);
+    assert!(text.contains("We pick Y."), "{text}");
+    assert!(!text.contains("We pick X."), "{text}");
+    // The generic path writes the frontmatter back in its own key order; every value is kept.
+    for line in OPEN_FIELDS.lines().chain(["kind: entry"]) {
+        assert!(has_line(&text, line), "{line} kept: {text}");
+    }
+
+    let text = refusal(&ctx, &id, json!({"extra": {}})).await;
+    assert!(text.contains("the update changes nothing"), "{text}");
+    assert!(read(tmp.path(), ENTRY).contains("We pick Y."), "unchanged");
+}
 
 /// C3: `commit_refresh` alone is a legitimate empty patch, and on an entry it must not reach
 /// `update_entry`, which would refuse it as `EmptyUpdate`.

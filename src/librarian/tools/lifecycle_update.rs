@@ -137,10 +137,15 @@ pub(super) fn entry_update(
             refused.join(", ")
         )));
     }
+    // An empty `extra` changes no frontmatter: with a body change the generic path runs; alone it
+    // goes on to `update_entry`, which refuses it as an update that changes nothing.
+    let extra_changes = patch.extra.as_ref().is_some_and(|e| !e.is_empty());
+    let body_changes = patch.body.is_some() || patch.body_edits.is_some();
     if patch.status.is_none()
         && patch.title.is_none()
         && patch.tags.is_none()
-        && patch.extra.is_none()
+        && !extra_changes
+        && (patch.extra.is_none() || body_changes)
     {
         return Ok(None);
     }
