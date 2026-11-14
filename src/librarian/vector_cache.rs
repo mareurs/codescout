@@ -85,10 +85,12 @@ impl CacheStatus {
 
 /// What one run did with the cache. Reports print it.
 ///
-/// `hits` counts the vectors the cache supplied to this run. `stored` and `errors` come from
-/// flushes: a flush writes every row staged in the cache, and the cache is one per process, so
-/// a flush can include rows staged by a cancelled or a concurrent call. Treat them as what the
-/// flushes of this run wrote and dropped, not as a count of this run's own embeds.
+/// `hits` counts the vectors the cache supplied to this run. `stored` counts the rows that
+/// flushes wrote. The part of `errors` that comes from flushes counts the rows that flushes
+/// dropped. A flush writes every row staged in the cache. The server keeps one cache per
+/// process. So a flush can include rows staged by a cancelled or a concurrent call. Lookup
+/// and stage failures reach `errors` through `note_item`. Do not read these counts as this
+/// run's own embeds.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CacheTally {
     pub status: CacheStatus,

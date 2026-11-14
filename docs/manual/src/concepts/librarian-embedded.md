@@ -84,7 +84,7 @@ When a file moves inside a project, its chunks get new identifiers. The text doe
 
 So a file that git moves reuses its vectors only if the librarian embedded its text after the cache existed. Until then, the librarian embeds the moved file one time.
 
-A project can set `chunk_grain` in the `[librarian]` section of its `.codescout/project.toml`. If a file moves into a project with another `chunk_grain`, its chunks have other text. The cache holds no vector for that text, so the librarian embeds it.
+A project can set `chunk_grain` in the `[librarian]` section of its `.codescout/project.toml`. If a file moves into a project with another `chunk_grain`, its chunks have other text. The cache may hold no vector for that text, so the librarian embeds it.
 
 A remote embedding server reports no vector size until its first embed. So the first lookups of a process can miss one time, and the librarian embeds that text.
 

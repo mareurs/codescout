@@ -480,7 +480,7 @@ mod tests {
     // cap-class: NOT_A_CAP — test-only fixture ceiling handed to CeilingEmbedder::new and EmbeddingService::with_budget; it parameterises the test's own embedder and bounds no runtime path
     const BUDGET: usize = 500;
 
-    /// The failure text of the two pins on how `embed_artifact` builds a vector.
+    /// The failure text of the three pins on how `embed_artifact` builds a vector.
     const BUMP_COMPOSITION_VERSION: &str = "the join, the segmentation or the pooling in \
          embed_artifact changed: bump COMPOSITION_VERSION in vector_cache.rs, or cached vectors \
          made the old way are served for the new text";
