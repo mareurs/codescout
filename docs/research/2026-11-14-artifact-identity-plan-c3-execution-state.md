@@ -18,9 +18,9 @@ Written 2026-11-14. The SDD ledger lives in the git-ignored directory `.superpow
 
 ## Where the work is
 
-- Branch `feat/c3-vector-cache-20261114` in `.worktrees/c3-vector-cache-20261114`, merged with `experiments` (which already holds the atomic write door `0f26f04fd`). Merged HEAD `b3535ceb7`.
-- Gate on that tree (untouched after the merge): FMT 0, CLIPPY 0, LEAN 0 (10129 passed, 61 skipped), DEFAULT 0 (10224 passed, 66 skipped), python 1836 passed, 7 skipped.
-- NOT yet merged into `experiments`. The finishing choice (merge locally, push and PR, keep) waits for the operator. Do not merge, push or delete before the answer.
+- **LANDED 2026-11-14.** The operator chose "merge locally". `experiments` was merged into the branch twice (the second merge brought only my two docs commits), the gate ran green on the first merged tree, and `experiments` fast-forwarded `8f4696f7f` to `a54988e05` (10 files, +3229/-29). The worktree and the branch are removed; the SDD workspace went with the worktree.
+- Gate on the gated tree (HEAD `b3535ceb7`, untouched after the merge): FMT 0, CLIPPY 0, LEAN 0 (10129 passed, 61 skipped), DEFAULT 0 (10224 passed, 66 skipped), python 1836 passed, 7 skipped. The second merge changed only two docs files, so the gate was not repeated.
+- Removal detail: the only client of the rust-analyzer mux held by the worktree was this session's own MCP server (socket peer pid check), so `--stop` was used; git refused once for an empty untracked `.cs-worktree-pending` marker, which was removed (0 bytes) without `--force`.
 
 ## What was built
 
@@ -78,6 +78,6 @@ Method: subagent-driven. Implementers sonnet; reviewers Opus with the recon skil
 
 ## Next steps, in order
 
-1. Operator: finishing choice for the C3 branch. After a merge: `scripts/worktree-remove.sh`, `git branch -d`, delete the SDD workspace.
-2. Write the Plan D plan (scout `489339eef5f9e93b`; open questions: who commits; file-only dual-write variant vs scratch copy of the old catalog; C3 cache location).
-3. Plan E.
+1. Write the Plan D plan (scout `489339eef5f9e93b`; open questions: who commits; file-only dual-write variant vs scratch copy of the old catalog; the C3 cache location, follow-up 5 above).
+2. Plan E.
+3. Optional follow-ups 1 to 4 above, in the order the operator chooses.

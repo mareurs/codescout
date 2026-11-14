@@ -9,7 +9,7 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 23
+entry_high_water_F: 24
 entry_high_water_W: 12
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
@@ -123,6 +123,7 @@ entry_high_water_W: 12
 | F-21 | 2026-11-14 | med | plan-prose | open | **Plan C3 Task 2's text-scan guard does not survive rustfmt** — the chained call is about 113 columns, so `.with_vector_cache(model, ` matches 0 times after formatting |
 | F-22 | 2026-11-14 | med | plan-prose | open | **Plan C3 contradicts two SQLite documents: WITHOUT ROWID with 3 KB blobs, and "delete the file at any time"** — withoutrowid.html § 4; howtocorrupt.html § 2.5 |
 | F-23 | 2026-11-14 | low | plan-prose | open | **Plan C3: five small drifts between its text and the code** — guide claims a model switch-back reads the cache; R11 "one extra embed" ignores concurrency; a failed open is sticky; two tests cannot fail as named |
+| F-24 | 2026-11-14 | med | plan-prose | open | **Plan C3 Task 1: four store tests pass on the broken build they should catch** — the flush counter is kept by the caller of the write, so a per-row commit stays at 1; symmetric tally inputs; WAL unpinned; only a short blob tested |
 
 ## Wins Index
 
@@ -1104,6 +1105,32 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 **Counterfactual:** without the joint read, every Task 1-4 test passes (each embeds fresh content inside one run) and the cache ships; the first measurement of the spec's "a rebuild reuses them" would be the cutover rebuild, which would re-embed nearly the whole corpus. Task 2's guard would go red at the Task 6 gate after four commits.
 
 **Status:** validated
+
+## F-24 — Plan C3 Task 1: four store tests pass on the broken build they should catch
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, Opus review of Plan C3 Task 1 (worktree `c3-vector-cache-20261114`, commit 013113b7f).
+
+**When:** Checking that every Task 1 test can fail on a broken `src/librarian/vector_cache.rs`.
+
+**Expected:** The Task 1 test list says of `one_flush_is_one_transaction`: "Mutation named: a per-row commit fails this." The tally test and the lock test pin what their names claim.
+
+**Got:** (1) `transactions` is incremented in `flush` after `write_rows` returns `Ok` (`vector_cache.rs:351`), and `write_rows` (`:177-188`) cannot reach the counter. A `write_rows` that autocommits each row returns `Ok` after 400 rows and the counter still reads 1, so the test passes on the mutation it names. A counter that the production code maintains is not an oracle for the property it counts. (2) `the_tally_counts_and_prints_what_a_run_did` calls `note_item(true, false)` and `note_item(false, true)`. A swap of the two parameters' roles gives the same `(hits 1, errors 3, stored 3)`. (3) No test pins `journal_mode = WAL`. A scratch experiment (system SQLite 3.54.1) shows that a DELETE-mode reader is not blocked by another connection's `BEGIN IMMEDIATE`, only by a writer in EXCLUSIVE (the commit). So `an_opening_process_takes_no_write_lock_and_a_locked_file_fails_only_the_flush` passes with the WAL line removed. (4) `a_row_whose_blob_is_not_dim_times_four_bytes_is_failed_not_returned` tests only a shorter blob. A `<` mutation of the `!=` length check (`:304`) returns a wider vector for a longer blob and passes.
+
+**Probable cause:** The plan names each oracle by what it reads on a correct build, not by what a broken build changes.
+
+**Workaround:** Reported as Important (1) and Minor (2)-(4) in the Task 1 review. The controller decides the fix.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** A test is evidence only for the failures it can express (`docs/conventions/testing-discipline.md`).
+
+**Fix idea / Pointer:** (1) An atomicity oracle: a raw connection adds `CREATE TRIGGER refuse BEFORE INSERT ON vec WHEN NEW.input_hash = 'bad' BEGIN SELECT RAISE(ABORT, 'refused'); END`; stage good, bad, good; flush is `{stored: 0, failed: 3}` and no row landed. (2) Use asymmetric inputs. (3) Read `PRAGMA journal_mode` through a second connection. (4) Add a `zeroblob(20)` case.
+
+---
 
 ## Template for new entries
 
