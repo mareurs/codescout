@@ -31,6 +31,10 @@
 - **C2-R5** A link whose target the grammar cannot name (`grammar_form_of` refuses) keeps the row and skips the line. This differs from Plan C1, which refuses a cite. Reason: `doc(link)` joins arbitrary pairs, including documents outside the key space, and refusing would break calls that work today. Cost if wrong: rows without twins. Plan D's dry run lists them.
 - **C2-R6** No doctor check in Plan C2. Plan D's dry run counts rows without a twin per class.
 - **C2-R7** The derived index stores no relation label (`edge` has `kind`, `target_*`, `dst_key`). A label is read from text by `lifecycle::relations::relations`. Plan C2 does not change the derived schema.
+- **C2-R8** (pre-flight) A rule skip keeps the row and says why in `text_twin`. A refused or failed write is an error and records nothing: a symlink target, an I/O error, or a commit failure after the file write (the file is restored).
+- **C2-R9** (pre-flight) `restore_section_after_failed_commit` in `dual_write.rs` is private. Task 2 makes it `pub(crate)` and changes nothing else in it.
+- **C2-R10** (pre-flight) `clippy -D warnings` rejects an item that only tests call. `parse_event_sections` gets its production caller in `splice_event` (the duplicate-id refusal reads the existing sections with it). `label_for_rel` and `splice_relation` are called by `link::call`. Add no `#[allow(dead_code)]`.
+- **C2-R11** (pre-flight) `link::call` holds no transaction, and `record_written_file` needs one. Task 3 opens `cat.conn.unchecked_transaction()` around the source-file write and `links::insert_with`, commits it, and leaves the later `artifact::upsert` and `events::insert` of the `supersedes` branch as they are.
 
 ## Review Focus
 
@@ -90,7 +94,7 @@ Format, exactly:
 
 **Files:**
 - Modify: `src/librarian/tools/event_create.rs` (`call`, a new private `single_writer_target`)
-- Modify: `src/librarian/catalog/dual_write.rs` only if a helper must be shared; prefer reuse of `record_written_file` and `restore_section_after_failed_commit` as they are.
+- Modify: `src/librarian/catalog/dual_write.rs`: make `restore_section_after_failed_commit` `pub(crate)` (ruling C2-R9); change nothing else in it.
 - Test: `event_create::tests`
 
 **Interfaces:**
@@ -137,11 +141,11 @@ The per-artifact write lock (`write_locks`) already covers the file read and the
   - `pub(crate) fn splice_relation(doc: &str, label: &str, form: &str) -> Option<String>`: `None` when the identical line `**<label>:** <form>` is already in the `## Relations` section (idempotent). Else the whole document with the line added at the end of that section, after one blank line. It creates the heading at the end of the body when absent.
   - the response of `link::call` gains `"text_twin"` with the same two values as Task 2. Reasons: `rel is not a label: <why>`, `target not nameable: <refusal>`, `already present`.
 
-Behaviour of `link::call`: after the destination frontmatter write (for `supersedes`) and before `links::insert`, compute the label and the form, splice the line, write the source file, and call `record_written_file`. If `links::insert` then fails, restore the file. A skipped twin never blocks the row.
+Behaviour of `link::call`: after the destination frontmatter write (for `supersedes`) and before the row write, compute the label and the form, splice the line, and open `cat.conn.unchecked_transaction()` (C2-R11). Inside it write the source file, call `record_written_file(&tx, …)`, then `links::insert_with(&tx, …)`, then commit. If the commit fails, restore the file. A skip by rule (C2-R8) never blocks the row. A refused or failed file write is an error and records no row.
 
 - [ ] **Step 1: Write the failing tests:**
   - in `link_text::tests`: `rel_words_become_a_label` (`depends_on` → `Depends on`, `see-also` → `See also`, `implements` → `Implements`), `a_rel_with_a_digit_is_not_a_label`, `a_new_line_goes_under_one_relations_heading`, `the_same_line_twice_is_a_no_op`, and `lifecycle_relations_reads_the_written_line_back` (assert label and `Reference` equal the input).
-  - in `link.rs` tests: `a_link_writes_a_relation_line_and_a_row`, `a_supersedes_link_writes_the_supersedes_line_and_keeps_the_frontmatter_write`, `a_link_to_a_target_outside_the_key_space_keeps_the_row_and_skips_the_line`, `the_same_link_twice_leaves_one_line`, `a_failed_row_insert_restores_the_source_file`.
+  - in `link.rs` tests: `a_link_writes_a_relation_line_and_a_row`, `a_supersedes_link_writes_the_supersedes_line_and_keeps_the_frontmatter_write`, `a_link_to_a_target_outside_the_key_space_keeps_the_row_and_skips_the_line`, `the_same_link_twice_leaves_one_line`, `a_failed_commit_restores_the_source_file`.
 - [ ] **Step 2: Run** `scripts/with-slot.sh cargo test --lib link_text` and `… cargo test --lib tools::link`. Expected: the new tests FAIL.
 - [ ] **Step 3: Implement** `link_text.rs` and the `call` change.
 - [ ] **Step 4: Run** the same commands. Expected: all PASS.
