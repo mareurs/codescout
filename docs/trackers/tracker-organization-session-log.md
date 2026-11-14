@@ -9,7 +9,7 @@ topic: tracker organization
 entry_prefix:
 - F
 - W
-entry_high_water_F: 2
+entry_high_water_F: 3
 entry_high_water_W: 4
 ---
 # Session Log — Tracker Organization
@@ -112,6 +112,7 @@ entry_high_water_W: 4
 |----|------|---------:|----------|--------|-------|
 | F-1 | 2026-11-11 | med | stale-claim | open | **frictions/ is not one-file-per-entry** — FR-N are defined in index.md; only issue-clusters/ has the shape |
 | F-2 | 2026-11-12 | med | stale-claim | mitigated | **A plan and its spec claimed three things the code contradicts** — "as it does today", a one-finding expectation, and "cannot be shown failing" |
+| F-3 | 2026-11-14 | med | stale-claim | open | **"L-B2 is blocked until identity Plan C exists" named the wrong plan** — the key-addressed tools need the Plan E flip; every doc action still takes a 16-hex id |
 | F-<n> | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
 
 ## Wins Index
@@ -411,6 +412,25 @@ be reshaped after the plan was written.
 **Counterfactual:** the first implementer would have met a plan test that a correct implementation fails (`LedgerQuiet` is also emitted), and would have had to retry or bend the test. The spec's false "as it does today" would have shipped a changed behaviour of an existing check with no mention to the operator. The locale test would have been pinned by a probe that falls back to C and prints English, which suggests git is unaffected when it is not.
 
 **Limits:** one plan, one reviewer, five tasks. The reviewer's other findings (a missing test of the duplicate key, the gate step, a three-readme case) were not verified one by one; they were taken as plan text and will meet their own reviewers at task time.
+
+## F-3 — The note "L-B2 is blocked until identity Plan C exists" named the wrong plan: the key-addressed tools need Plan E
+
+**Valid:** dated 2026-11-14
+
+**Observed:** The parked-items memory said Plan L-B2 (the lifecycle tools) was blocked until identity Plan C exists. Plan C1 has landed (`7db510676`, in `experiments`). I read the code and the identity spec before planning L-B2:
+
+- Every `doc` action takes a 16-hex `id` (`get.rs`, `update.rs`, `mv.rs` and the others each name `id="<16-hex>"` in their arg hint). None takes a key.
+- The L-B2 tools in the lifecycle spec (§ Tools) address a collection by key, and the identity spec forbids a hex id in tool output.
+- The identity spec's plan order puts "the read and write flip, `doc(move)` as a rename" in Plan E, not in C. The C1 execution-state doc lists N-5: `doc(move)` on a stem rename leaves `[[oldkey]]` cites stale.
+- C1 does give the lifecycle layer a safe base for writes: dual-write of entries and cites, the CLI write lock, and `rekey_prefix` that refuses grammar citers.
+
+**Expected:** that the end of Plan C unblocks all of L-B2.
+
+**Cost:** I nearly planned L-B2 against an interface that does not exist. An L-B2 built on hex ids would need re-addressing at Plan E.
+
+**Rests on:** the arg hints in `src/librarian/tools/*.rs`, the identity spec's "Plan order" paragraph and the C1 execution-state doc, all read on 2026-11-14.
+
+**Fix:** correct the memory. The decision on how to sequence L-B2 against Plan E goes to the operator.
 
 ## Template for new entries
 

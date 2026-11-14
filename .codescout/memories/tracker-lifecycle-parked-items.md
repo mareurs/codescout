@@ -26,7 +26,7 @@ Plans L-A (core), L-B (core completion), a follow-up (30-day grace, ledger-only 
 - A `Finding::subject()` accessor would help the doctor (L-B2).
 - `portable_reason` strips the root with a literal `/` (Windows, symlinked root): display only.
 - `Promoted  from` (double space) counts as forward; label vocabulary belongs to the builder.
-- Plan L-B2 (tools) is blocked until identity Plan C exists (identity B1 and B2 plans are on `experiments`; B2 is running in `.worktrees/artifact-identity-plan-b2`).
+- Plan L-B2 (tools) is not blocked by identity Plan C (C1 landed at 7db510676, 2026-11-13). It conflicts with Plan E: the lifecycle spec's tools address a collection by key, but every `doc` action still takes a 16-hex `id`, and `doc(move)` as a key rename is Plan E (F-3 in the session log). C2, C3, D and E are not planned yet. Sequencing is the operator's call.
 - Plan L-E (migration): `statements::parse_rests_on` should read through `relations()`; `is_bold_field_label` is duplicated in `relations.rs` and `statements.rs`; the loose file `docs/trackers/temp/artifact-identity-refactor.md` must move to `temp/artifact-identity-refactor/readme.md`; legacy `[[collection:R-91]]` citations: the identity session agreed its cutover rewrite emits `[[entry-key]]` for tokens that become entries.
 - `table::render_markdown` escaping edge cases (title `\[a](b)` makes a working link; `\|` loses its backslash) matter only if a table is written to a file; bare tokens like `R-91` in a title still parse as `Reference::Bare`.
 - No default `review_every` exists; writer collections should use `key_style: name`.
