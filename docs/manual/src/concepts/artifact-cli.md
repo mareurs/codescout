@@ -77,11 +77,11 @@ first letter capitalised. `depends_on` gives `Depends on`. The same link run
 twice leaves one line and one row. A rel that cannot make a valid label keeps
 the row and skips the line.
 
-An event is written as text only when the document has `single_writer: true`
-in its frontmatter (a YAML boolean; the string `"true"` does not count) and
-the kind is `note`, `verdict`, `intent`, `reviewed` or `external_signal`. A
-ledger, or a document with `entry_kind`, ignores the flag. Each event is one
-section under a `## Events` heading at the end of the body:
+An event is written as text when the document has `single_writer: true` in its
+frontmatter. The value must be a YAML boolean; the string `"true"` does not
+count. The kind must be `note`, `verdict`, `intent`, `reviewed` or
+`external_signal`. A ledger, or a document with `entry_kind`, ignores the flag.
+Each event is one section under a `## Events` heading at the end of the body:
 
 ```markdown
 ## Events
@@ -98,11 +98,12 @@ The heading reads `### <kind> — <UTC time> — <author>`; the author is
 is a blockquote for a `note` whose payload is only text, and a fenced
 `event-payload` JSON block for every other event.
 
-Both commands report the outcome in `text_twin`. `link` returns the bare string
-`ok` when the line was written. When the text was skipped, the response says
-why: `skipped: not a single-writer document`, `skipped: kind has no text twin`,
-`skipped: ledger or entry document`, `skipped: already present`, or a refusal
-to name the target.
+Both commands report a skipped text in `text_twin` as `skipped: <reason>`.
+`link` returns the bare string `ok` when the line was written. `event create`
+skips with
+`not a single-writer document`, `kind has no text twin`,
+`ledger or entry document` or `target not nameable: <why>`. `link` skips with
+`rel is not a label: <why>`, `target not nameable: <why>` or `already present`.
 
 ## Output modes
 
