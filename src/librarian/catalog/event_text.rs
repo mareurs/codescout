@@ -15,7 +15,8 @@
 //! - The heading is for people. The parser never reads it. It holds the kind in lowercase, so it
 //!   never has the ledger entry heading shape `<ID> — <title>`.
 //! - The comment holds the event's fields on one line, as JSON. Every `>` in it is written as
-//!   the six characters `>`, so no field can close the comment, and JSON reads it back to the
+//!   a backslash followed by `u003e` (six characters), so no field can close the comment.
+//!   JSON reads it back to the
 //!   same value.
 //! - A `note` whose payload is exactly `{"text": <string>}` is a blockquote, one `> ` per line (an
 //!   empty line is `>`). A blockquote cannot act as structure: no heading, label line or fence in

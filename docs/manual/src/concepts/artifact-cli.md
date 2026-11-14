@@ -103,7 +103,7 @@ A plain `link` returns the bare string `ok` when the line was written. `event cr
 skips with `not a single-writer document`, `document unreadable: <why>` or
 `kind has no text twin`. It also skips with `ledger or entry document` or
 `target not nameable: <why>`. `link` skips with
-`rel is not a label: <why>`, `target not nameable: <why>` or `already present`.
+`rel is not a label: <why>`, `target not nameable: <why>`, `source file is not in this worktree` or `already present`.
 
 ## Output modes
 
