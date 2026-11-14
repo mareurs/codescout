@@ -45,7 +45,7 @@ Inputs the spec implies and the task tests pin, most likely first:
 ## Rulings (controller; the operator delegated them on 2026-11-14 and may overrule any)
 
 - **P-R1** (write-core M-7) Task 9 refuses a status write that reopens an entry whose path has an `archive` segment, and names the move. Cost if wrong: one refusal branch.
-- **P-R2** The key check compares `identity::key::key_of` over the tracked and untracked Markdown paths (`scan::list_paths`, made `pub(crate)`) plus the candidate path. It reads no file. It needs the checkout's git top level; where `list_paths` fails, entry create refuses with that error. Cost if wrong: a subproject root cannot create entries until a cheaper index exists. Reason: the first draft read about 4600 files per create.
+- **P-R2** The key check compares `identity::key::key_of` over the tracked and untracked Markdown paths plus the candidate path. It reads no file. A new `pub(crate) fn list_checkout_paths(root: &Path) -> anyhow::Result<Vec<String>>` in `lifecycle/scan.rs` runs `require_top_level` first and then `list_paths(root, &git)` (`list_paths` lists `--cached --others --exclude-standard`, so untracked files count; it does not itself check the top level, and from a subproject root it would list only that subtree). Where `require_top_level` fails, entry create refuses with that error. Cost if wrong: a subproject root cannot create entries until a cheaper index exists. Reason: the first draft read about 4600 files per create. Keys are repository-wide: an archived collection `k` blocks a new live collection `k`.
 - **P-R3** An empty `UpdateSpec` is `WriteProblem::EmptyUpdate`. The tool calls `update_entry` only when the patch carries `status`, `title`, `tags` or `extra`.
 - **P-R4** `revisit_by` without `status` on an entry re-dates it, keeps `status` and `status_since`, and is allowed only when the current status class needs a revisit date (else `RevisitNotNeeded`); a past date is `RevisitPast`. Cost if wrong: one branch in `update_entry`.
 - **P-R5** The collection table gains an `Archived` column and `doc(get)` passes `include_archived = true`. This changes a pinned table format; the existing table tests are updated. Cost if wrong: one column and its tests.
@@ -156,7 +156,7 @@ Inputs the spec implies and the task tests pin, most likely first:
 
 - [ ] **Step 1: Write the failing tests** (temp dir trees; `testkit` helpers where they fit):
   - `finds_a_collection_in_each_lifecycle_folder`; `finds_an_archived_collection_by_its_dir`.
-  - `lists_live_and_archived_entries_and_the_template`: two entries plus `archive/old.md`; `node().entries.len() == 2` (archived entries are in `entries` with `archived: true`) and `template` equals the readme's `## Entry template` text.
+  - `lists_live_and_archived_entries_and_the_template`: two entries plus `archive/old.md`; `node().entries.len() == 3` with exactly one entry `archived: true` (the tree keeps archived entries in the node; `table::rows` filters them) and `template` equals the readme's `## Entry template` text.
   - `a_readme_in_upper_case_is_found`.
   - `an_unknown_key_is_not_found`; `a_bad_key_is_refused_before_any_read` (`../x`, empty).
   - `a_key_in_two_lifecycle_folders_is_ambiguous`, dirs sorted.
@@ -194,7 +194,7 @@ Inputs the spec implies and the task tests pin, most likely first:
 ### Task 6: The shared write helper, the exclusive mode and the worktree fixture
 
 **Files:**
-- Modify: `src/librarian/tools/create.rs` (extract the helper; `Args` and `preflight`), `src/librarian/catalog/artifact.rs` (`insert_new`), `src/librarian/tools/doctor.rs` (move `repo_with_registered_worktree` to a shared test module)
+- Modify: `src/librarian/tools/create.rs` (extract `resolve_base_dir` and the helper; `Args` and `preflight`), `src/librarian/catalog/artifact.rs` (`insert_new`), `src/librarian/tools/doctor.rs` (move `repo_with_registered_worktree` AND its dependency `git_fixture_with_commit` to the shared test module; the other doctor tests keep using them)
 - Create: shared test fixture module `src/librarian/tools/testfixture.rs` (`#[cfg(test)]`, register in `tools/mod.rs`)
 - Test: `src/librarian/tools/create.rs` tests, `src/librarian/catalog/artifact.rs` tests
 
@@ -202,26 +202,35 @@ Inputs the spec implies and the task tests pin, most likely first:
 - Produces:
   ```rust
   // create.rs
+  pub(super) fn resolve_base_dir(ctx: &ToolContext, repo: Option<&str>) -> Result<PathBuf>; // today's base_dir logic, extracted unchanged
   pub(super) enum WriteMode { Plain, Exclusive }
+  pub(super) enum Content { Rendered(String), Compose { body: String } }
+  // Rendered: the file bytes are given and carry no `id:` (entry, collection).
+  // Compose: write_new builds the frontmatter from the fields below plus `id: Some(id)` and the body (plain create, as today).
   pub(super) struct NewArtifact<'a> {
-      pub rel_path: String, pub content: String,
+      pub rel_path: String, pub content: Content,
       pub kind: String, pub status: String, pub title: String,
       pub tags: Vec<String>, pub owners: Vec<String>,
       pub topic: Option<String>, pub time_scope: Option<String>,
       pub extra: &'a BTreeMap<String, Value>, pub body_for_checks: &'a str,
+      pub augment: Option<&'a AugmentSpec>,   // written in the same transaction as the row
   }
   pub(super) async fn write_new(ctx: &ToolContext, repo: Option<&str>, art: NewArtifact<'_>, mode: WriteMode) -> Result<Value>;
+  // the race-critical step, callable without any pre-check:
+  pub(super) fn insert_and_create_exclusive(cat: &Catalog, row: &ArtifactRow, full: &Path, content: &str) -> Result<(), anyhow::Error>;
   // artifact.rs
-  pub fn insert_new(cat: &Catalog, row: &ArtifactRow) -> Result<()>; // plain INSERT; Err when the id or abs_path exists
+  pub enum InsertError { Exists, Other(anyhow::Error) }
+  pub fn insert_new(cat: &Catalog, row: &ArtifactRow) -> Result<(), InsertError>; // plain INSERT; Exists when the id or the UNIQUE abs_path exists
   // testfixture.rs
   pub(crate) fn repo_with_worktree() -> (TempDir, PathBuf /*main*/, PathBuf /*worktree*/);
   ```
-  `Plain` keeps today's order and `undo_failed_create`. `Exclusive` uses `insert_new`, `OpenOptions::create_new`, and on `AlreadyExists` deletes the inserted row only. `create::call` builds a `NewArtifact` and calls `write_new` in `Plain` mode; its behaviour does not change. `Args` fields `rel_path`, `kind`, `title` and `body` become optional in the serde struct and gain a new `collection: Option<String>`; `preflight` still requires `rel_path`, `kind`, `title` and `body` when `collection` is absent (the test `doc_malformed_calls_get_their_own_error_not_the_worktree_guard` keeps passing).
+  `Plain` keeps today's order, slug minting (`upsert_and_mint_slug`) and `undo_failed_create`. `Exclusive`: `insert_new` and, in the same transaction, `ensure_slug` for the row (so the entry reaches the entry graph), then `OpenOptions::create_new`; an `InsertError::Exists` becomes the message `path exists: <rel_path>`; on `AlreadyExists` from `create_new` it deletes the row this call inserted and never calls `remove_file`; any other write error also deletes only the row. `create::call` builds a `NewArtifact` with `Content::Compose` and calls `write_new` in `Plain` mode; its behaviour does not change (augmentation atomicity included: `assert_failed_catalog_finalization_is_atomic` stays green). `Args` fields `rel_path`, `kind`, `title` and `body` become optional in the serde struct and gain `collection: Option<String>`; `preflight` still requires `rel_path`, `kind`, `title` and `body` when `collection` is absent (the test `doc_malformed_calls_get_their_own_error_not_the_worktree_guard` keeps passing).
 
 - [ ] **Step 1: Write the failing tests:**
-  - `insert_new_refuses_an_existing_id_and_leaves_the_row` (artifact.rs): the first row's `created_at` and `file_sha256` are unchanged after a second `insert_new` with the same id fails.
-  - `exclusive_write_on_an_existing_file_leaves_file_and_row_untouched` (create.rs): create a file and its row, call `write_new` in `Exclusive` mode on the same path; assert `Err`, the file bytes, and the row's `created_at` and `file_sha256` are unchanged.
-  - `exclusive_write_over_a_stray_file_without_a_row_deletes_only_its_own_row`: a file with no row; `Exclusive` fails with `AlreadyExists`; the file's bytes are unchanged and no row remains.
+  - `insert_new_refuses_an_existing_id_and_leaves_the_row` (artifact.rs): after a second `insert_new` with the same id fails with `Exists`, the first row's `created_at` and `file_sha256` are unchanged; a second row with a different id but the same `abs_path` also gives `Exists`.
+  - `insert_and_create_exclusive_on_a_planted_file_leaves_the_file_and_deletes_only_its_row` (create.rs): plant a file at `full` with no row, call `insert_and_create_exclusive` directly (no pre-check), assert the error kind is `AlreadyExists`, the planted file's bytes are unchanged, and no row remains.
+  - `insert_and_create_exclusive_on_an_existing_row_leaves_file_and_row_untouched`: a file and its row exist; the call fails; bytes, `created_at` and `file_sha256` are unchanged.
+  - `exclusive_write_mints_a_slug`: after a successful `Exclusive` write, the row has a slug.
   - `plain_mode_is_todays_behaviour`: the existing `create` tests are the proof (no new test).
   - `a_call_with_collection_and_no_rel_path_passes_preflight` and `a_call_with_neither_still_fails_preflight`.
 - [ ] **Step 2: Run** `scripts/with-slot.sh cargo test --lib -- tools::create catalog::artifact`. Expected: the new tests FAIL.
@@ -233,15 +242,15 @@ Inputs the spec implies and the task tests pin, most likely first:
 
 **Files:**
 - Create: `src/librarian/tools/create_lifecycle.rs` (register in `tools/mod.rs`), tests in `src/librarian/tools/create_lifecycle_tests.rs`
-- Modify: `src/librarian/tools/create.rs` (call the new module when `collection` is set), `src/librarian/lifecycle/scan.rs` (`list_paths` becomes `pub(crate)`), `src/librarian/tools/artifact.rs` (advertise `collection`, trim to stay net-neutral)
+- Modify: `src/librarian/tools/create.rs` (call the new module when `collection` is set), `src/librarian/lifecycle/scan.rs` (add `pub(crate) fn list_checkout_paths`, see P-R2), `src/librarian/tools/artifact.rs` (advertise `collection`, trim to stay net-neutral)
 
 **Interfaces:**
-- Consumes: `collection::load_collection`, `write::{new_entry, NewEntry, EntryFile}`, `scan::list_paths`, `identity::key::key_of`, Task 6's `write_new` (`Exclusive`).
-- Produces: `pub(super) async fn entry_mode(ctx: &ToolContext, a: &Args) -> Result<Value>` returning `{"id", "abs_path", "key"}`. A call with `collection` and `rel_path` is refused.
+- Consumes: `collection::load_collection`, `write::{new_entry, NewEntry, EntryFile}`, `scan::list_checkout_paths`, `identity::key::key_of`, Task 6's `write_new` (`Exclusive`).
+- Produces: `pub(super) async fn entry_mode(ctx: &ToolContext, a: &Args) -> Result<Value>` returning `{"id", "abs_path", "key"}`. A call with `collection` and `rel_path` is refused, and a call with `collection` and `kind: "collection"` is refused (entry mode only; the entry kind goes in `kind`).
 - Mapping: `kind` = entry kind; `extra` = declared fields with `revisit_by` (ISO string) and `valid` (string) taken out by name (both pass `reject_reserved_extra_keys`, which checks only `frontmatter::RESERVED_KEYS`); `status`, `tags`, `title`, `body` as they are; `owners`, `topic`, `time_scope`, `augment` are refused in entry mode.
 
 - [ ] **Step 1: Write the failing tests** (`git init` temp project):
-  - `creates_an_entry_from_the_schema_and_template`: file at `docs/trackers/ledgers/<key>/<stem>.md`, status `initial_status`, body the template, no `id:`, `kind: entry`, result has `key`, `id`, `abs_path`, the row exists with catalog kind `entry`.
+  - `creates_an_entry_from_the_schema_and_template`: file at `docs/trackers/ledgers/<key>/<stem>.md`, status `initial_status`, body the template, no `id:`, `kind: entry`, result has `key`, `id`, `abs_path`, the row exists with catalog kind `entry` and has a slug.
   - `rel_path_and_collection_together_are_refused`.
   - `a_blocked_entry_takes_revisit_by_from_extra`; `a_past_revisit_by_is_refused`.
   - `a_second_create_of_the_same_title_on_the_same_day_is_refused_and_leaves_the_first` (assert file bytes, row `created_at` and `file_sha256` unchanged).
@@ -251,7 +260,7 @@ Inputs the spec implies and the task tests pin, most likely first:
   - `an_unknown_collection_names_the_remedy`.
   - `a_requirements_toml_rule_is_enforced_on_entry_create` (reuse the `enforce_on_create` test setup).
   - `creates_in_a_worktree_session_from_the_worktrees_schema` (`repo_with_worktree`; the readme exists only in the worktree).
-  - `the_advertised_surface_is_net_neutral`: `tool_surface_under_budget` and the three schema gates named in Task 11 stay green (run them here).
+  - `the_advertised_surface_is_net_neutral`: `tool_surface_under_budget` and the schema gates listed in Step 4 stay green (run them here).
 - [ ] **Step 2: Run** `scripts/with-slot.sh cargo test --lib -- tools::create_lifecycle`. Expected: FAIL to compile.
 - [ ] **Step 3: Implement** `entry_mode`: load the collection; `new_entry`; key check (P-R2: `key_of` over `list_paths` plus the candidate; a path equal to the candidate is "path exists", another path with the same key is a collision naming both); then `write_new(..., Exclusive)`. Add `collection` to the advertised schema with the shortest accurate description and trim the same number of characters from the `doc` description (`append_entry` and `rekey_prefix` prose first); do not raise the budget.
 - [ ] **Step 4: Run** the same command, then `scripts/with-slot.sh cargo test --lib -- tool_surface_under_budget every_action_labelled_schema_key_is_honored_by_that_action every_schema_object_promising_to_refuse_unknown_keys_actually_refuses input_schema_has_no_phantom_update_fields every_tool_description_is_under_its_cap`. Expected: PASS.
@@ -288,8 +297,8 @@ Inputs the spec implies and the task tests pin, most likely first:
       -> Result<Option<EntryUpdate>>;
   ```
   `Ok(None)` when the path does not place as `Role::Entry` (the generic path runs unchanged). `Ok(Some(..))` when it does: `text` is the document after the frontmatter change, `status`, `title` and `tags` are read back from `text`.
-- Rules: call `update_entry` only when the patch carries `status`, `title`, `tags` or `extra`; a patch with only `body`, `body_edits` or `commit_refresh` returns `text = original` and the generic body path runs. `extra`: `revisit_by` (ISO string) and `valid` (string or null) by name, every other key a declared field (null deletes). `owners`, `topic`, `time_scope`, `params` are refused with a message that says an entry has none. A status write that reopens an entry whose `rel_path` has an `archive` segment is refused with the move named (P-R1).
-- Where: in `update::call`, after `original` is read and before the bug `closed` stamp (a file with `kind: bug` that places as an entry must not get `extra.closed`), after `reject_reserved_extra_keys`. The root is `cp.git_root` when it contains `full`, else the managed root that contains it (`managed_roots(ctx)`); `rel_path` is `full` with that root stripped. The generic code then uses `text` as `original`, clears `patch.status`, `title`, `tags` and `extra` for the file-writing branches only, and builds `updated_row` with the returned `status`, `title` and `tags` as overrides (the row is built from the patch at `update.rs` ~L870-877). `update::call` emits no `status_change` event (only a body `field_patch`), so none is added.
+- Rules: first refuse `owners`, `topic`, `time_scope` and `params` (below); then, when the patch carries none of `status`, `title`, `tags`, `extra`, return `Ok(None)` (a patch with only `body`, `body_edits` or `commit_refresh` takes the generic path, which is already correct and does not parse the entry); otherwise call `update_entry`. `extra`: `revisit_by` (ISO string) and `valid` (string or null) by name, every other key a declared field (null deletes). `owners`, `topic`, `time_scope`, `params` are refused with a message that says an entry has none. A status write that reopens an entry whose `rel_path` has an `archive` segment is refused with the move named (P-R1).
+- Where: in `update::call`, after `original` is read and before the bug `closed` stamp (a file with `kind: bug` that places as an entry must not get `extra.closed`). Call `reject_reserved_extra_keys` again at the new seam before the mapping (it is idempotent; today it runs a little later in `call`). The root is `cp.git_root` when it contains `full`, else the managed root that contains it (`managed_roots(ctx)`); `rel_path` is `full` with that root stripped. The generic code then uses `text` as `original`, clears `patch.status`, `title`, `tags` and `extra` for the file-writing branches only, and builds `updated_row` with the returned `status`, `title` and `tags` as overrides (the row is built from the patch at `update.rs` ~L870-877). `update::call` emits no `status_change` event (only a body `field_patch`), so none is added.
 
 - [ ] **Step 1: Write the failing tests:**
   - `a_status_update_sets_status_since_and_closed_through_the_tool`.
@@ -338,5 +347,5 @@ Inputs the spec implies and the task tests pin, most likely first:
 - The exact line of the seam in `update::call` and the row-override edit (Task 9), beyond the lines the review cited.
 - That `filter::eval` accepts the lifted flat rows without change (Task 10).
 - That `insert_new` can be a plain `INSERT` given the `abs_path UNIQUE` column and the id algorithm (Task 6).
-- That `list_paths` returns untracked Markdown files too (P-R2); if it returns only tracked ones, a new untracked file with the same key is missed, and the plan needs `git ls-files --others --exclude-standard` as well.
+- That `list_paths` includes untracked files: the review read `--cached --others --exclude-standard` at `scan.rs:107-116`; the implementer confirms with a test (Task 7).
 - The `tools/mod.rs` registration style for a module that is not itself a tool.
