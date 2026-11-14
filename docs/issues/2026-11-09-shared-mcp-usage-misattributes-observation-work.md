@@ -203,6 +203,29 @@ What this does and does not show:
 
 Open: read why a `SessionStart` hook reports `Failed` under Codex (the two new `wake-missed-jobs.mjs` entries have no trust hash, so they are the first suspects, not verified).
 
+## Correction to the live check, 2026-11-14 (session `5566e8a8`)
+
+**The live check above does not test the fix. The hook that carries the fix did not run.** Read the section above as void for the claim "the stamp did not move because of the fix".
+
+What I read on 2026-11-13 and 2026-11-14:
+- A second probe (`codex exec`, thread `01a1d1cb-cad0-71f0-9ef2-d47a1643dd7e`) printed the same hook lines: `SessionStart` `Completed` and `Failed`, `UserPromptSubmit` `Completed` and `Failed`, `Stop` `Failed`. The output names no hook. The rollout file of the thread has no hook records.
+- buddy's `SessionStart` hook ran in that thread. Evidence: a `source=startup` line for the thread in `.buddy/.session-start-trace.log`, and the directory `.buddy/01a1d1cb-…/`.
+- The companion `session-start.mjs` left none of its marks. `.codescout/cc_session_id` was last written at 00:03:51 local time, before the probe at 00:06:18, and holds another id. The thread directory has no `recon-loaded` file. The script itself is sound: `node --check` passes and `lib.mjs` exports `isCodexProcess`.
+- `hooks/list` (app-server JSON-RPC, read-only, cwd = this checkout) returns `trustStatus: "modified"` for all 22 `codescout-companion` hooks, including both `session_start` entries. The hooks of buddy, `cs-hint-codex` and `~/.codex/hooks.json` return `trusted`.
+
+Cause, from the 2026-11-07 and 2026-11-09 findings in codescout memory `codex-hook-content-trust-20261107`: Codex binds hook approval to the content of the whole plugin root, so any change in the cache cancels it, and the hooks then fail with `plugin contents changed; hook approval required`. The `codex plugin add` of 2026-11-12 (section "Codex cache refreshed") replaced `1.21.0` with `1.21.5`. The `trusted_content_hash` records in `~/.codex/config.toml` still hold the `1.21.0` value (`sha256:057a03b6…` on `session_start:0:0`). **That refresh made every companion hook fail in real Codex sessions on this host.** The earlier note said the config diff was empty, which is true, but it did not check `hooks/list`.
+
+Not verified:
+- That the `Failed` lines in the probe belong to the companion hooks. This follows from the trust status and from the missing marks, not from a hook name in the output. The trust status was read on 2026-11-14, after the probe, and `config.toml` changed in between (2026-11-13 09:57: declaration hashes for the two `wake-missed-jobs.mjs` entries, a reasoning-effort setting).
+- Whether the fix works. No run with an executing hook exists yet.
+
+Side effect of the probes: buddy's hook rewrote `.buddy/.current_session_id` with the Codex thread id. That file names the last writer, not this session. Skills read `$CLAUDE_CODE_SESSION_ID` first, so the damage is small.
+
+Open:
+- Renew the content approvals for the 22 companion hooks (operator step: edit `trusted_content_hash` as on 2026-11-07, or approve in Codex). I did not change `~/.codex/config.toml`.
+- Then repeat the probe, and read `.codescout/cc_session_id` and the rendezvous slot, not only `usage.db`.
+- Every plugin refresh of the Codex cache needs the same renewal. This is a cost of the refresh route used here.
+
 ## Fix provenance
 
 - **SHA:** `claude-plugins:f41d5aa` (`f41d5aaf34149c84bc619e5468341648a7998610`, 2026-11-12, repo `claude-plugins`, path `codescout-companion/hooks/`)
