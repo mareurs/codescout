@@ -404,16 +404,24 @@ fn native_stamp_rendezvous(dir: &std::path::Path, session: &str) {
 }
 
 /// The `cc_session_id` usage.db recorded for the one `run_command` whose input names `marker`.
+///
+/// A missing row panics with the dropped-rows log beside the database error, so a failure says
+/// whether the recorder reported a failed write.
 fn native_recorded_session(dir: &std::path::Path, marker: &str) -> String {
     rusqlite::Connection::open(dir.join(".codescout").join("usage.db"))
         .unwrap()
         .query_row(
             "SELECT cc_session_id FROM tool_calls \
-             WHERE tool_name = 'run_command' AND input_json LIKE ?1",
+                   WHERE tool_name = 'run_command' AND input_json LIKE ?1",
             [format!("%{marker}%")],
             |r| r.get(0),
         )
-        .unwrap_or_else(|e| panic!("no single usage row for {marker}: {e}"))
+        .unwrap_or_else(|e| {
+            panic!(
+                "no single usage row for {marker}: {e}; usage-dropped-rows.log: {}",
+                crate::server::test_support::dropped_rows_log(dir)
+            )
+        })
 }
 
 /// Docs: ce484db75532c7f0. The commit guard reads `usage.db.cc_session_id`

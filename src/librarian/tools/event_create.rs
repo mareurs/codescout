@@ -618,10 +618,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         &written,
                     )
                     .map_err(|e| {
-                        use crate::librarian::catalog::dual_write::{
-                            with_sentence, write_failed_in_io, PARTLY_WRITTEN,
-                        };
-                        let partial = write_failed_in_io(&e);
                         // The refusal and the io error write `path.display()` (and a link's
                         // target) into their text; a response names the document by its label.
                         let e = crate::librarian::catalog::dual_write::without_path(
@@ -629,14 +625,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                             &doc.path,
                             &label,
                         );
-                        let e = LibrarianRecoverableError::new(format!(
+                        LibrarianRecoverableError::new(format!(
                             "event_create: cannot write {label}, so no event was recorded: {e}"
-                        ));
-                        if partial {
-                            with_sentence(e, PARTLY_WRITTEN)
-                        } else {
-                            e
-                        }
+                        ))
                     })?;
                     let file = TwinWrite {
                         path: doc.path,
@@ -1581,11 +1572,12 @@ pub(crate) mod tests {
         }
     }
 
-    /// The read passes and the write itself fails with an I/O error. The document is rewritten in
-    /// place, so such a failure can leave it cut, and the error says so; no row remains.
+    /// The read passes and the write door fails with an I/O error (the writability probe refuses a
+    /// read-only document with `Permission denied`). The door replaces the document atomically, so
+    /// the document keeps its bytes, the error does not say it may be cut, and no row remains.
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_failed_io_write_says_the_document_may_be_partly_written() {
+    async fn a_failed_io_write_leaves_the_document_unchanged_and_records_no_row() {
         use std::os::unix::fs::PermissionsExt;
         let (tmp, ctx, path) = twin_fixture(FLAGGED);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
@@ -1602,14 +1594,23 @@ pub(crate) mod tests {
             "{shown}"
         );
         assert!(
-            shown.contains("The document may be partly written."),
-            "{shown}"
+            shown.contains("Permission denied"),
+            "the error is the I/O error of the door, not a refusal: {shown}"
+        );
+        assert!(
+            !shown.contains("partly written"),
+            "a failed write leaves the document unchanged, so the error does not say it may be cut: {shown}"
         );
         assert!(
             !shown.contains(&tmp.path().display().to_string()),
             "no path in the error: {shown}"
         );
         assert_eq!(event_rows(&ctx, "doc1"), 0, "no row remains");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            FLAGGED,
+            "the document keeps its bytes"
+        );
     }
 
     /// Both lower-layer errors a failed restore can carry (a missing file, a link) write the

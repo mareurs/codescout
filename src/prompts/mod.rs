@@ -4180,6 +4180,44 @@ mod redesign_invariants {
         }
     }
 
+    /// The runtime guide must say where the vector cache is, how it fills, how to remove it and
+    /// what the reindex response reports. A guide that omits the removal steps invites the
+    /// unsafe form ("delete it at any time"): deleting a SQLite file another process holds open
+    /// can corrupt it, so the safe form names every file and says to stop the processes first.
+    #[test]
+    fn the_runtime_guide_documents_the_vector_cache() {
+        let runtime = crate::prompts::topic_body("librarian-runtime").expect("guide registered");
+        // The guide wraps lines, so a phrase is compared with its whitespace collapsed.
+        let flat = runtime.split_whitespace().collect::<Vec<_>>().join(" ");
+        for token in ["embed_cache", "reembed=true"] {
+            assert!(
+                flat.contains(token),
+                "librarian-runtime does not mention `{token}`, so the vector cache is undocumented"
+            );
+        }
+        // One ordered phrase carries the safe removal: stop every process first, then delete
+        // all three files. Reversing it, or naming fewer files, fails here.
+        let removal = "stop every codescout process, then delete `vector-cache.db`, \
+                       `vector-cache.db-wal` and `vector-cache.db-shm`";
+        assert!(
+            flat.contains(removal),
+            "librarian-runtime does not give the removal steps in order: `{removal}`"
+        );
+        assert!(
+            !flat.contains("at any time"),
+            "librarian-runtime tells the reader to delete the cache `at any time`; removing a \
+             SQLite file that a running process holds open can corrupt it"
+        );
+        // A model switch is applied only by `reembed=true`, which never reads the cache, so the
+        // guide must not claim that switching back to an earlier model reuses vectors.
+        for claim in ["switch back", "switching back", "earlier model"] {
+            assert!(
+                !flat.contains(claim),
+                "librarian-runtime claims a model switch reuses cached vectors (`{claim}`)"
+            );
+        }
+    }
+
     #[test]
     fn every_iron_law_has_do_instead() {
         let rendered = build_server_instructions(None);

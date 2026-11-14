@@ -77,6 +77,7 @@ pub async fn embed_document_pooled(
 /// **No whitespace-only segment** unless it cannot be avoided within the budget (see
 /// [`absorb_blank_segments`]): the embedder refuses a blank input, and one refused segment
 /// leaves the whole document without a vector.
+// Changing this changes cached vectors: bump `librarian::vector_cache::COMPOSITION_VERSION`.
 pub fn segment_for_budget(content: &str, budget_chars: usize) -> Vec<String> {
     let budget = budget_chars.max(1);
     let mut out: Vec<String> = Vec::new();
@@ -130,6 +131,7 @@ const ENTRY_MARKER: &str = "  **+1:";
 /// from `char_indices`, so no cut can fall inside a UTF-8 character.
 ///
 /// Terminates: every iteration emits a non-empty piece and shortens `rest` by it.
+// Changing this changes cached vectors: bump `librarian::vector_cache::COMPOSITION_VERSION`.
 fn split_long_line(line: &str, budget: usize, out: &mut Vec<String>) {
     let mut rest = line;
     loop {
@@ -242,6 +244,7 @@ fn head_steal_points(s: &str) -> Vec<usize> {
 ///
 /// Terminates: each step shortens `segs` or turns a blank segment into one with content,
 /// otherwise the index advances.
+// Changing this changes cached vectors: bump `librarian::vector_cache::COMPOSITION_VERSION`.
 fn absorb_blank_segments(segs: &mut Vec<String>, budget: usize) {
     if !segs.iter().any(|s| has_content(s)) {
         return;
@@ -301,6 +304,7 @@ fn absorb_blank_segments(segs: &mut Vec<String>, budget: usize) {
 /// *segmented* document systematically further from every query than a short one, in
 /// proportion to how varied its content is. That is a ranking bug that no test of "did it
 /// embed" would catch.
+// Changing this changes cached vectors: bump `librarian::vector_cache::COMPOSITION_VERSION`.
 pub fn mean_pool_normalized(vectors: &[Vec<f32>]) -> anyhow::Result<Vec<f32>> {
     let first = vectors
         .first()

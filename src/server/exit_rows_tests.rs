@@ -19,33 +19,117 @@ use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
 
+/// One `tool_calls` row as the tests read it: `(outcome, err_family, error_msg)`.
+type Row = (String, Option<String>, Option<String>);
+
 /// `(outcome, err_family, error_msg)` of every row for `tool`, once at least one exists and
 /// the count has held still for 300 ms.
+///
+/// When it ends with no row it prints, to the captured output that nextest shows for a failing
+/// test, the last error a read returned and the dropped-rows log, because an empty list alone
+/// cannot tell a row that was never written from a read that failed.
 async fn rows_for(dir: &Path, tool: &str) -> Vec<(String, Option<String>, Option<String>)> {
-    let read = || -> Vec<(String, Option<String>, Option<String>)> {
-        let Ok(conn) = rusqlite::Connection::open_with_flags(
+    let read = || -> Result<Vec<Row>, String> {
+        let conn = rusqlite::Connection::open_with_flags(
             dir.join(".codescout").join("usage.db"),
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        ) else {
-            return Vec::new();
-        };
-        let Ok(mut stmt) = conn.prepare(
-            "SELECT outcome, err_family, error_msg FROM tool_calls WHERE tool_name = ?1 ORDER BY id",
-        ) else {
-            return Vec::new();
-        };
-        stmt.query_map([tool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .map(|rows| rows.filter_map(Result::ok).collect())
-            .unwrap_or_default()
+        )
+        .map_err(|e| format!("open: {e}"))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT outcome, err_family, error_msg FROM tool_calls WHERE tool_name = ?1 ORDER BY id",
+            )
+            .map_err(|e| format!("prepare: {e}"))?;
+        let rows = stmt
+            .query_map([tool], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .map_err(|e| format!("query: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("row: {e}"));
+        rows
+    };
+    let mut last_error: Option<String> = None;
+    let mut read_or_note = || match read() {
+        Ok(rows) => rows,
+        Err(e) => {
+            last_error = Some(e);
+            Vec::new()
+        }
     };
     for _ in 0..100 {
-        if !read().is_empty() {
+        if !read_or_note().is_empty() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     tokio::time::sleep(Duration::from_millis(300)).await;
-    read()
+    let rows = read_or_note();
+    if rows.is_empty() {
+        eprintln!("{}", no_row_diagnosis(tool, last_error.as_deref(), dir));
+    }
+    rows
+}
+
+/// The line `rows_for` prints when it ends with no row: the last read error (or the statement
+/// that every read succeeded and found nothing) and the dropped-rows log.
+fn no_row_diagnosis(tool: &str, last_read_error: Option<&str>, dir: &Path) -> String {
+    format!(
+        "rows_for({tool}): no row after 5.3 s; last read error: {}; usage-dropped-rows.log: {}",
+        last_read_error.unwrap_or("none, every read succeeded and returned no row"),
+        super::test_support::dropped_rows_log(dir),
+    )
+}
+
+/// The diagnosis names the three things that tell a missing row from a failed read: the
+/// last read error, a dropped-write line when the recorder logged one, and the absence of
+/// that log when it did not. Each case was a distinct answer the empty list used to hide.
+#[test]
+fn the_empty_row_diagnosis_names_the_read_error_and_the_dropped_rows_log() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let quiet = no_row_diagnosis("create_file", None, dir.path());
+    assert!(
+        quiet.contains("none, every read succeeded and returned no row"),
+        "{quiet}"
+    );
+    assert!(
+        quiet.contains("absent: no write was reported as failed"),
+        "{quiet}"
+    );
+
+    let codescout = dir.path().join(".codescout");
+    std::fs::create_dir_all(&codescout).unwrap();
+    std::fs::write(
+        codescout.join("usage-dropped-rows.log"),
+        "t1\tcreate_file\t-\tdatabase is locked\t1\tsha\t5006\nt2\tsymbols\t-\tdatabase is locked\t1\tsha\t5010\n",
+    )
+    .unwrap();
+    let dropped = no_row_diagnosis(
+        "create_file",
+        Some("open: unable to open database file"),
+        dir.path(),
+    );
+    assert!(
+        dropped.contains("last read error: open: unable to open database file"),
+        "{dropped}"
+    );
+    assert!(
+        dropped.contains("create_file\t-\tdatabase is locked\t1\tsha\t5006 | t2\tsymbols"),
+        "two log lines must read as one, joined by ' | ': {dropped}"
+    );
+
+    let unreadable = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(
+        unreadable
+            .path()
+            .join(".codescout")
+            .join("usage-dropped-rows.log"),
+    )
+    .unwrap();
+    let broken = no_row_diagnosis("create_file", None, unreadable.path());
+    assert!(
+        broken.contains("usage-dropped-rows.log: unreadable: "),
+        "{broken}"
+    );
 }
 
 fn assert_one_row(

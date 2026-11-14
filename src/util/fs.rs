@@ -511,6 +511,56 @@ fn atomic_write_with(
     })
 }
 
+/// Ask whether an EXISTING target can be written, without writing it. Run it before
+/// [`atomic_write`] replaces a file that the caller is not allowed to change.
+///
+/// **Why it exists.** `rename` replaces a read-only file, because it needs write permission on
+/// the directory and none on the file. An in-place write needs the reverse. A caller whose
+/// contract is "a read-only document stays unchanged" must therefore ask the file itself.
+///
+/// **What it does.** A missing path gives `Ok`: the caller creates the file, and the check never
+/// creates it. An existing path is opened for writing, WITHOUT create and WITHOUT truncate, and
+/// closed again, so no byte changes. On Unix the open adds `O_NONBLOCK` (a FIFO with no reader
+/// must not hold the call), `O_NOCTTY` (opening a terminal device cannot make it this process's
+/// controlling terminal, as in `open_regular`) and `O_NOFOLLOW` (a link planted after the
+/// caller's own leaf check is not followed; the open fails with `ELOOP`). The opened descriptor
+/// must be a regular file.
+/// Anything else is refused with an error that does not spell the path. Any other open error
+/// returns unchanged: `EACCES` for mode 0444, `EISDIR` for a directory, `EROFS`, `EPERM`.
+///
+/// **Limits.** A process that may write anyway (root) is admitted, as an in-place write would
+/// have admitted it. `access(W_OK)` is not used: it checks the real user id, not the effective
+/// one. The check and the replace are two steps, so a change between them is not seen. It costs
+/// one extra `open` per write. On Linux, `open(2)` with `O_NONBLOCK` returns `EWOULDBLOCK` for a
+/// file under an incompatible lease (knfsd delegations, Samba kernel oplocks). The old in-place
+/// write blocked until the lease broke and then succeeded. Now such a write is refused. The check
+/// opens a device node for writing before it tests the type (the same open-then-check order as
+/// `open_regular`). A device node in a repository needs `mknod`.
+///
+/// It lives here, beside [`atomic_write`], because the librarian's source gate counts every
+/// production `OpenOptions` under `src/librarian` as a raw read.
+pub(crate) fn refuse_unwritable_existing(path: &Path) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_NOFOLLOW);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if !file.metadata()?.file_type().is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the target exists and is not a regular file",
+        ));
+    }
+    Ok(())
+}
+
 /// Write UTF-8 content to a file, creating parent directories as needed.
 /// Uses atomic write-then-rename to prevent corruption on crash.
 pub fn write_utf8(path: &Path, content: &str) -> Result<()> {
@@ -2312,5 +2362,152 @@ mod bounded_read_tests {
         within_deadline("a closure that panics", || -> () {
             panic!("the closure's own failure")
         });
+    }
+}
+
+/// `refuse_unwritable_existing`: the check the librarian's write door runs before a replace. It
+/// opens an existing target for writing without creating or truncating it, so every case here
+/// also asserts that the check changed nothing on disk.
+#[cfg(all(test, unix))]
+mod refuse_unwritable_existing_tests {
+    use super::special_file_fixtures::{make_fifo, within_deadline};
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::tempdir;
+
+    /// The names in `dir`, sorted.
+    fn names(dir: &Path) -> Vec<String> {
+        let mut out: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_writable_regular_file_is_admitted_and_left_untouched() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, "keep\n").unwrap();
+
+        refuse_unwritable_existing(&file).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "keep\n");
+        assert_eq!(names(dir.path()), vec!["doc.md"]);
+    }
+
+    #[test]
+    fn an_unwritable_existing_file_is_refused_with_its_own_error() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, "keep\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().write(true).open(&file).is_ok() {
+            // A process that ignores file modes (root) cannot show the refusal.
+            return;
+        }
+
+        let e = refuse_unwritable_existing(&file).unwrap_err();
+
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "keep\n");
+        assert_eq!(names(dir.path()), vec!["doc.md"]);
+    }
+
+    #[test]
+    fn a_missing_path_is_fine_and_is_not_created_by_the_check() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("fresh.md");
+
+        refuse_unwritable_existing(&file).unwrap();
+
+        assert!(!file.exists(), "the check must not create the file");
+        assert_eq!(names(dir.path()), Vec::<String>::new());
+    }
+
+    /// A FIFO with no reader: a blocking write-open never returns. `within_deadline` turns that
+    /// hang into a failing assertion.
+    #[test]
+    fn a_fifo_at_the_path_is_refused_without_blocking() {
+        let dir = tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+        let probe = fifo.clone();
+
+        let result = within_deadline("the writability check on a FIFO", move || {
+            refuse_unwritable_existing(&probe)
+        });
+
+        assert!(result.is_err(), "a FIFO is not a document");
+        assert!(std::os::unix::fs::FileTypeExt::is_fifo(
+            &std::fs::symlink_metadata(&fifo).unwrap().file_type()
+        ));
+        assert_eq!(names(dir.path()), vec!["pipe"]);
+    }
+
+    /// With a reader attached the write-open succeeds, so only the type check on the opened
+    /// descriptor can refuse. The error must not spell the path.
+    #[test]
+    fn a_fifo_with_a_reader_is_refused_by_its_type_and_the_error_has_no_path() {
+        use std::os::unix::fs::OpenOptionsExt;
+        let dir = tempdir().unwrap();
+        let fifo = dir.path().join("pipe");
+        make_fifo(&fifo);
+        let _reader = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&fifo)
+            .unwrap();
+        let probe = fifo.clone();
+
+        let e = within_deadline("the writability check on a FIFO with a reader", move || {
+            refuse_unwritable_existing(&probe)
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::InvalidInput,
+            "the open must have succeeded, so the type check did the refusing: {e}"
+        );
+        assert!(
+            e.raw_os_error().is_none(),
+            "the type check's error is not an OS error: {e}"
+        );
+        assert!(
+            !e.to_string().contains(&*dir.path().to_string_lossy()),
+            "the refusal must not spell the path: {e}"
+        );
+    }
+
+    #[test]
+    fn a_directory_at_the_path_is_refused() {
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("doc.md");
+        std::fs::create_dir(&sub).unwrap();
+
+        let result = refuse_unwritable_existing(&sub);
+
+        assert!(result.is_err(), "a directory is not a document");
+        assert!(sub.is_dir());
+        assert_eq!(names(dir.path()), vec!["doc.md"]);
+    }
+
+    /// A link at the leaf is not followed: the open fails (`ELOOP`) and the target keeps its
+    /// bytes. A check that followed the link would admit this writable target.
+    #[test]
+    fn a_symlink_at_the_path_is_not_followed_by_the_check() {
+        let dir = tempdir().unwrap();
+        let real = dir.path().join("real.md");
+        std::fs::write(&real, "real\n").unwrap();
+        let link = dir.path().join("link.md");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let e = refuse_unwritable_existing(&link).unwrap_err();
+
+        assert_eq!(e.raw_os_error(), Some(libc::ELOOP), "{e}");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "real\n");
+        assert_eq!(names(dir.path()), vec!["link.md", "real.md"]);
     }
 }

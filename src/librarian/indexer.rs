@@ -9,6 +9,7 @@ use crate::librarian::catalog::artifact::ArtifactRow;
 use crate::librarian::catalog::chunk::ChunkGrain;
 use crate::librarian::catalog::{artifact, Catalog};
 use crate::librarian::classify::{classify, CompiledRule};
+use crate::librarian::embedding::CachedEmbed;
 use crate::librarian::frontmatter;
 
 #[derive(Debug, Default)]
@@ -1612,7 +1613,10 @@ pub fn delete_chunk_vectors(cat: &Catalog, artifact_id: &str) -> Result<usize> {
 /// `docs/issues/archive/2026-09-07-missing-file-counts-every-read-failure-including-non-utf8.md`
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct BackfillReport {
-    /// Chunk vectors written.
+    /// Chunk vectors written to the store, whether the embedder made them or the vector cache
+    /// supplied them. `embed_cache.hits` is how many vectors the cache supplied. It can count
+    /// vectors that are not in `embedded`, because a store run that rolls an artifact back still
+    /// counts its hits.
     pub embedded: usize,
     /// Artifacts whose body yielded no embeddable chunk (blank, or
     /// frontmatter-only). These are correctly vectorless and will stay so.
@@ -1647,6 +1651,14 @@ pub struct BackfillReport {
     /// The first 20 failures, as `"<chunk_id>: embed failed: <error>"` (the reindex's form).
     /// `embed_failed` is the full count.
     pub embed_errors: Vec<String>,
+    /// What the vector cache did in this run: `hits` is how many vectors it supplied instead of
+    /// the embedder, `stored` how many fresh vectors it kept, `errors` how many cache operations
+    /// failed (a failed lookup degrades to an embed and a failed write drops that batch's rows;
+    /// each is counted in `errors`). A store run drops the vectors of an artifact that
+    /// had a failed chunk, so they are not in `embedded`; the cache still keeps the fresh ones,
+    /// and the retry reads them back. `status` is read at the end of the run, `off` without a
+    /// cache.
+    pub embed_cache: crate::librarian::vector_cache::CacheTally,
 }
 /// Where [`backfill_chunk_vectors`] writes its vectors. It must be the store this run's
 /// search reads: a vector written anywhere else is counted as embedded and found by no query.
@@ -1748,6 +1760,12 @@ async fn backfill_chunk_vectors_with(
 ) -> Result<BackfillReport> {
     use crate::librarian::catalog::gc::set_meta;
     let door = crate::librarian::read_door::ReadDoor::new(roots.to_vec());
+
+    // A cache that failed to open in an earlier call is tried again by this one (C3-R13). The
+    // guard writes what the run staged however the run ends: this function leaves through a `?`
+    // at many places, and one taken after a page's embeds would drop what that page staged.
+    svc.rearm_cache();
+    let _flush_on_exit = svc.flush_on_drop();
 
     let flush = batch.max(1);
     let mut report = BackfillReport::default();
@@ -1945,14 +1963,23 @@ async fn backfill_chunk_vectors_with(
             // ends the run.
             // docs/issues/archive/2026-10-14-backfill-restarts-at-the-first-page-so-one-input-the-embedder-always-rejects-blocks-every-later-page.md
             let futures_iter = items.into_iter().map(|item| async move {
-                let embedded = svc.embed_artifact(item.title.as_deref(), &item.text).await;
+                // Through the vector cache. A backfill has no `reembed`, so it always reads it.
+                let embedded = svc
+                    .embed_artifact_cached(item.title.as_deref(), &item.text, true)
+                    .await;
                 (item.chunk_id, item.artifact_id, embedded)
             });
             let mut s = stream::iter(futures_iter).buffer_unordered(EMBED_CONCURRENCY);
             let mut finished = Vec::new();
             let mut any_failed = false;
             while let Some((chunk_id, artifact_id, embedded)) = s.next().await {
-                match embedded {
+                let CachedEmbed {
+                    vector,
+                    from_cache,
+                    cache_failed,
+                } = embedded;
+                report.embed_cache.note_item(from_cache, cache_failed);
+                match vector {
                     Ok(vec) => finished.push((chunk_id, artifact_id, vec)),
                     Err(e) => {
                         any_failed = true;
@@ -1996,6 +2023,10 @@ async fn backfill_chunk_vectors_with(
             report.embedded += pending.len();
             pending.clear();
         }
+        // One cache transaction beside each page's store write. Outside the `if`: a store run
+        // that dropped an artifact for a failed chunk wrote nothing, and still staged the
+        // vectors of its healthy chunks, which its retry then reads from the cache.
+        report.embed_cache.note_flush(svc.flush_cache());
         {
             let cat = catalog.lock();
             set_meta(&cat.conn, &cursor_key, &format!("{cur_updated}|{cur_id}"))?;
@@ -2010,6 +2041,9 @@ async fn backfill_chunk_vectors_with(
         let cat = catalog.lock();
         set_meta(&cat.conn, &cursor_key, "")?;
     }
+    // Read at the END of the run: the cache file opens at its first lookup, so a failed open
+    // shows only now. `Off` without a cache.
+    report.embed_cache.status = svc.cache_status();
     Ok(report)
 }
 
@@ -2157,10 +2191,17 @@ pub async fn index_repo(
     }
 
     if let Some(svc) = embedding {
+        // A cache that failed to open in an earlier call is tried again by this one (C3-R13).
+        // The guard writes what the run staged however the run ends: the loop below leaves at
+        // its first failed embed or store write, and the tallies are not reported (C3-R12).
+        svc.rearm_cache();
+        let _flush_on_exit = svc.flush_on_drop();
         let futures_iter = embed_queue.into_iter().map(|item| async move {
+            // Through the vector cache. `index_repo` has no `reembed`, so it always reads it.
             let vec = svc
-                .embed_artifact(item.title.as_deref(), &item.text)
-                .await?;
+                .embed_artifact_cached(item.title.as_deref(), &item.text, true)
+                .await
+                .vector?;
             anyhow::Ok((item.chunk_id, item.artifact_id, vec))
         });
         let mut stream = stream::iter(futures_iter).buffer_unordered(EMBED_CONCURRENCY);
@@ -2177,6 +2218,8 @@ pub async fn index_repo(
                 }
                 report.embedded += batch.len();
                 batch.clear();
+                // One cache transaction beside each store batch.
+                svc.flush_cache();
             }
         }
         if !batch.is_empty() {
@@ -2186,6 +2229,7 @@ pub async fn index_repo(
             } else {
                 write_embeddings_v2(cat, &pairs_for_sqlite(&batch))?;
             }
+            svc.flush_cache();
         }
     }
 
@@ -7178,5 +7222,548 @@ kind = "memory"
         assert!(sizes.len() >= 2, "{sizes:?}");
         assert_eq!(sizes.iter().sum::<usize>(), report.embedded, "{sizes:?}");
         assert_eq!(store.single_calls.load(SeqCst), 0, "no per-vector request");
+    }
+    // ---- The vector cache at the backfill and `index_repo` embed sites (C3 task 4) ----
+
+    /// Three sections, so a file is several chunks. No file name is inside the text, so a copy
+    /// under another name has the same embed inputs.
+    const CACHED_BODY: &str =
+        "# Ledger\n\nalpha text\n\n## Second\n\nbeta text\n\n## Third\n\ngamma text\n";
+
+    type SeenTexts = std::sync::Arc<parking_lot::Mutex<Vec<String>>>;
+
+    /// A 4-wide recording embedder over `cache`, under the model string `test-model`.
+    fn recording_cached_svc(
+        seen: &SeenTexts,
+        cache: &std::sync::Arc<crate::librarian::vector_cache::VectorCache>,
+    ) -> crate::librarian::embedding::EmbeddingService {
+        backfill_recording_svc(4, 4, seen.clone()).with_vector_cache("test-model", cache.clone())
+    }
+
+    /// A store whose every write fails: the run leaves through a `?` after it has embedded.
+    struct FailingStore;
+
+    #[async_trait::async_trait]
+    impl crate::librarian::artifact_store::ArtifactVectorStore for FailingStore {
+        async fn upsert(&self, _p: &str, _c: &str, _a: &str, _v: &[f32]) -> Result<()> {
+            anyhow::bail!("fixture store refused the write")
+        }
+        async fn delete(&self, _artifact_id: &str) -> Result<()> {
+            Ok(())
+        }
+        async fn refile(&self, _old: &str, _new: &str) -> Result<u64> {
+            Ok(0)
+        }
+        async fn knn(
+            &self,
+            _project_id: Option<&str>,
+            _query: &[f32],
+            _k: usize,
+        ) -> Result<Vec<(String, f32)>> {
+            Ok(Vec::new())
+        }
+    }
+
+    /// A text embedded before is not embedded again, and its cached vector lands in the store
+    /// under the chunk id of the artifact that has no vector now.
+    /// Mutation named: a seam that reads the cache but never writes the hit to the store fails the
+    /// store assertion; a drain that still calls `embed_artifact` fails `seen`.
+    #[tokio::test]
+    async fn a_backfill_of_text_embedded_before_embeds_nothing_and_stores_the_cached_vectors() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::catalog::chunk::chunks_for;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let seen: SeenTexts = Default::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::in_memory());
+        let svc = recording_cached_svc(&seen, &cache);
+        let store = InMemoryArtifactStore::default();
+
+        let _a_dir = index_files(&m, &[("a.md", CACHED_BODY)]);
+        let first = store_backfill(&m, &svc, &store, "p").await;
+        let a = artifact_id_named(&m.lock(), "a.md");
+        let chunks = chunks_for(&m.lock(), &a).unwrap().len();
+        assert!(
+            chunks >= 3,
+            "the fixture is several chunks, or the counts below prove little"
+        );
+        assert_eq!(first.embedded, chunks);
+        assert_eq!(first.embed_cache.hits, 0, "nothing was cached yet");
+        assert_eq!(
+            first.embed_cache.stored, chunks,
+            "every fresh vector is kept"
+        );
+        assert_eq!(
+            seen.lock().len(),
+            chunks,
+            "the first run embeds every chunk"
+        );
+
+        let _b_dir = index_files(&m, &[("b.md", CACHED_BODY)]);
+        seen.lock().clear();
+        let second = store_backfill(&m, &svc, &store, "p").await;
+
+        assert!(
+            seen.lock().is_empty(),
+            "the same text is not embedded again: {:?}",
+            seen.lock()
+        );
+        assert_eq!(second.embed_cache.hits, chunks);
+        assert_eq!(second.embed_cache.stored, 0, "a hit is not stored again");
+        assert_eq!(second.embedded, chunks, "`embedded` is vectors written");
+        let b = artifact_id_named(&m.lock(), "b.md");
+        let rows = chunks_for(&m.lock(), &b).unwrap();
+        assert_eq!(rows.len(), chunks);
+        for row in rows {
+            assert_eq!(
+                store.chunk(&row.chunk_id),
+                Some((b.clone(), vec![1.0, 0.0, 0.0, 0.0])),
+                "the cached vector lands under the new chunk id and the new artifact"
+            );
+        }
+    }
+
+    /// One cache transaction beside each page's write. An end-of-run flush is one transaction
+    /// and fails this, and so does a flush per artifact: a page holds two artifacts here, so a
+    /// page's flush is half as many transactions as artifacts.
+    #[tokio::test]
+    async fn a_backfill_flushes_the_cache_once_per_page() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let seen: SeenTexts = Default::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::in_memory());
+        let svc = recording_cached_svc(&seen, &cache);
+        let store = InMemoryArtifactStore::default();
+        let _dir = index_files(
+            &m,
+            &[
+                ("a.md", "# A\n\nalpha text\n\n## A two\n\nalpha more\n"),
+                ("b.md", "# B\n\nbravo text\n\n## B two\n\nbravo more\n"),
+                ("c.md", "# C\n\ncharlie text\n\n## C two\n\ncharlie more\n"),
+                ("d.md", "# D\n\ndelta text\n\n## D two\n\ndelta more\n"),
+            ],
+        );
+
+        // Batch 2 is two artifacts per page: four artifacts, two pages.
+        let report = backfill_chunk_vectors_with(
+            &m,
+            &svc,
+            2,
+            None,
+            false,
+            BackfillTarget::Store {
+                store: &store,
+                project_id: "p",
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.artifacts, 4);
+        assert!(report.embedded >= 8, "{report:?}");
+        assert_eq!(
+            cache.transactions(),
+            2,
+            "one flush per page of two artifacts, not one per artifact (4) or one per run (1)"
+        );
+        assert_eq!(cache.len(), report.embedded);
+        assert_eq!(report.embed_cache.stored, report.embedded);
+    }
+
+    /// A cache that cannot open degrades every lookup to an embed. The run is whole and the
+    /// report says why the cache did nothing.
+    #[tokio::test]
+    async fn a_cache_failure_does_not_fail_a_backfill() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::catalog::chunk::chunks_for;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("vector-cache.db");
+        let garbage = vec![0xAB_u8; 200];
+        std::fs::write(&file, &garbage).unwrap();
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let seen: SeenTexts = Default::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::open(&file));
+        let svc = recording_cached_svc(&seen, &cache);
+        let store = InMemoryArtifactStore::default();
+        let _dir = index_files(&m, &[("a.md", CACHED_BODY)]);
+        let a = artifact_id_named(&m.lock(), "a.md");
+
+        let report = store_backfill(&m, &svc, &store, "p").await;
+
+        let chunks = chunks_for(&m.lock(), &a).unwrap().len();
+        assert!(chunks >= 3);
+        assert_eq!(
+            report.embedded, chunks,
+            "every chunk is embedded without the cache"
+        );
+        assert_eq!(report.embed_failed, 0);
+        assert_eq!(
+            report.embed_cache.status,
+            crate::librarian::vector_cache::CacheStatus::Unavailable
+        );
+        assert_eq!(
+            report.embed_cache.errors, chunks,
+            "one failed lookup per chunk"
+        );
+        assert_eq!(report.embed_cache.hits, 0);
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            garbage,
+            "the file is left alone"
+        );
+    }
+
+    /// A run with no cache attached reports `off` and zero counts.
+    #[tokio::test]
+    async fn a_backfill_without_a_cache_reports_it_off() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let store = InMemoryArtifactStore::default();
+        let _dir = index_files(&m, &[("a.md", CACHED_BODY)]);
+
+        let report = store_backfill(&m, &backfill_svc(), &store, "p").await;
+
+        assert!(report.embedded >= 3);
+        assert_eq!(
+            report.embed_cache,
+            crate::librarian::vector_cache::CacheTally::default()
+        );
+        assert_eq!(report.embed_cache.status.as_str(), "off");
+    }
+
+    /// The dimension probe of a remote embedder is a compatibility check, never a vector for
+    /// the cache: it stays a bare `embed_artifact` call. `learning` declares 0 until its first
+    /// embed, so this run probes.
+    #[tokio::test]
+    async fn the_dimension_probe_is_not_cached() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::catalog::chunk::chunks_for;
+        use crate::librarian::embedding::test_support::CountingEmbedder;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let emb = CountingEmbedder::learning(4);
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::in_memory());
+        let svc = crate::librarian::embedding::EmbeddingService::new(emb.clone())
+            .with_vector_cache("test-model", cache.clone());
+        let store = InMemoryArtifactStore::default();
+        let _dir = index_files(&m, &[("a.md", CACHED_BODY)]);
+        let a = artifact_id_named(&m.lock(), "a.md");
+
+        let report = store_backfill(&m, &svc, &store, "p").await;
+
+        let chunks = chunks_for(&m.lock(), &a).unwrap().len();
+        assert!(chunks >= 3);
+        let probes = emb
+            .seen()
+            .iter()
+            .filter(|t| t.contains("codescout backfill dimension probe"))
+            .count();
+        assert_eq!(probes, 1, "the run probed once: {:?}", emb.seen());
+        assert_eq!(
+            cache.len(),
+            chunks,
+            "the cache holds the chunks and not the probe"
+        );
+        assert_eq!(report.embed_cache.stored, chunks);
+    }
+
+    /// The cache is retried at the start of each backfill: a failed open of one run does not
+    /// switch the cache off for the life of the process (C3-R13).
+    #[tokio::test]
+    async fn a_cache_that_failed_to_open_is_retried_by_the_next_backfill() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::catalog::chunk::chunks_for;
+        use crate::librarian::vector_cache::CacheStatus;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("vector-cache.db");
+        std::fs::write(&file, vec![0xAB_u8; 200]).unwrap();
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let seen: SeenTexts = Default::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::open(&file));
+        let svc = recording_cached_svc(&seen, &cache);
+        let store = InMemoryArtifactStore::default();
+        let _a_dir = index_files(&m, &[("a.md", CACHED_BODY)]);
+
+        let first = store_backfill(&m, &svc, &store, "p").await;
+        assert_eq!(first.embed_cache.status, CacheStatus::Unavailable);
+
+        std::fs::remove_file(&file).unwrap();
+        let _b_dir = index_files(
+            &m,
+            &[("b.md", "# Other\n\ndelta text\n\n## More\n\nepsilon\n")],
+        );
+        let second = store_backfill(&m, &svc, &store, "p").await;
+
+        let b = artifact_id_named(&m.lock(), "b.md");
+        let chunks = chunks_for(&m.lock(), &b).unwrap().len();
+        assert_eq!(second.embed_cache.status, CacheStatus::On);
+        assert_eq!(second.embed_cache.stored, chunks);
+        assert_eq!(second.embed_cache.errors, 0);
+    }
+
+    /// A run that leaves through a `?` after it embedded still writes the vectors it staged:
+    /// they are valid for the next run, whatever the store did with them.
+    #[tokio::test]
+    async fn a_backfill_that_fails_to_write_still_flushes_what_it_staged() {
+        use crate::librarian::catalog::chunk::chunks_for;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let seen: SeenTexts = Default::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::in_memory());
+        let svc = recording_cached_svc(&seen, &cache);
+        let _dir = index_files(&m, &[("a.md", CACHED_BODY)]);
+        let a = artifact_id_named(&m.lock(), "a.md");
+
+        let result = backfill_chunk_vectors_with(
+            &m,
+            &svc,
+            100,
+            None,
+            false,
+            BackfillTarget::Store {
+                store: &FailingStore,
+                project_id: "p",
+            },
+            &[],
+        )
+        .await;
+
+        assert!(result.is_err(), "the store write fails the run");
+        let chunks = chunks_for(&m.lock(), &a).unwrap().len();
+        assert!(chunks >= 3);
+        assert_eq!(
+            cache.len(),
+            chunks,
+            "the embedded vectors reached the cache although the run ended in an error"
+        );
+    }
+    /// A store run drops an artifact that had a failed chunk, and writes nothing for the page.
+    /// It still staged the vector of the healthy chunk, so the page's flush is not inside the
+    /// "something to write" branch, and the retry reads that vector from the cache.
+    #[tokio::test]
+    async fn a_store_run_that_drops_an_artifact_keeps_its_embedded_vectors_in_the_cache() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        let m = parking_lot::Mutex::new(Catalog::open_in_memory().unwrap());
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::in_memory());
+        let store = InMemoryArtifactStore::default();
+        let _dir = index_files(&m, &[("two.md", "# Two\n\nalpha\n\n## Second\n\nbeta\n")]);
+
+        let rejecting =
+            backfill_rejecting_svc("beta").with_vector_cache("test-model", cache.clone());
+        let first = store_backfill(&m, &rejecting, &store, "p").await;
+        assert_eq!(first.embed_failed, 1, "only the `beta` chunk is refused");
+        assert_eq!(
+            first.embedded, 0,
+            "the run dropped the artifact: nothing written"
+        );
+        assert_eq!(
+            first.embed_cache.stored, 1,
+            "the page's own flush kept the healthy chunk's vector, though nothing was written"
+        );
+
+        let accepting = backfill_rejecting_svc("never-in-the-text")
+            .with_vector_cache("test-model", cache.clone());
+        let second = store_backfill(&m, &accepting, &store, "p").await;
+        assert_eq!(second.embedded, 2, "the retry writes both chunks");
+        assert_eq!(
+            second.embed_cache.hits, 1,
+            "the healthy chunk costs no embed"
+        );
+    }
+
+    /// The same text moved to another path is not embedded again by `index_repo`, and the
+    /// store holds each cached vector under the new chunk id and the new artifact id.
+    #[tokio::test]
+    async fn index_repo_reuses_the_vectors_of_a_moved_file() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::catalog::chunk::chunks_for;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("docs/specs")).unwrap();
+        std::fs::write(root.join("docs/specs/old.md"), CACHED_BODY).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let store = InMemoryArtifactStore::default();
+        let seen: SeenTexts = Default::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::in_memory());
+        let svc = recording_cached_svc(&seen, &cache);
+
+        let first = index_repo(&cat, &rules, root, &ignore, Some(&svc), Some(&store), "p")
+            .await
+            .unwrap();
+        let old_id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/old.md"));
+        let chunks = chunks_for(&cat, &old_id).unwrap().len();
+        assert!(chunks >= 3);
+        assert_eq!(first.embedded, chunks);
+        assert_eq!(
+            seen.lock().len(),
+            chunks,
+            "the first run embeds every chunk"
+        );
+        assert_eq!(cache.len(), chunks);
+
+        std::fs::rename(
+            root.join("docs/specs/old.md"),
+            root.join("docs/specs/new.md"),
+        )
+        .unwrap();
+        seen.lock().clear();
+        let second = index_repo(&cat, &rules, root, &ignore, Some(&svc), Some(&store), "p")
+            .await
+            .unwrap();
+
+        assert!(
+            seen.lock().is_empty(),
+            "a moved file is not embedded again: {:?}",
+            seen.lock()
+        );
+        assert_eq!(second.embedded, chunks, "`embedded` is vectors written");
+        let new_id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/specs/new.md"));
+        let rows = chunks_for(&cat, &new_id).unwrap();
+        assert_eq!(rows.len(), chunks);
+        for row in rows {
+            assert_eq!(
+                store.chunk(&row.chunk_id),
+                Some((new_id.clone(), vec![1.0, 0.0, 0.0, 0.0])),
+                "the cached vector lands under the new chunk id"
+            );
+        }
+        assert_eq!(
+            store.chunks_under(&old_id),
+            0,
+            "the old artifact's vectors are dropped"
+        );
+    }
+
+    /// One cache transaction beside each of `index_repo`'s store batches (100 vectors, then the
+    /// rest). An end-of-run flush is one transaction and fails this.
+    #[tokio::test]
+    async fn index_repo_flushes_the_cache_with_each_batch() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        let tmp = tempfile::TempDir::new().unwrap();
+        for i in 0..130u32 {
+            std::fs::write(
+                tmp.path().join(format!("f{i:03}.md")),
+                format!("# File {i}\n\nContent {i}.\n"),
+            )
+            .unwrap();
+        }
+        let cat = Catalog::open_in_memory().unwrap();
+        let store = InMemoryArtifactStore::default();
+        let seen: SeenTexts = Default::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::in_memory());
+        let svc = recording_cached_svc(&seen, &cache);
+
+        let report = index_repo(
+            &cat,
+            &md_rules(),
+            tmp.path(),
+            &globset::GlobSet::empty(),
+            Some(&svc),
+            Some(&store),
+            "p",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.embedded, 130);
+        assert_eq!(cache.len(), 130, "every vector is in the cache");
+        assert_eq!(cache.transactions(), 2, "the batch of 100 and the rest");
+    }
+
+    /// `index_repo` leaves at its first failed embed. The vectors it had staged are still
+    /// written to the cache: the ones made before the refused chunk are good.
+    #[tokio::test]
+    async fn index_repo_flushes_what_it_staged_when_an_embed_fails() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("a.md"),
+            "# A\n\nalpha text\n\n## B\n\nbeta text\n",
+        )
+        .unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let store = InMemoryArtifactStore::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::in_memory());
+        // Refuses the chunk that holds `beta`, embeds `alpha`.
+        let svc = backfill_rejecting_svc("beta").with_vector_cache("test-model", cache.clone());
+
+        let result = index_repo(
+            &cat,
+            &md_rules(),
+            tmp.path(),
+            &globset::GlobSet::empty(),
+            Some(&svc),
+            Some(&store),
+            "p",
+        )
+        .await;
+
+        assert!(result.is_err(), "a refused chunk fails `index_repo`");
+        assert_eq!(
+            cache.len(),
+            1,
+            "the vector of the chunk embedded before the refusal reached the cache"
+        );
+    }
+
+    /// The cache is retried at the start of each `index_repo` call (C3-R13).
+    #[tokio::test]
+    async fn a_cache_that_failed_to_open_is_retried_by_the_next_index_repo() {
+        use crate::librarian::artifact_store::test_support::InMemoryArtifactStore;
+        use crate::librarian::catalog::chunk::chunks_for;
+        use crate::librarian::vector_cache::CacheStatus;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("vector-cache.db");
+        std::fs::write(&file, vec![0xAB_u8; 200]).unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("one.md"), CACHED_BODY).unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let rules = md_rules();
+        let ignore = globset::GlobSet::empty();
+        let store = InMemoryArtifactStore::default();
+        let seen: SeenTexts = Default::default();
+        let cache = std::sync::Arc::new(crate::librarian::vector_cache::VectorCache::open(&file));
+        let svc = recording_cached_svc(&seen, &cache);
+
+        let first = index_repo(
+            &cat,
+            &rules,
+            tmp.path(),
+            &ignore,
+            Some(&svc),
+            Some(&store),
+            "p",
+        )
+        .await
+        .unwrap();
+        assert!(first.embedded >= 3, "a failing cache does not fail the run");
+        assert_eq!(cache.status(), CacheStatus::Unavailable);
+
+        std::fs::remove_file(&file).unwrap();
+        std::fs::write(
+            tmp.path().join("two.md"),
+            "# Other\n\ndelta text\n\n## More\n\nepsilon\n",
+        )
+        .unwrap();
+        index_repo(
+            &cat,
+            &rules,
+            tmp.path(),
+            &ignore,
+            Some(&svc),
+            Some(&store),
+            "p",
+        )
+        .await
+        .unwrap();
+
+        let one = crate::librarian::ids::artifact_id_from_abs(&tmp.path().join("one.md"));
+        let two = crate::librarian::ids::artifact_id_from_abs(&tmp.path().join("two.md"));
+        assert_eq!(cache.status(), CacheStatus::On);
+        // `index_repo` stamps no artifact as embedded, so the second call queued both files.
+        assert_eq!(
+            cache.len(),
+            chunks_for(&cat, &one).unwrap().len() + chunks_for(&cat, &two).unwrap().len()
+        );
     }
 }
