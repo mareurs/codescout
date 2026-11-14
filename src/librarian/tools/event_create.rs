@@ -618,6 +618,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                         &written,
                     )
                     .map_err(|e| {
+                        use crate::librarian::catalog::dual_write::{
+                            with_sentence, write_failed_in_io, PARTLY_WRITTEN,
+                        };
+                        let partial = write_failed_in_io(&e);
                         // The refusal and the io error write `path.display()` (and a link's
                         // target) into their text; a response names the document by its label.
                         let e = crate::librarian::catalog::dual_write::without_path(
@@ -625,9 +629,14 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                             &doc.path,
                             &label,
                         );
-                        LibrarianRecoverableError::new(format!(
+                        let e = LibrarianRecoverableError::new(format!(
                             "event_create: cannot write {label}, so no event was recorded: {e}"
-                        ))
+                        ));
+                        if partial {
+                            with_sentence(e, PARTLY_WRITTEN)
+                        } else {
+                            e
+                        }
                     })?;
                     let file = TwinWrite {
                         path: doc.path,
@@ -1310,37 +1319,32 @@ pub(crate) mod tests {
     async fn an_unreadable_target_skips_with_its_own_reason_and_keeps_the_row() {
         let (tmp, ctx, path) = twin_fixture(FLAGGED);
         std::fs::remove_file(&path).unwrap();
-        let mut cases: Vec<(&str, Box<dyn Fn()>)> = vec![
-            ("a directory at the path", {
-                let p = path.clone();
-                Box::new(move || std::fs::create_dir(&p).unwrap())
-            }),
-            ("no file at the path", Box::new(|| {})),
-        ];
+        let mut cases = vec!["a directory at the path", "no file at the path"];
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let p = path.clone();
-            std::fs::write(&p, FLAGGED).unwrap();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
-            let readable = std::fs::read(&p).is_ok();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
-            std::fs::remove_file(&p).unwrap();
+            std::fs::write(&path, FLAGGED).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let readable = std::fs::read(&path).is_ok();
+            std::fs::remove_file(&path).unwrap();
             // Running as a user who ignores file modes (root): a mode-000 file is still readable.
             if !readable {
-                cases.push((
-                    "a mode-000 file",
-                    Box::new(move || {
-                        std::fs::write(&p, FLAGGED).unwrap();
-                        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000))
-                            .unwrap();
-                    }),
-                ));
+                cases.push("a mode-000 file");
             }
         }
         let mut rows = 0;
-        for (label, setup) in cases {
-            setup();
+        for label in cases {
+            match label {
+                "a directory at the path" => std::fs::create_dir(&path).unwrap(),
+                #[cfg(unix)]
+                "a mode-000 file" => {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::write(&path, FLAGGED).unwrap();
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000))
+                        .unwrap();
+                }
+                _ => {}
+            }
             let r = note(&ctx, "doc1", "a thought").await.unwrap();
             rows += 1;
             let reason = r["text_twin"].as_str().unwrap_or_default();
@@ -1564,6 +1568,10 @@ pub(crate) mod tests {
             shown.contains("link.md"),
             "the error names the document: {shown}"
         );
+        assert!(
+            !shown.contains("partly written"),
+            "a refusal writes nothing, so it claims no partial write: {shown}"
+        );
         for (what, path) in [
             ("the link path", link.display().to_string()),
             ("the link's target path", real.display().to_string()),
@@ -1571,6 +1579,37 @@ pub(crate) mod tests {
         ] {
             assert!(!shown.contains(&path), "the error holds {what}: {shown}");
         }
+    }
+
+    /// The read passes and the write itself fails with an I/O error. The document is rewritten in
+    /// place, so such a failure can leave it cut, and the error says so; no row remains.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failed_io_write_says_the_document_may_be_partly_written() {
+        use std::os::unix::fs::PermissionsExt;
+        let (tmp, ctx, path) = twin_fixture(FLAGGED);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().write(true).open(&path).is_ok() {
+            // Running as a user who ignores file modes (root): the write cannot be made to fail.
+            return;
+        }
+
+        let err = note(&ctx, "doc1", "never recorded").await.unwrap_err();
+
+        let shown = format!("{err:#}");
+        assert!(
+            shown.contains("event_create: cannot write notes.md, so no event was recorded"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("The document may be partly written."),
+            "{shown}"
+        );
+        assert!(
+            !shown.contains(&tmp.path().display().to_string()),
+            "no path in the error: {shown}"
+        );
+        assert_eq!(event_rows(&ctx, "doc1"), 0, "no row remains");
     }
 
     /// Both lower-layer errors a failed restore can carry (a missing file, a link) write the

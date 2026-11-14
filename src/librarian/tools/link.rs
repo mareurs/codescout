@@ -140,13 +140,7 @@ fn note_destination_change(e: anyhow::Error, dst_label: &str) -> anyhow::Error {
          row still says the old status). Repeat the call after fixing the cause: the status \
          write is idempotent."
     );
-    match e.downcast_ref::<LibrarianRecoverableError>() {
-        Some(lower) => anyhow::Error::new(LibrarianRecoverableError {
-            message: format!("{}. {sentence}", lower.message.trim_end_matches('.')),
-            hint: lower.hint.clone(),
-        }),
-        None => anyhow::anyhow!("{}. {sentence}", format!("{e:#}").trim_end_matches('.')),
-    }
+    crate::librarian::catalog::dual_write::with_sentence(e, &sentence)
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
@@ -247,12 +241,21 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     &file.written,
                 )
                 .map_err(|e| {
-                    lower_error(
+                    use crate::librarian::catalog::dual_write::{
+                        with_sentence, write_failed_in_io, PARTLY_WRITTEN,
+                    };
+                    let partial = write_failed_in_io(&e);
+                    let e = lower_error(
                         e,
                         &file.path,
                         &label,
                         format!("doc(link): cannot write {label}, so no link was recorded"),
-                    )
+                    );
+                    if partial {
+                        with_sentence(e, PARTLY_WRITTEN)
+                    } else {
+                        e
+                    }
                 })?;
                 if let Err(e) = crate::librarian::catalog::dual_write::record_written_file(
                     &tx,
@@ -1124,6 +1127,10 @@ mod tests {
         let msg = shown(&err);
         assert!(msg.contains("doc(link): cannot write `[[src]]`"), "{msg}");
         assert!(msg.contains("no link was recorded"), "{msg}");
+        assert!(
+            msg.contains("The document may be partly written."),
+            "an I/O error of the write itself says the document may be cut: {msg}"
+        );
         assert!(
             !msg.contains(&r.root.display().to_string()),
             "no absolute path in the error: {msg}"
