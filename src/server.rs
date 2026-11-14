@@ -13106,6 +13106,19 @@ pub(crate) mod test_support {
     ) -> (tempfile::TempDir, CodeScoutServer) {
         make_server_in_root(project_toml, None).await
     }
+    /// What a test prints when a `usage.db` row it expected is missing: the contents of
+    /// `<dir>/.codescout/usage-dropped-rows.log`, which `UsageRecorder::note_dropped_row` appends
+    /// to when the write of a row fails. An absent file means no write was reported as failed.
+    /// docs/issues/2026-11-12-usage-row-tests-fail-when-the-row-is-not-written-yet-under-load.md
+    pub(crate) fn dropped_rows_log(dir: &std::path::Path) -> String {
+        match std::fs::read_to_string(dir.join(".codescout").join("usage-dropped-rows.log")) {
+            Ok(text) => text.trim_end().replace('\n', " | "),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                "absent: no write was reported as failed".to_string()
+            }
+            Err(e) => format!("unreadable: {e}"),
+        }
+    }
 
     /// `make_server_with_project_toml`, with the project root one directory below the temp dir.
     ///

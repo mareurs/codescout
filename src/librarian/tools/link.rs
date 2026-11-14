@@ -241,21 +241,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     &file.written,
                 )
                 .map_err(|e| {
-                    use crate::librarian::catalog::dual_write::{
-                        with_sentence, write_failed_in_io, PARTLY_WRITTEN,
-                    };
-                    let partial = write_failed_in_io(&e);
-                    let e = lower_error(
+                    lower_error(
                         e,
                         &file.path,
                         &label,
                         format!("doc(link): cannot write {label}, so no link was recorded"),
-                    );
-                    if partial {
-                        with_sentence(e, PARTLY_WRITTEN)
-                    } else {
-                        e
-                    }
+                    )
                 })?;
                 if let Err(e) = crate::librarian::catalog::dual_write::record_written_file(
                     &tx,
@@ -1109,8 +1100,9 @@ mod tests {
         }
     }
 
-    /// The read passes and the write fails with an io error that names the path: the error is
-    /// an error, no row is recorded, and the document is named by its label.
+    /// The read passes and the write door fails with an I/O error (the writability probe refuses a
+    /// read-only document with `Permission denied`): the error is an error, no row is recorded, the
+    /// document keeps its bytes and is named by its label, and the error does not say it may be cut.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_failed_file_write_is_an_error_and_records_no_row() {
@@ -1128,8 +1120,12 @@ mod tests {
         assert!(msg.contains("doc(link): cannot write `[[src]]`"), "{msg}");
         assert!(msg.contains("no link was recorded"), "{msg}");
         assert!(
-            msg.contains("The document may be partly written."),
-            "an I/O error of the write itself says the document may be cut: {msg}"
+            msg.contains("Permission denied"),
+            "the error is the I/O error of the door, not a refusal: {msg}"
+        );
+        assert!(
+            !msg.contains("partly written"),
+            "a failed write leaves the document unchanged, so the error does not say it may be cut: {msg}"
         );
         assert!(
             !msg.contains(&r.root.display().to_string()),
