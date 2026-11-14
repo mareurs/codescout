@@ -494,6 +494,9 @@ pub mod create;
 pub(crate) mod create_lifecycle;
 // Not a registered `Tool`: `update` on a lifecycle entry, called from `update::call`.
 pub(crate) mod lifecycle_update;
+// Not a registered `Tool`: the entry table of `get` on a lifecycle collection readme, called from
+// `get::call`.
+pub(crate) mod get_table;
 pub mod update;
 
 pub mod link;
@@ -579,6 +582,10 @@ mod create_lifecycle_tests;
 /// `update` on a lifecycle entry (see `lifecycle_update`).
 #[cfg(test)]
 mod lifecycle_update_tests;
+
+/// `get` on a lifecycle collection readme: the entry table (see `get_table`).
+#[cfg(test)]
+mod get_table_tests;
 
 #[cfg(test)]
 mod containing_root_tests {

@@ -558,29 +558,49 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         "head_commit": head_commit,
     });
 
+    // A collection readme gains its entry table (`get_table`), unless a body selector asks for
+    // prose; its flat rows are what `entry_filter` filters, so the readme needs no augmentation.
+    let readme_table = if a.full.unwrap_or(false)
+        || a.heading.is_some()
+        || a.headings.as_ref().is_some_and(|v| !v.is_empty())
+    {
+        None
+    } else {
+        super::get_table::readme_table(ctx, &row.abs_path)?
+    };
+    if let Some(t) = &readme_table {
+        out["table"] = json!(t.table);
+    }
+
     if let Some(ref filter) = a.entry_filter {
-        let aug_row = aug.as_ref().ok_or_else(|| {
-            LibrarianRecoverableError::new(
-                "entry_filter set but this artifact is not augmented — declare \
-                 entry_collection on its augmentation, or retrofit it \
-                 (docs/conventions/retrofitting-trackers-for-filtering.md)",
-            )
-        })?;
-        let collection = aug_row.entry_collection.as_deref().ok_or_else(|| {
-            LibrarianRecoverableError::new(
-                "entry_filter set but the augmentation has no entry_collection — \
-                 declare which params array holds the filterable rows",
-            )
-        })?;
-        let params: Value = serde_json::from_str(&aug_row.params)?;
-        let arr = params
-            .get(collection)
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| {
-                LibrarianRecoverableError::new(format!(
-                    "entry_collection points at `{collection}` but params has no array there"
-                ))
-            })?;
+        let params: Value;
+        let arr: &Vec<Value> = match &readme_table {
+            Some(t) => &t.rows,
+            None => {
+                let aug_row = aug.as_ref().ok_or_else(|| {
+                    LibrarianRecoverableError::new(
+                        "entry_filter set but this artifact is not augmented — declare \
+                         entry_collection on its augmentation, or retrofit it \
+                         (docs/conventions/retrofitting-trackers-for-filtering.md)",
+                    )
+                })?;
+                let collection = aug_row.entry_collection.as_deref().ok_or_else(|| {
+                    LibrarianRecoverableError::new(
+                        "entry_filter set but the augmentation has no entry_collection — \
+                         declare which params array holds the filterable rows",
+                    )
+                })?;
+                params = serde_json::from_str(&aug_row.params)?;
+                params
+                    .get(collection)
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| {
+                        LibrarianRecoverableError::new(format!(
+                            "entry_collection points at `{collection}` but params has no array there"
+                        ))
+                    })?
+            }
+        };
         let mut matched: Vec<Value> = Vec::new();
         let mut considered = 0usize;
         for item in arr {

@@ -19,7 +19,7 @@ use super::update::UpdatePatch;
 use super::LibrarianRecoverableError;
 use crate::librarian::lifecycle::collection::load_collection_dir;
 use crate::librarian::lifecycle::entry::parse_date;
-use crate::librarian::lifecycle::layout::{place, Role};
+use crate::librarian::lifecycle::layout::{place, Placement, PlacementError, Role};
 use crate::librarian::lifecycle::schema::StatusClass;
 use crate::librarian::lifecycle::write::{read_entry, update_entry, UpdateSpec, WriteProblem};
 
@@ -54,16 +54,7 @@ pub(super) fn root_and_rel_path(
     }
     // No root gives a path to place. A file that sits in a lifecycle tree is refused rather than
     // updated on the generic path, which would skip every lifecycle check in silence.
-    let lossy = full.to_string_lossy();
-    let spelled = if cfg!(windows) {
-        super::windows_comparable(&lossy)
-    } else {
-        lossy.into_owned()
-    };
-    let in_lifecycle_tree = spelled
-        .match_indices("docs/trackers/")
-        .any(|(i, _)| (i == 0 || spelled[..i].ends_with('/')) && place(&spelled[i..]).is_some());
-    if in_lifecycle_tree {
+    if unrooted_placement(full).is_some() {
         return Err(refuse(format!(
             "{} is a lifecycle tracker file that no managed root of this session holds at a \
              UTF-8 path, so its collection cannot be loaded; use a session whose project holds \
@@ -72,6 +63,22 @@ pub(super) fn root_and_rel_path(
         )));
     }
     Ok(None)
+}
+
+/// What `layout::place` makes of `full`, a path no root gives a repo-relative form of, read from
+/// its first `docs/trackers/` segment that places; `None` when no such segment places (the file
+/// is in no lifecycle tree).
+pub(super) fn unrooted_placement(full: &Path) -> Option<Result<Placement, PlacementError>> {
+    let lossy = full.to_string_lossy();
+    let spelled = if cfg!(windows) {
+        super::windows_comparable(&lossy)
+    } else {
+        lossy.into_owned()
+    };
+    spelled
+        .match_indices("docs/trackers/")
+        .filter(|(i, _)| *i == 0 || spelled[..*i].ends_with('/'))
+        .find_map(|(i, _)| place(&spelled[i..]))
 }
 
 /// `full` below `root`, both as spelled, as a repo-relative path; `None` when `root` does not
