@@ -776,3 +776,114 @@ fn no_frontmatter_and_bad_yaml_are_named() {
         "{bad:?}"
     );
 }
+
+// ---- revisit rule ----------------------------------------------------------------------------
+
+#[test]
+fn new_entry_refuses_a_past_revisit_by() {
+    let today = d("2026-11-14");
+    let yesterday = d("2026-11-13");
+    let mut i = input("friction", "Late");
+    i.status = Some("waiting");
+    i.revisit_by = Some(yesterday);
+    let problems = new_entry(&schema(), DIR, None, &i, today).unwrap_err();
+    assert_eq!(problems, vec![WriteProblem::RevisitPast(yesterday)]);
+    // A date equal to today is allowed: the doctor fires only when `revisit_by < today`.
+    i.revisit_by = Some(today);
+    let m = meta(&new_entry(&schema(), DIR, None, &i, today).unwrap().text);
+    assert_eq!(m.revisit_by, Some(today));
+}
+
+#[test]
+fn change_status_refuses_a_past_revisit_by_and_a_stored_past_date() {
+    // (a) the call's own date is before today (today is `d1()`, 2026-11-14).
+    let past = d("2026-11-13");
+    assert_eq!(
+        change(&doc("open"), "waiting", Some(past)).unwrap_err(),
+        vec![WriteProblem::RevisitPast(past)]
+    );
+    // A date equal to today is allowed.
+    let m = meta(&change(&doc("open"), "waiting", Some(d1())).unwrap());
+    assert_eq!(m.revisit_by, Some(d1()));
+    // (b) no call date, and the stored one is before today.
+    let stale = d("2026-11-10");
+    let stored = doc_with("waiting", Some(stale), None);
+    assert_eq!(
+        change(&stored, "parked", None).unwrap_err(),
+        vec![WriteProblem::RevisitPast(stale)]
+    );
+    // A fresh date from the call replaces the stale stored one.
+    let m = meta(&change(&stored, "parked", Some(x())).unwrap());
+    assert_eq!(m.revisit_by, Some(x()));
+    // (c) an open or terminal target drops the stored past date.
+    for status in ["open", "fixed"] {
+        let m = meta(&change(&stored, status, None).unwrap());
+        assert_eq!(m.status, status);
+        assert_eq!(m.revisit_by, None);
+    }
+}
+
+#[test]
+fn a_blank_body_is_the_template() {
+    let body_of = |body: Option<&str>| {
+        let mut i = input("friction", "Blank");
+        i.body = body;
+        let file = new_entry(&schema(), DIR, Some("template text"), &i, d("2026-11-14")).unwrap();
+        read(&file.text).1
+    };
+    let template = body_of(None);
+    assert_eq!(template, frontmatter::render_body("template text"));
+    for blank in ["  \n", "", " \t\r\n\n"] {
+        assert_eq!(body_of(Some(blank)), template, "{blank:?}");
+    }
+    // A body with text keeps its own text.
+    assert_eq!(body_of(Some("mine")), frontmatter::render_body("mine"));
+}
+
+#[test]
+fn every_problem_text_names_its_remedy() {
+    let entry_problem = |status: &str| EntryProblem::RevisitMissing {
+        status: status.into(),
+    };
+    let hex_stem =
+        entry_stem(name_schema().key_style, d("2026-11-14"), "0123456789abcdef").unwrap_err();
+    let all = vec![
+        WriteProblem::KindUndeclared("bug".into()),
+        WriteProblem::StatusUndeclared("nope".into()),
+        WriteProblem::Title("???".into()),
+        WriteProblem::Stem(StemError::ReservedName("readme".into())),
+        WriteProblem::Stem(hex_stem),
+        WriteProblem::BadYaml("did not find expected ']'".into()),
+        WriteProblem::NoFrontmatter,
+        WriteProblem::FieldUndeclared("colour".into()),
+        WriteProblem::RevisitNotNeeded("open".into()),
+        WriteProblem::RevisitPast(d("2026-11-13")),
+        WriteProblem::Invalid(vec![entry_problem("waiting")]),
+        // Several inner problems must not add a second separator.
+        WriteProblem::Invalid(vec![entry_problem("waiting"), entry_problem("parked")]),
+    ];
+    // No wildcard: a new variant fails to compile here until a case is added above.
+    let _exhaustive = |p: &WriteProblem| match p {
+        WriteProblem::KindUndeclared(_)
+        | WriteProblem::StatusUndeclared(_)
+        | WriteProblem::Title(_)
+        | WriteProblem::Stem(_)
+        | WriteProblem::BadYaml(_)
+        | WriteProblem::NoFrontmatter
+        | WriteProblem::FieldUndeclared(_)
+        | WriteProblem::RevisitNotNeeded(_)
+        | WriteProblem::RevisitPast(_)
+        | WriteProblem::Invalid(_) => (),
+    };
+    const OPENERS: [&str; 7] = ["pass", "use", "remove", "declare", "fix", "give", "name"];
+    for problem in all {
+        let text = problem.to_string();
+        let parts: Vec<&str> = text.split("; ").collect();
+        assert_eq!(parts.len(), 2, "{text}");
+        assert!(parts.iter().all(|p| !p.trim().is_empty()), "{text}");
+        assert!(
+            OPENERS.iter().any(|o| parts[1].starts_with(o)),
+            "the remedy of {text:?} must start with one of {OPENERS:?}"
+        );
+    }
+}

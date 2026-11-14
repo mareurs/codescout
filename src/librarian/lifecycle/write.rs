@@ -14,26 +14,29 @@ use crate::librarian::frontmatter::{self, Frontmatter, RESERVED_KEYS};
 use crate::librarian::identity::key::Key;
 use crate::util::markdown_fence::FenceState;
 
-/// Why a write function refused to produce a document.
+/// Why a write function refused to produce a document. Every text has the shape
+/// `<what is wrong>; <remedy>`: one `; `, then an imperative clause the caller can act on.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WriteProblem {
-    #[error("entry_kind {0:?} is not declared in the collection readme")]
+    #[error("entry_kind {0:?} is not declared in the collection readme; use one of the entry_kinds the readme declares")]
     KindUndeclared(String),
-    #[error("status {0:?} is not declared in the collection readme")]
+    #[error("status {0:?} is not declared in the collection readme; use one of the statuses the readme declares")]
     StatusUndeclared(String),
-    #[error("title {0:?} is not a one-line title with a slug")]
+    #[error("title {0:?} is not a one-line title with a slug; give a one-line title with at least one letter or digit from a-z, A-Z or 0-9")]
     Title(String),
     #[error("no entry stem can be built: {0}")]
     Stem(StemError),
-    #[error("frontmatter is not valid YAML: {0}")]
+    #[error("frontmatter is not valid YAML: {0}; fix the YAML between the leading --- lines")]
     BadYaml(String),
-    #[error("the document has no frontmatter")]
+    #[error("the document has no frontmatter; give it a frontmatter block between two --- lines at the top")]
     NoFrontmatter,
-    #[error("field {0:?} is not a writable field of this collection")]
+    #[error("field {0:?} is not a writable field of this collection; remove it, or declare it under fields in the collection readme")]
     FieldUndeclared(String),
-    #[error("status {0:?} takes no revisit_by date")]
+    #[error("status {0:?} takes no revisit_by date; remove revisit_by")]
     RevisitNotNeeded(String),
-    #[error("the result is not a valid entry: {}", problems_text(.0))]
+    #[error("revisit_by {0} is before today; pass a revisit_by of today or later")]
+    RevisitPast(NaiveDate),
+    #[error("the result is not a valid entry: {}; fix each problem named", problems_text(.0))]
     Invalid(Vec<EntryProblem>),
 }
 
@@ -67,13 +70,14 @@ pub fn entry_template(readme_body: &str) -> Option<String> {
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_string())
 }
-/// The messages of `problems`, `; `-separated.
+/// The messages of `problems`, ` | `-separated: a `; ` here would add a second separator to the
+/// `<what is wrong>; <remedy>` shape of the text that holds them.
 fn problems_text(problems: &[EntryProblem]) -> String {
     problems
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
-        .join("; ")
+        .join(" | ")
 }
 
 /// What `new_entry` is asked to create.
@@ -151,6 +155,8 @@ pub(crate) fn set_date(fm: &mut Frontmatter, key: &str, date: Option<NaiveDate>)
 /// always `today`. `closed` is present iff the target is terminal: kept when the entry is itself
 /// terminal and has one, else `today`. A blocked or deferred target takes the call's `revisit_by`
 /// over the stored one; an open or terminal target drops the stored one and refuses a passed one.
+/// A blocked or deferred target whose date (passed or stored) is before `today` is refused with
+/// `RevisitPast`; `today` itself is allowed.
 /// The result is re-read.
 pub fn change_status(
     doc: &str,
@@ -168,6 +174,9 @@ pub fn change_status(
     }
     let revisit = if class.needs_revisit() {
         match revisit_by.or(meta.revisit_by) {
+            Some(date) if date < today => {
+                return Err(vec![WriteProblem::RevisitPast(date)]);
+            }
             Some(date) => Some(date),
             None => {
                 return Err(vec![WriteProblem::Invalid(vec![
@@ -266,7 +275,11 @@ pub fn new_entry(
         Some(c) if !c.needs_revisit() && input.revisit_by.is_some() => {
             problems.push(WriteProblem::RevisitNotNeeded(status.to_string()));
         }
-        Some(_) => {}
+        Some(_) => {
+            if let Some(date) = input.revisit_by.filter(|date| *date < today) {
+                problems.push(WriteProblem::RevisitPast(date));
+            }
+        }
     }
     let title_slug = slug(input.title).filter(|_| !input.title.contains(['\n', '\r']));
     let key = match &title_slug {
@@ -318,7 +331,12 @@ pub fn new_entry(
         extra,
         ..Frontmatter::default()
     };
-    let body = input.body.or(template).unwrap_or("");
+    // A blank body is no body: the template stands in for it, as for `None`.
+    let body = input
+        .body
+        .filter(|body| !body.trim().is_empty())
+        .or(template)
+        .unwrap_or("");
     let text = frontmatter::write(&fm, &frontmatter::render_body(body));
     reread(schema, &text)?;
     Ok(EntryFile {
