@@ -38,8 +38,10 @@ pub enum WriteProblem {
     RevisitPast(NaiveDate),
     #[error("the update changes nothing; pass at least one of status, revisit_by, title, tags, valid or fields")]
     EmptyUpdate,
-    #[error("entry_kind is fixed: an update cannot change it, nor repair a document whose entry_kind the readme does not declare; remove entry_kind from the update, and fix an undeclared entry_kind in the file by hand")]
+    #[error("entry_kind is fixed: an update cannot change it; remove entry_kind from the update")]
     KindFixed,
+    #[error("entry_kind {0:?} is not declared in the collection readme and an update cannot change it; declare it in the collection readme, or fix the file by hand")]
+    KindNotRepairable(String),
     #[error("the result is not a valid entry: {}; fix each problem named", problems_text(.0))]
     Invalid(Vec<EntryProblem>),
 }
@@ -345,8 +347,8 @@ pub struct UpdateSpec<'a> {
 /// one line with a slug. `tags` are trimmed, emptied and de-duplicated. `valid: Some(None)`
 /// removes `valid`. `fields` are `change_fields` edits. The refusals of every part are returned
 /// together.
-/// `entry_kind` is fixed: setting it is `KindFixed`, and so is a document whose own kind the
-/// schema does not declare. A document that does not parse as an entry is `Invalid`; neither is
+/// `entry_kind` is fixed: setting it is `KindFixed`, and a document whose own kind the schema
+/// does not declare is `KindNotRepairable`, which names that kind. A document that does not parse as an entry is `Invalid`; neither is
 /// repairable here. An empty spec is `EmptyUpdate`.
 pub fn update_entry(
     doc: &str,
@@ -365,7 +367,7 @@ pub fn update_entry(
     }
     let meta = read_entry(doc)?;
     if !schema.entry_kinds.contains(&meta.entry_kind) {
-        return Err(vec![WriteProblem::KindFixed]);
+        return Err(vec![WriteProblem::KindNotRepairable(meta.entry_kind)]);
     }
     let text = edit_doc(doc, |fm| {
         let mut problems = Vec::new();

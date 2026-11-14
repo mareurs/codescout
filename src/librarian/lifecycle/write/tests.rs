@@ -860,6 +860,7 @@ fn every_problem_text_names_its_remedy() {
         WriteProblem::RevisitPast(d("2026-11-13")),
         WriteProblem::EmptyUpdate,
         WriteProblem::KindFixed,
+        WriteProblem::KindNotRepairable("bug".into()),
         WriteProblem::Invalid(vec![entry_problem("waiting")]),
         // Several inner problems must not add a second separator.
         WriteProblem::Invalid(vec![entry_problem("waiting"), entry_problem("parked")]),
@@ -882,6 +883,7 @@ fn every_problem_text_names_its_remedy() {
         | WriteProblem::RevisitPast(_)
         | WriteProblem::EmptyUpdate
         | WriteProblem::KindFixed
+        | WriteProblem::KindNotRepairable(_)
         | WriteProblem::Invalid(_) => (),
     };
     const OPENERS: [&str; 7] = ["pass", "use", "remove", "declare", "fix", "give", "name"];
@@ -1052,16 +1054,22 @@ fn a_document_that_does_not_parse_as_an_entry_is_not_repaired() {
 }
 
 #[test]
-fn an_undeclared_entry_kind_is_not_repaired_and_the_refusal_says_the_kind_is_fixed() {
+fn an_undeclared_entry_kind_is_not_repaired_and_the_refusal_names_it() {
     let text = doc("open").replacen("entry_kind: friction\n", "entry_kind: bug\n", 1);
     assert!(text.contains("entry_kind: bug\n"), "{text}");
     let spec = UpdateSpec {
         title: Some("Retitled"),
         ..UpdateSpec::default()
     };
+    let problems = upd(&text, &spec).unwrap_err();
     assert_eq!(
-        upd(&text, &spec).unwrap_err(),
-        vec![WriteProblem::KindFixed]
+        problems,
+        vec![WriteProblem::KindNotRepairable("bug".into())]
+    );
+    let shown = problems[0].to_string();
+    assert!(
+        shown.contains("\"bug\"") && shown.contains("cannot change"),
+        "{shown}"
     );
 }
 
