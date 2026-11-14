@@ -270,6 +270,25 @@ struct Args {
     entry_filter: Option<FilterNode>,
 }
 
+impl Args {
+    /// Which body selectors the call sets: `full`, `heading`, a non-empty `headings`, a line
+    /// range (`start_line` or `end_line`). At most one may be set; any one asks for prose, so a
+    /// collection readme then builds no entry table (`get_table`).
+    fn body_selectors(&self) -> [bool; 4] {
+        [
+            self.full.unwrap_or(false),
+            self.heading.is_some(),
+            self.headings.as_ref().is_some_and(|v| !v.is_empty()),
+            self.start_line.is_some() || self.end_line.is_some(),
+        ]
+    }
+
+    /// Does the call set a body selector ([`Args::body_selectors`])?
+    fn body_selected(&self) -> bool {
+        self.body_selectors().contains(&true)
+    }
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     if args.get("include_body").is_some() {
         return Err(LibrarianRecoverableError::new(
@@ -279,13 +298,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a: Args = serde_json::from_value(args).map_err(|e| {
         crate::tools::RecoverableError::with_hint(format!("doc(action=\"get\") requires 'id': {e}"), "e.g. doc(action=\"get\", id=\"<16-hex>\"). Get an id from doc(action=\"find\", ...). Add full=true for the whole body, or heading=\"## Section\" for one section.")
     })?;
-    let body_selectors = [
-        a.full.unwrap_or(false),
-        a.heading.is_some(),
-        a.headings.as_ref().is_some_and(|v| !v.is_empty()),
-        a.start_line.is_some() || a.end_line.is_some(),
-    ];
-    if body_selectors.iter().filter(|b| **b).count() > 1 {
+    if a.body_selectors().iter().filter(|b| **b).count() > 1 {
         return Err(LibrarianRecoverableError::new(
             "at most one of `full`, `heading`, `headings`, `start_line`+`end_line` may be set",
         ));
@@ -559,18 +572,16 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     });
 
     // A collection readme gains its entry table (`get_table`) unless a body selector asks for
-    // prose; its flat rows are what `entry_filter` filters, with a selector or without, so the
-    // readme needs no augmentation.
-    let body_selector = a.full.unwrap_or(false)
-        || a.heading.is_some()
-        || a.headings.as_ref().is_some_and(|v| !v.is_empty());
-    let readme_table = if body_selector && a.entry_filter.is_none() {
+    // prose (`Args::body_selected`, a line range included); its flat rows are what `entry_filter`
+    // filters, with a selector or without, so the readme needs no augmentation.
+    let body_selected = a.body_selected();
+    let readme_table = if body_selected && a.entry_filter.is_none() {
         None
     } else {
         super::get_table::readme_table(ctx, &row.abs_path)?
     };
     if let Some(t) = &readme_table {
-        if !body_selector {
+        if !body_selected {
             out["table"] = json!(t.table);
         }
         // What the table and `entries` leave out, said wherever either is given.
@@ -662,11 +673,6 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     };
 
     let file_path = resolve_file_path(ctx, &row);
-    let body_selected = a.full.unwrap_or(false)
-        || a.heading.is_some()
-        || a.headings.as_ref().is_some_and(|v| !v.is_empty())
-        || a.start_line.is_some()
-        || a.end_line.is_some();
 
     let file_content = match &file_path {
         // Through the read door (`read_door`): a row whose file resolves outside its repository,
@@ -741,8 +747,8 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
 
         let mut preview = crate::librarian::preview::extract(&row.kind, &row, body, ctx);
         offset_preview_heading_lines(&mut preview, line_offset);
-        // `body_selected` (already in scope, computed above from `a.full` / `a.heading` /
-        // `a.headings` / `a.start_line` / `a.end_line` — do not recompute it here) is the
+        // `body_selected` (already in scope, `Args::body_selected` computed above — do not
+        // recompute it here) is the
         // DEFAULT for whether the preview gets stubbed. It is corrected to `false` below,
         // specifically when the `heading` selector fails to resolve: the stub's premise —
         // "the caller already named what they wanted" — is false on a miss, and shipping an

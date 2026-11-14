@@ -295,6 +295,40 @@ async fn a_heading_selector_still_returns_prose() {
         assert!(out.get("table").is_none(), "{selector}: {out}");
     }
 }
+/// A line range is a body selector: it returns the lines, builds no table and loads no
+/// collection, so a readme whose collection does not load still answers it.
+#[tokio::test]
+async fn a_line_range_returns_lines_and_loads_no_collection() {
+    let tmp = two_entry_project();
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), README, "collection");
+    // The readme's body is file lines 11-13 (ten frontmatter lines).
+    for range in [
+        json!({"start_line": 11, "end_line": 13}),
+        json!({"start_line": 13}),
+        json!({"end_line": 13}),
+    ] {
+        let mut args = json!({"id": id});
+        args.as_object_mut()
+            .unwrap()
+            .extend(range.as_object().unwrap().clone());
+        let out = get(&ctx, args).await.unwrap();
+        assert!(out.get("table").is_none(), "{range}: {out}");
+    }
+
+    let broken = LEDGER.replace("initial_status: open\n", "initial_status: nope\n");
+    let tmp = project(&[(README, &broken)]);
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), README, "collection");
+    let out = get(&ctx, json!({"id": id, "start_line": 11, "end_line": 13}))
+        .await
+        .unwrap();
+    assert!(out.get("table").is_none(), "{out}");
+    assert!(
+        out.to_string().contains("What we decided."),
+        "the lines: {out}"
+    );
+}
 
 /// P-R7: a readme under `<lifecycle>/archive/` is loaded by its folder.
 #[tokio::test]

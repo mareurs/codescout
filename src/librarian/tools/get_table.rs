@@ -4,8 +4,9 @@
 //! collection loaded by FOLDER (`load_collection_dir`, so an archived collection works) from the
 //! session's checkout, and the response gains `table`, the markdown of every entry (archived ones
 //! included, marked in the `Archived` column). The same rows, flat, are what `entry_filter`
-//! filters. `get::call` decides when the branch runs: a call with no `heading`, `headings` or
-//! `full` gains `table`, and an `entry_filter` is served from the rows with or without one.
+//! filters. `get::call` decides when the branch runs: a call with no body selector
+//! (`Args::body_selected` in `get`: `full`, `heading`, `headings` or a line range) gains `table`,
+//! and an `entry_filter` is served from the rows with or without one.
 
 use std::path::{Path, PathBuf};
 
