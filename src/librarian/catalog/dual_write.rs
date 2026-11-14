@@ -384,18 +384,6 @@ pub(crate) fn without_path(text: &str, path: &std::path::Path, label: &str) -> S
     out
 }
 
-/// The sentence a failed document write adds when the write itself failed. The writers rewrite the
-/// whole document in place, so an I/O error during the write can leave the document cut.
-pub(crate) const PARTLY_WRITTEN: &str =
-    "The document may be partly written. Compare it with git before you repeat the call.";
-
-/// True when `e`, an error of `util::write_catalogued_file`, is an I/O error of the write itself.
-/// False for its refusals (a symbolic link, a path outside the repository), which are
-/// `LibrarianRecoverableError`s and write nothing.
-pub(crate) fn write_failed_in_io(e: &anyhow::Error) -> bool {
-    e.chain().any(|cause| cause.is::<std::io::Error>())
-}
-
 /// `e` with `sentence` added to its message. A recoverable error stays recoverable and keeps its
 /// hint.
 pub(crate) fn with_sentence(e: anyhow::Error, sentence: &str) -> anyhow::Error {
@@ -901,54 +889,21 @@ mod tests {
         );
     }
 
-    /// The two directions of the partial-write sentence, from the real write door: its refusals
-    /// write nothing and are not I/O errors; a write the OS refuses is. A check that answered
-    /// `true` for every error (or `false` for every one) fails one of the halves.
-    #[cfg(unix)]
-    #[test]
-    fn only_an_io_error_of_the_write_itself_counts_as_a_possible_partial_write() {
-        use crate::librarian::util::write_catalogued_file;
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        let real = root.join("real.md");
-        std::fs::write(&real, "x").unwrap();
-
-        let link = root.join("link.md");
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-        let symlink = write_catalogued_file(std::slice::from_ref(&root), &link, "y").unwrap_err();
-        assert!(!write_failed_in_io(&symlink), "{symlink:#}");
-
-        let outside = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(outside.path(), root.join("out")).unwrap();
-        let escape =
-            write_catalogued_file(std::slice::from_ref(&root), &root.join("out/doc.md"), "y")
-                .unwrap_err();
-        assert!(!write_failed_in_io(&escape), "{escape:#}");
-
-        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o444)).unwrap();
-        if std::fs::OpenOptions::new().write(true).open(&real).is_ok() {
-            // Running as a user who ignores file modes (root): the write cannot be made to fail.
-            return;
-        }
-        let io = write_catalogued_file(std::slice::from_ref(&root), &real, "y").unwrap_err();
-        assert!(write_failed_in_io(&io), "{io:#}");
-    }
-
     #[test]
     fn a_sentence_joins_a_recoverable_error_and_keeps_its_hint() {
         use crate::librarian::tools::LibrarianRecoverableError;
+        const SENTENCE: &str = "Check the destination.";
         let e = with_sentence(
             LibrarianRecoverableError::with_hint("cannot write x.", "fix x"),
-            PARTLY_WRITTEN,
+            SENTENCE,
         );
         let lower = e
             .downcast_ref::<LibrarianRecoverableError>()
             .expect("stays recoverable");
-        assert_eq!(lower.message, format!("cannot write x. {PARTLY_WRITTEN}"));
+        assert_eq!(lower.message, format!("cannot write x. {SENTENCE}"));
         assert_eq!(lower.hint.as_deref(), Some("fix x"));
-        let plain = with_sentence(anyhow::anyhow!("disk full"), PARTLY_WRITTEN);
-        assert_eq!(format!("{plain:#}"), format!("disk full. {PARTLY_WRITTEN}"));
+        let plain = with_sentence(anyhow::anyhow!("disk full"), SENTENCE);
+        assert_eq!(format!("{plain:#}"), format!("disk full. {SENTENCE}"));
     }
 
     // mutation: return the absolute path.
