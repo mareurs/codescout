@@ -70,10 +70,12 @@ pub struct AugmentSpec {
 #[derive(Deserialize)]
 pub struct Args {
     pub repo: Option<String>,
-    pub rel_path: String,
-    pub kind: String,
-    pub title: String,
-    pub body: String,
+    /// `rel_path`, `kind`, `title` and `body` are required unless `collection` is given;
+    /// [`parse_args`] enforces it.
+    pub rel_path: Option<String>,
+    pub kind: Option<String>,
+    pub title: Option<String>,
+    pub body: Option<String>,
     #[serde(default)]
     pub owners: Vec<String>,
     #[serde(default)]
@@ -84,6 +86,8 @@ pub struct Args {
     #[serde(default)]
     pub extra: std::collections::BTreeMap<String, serde_json::Value>,
     pub augment: Option<AugmentSpec>,
+    /// The key of the collection an entry is created in (entry mode).
+    pub collection: Option<String>,
 }
 /// The seven statuses a `kind: bug` file may carry, per
 /// `docs/issues/_TEMPLATE.md`.
@@ -303,10 +307,29 @@ fn resolve_status(kind: &str, requested: Option<&str>) -> anyhow::Result<String>
 
 /// Argument parse for `create`: pure, no catalog or filesystem access. `call` runs it first, and
 /// [`preflight`] runs it alone so the worktree write guard can sit behind it.
+///
+/// Without `collection`, a plain create needs `rel_path`, `kind`, `title` and `body`; the first
+/// one missing is named in serde's own words, as when the four were required by the struct.
 fn parse_args(args: Value) -> Result<Args> {
-    serde_json::from_value(args).map_err(|e| {
-        crate::tools::RecoverableError::with_hint(format!("doc(action=\"create\") requires 'rel_path', 'kind', 'title' and 'body': {e}"), "e.g. doc(action=\"create\", rel_path=\"docs/plans/my-plan.md\", kind=\"plan\", title=\"My plan\", body=\"# My plan\"). rel_path is relative to the repo root and does NOT include the repo name.").into()
-    })
+    let a: Args = serde_json::from_value(args).map_err(plain_args_error)?;
+    if a.collection.is_none() {
+        let missing = [
+            ("rel_path", a.rel_path.is_none()),
+            ("kind", a.kind.is_none()),
+            ("title", a.title.is_none()),
+            ("body", a.body.is_none()),
+        ]
+        .into_iter()
+        .find_map(|(name, absent)| absent.then_some(name));
+        if let Some(name) = missing {
+            return Err(plain_args_error(format_args!("missing field `{name}`")));
+        }
+    }
+    Ok(a)
+}
+
+fn plain_args_error(detail: impl std::fmt::Display) -> anyhow::Error {
+    crate::tools::RecoverableError::with_hint(format!("doc(action=\"create\") requires 'rel_path', 'kind', 'title' and 'body': {detail}"), "e.g. doc(action=\"create\", rel_path=\"docs/plans/my-plan.md\", kind=\"plan\", title=\"My plan\", body=\"# My plan\"). rel_path is relative to the repo root and does NOT include the repo name.").into()
 }
 
 /// The part of `call` that cannot write: refuses a malformed call with the tool's own error.
@@ -339,7 +362,13 @@ fn undo_failed_create(cat: &crate::librarian::catalog::Catalog, id: &str, full: 
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
-    let a = parse_args(args)?;
+    let mut a = parse_args(args)?;
+    if a.collection.is_some() {
+        return Err(LibrarianRecoverableError::new(
+            "doc(action=\"create\") does not take `collection` yet; omit it and pass rel_path, \
+             kind, title and body",
+        ));
+    }
 
     // F4: `params_path` is advertised on the shared `augment` schema object (honored
     // by `doc(action="augment")`) but not meaningful here — `create` writes the
@@ -359,25 +388,32 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         }
     }
 
-    let status = resolve_status(&a.kind, a.status.as_deref())?;
+    // `parse_args` refused a plain call missing any of the four, so this `else` is not reached.
+    let (Some(rel_path), Some(kind), Some(title), Some(body)) = (
+        a.rel_path.take(),
+        a.kind.take(),
+        a.title.take(),
+        a.body.take(),
+    ) else {
+        return Err(plain_args_error("missing field"));
+    };
+    let status = resolve_status(&kind, a.status.as_deref())?;
     let art = NewArtifact {
-        rel_path: a.rel_path,
-        content: Content::Compose {
-            body: a.body.clone(),
-        },
-        kind: a.kind.clone(),
+        rel_path,
+        content: Content::Compose { body: body.clone() },
+        kind: kind.clone(),
         status,
-        title: a.title,
+        title,
         tags: a.tags,
         owners: a.owners,
         topic: a.topic,
         time_scope: a.time_scope,
         extra: &a.extra,
-        body_for_checks: &a.body,
+        body_for_checks: &body,
         augment: a.augment.as_ref(),
     };
     let mut result = write_new(ctx, a.repo.as_deref(), art, WriteMode::Plain).await?;
-    if a.kind == "tracker" && a.augment.is_none() {
+    if kind == "tracker" && a.augment.is_none() {
         result["tracker_hint"] = json!(
             "Tracker created without augmentation. \
              Call librarian(tracker_design) to pick an archetype \
@@ -433,10 +469,29 @@ pub(super) enum WriteMode {
     /// `create` as it always was: `upsert_and_mint_slug`, then `fs::write`, and on a failed write
     /// [`undo_failed_create`].
     Plain,
+    /// The first writer of a path wins and is never harmed by a second: see
+    /// [`insert_and_create_exclusive`].
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "entry and collection create (create_lifecycle) construct it"
+        )
+    )]
+    Exclusive,
 }
 
 /// The bytes [`write_new`] writes.
 pub(super) enum Content {
+    /// The file's bytes, given whole; they carry no `id:` (entry and collection create).
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "entry and collection create (create_lifecycle) construct it"
+        )
+    )]
+    Rendered(String),
     /// `write_new` builds the frontmatter from the [`NewArtifact`] fields plus `id: Some(id)`, and
     /// appends `body` (plain create).
     Compose { body: String },
@@ -538,10 +593,10 @@ pub(super) async fn write_new(
     validate_rel_path(&rel_path)?;
     let full = base_dir.join(&rel_path);
     if full.exists() {
-        return Err(LibrarianRecoverableError::new(format!(
-            "path exists: {}",
-            full.display()
-        )));
+        return Err(LibrarianRecoverableError::new(match mode {
+            WriteMode::Plain => format!("path exists: {}", full.display()),
+            WriteMode::Exclusive => format!("path exists: {rel_path}"),
+        }));
     }
     // `exists()` follows a link and answers `false` for a DANGLING one, which used to send a
     // create on to `fs::write` — that follows the link too and CREATES its target, wherever the
@@ -581,6 +636,7 @@ pub(super) async fn write_new(
         art.body_for_checks,
     )?;
     let content = match &art.content {
+        Content::Rendered(bytes) => bytes.clone(),
         Content::Compose { body } => {
             // A bug's `opened` is the day it was filed. The server knows it, so it writes it rather
             // than leave `tests/issue_frontmatter.rs` to refuse the file in whichever session next
@@ -678,9 +734,179 @@ pub(super) async fn write_new(
                 )));
             }
         }
+        WriteMode::Exclusive => {
+            // The lock is held across the insert, the file create and any take-back, so no other
+            // in-process writer sees the row between them.
+            let cat = ctx.catalog.lock();
+            let cp = ctx.current_project.as_deref();
+            if let Err(e) = insert_and_create_exclusive_with(&cat, &row, &full, &content, |cat| {
+                finalize_in_tx(cat, &id, art.augment, cp)
+            }) {
+                return Err(exclusive_refusal(e, &full, &rel_path));
+            }
+        }
     }
 
     Ok(json!({"id": id, "abs_path": crate::util::fs::to_forward_slash(&row.abs_path)}))
+}
+
+/// Shape an exclusive create's failure for the caller. A clash with an existing row, or a file
+/// already at the path (this call's row then taken back), is `path exists: <rel_path>`; every
+/// other failure is returned as it is.
+fn exclusive_refusal(e: anyhow::Error, full: &std::path::Path, rel_path: &str) -> anyhow::Error {
+    let row_exists = matches!(
+        e.downcast_ref::<artifact::InsertError>(),
+        Some(artifact::InsertError::Exists)
+    );
+    // `create_dir_all` also answers `AlreadyExists` when a file sits where a directory is needed,
+    // so only a leaf that is there is "path exists".
+    let file_exists = e
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists)
+        && full.symlink_metadata().is_ok();
+    if row_exists || file_exists {
+        LibrarianRecoverableError::new(format!("path exists: {rel_path}"))
+    } else {
+        e
+    }
+}
+
+/// The race-critical step of an exclusive create, with no pre-check of its own: insert the row
+/// with a plain `INSERT` and mint its slug in one transaction, then create the file with
+/// `create_new`. See [`insert_and_create_exclusive_with`].
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the race tests call it directly; write_new calls the _with form"
+    )
+)]
+pub(super) fn insert_and_create_exclusive(
+    cat: &crate::librarian::catalog::Catalog,
+    row: &ArtifactRow,
+    full: &std::path::Path,
+    content: &str,
+) -> Result<(), anyhow::Error> {
+    insert_and_create_exclusive_with(cat, row, full, content, |_| Ok(()))
+}
+
+/// Where an exclusive create's file step failed.
+#[derive(Clone, Copy, PartialEq)]
+enum FileStep {
+    /// Making the parent directory: no file of this call's exists.
+    Dir,
+    /// `create_new`: no file of this call's exists. `AlreadyExists` here means another writer's
+    /// file is at the path.
+    Create,
+    /// Writing the bytes into the file this call created: that partial file remains.
+    Write,
+}
+
+/// [`insert_and_create_exclusive`] with `in_tx`, the further catalog writes (augmentation,
+/// worktree registration) that ride in the row's transaction.
+///
+/// The row id is `sha256(abs_path)`, so a second create of one path computes the first one's id.
+/// Hence: the row goes in with [`artifact::insert_new`] (no `ON CONFLICT`), and an existing row
+/// is [`artifact::InsertError::Exists`] with nothing written. Once the row is committed it is this
+/// call's own, and a failed file step takes back that row only ([`artifact::delete_inserted`]),
+/// never a file: `remove_file` is not called on any path, because the file at `full` may be
+/// another writer's.
+fn insert_and_create_exclusive_with(
+    cat: &crate::librarian::catalog::Catalog,
+    row: &ArtifactRow,
+    full: &std::path::Path,
+    content: &str,
+    in_tx: impl FnOnce(&crate::librarian::catalog::Catalog) -> Result<()>,
+) -> Result<(), anyhow::Error> {
+    {
+        let tx = cat.conn.unchecked_transaction()?;
+        artifact::insert_new(cat, row).map_err(|e| match e {
+            artifact::InsertError::Other(e) => e,
+            exists @ artifact::InsertError::Exists => anyhow::Error::new(exists),
+        })?;
+        // In the same transaction, so an entry reaches the entry graph or is not created at all.
+        artifact::ensure_slug(&cat.conn, &row.id)?;
+        in_tx(cat)?;
+        tx.commit()?;
+    }
+    if let Some(parent) = full.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Err(take_back_inserted_row(cat, row, full, e, FileStep::Dir));
+        }
+    }
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(full)
+    {
+        Ok(file) => file,
+        Err(e) => return Err(take_back_inserted_row(cat, row, full, e, FileStep::Create)),
+    };
+    if let Err(e) = std::io::Write::write_all(&mut file, content.as_bytes()) {
+        return Err(take_back_inserted_row(cat, row, full, e, FileStep::Write));
+    }
+    Ok(())
+}
+
+/// Take back the row an exclusive create inserted after its file step failed with `cause`, and
+/// build the error. The row is deleted only while it is still the inserted one
+/// ([`artifact::delete_inserted`]); no file is removed.
+///
+/// `AlreadyExists` from `create_new` with the row handled comes back as the bare `io::Error`, so
+/// [`exclusive_refusal`] can call it "path exists". A failed take-back comes back as a message of
+/// its own, never as that `io::Error`: a caller must not read it as a clean refusal.
+fn take_back_inserted_row(
+    cat: &crate::librarian::catalog::Catalog,
+    row: &ArtifactRow,
+    full: &std::path::Path,
+    cause: std::io::Error,
+    step: FileStep,
+) -> anyhow::Error {
+    let path = full.display();
+    let taken_back = match artifact::delete_inserted(cat, row) {
+        Ok(taken_back) => taken_back,
+        Err(del) => {
+            tracing::warn!(id = %row.id, error = %del, "could not take back the catalog row of a failed exclusive create");
+            return match step {
+                FileStep::Create if cause.kind() == std::io::ErrorKind::AlreadyExists => {
+                    anyhow::anyhow!(
+                        "{path} already exists ({cause}) and could not take back the catalog row \
+                         this call inserted ({del:#}); remove that row, not the file, which is \
+                         another writer's"
+                    )
+                }
+                FileStep::Dir | FileStep::Create => anyhow::anyhow!(
+                    "could not create {path} ({cause}) and could not take back the catalog row \
+                     this call inserted ({del:#}); remove that row before retrying"
+                ),
+                FileStep::Write => anyhow::anyhow!(
+                    "could not write {path} ({cause}) and could not take back the catalog row \
+                     this call inserted ({del:#}); remove that row and the partial file before \
+                     retrying"
+                ),
+            };
+        }
+    };
+    if step == FileStep::Create && cause.kind() == std::io::ErrorKind::AlreadyExists {
+        return anyhow::Error::from(cause);
+    }
+    let row_note = if taken_back {
+        "the catalog row this call inserted was taken back"
+    } else {
+        "the catalog row this call inserted has since been changed by another writer and was \
+         left in place"
+    };
+    let context = match (step, taken_back) {
+        (FileStep::Dir | FileStep::Create, true) => {
+            format!("could not create {path}; {row_note}, so the create can be retried")
+        }
+        (FileStep::Dir | FileStep::Create, false) => format!("could not create {path}; {row_note}"),
+        (FileStep::Write, _) => format!(
+            "could not write {path}; {row_note}, and the partial file remains: delete it before \
+             retrying"
+        ),
+    };
+    anyhow::Error::from(cause).context(context)
 }
 
 #[cfg(test)]
@@ -2423,5 +2649,353 @@ mod tests {
             err.to_string().contains("temp dir"),
             "unexpected error: {err}"
         );
+    }
+
+    /// A row for `full` as an exclusive create would make it, stamped `created_at` so a test can
+    /// tell one writer's row from another's.
+    fn exclusive_row(full: &std::path::Path, content: &str, created_at: i64) -> ArtifactRow {
+        ArtifactRow {
+            id: crate::librarian::ids::artifact_id_from_abs(full),
+            abs_path: full.to_path_buf(),
+            kind: "decision".into(),
+            status: "open".into(),
+            title: Some("Pick X".into()),
+            owners: vec![],
+            tags: vec![],
+            topic: None,
+            time_scope: None,
+            source: Some("generated".into()),
+            created_at,
+            updated_at: created_at,
+            file_mtime: created_at,
+            file_sha256: crate::librarian::util::sha_of_bytes(content.as_bytes()),
+            confidence: 1.0,
+        }
+    }
+
+    /// A row at another path that no exclusive create may touch.
+    fn neighbour(cat: &Catalog, dir: &std::path::Path) -> ArtifactRow {
+        let row = exclusive_row(&dir.join("neighbour.md"), "neighbour", 5);
+        artifact::upsert_and_mint_slug(cat, &row).unwrap();
+        row
+    }
+
+    fn artifact_count(cat: &Catalog) -> i64 {
+        cat.conn
+            .query_row("SELECT count(*) FROM artifact", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn slug_of(cat: &Catalog, id: &str) -> Option<String> {
+        cat.conn
+            .query_row("SELECT slug FROM artifact WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    }
+
+    /// The race path, reached with no pre-check: a file is at `full` and no row is. The call must
+    /// fail with `AlreadyExists`, leave the file's bytes alone and take back only the row it made.
+    #[test]
+    fn insert_and_create_exclusive_on_a_planted_file_leaves_the_file_and_deletes_only_its_row() {
+        let tmp = TempDir::new().unwrap();
+        let full = tmp.path().join("docs/trackers/ledgers/d/pick-x.md");
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, "planted bytes").unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        let other = neighbour(&cat, tmp.path());
+        let row = exclusive_row(&full, "racer bytes", 2000);
+
+        let err = insert_and_create_exclusive(&cat, &row, &full, "racer bytes").unwrap_err();
+
+        assert_eq!(
+            err.downcast_ref::<std::io::Error>().map(|e| e.kind()),
+            Some(std::io::ErrorKind::AlreadyExists),
+            "{err:#}"
+        );
+        assert_eq!(std::fs::read(&full).unwrap(), b"planted bytes");
+        assert!(artifact::get(&cat, &row.id).unwrap().is_none());
+        assert_eq!(artifact::get(&cat, &other.id).unwrap(), Some(other));
+        assert_eq!(artifact_count(&cat), 1);
+    }
+
+    /// The first writer's file and row exist. A second exclusive create of the same path fails and
+    /// changes neither: not the bytes, not `created_at`, not `file_sha256`, not the slug.
+    #[test]
+    fn insert_and_create_exclusive_on_an_existing_row_leaves_file_and_row_untouched() {
+        let tmp = TempDir::new().unwrap();
+        let full = tmp.path().join("docs/trackers/ledgers/d/pick-x.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        let first = exclusive_row(&full, "winner bytes", 1000);
+        insert_and_create_exclusive(&cat, &first, &full, "winner bytes").unwrap();
+        let first_slug = slug_of(&cat, &first.id);
+
+        let second = exclusive_row(&full, "racer bytes", 2000);
+        let err = insert_and_create_exclusive(&cat, &second, &full, "racer bytes").unwrap_err();
+
+        assert!(
+            matches!(
+                err.downcast_ref::<artifact::InsertError>(),
+                Some(artifact::InsertError::Exists)
+            ),
+            "{err:#}"
+        );
+        assert_eq!(std::fs::read(&full).unwrap(), b"winner bytes");
+        let kept = artifact::get(&cat, &first.id).unwrap().unwrap();
+        assert_eq!(kept.created_at, 1000);
+        assert_eq!(kept.file_sha256, first.file_sha256);
+        assert_eq!(kept, first);
+        assert_eq!(slug_of(&cat, &first.id), first_slug);
+        assert_eq!(artifact_count(&cat), 1);
+    }
+
+    /// A row with no file (a stale row): the insert refuses, so no file is made either.
+    #[test]
+    fn insert_and_create_exclusive_on_a_row_without_a_file_creates_no_file() {
+        let tmp = TempDir::new().unwrap();
+        let full = tmp.path().join("docs/trackers/ledgers/d/pick-x.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        let stale = exclusive_row(&full, "old bytes", 1000);
+        artifact::upsert(&cat, &stale).unwrap();
+
+        let row = exclusive_row(&full, "new bytes", 2000);
+        let err = insert_and_create_exclusive(&cat, &row, &full, "new bytes").unwrap_err();
+
+        assert!(
+            matches!(
+                err.downcast_ref::<artifact::InsertError>(),
+                Some(artifact::InsertError::Exists)
+            ),
+            "{err:#}"
+        );
+        assert!(!full.exists());
+        assert!(!tmp.path().join("docs").exists(), "no directory either");
+        assert_eq!(artifact::get(&cat, &stale.id).unwrap(), Some(stale));
+    }
+
+    /// A write error other than `AlreadyExists` on the file (here the parent is a file, so no
+    /// directory can be made): only this call's row is taken back, and the blocking file is left
+    /// alone.
+    #[test]
+    fn insert_and_create_exclusive_whose_create_fails_takes_back_only_its_row() {
+        let tmp = TempDir::new().unwrap();
+        let blocker = tmp.path().join("blocker");
+        std::fs::write(&blocker, "a file where a directory should be").unwrap();
+        let full = blocker.join("pick-x.md");
+        let cat = Catalog::open_in_memory().unwrap();
+        let other = neighbour(&cat, tmp.path());
+        let row = exclusive_row(&full, "racer bytes", 2000);
+
+        let err = insert_and_create_exclusive(&cat, &row, &full, "racer bytes").unwrap_err();
+
+        let text = format!("{err:#}");
+        assert!(text.contains("could not create"), "{text}");
+        assert!(text.contains("taken back"), "{text}");
+        assert_eq!(
+            std::fs::read(&blocker).unwrap(),
+            b"a file where a directory should be"
+        );
+        assert!(artifact::get(&cat, &row.id).unwrap().is_none());
+        assert_eq!(artifact::get(&cat, &other.id).unwrap(), Some(other));
+    }
+
+    /// The take-back itself fails: the error says so, is not shaped as a plain `AlreadyExists`
+    /// (which `write_new` would report as a clean "path exists"), and the planted file is intact.
+    #[test]
+    fn insert_and_create_exclusive_that_cannot_take_back_its_row_says_so_and_keeps_the_file() {
+        let tmp = TempDir::new().unwrap();
+        let full = tmp.path().join("pick-x.md");
+        std::fs::write(&full, "planted bytes").unwrap();
+        let cat = Catalog::open_in_memory().unwrap();
+        cat.conn
+            .execute_batch(
+                "CREATE TRIGGER no_delete BEFORE DELETE ON artifact
+                 BEGIN SELECT RAISE(ABORT, 'simulated delete failure'); END;",
+            )
+            .unwrap();
+        let row = exclusive_row(&full, "racer bytes", 2000);
+
+        let err = insert_and_create_exclusive(&cat, &row, &full, "racer bytes").unwrap_err();
+
+        let text = format!("{err:#}");
+        assert!(text.contains("could not take back"), "{text}");
+        assert!(text.contains("simulated delete failure"), "{text}");
+        assert!(err.downcast_ref::<std::io::Error>().is_none(), "{text}");
+        assert_eq!(std::fs::read(&full).unwrap(), b"planted bytes");
+    }
+
+    fn rendered_artifact<'a>(
+        rel_path: &str,
+        content: &str,
+        extra: &'a std::collections::BTreeMap<String, Value>,
+    ) -> NewArtifact<'a> {
+        NewArtifact {
+            rel_path: rel_path.into(),
+            content: Content::Rendered(content.into()),
+            kind: "decision".into(),
+            status: "open".into(),
+            title: "Pick X".into(),
+            tags: vec![],
+            owners: vec![],
+            topic: None,
+            time_scope: None,
+            extra,
+            body_for_checks: "the body",
+            augment: None,
+        }
+    }
+
+    const ENTRY_BYTES: &str = "---\nkind: decision\nstatus: open\ntitle: Pick X\n---\n\nthe body\n";
+
+    #[tokio::test]
+    async fn exclusive_write_mints_a_slug() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let extra = Default::default();
+        let rel = "docs/trackers/ledgers/d/pick-x.md";
+
+        let v = write_new(
+            &ctx,
+            Some("r"),
+            rendered_artifact(rel, ENTRY_BYTES, &extra),
+            WriteMode::Exclusive,
+        )
+        .await
+        .unwrap();
+
+        let id = v["id"].as_str().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join(rel)).unwrap(),
+            ENTRY_BYTES,
+            "Rendered bytes are written as given, with no `id:` added"
+        );
+        assert_eq!(slug_of(&ctx.catalog.lock(), id).as_deref(), Some("pick-x"));
+    }
+
+    /// `write_new` in `Exclusive` mode names the refused path by its `rel_path`, whether the file
+    /// or only the row is there.
+    #[tokio::test]
+    async fn exclusive_write_refuses_an_existing_file_or_row_naming_the_rel_path() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let extra = Default::default();
+        let rel = "docs/trackers/ledgers/d/pick-x.md";
+        let full = tmp.path().join(rel);
+        let stale = exclusive_row(&full, "old bytes", 1000);
+        artifact::upsert(&ctx.catalog.lock(), &stale).unwrap();
+
+        let err = write_new(
+            &ctx,
+            Some("r"),
+            rendered_artifact(rel, ENTRY_BYTES, &extra),
+            WriteMode::Exclusive,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.to_string(), format!("path exists: {rel}"));
+        assert!(!full.exists());
+        assert_eq!(
+            artifact::get(&ctx.catalog.lock(), &stale.id).unwrap(),
+            Some(stale.clone())
+        );
+
+        artifact::delete(&ctx.catalog.lock(), &stale.id).unwrap();
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, "planted bytes").unwrap();
+        let err = write_new(
+            &ctx,
+            Some("r"),
+            rendered_artifact(rel, ENTRY_BYTES, &extra),
+            WriteMode::Exclusive,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.to_string(), format!("path exists: {rel}"));
+        assert_eq!(std::fs::read(&full).unwrap(), b"planted bytes");
+        assert_eq!(artifact_count(&ctx.catalog.lock()), 0);
+    }
+
+    /// A slug failure inside the exclusive transaction rolls the row back before any directory or
+    /// file exists.
+    #[tokio::test]
+    async fn a_failed_exclusive_finalization_leaves_no_row_and_no_file() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        ctx.catalog
+            .lock()
+            .conn
+            .execute_batch(
+                "CREATE TRIGGER fail_slug BEFORE UPDATE OF slug ON artifact
+                 BEGIN SELECT RAISE(ABORT, 'simulated slug failure'); END;",
+            )
+            .unwrap();
+        let extra = Default::default();
+
+        let err = write_new(
+            &ctx,
+            Some("r"),
+            rendered_artifact("docs/trackers/ledgers/d/pick-x.md", ENTRY_BYTES, &extra),
+            WriteMode::Exclusive,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("simulated slug failure"),
+            "{err:#}"
+        );
+        assert_eq!(artifact_count(&ctx.catalog.lock()), 0);
+        assert!(!tmp.path().join("docs").exists());
+    }
+
+    #[test]
+    fn a_call_with_collection_and_no_rel_path_passes_preflight() {
+        preflight(&json!({
+            "action": "create", "collection": "decisions",
+            "kind": "decision", "title": "Pick X", "body": "the body"
+        }))
+        .unwrap();
+    }
+
+    #[test]
+    fn a_call_with_neither_still_fails_preflight() {
+        for (args, missing) in [
+            (json!({"action": "create"}), "rel_path"),
+            (
+                json!({"action": "create", "kind": "spec", "title": "T", "body": "b"}),
+                "rel_path",
+            ),
+            (
+                json!({"action": "create", "rel_path": "x.md", "kind": "spec", "title": "T"}),
+                "body",
+            ),
+        ] {
+            let text = format!("{:#}", preflight(&args).unwrap_err());
+            assert!(text.contains("requires 'rel_path'"), "{args} -> {text}");
+            assert!(
+                text.contains(&format!("missing field `{missing}`")),
+                "{args} -> {text}"
+            );
+        }
+    }
+
+    /// Entry mode is not wired yet: a `collection` call is refused rather than read as a plain
+    /// create with its `collection` ignored.
+    #[tokio::test]
+    async fn a_create_with_collection_is_refused_and_writes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let ctx = mk_ctx(tmp.path().to_path_buf());
+        let err = call(
+            &ctx,
+            json!({
+                "repo": "r", "collection": "decisions", "rel_path": "docs/x.md",
+                "kind": "decision", "title": "Pick X", "body": "the body"
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("collection"), "{err:#}");
+        assert!(!tmp.path().join("docs").exists());
+        assert_eq!(artifact_count(&ctx.catalog.lock()), 0);
     }
 }

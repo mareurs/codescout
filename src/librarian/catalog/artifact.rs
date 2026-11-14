@@ -186,6 +186,88 @@ pub fn upsert(cat: &Catalog, row: &ArtifactRow) -> Result<()> {
     Ok(())
 }
 
+/// Why [`insert_new`] wrote no row.
+#[derive(Debug, thiserror::Error)]
+pub enum InsertError {
+    /// A row with this id, or another id at this `abs_path`, is already there. It is unchanged.
+    #[error("a catalog row for this path exists; it was left unchanged")]
+    Exists,
+    #[error(transparent)]
+    Other(anyhow::Error),
+}
+
+/// Insert a row that must be new: a plain `INSERT`, with no `ON CONFLICT` and none of
+/// [`upsert`]'s pre-clean of a row at the same `abs_path`. A clash on the `id` primary key or on
+/// the `abs_path` UNIQUE constraint is [`InsertError::Exists`] and changes nothing.
+///
+/// For an exclusive create: the id is `sha256(abs_path)`, so two creates of one path compute one
+/// id, and an `upsert` by the second would rewrite the first writer's row.
+pub fn insert_new(cat: &Catalog, row: &ArtifactRow) -> std::result::Result<(), InsertError> {
+    let abs_path_str = crate::util::fs::RepoPath::from(&row.abs_path);
+    let owners = serde_json::to_string(&row.owners).map_err(|e| InsertError::Other(e.into()))?;
+    let tags = serde_json::to_string(&row.tags).map_err(|e| InsertError::Other(e.into()))?;
+    let inserted = cat.conn.execute(
+        "INSERT INTO artifact (id, abs_path, kind, status, title, owners, tags,
+            topic, time_scope, source, created_at, updated_at, file_mtime, file_sha256, confidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        params![
+            row.id,
+            abs_path_str,
+            row.kind,
+            row.status,
+            row.title,
+            owners,
+            tags,
+            row.topic,
+            row.time_scope,
+            row.source,
+            row.created_at,
+            row.updated_at,
+            row.file_mtime,
+            row.file_sha256,
+            row.confidence,
+        ],
+    );
+    let err = match inserted {
+        Ok(_) => return Ok(()),
+        Err(e) => e,
+    };
+    let is_key_clash = matches!(
+        &err,
+        rusqlite::Error::SqliteFailure(f, _)
+            if f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY
+                || f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+    );
+    // A key clash raised by something else (a trigger writing another table) is not "this row
+    // exists": `Exists` is reported only when the row it names is there to be seen.
+    if is_key_clash {
+        let present = cat
+            .conn
+            .query_row(
+                "SELECT 1 FROM artifact WHERE id = ?1 OR abs_path = ?2",
+                params![row.id, abs_path_str],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|e| InsertError::Other(e.into()))?
+            .is_some();
+        if present {
+            return Err(InsertError::Exists);
+        }
+    }
+    Err(InsertError::Other(err.into()))
+}
+
+/// Delete the row [`insert_new`] wrote for `row`, and only while it is still that row: same id,
+/// same `created_at`, same `file_sha256`. A row another writer has since rewritten (an `upsert`
+/// keeps `created_at` but writes its own hash) is left. Returns whether a row was deleted.
+pub fn delete_inserted(cat: &Catalog, row: &ArtifactRow) -> Result<bool> {
+    Ok(cat.conn.execute(
+        "DELETE FROM artifact WHERE id = ?1 AND created_at = ?2 AND file_sha256 = ?3",
+        params![row.id, row.created_at, row.file_sha256],
+    )? > 0)
+}
+
 pub fn get(cat: &Catalog, id: &str) -> Result<Option<ArtifactRow>> {
     cat.conn
         .prepare("SELECT id, abs_path, kind, status, title, owners, tags,
@@ -1030,6 +1112,78 @@ mod tests {
         let cat = Catalog::open_in_memory().unwrap();
         upsert(&cat, &sample("id1")).unwrap();
         assert!(delete(&cat, "id1").unwrap());
+        assert!(get(&cat, "id1").unwrap().is_none());
+    }
+
+    /// A second `insert_new` of an existing id, or of a new id at an existing `abs_path`, is
+    /// `Exists` and leaves the first row exactly as it was. `upsert` would have overwritten it.
+    #[test]
+    fn insert_new_refuses_an_existing_id_and_leaves_the_row() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let first = sample("id1");
+        insert_new(&cat, &first).unwrap();
+
+        let mut same_id = sample("id1");
+        same_id.abs_path = "/test/r/elsewhere.md".into();
+        same_id.created_at = 77;
+        same_id.file_sha256 = "other".into();
+        assert!(matches!(
+            insert_new(&cat, &same_id),
+            Err(InsertError::Exists)
+        ));
+        let kept = get(&cat, "id1").unwrap().unwrap();
+        assert_eq!(kept.created_at, first.created_at);
+        assert_eq!(kept.file_sha256, first.file_sha256);
+        assert_eq!(kept, first);
+
+        let mut same_path = sample("id2");
+        same_path.abs_path = first.abs_path.clone();
+        same_path.created_at = 88;
+        same_path.file_sha256 = "third".into();
+        assert!(matches!(
+            insert_new(&cat, &same_path),
+            Err(InsertError::Exists)
+        ));
+        assert!(get(&cat, "id2").unwrap().is_none());
+        assert_eq!(get(&cat, "id1").unwrap().unwrap(), first);
+    }
+
+    /// Only a clash with an existing row is `Exists`; any other failure is `Other` and keeps its
+    /// cause.
+    #[test]
+    fn insert_new_reports_any_other_failure_as_other() {
+        let cat = Catalog::open_in_memory().unwrap();
+        cat.conn
+            .execute_batch(
+                "CREATE TRIGGER no_insert BEFORE INSERT ON artifact
+                 BEGIN SELECT RAISE(ABORT, 'simulated insert failure'); END;",
+            )
+            .unwrap();
+        match insert_new(&cat, &sample("id1")) {
+            Err(InsertError::Other(e)) => {
+                assert!(
+                    format!("{e:#}").contains("simulated insert failure"),
+                    "{e:#}"
+                )
+            }
+            other => panic!("expected Other, got {other:?}"),
+        }
+    }
+
+    /// `delete_inserted` removes the row only while it is still the one that was inserted.
+    #[test]
+    fn delete_inserted_leaves_a_row_another_writer_changed() {
+        let cat = Catalog::open_in_memory().unwrap();
+        let mine = sample("id1");
+        insert_new(&cat, &mine).unwrap();
+        let mut theirs = mine.clone();
+        theirs.file_sha256 = "rewritten".into();
+        upsert(&cat, &theirs).unwrap();
+        assert!(!delete_inserted(&cat, &mine).unwrap());
+        assert!(get(&cat, "id1").unwrap().is_some());
+
+        upsert(&cat, &mine).unwrap();
+        assert!(delete_inserted(&cat, &mine).unwrap());
         assert!(get(&cat, "id1").unwrap().is_none());
     }
 
