@@ -1,6 +1,6 @@
 use super::*;
 use crate::librarian::lifecycle::layout::PlacementError;
-use crate::librarian::lifecycle::schema::SchemaError;
+use crate::librarian::lifecycle::schema::{KeyStyle, SchemaError};
 use crate::librarian::lifecycle::testkit::{entry, k, LEDGER, STREAM, STREAM_NO_EXIT};
 use crate::librarian::lifecycle::tree::TreeProblem;
 use std::fs;
@@ -374,4 +374,155 @@ fn a_readme_with_a_reserved_field_name_is_broken_with_one_separator() {
 fn a_broken_collection_joins_its_problems_with_a_bar() {
     let text = CollectionLoadError::Broken(vec!["a: one".into(), "b: two".into()]).to_string();
     assert!(text.contains("a: one | b: two"), "{text}");
+}
+
+// ---- collection_readme ----
+
+/// A schema `extra` map from a JSON object literal.
+fn extra_of(v: serde_json::Value) -> BTreeMap<String, Value> {
+    v.as_object().unwrap().clone().into_iter().collect()
+}
+
+fn ledger_extra() -> BTreeMap<String, Value> {
+    extra_of(serde_json::json!({
+        "entry_kinds": ["friction"],
+        "statuses": {"open": "open", "parked": "deferred", "fixed": "terminal"},
+        "initial_status": "open",
+        "key_style": "dated",
+        "fields": {
+            "severity": {"type": "enum", "values": ["low", "med", "high"]},
+            "covers": {"type": "list"}
+        },
+        "owner": "the team",
+        "writer": "the agent",
+        "review_every": "30d"
+    }))
+}
+
+fn stream_extra() -> BTreeMap<String, Value> {
+    extra_of(serde_json::json!({
+        "entry_kinds": ["step"],
+        "statuses": {"open": "open", "done": "terminal"},
+        "initial_status": "open",
+        "exit_when": "it ships"
+    }))
+}
+
+#[test]
+fn a_full_ledger_readme_renders_and_parses() {
+    let body = "# Frictions\n\n## Entry template\nWrite what happened.\n";
+    let text = collection_readme(Lifecycle::Ledger, "Frictions", &ledger_extra(), body).unwrap();
+    assert!(text.starts_with("---\n"), "{text}");
+    assert!(text.ends_with("Write what happened.\n"), "{text}");
+    let (fm, rest) = frontmatter::parse(&text).unwrap();
+    let fm = fm.unwrap();
+    assert!(rest.contains("# Frictions"));
+    let schema = parse_schema(Lifecycle::Ledger, &fm).unwrap();
+    assert_eq!(schema.title, "Frictions");
+    assert_eq!(schema.entry_kinds, vec!["friction".to_string()]);
+    assert_eq!(schema.statuses.len(), 3);
+    assert_eq!(schema.initial_status, "open");
+    assert_eq!(schema.key_style, KeyStyle::Dated);
+    assert_eq!(schema.fields.len(), 2);
+    assert_eq!(schema.owner.as_deref(), Some("the team"));
+    assert_eq!(schema.writer.as_deref(), Some("the agent"));
+    assert_eq!(schema.review_every_days, Some(30));
+    assert_eq!(schema.exit_when, None);
+    // A stream renders with its `exit_when`.
+    let text = collection_readme(Lifecycle::Stream, "Steps", &stream_extra(), "").unwrap();
+    let (fm, _) = frontmatter::parse(&text).unwrap();
+    let schema = parse_schema(Lifecycle::Stream, &fm.unwrap()).unwrap();
+    assert_eq!(schema.exit_when.as_deref(), Some("it ships"));
+}
+
+#[test]
+fn a_stream_without_exit_when_is_refused() {
+    let mut extra = stream_extra();
+    extra.remove("exit_when");
+    for lifecycle in [Lifecycle::Stream, Lifecycle::Temp] {
+        let errs = collection_readme(lifecycle, "Steps", &extra, "").unwrap_err();
+        assert!(errs.contains(&SchemaError::ExitRequired), "{errs:?}");
+    }
+}
+
+#[test]
+fn a_ledger_with_exit_when_is_refused() {
+    let mut extra = ledger_extra();
+    extra.insert("exit_when".into(), Value::from("never"));
+    let errs = collection_readme(Lifecycle::Ledger, "Frictions", &extra, "").unwrap_err();
+    assert!(errs.contains(&SchemaError::ExitRefused), "{errs:?}");
+}
+
+#[test]
+fn an_unknown_status_class_is_refused() {
+    let mut extra = ledger_extra();
+    extra.insert(
+        "statuses".into(),
+        serde_json::json!({"open": "open", "napping": "sleepy", "fixed": "terminal"}),
+    );
+    let errs = collection_readme(Lifecycle::Ledger, "Frictions", &extra, "").unwrap_err();
+    assert_eq!(
+        errs,
+        vec![SchemaError::UnknownClass {
+            word: "napping".into(),
+            class: "sleepy".into()
+        }]
+    );
+}
+
+#[test]
+fn the_readme_carries_kind_collection_and_no_id() {
+    let text = collection_readme(Lifecycle::Ledger, "Frictions", &ledger_extra(), "x").unwrap();
+    let (fm, _) = frontmatter::parse(&text).unwrap();
+    let fm = fm.unwrap();
+    assert_eq!(fm.kind.as_deref(), Some("collection"));
+    assert_eq!(fm.title.as_deref(), Some("Frictions"));
+    assert_eq!(fm.id, None);
+    assert!(!text.contains("\nid:"), "{text}");
+}
+
+#[test]
+fn an_empty_title_is_missing_title() {
+    for title in ["", "   "] {
+        let errs = collection_readme(Lifecycle::Ledger, title, &ledger_extra(), "").unwrap_err();
+        assert_eq!(errs, vec![SchemaError::MissingTitle], "{title:?}");
+    }
+}
+
+#[test]
+fn an_unknown_key_in_extra_is_refused_naming_the_key() {
+    // `id` and `kind` are reserved: `frontmatter::write` would drop them without a word, so
+    // they are refused here like any other key the schema does not read.
+    for key in ["colour", "id", "kind"] {
+        let mut extra = ledger_extra();
+        extra.insert(key.into(), Value::from("red"));
+        let errs = collection_readme(Lifecycle::Ledger, "Frictions", &extra, "").unwrap_err();
+        assert_eq!(errs.len(), 1, "{key}: {errs:?}");
+        match &errs[0] {
+            SchemaError::Malformed { detail, .. } => {
+                assert!(detail.contains(&format!("{key:?}")), "{key}: {detail}");
+                assert!(detail.contains("; "), "problem; remedy: {detail}");
+                assert!(detail.contains("entry_kinds"), "names the keys: {detail}");
+            }
+            other => panic!("{key}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn the_rendered_readme_loads_through_load_collection_dir() {
+    let body = "# Frictions\n\n## Entry template\nWrite what happened.\n\n## After\nx\n";
+    let text = collection_readme(Lifecycle::Ledger, "Frictions", &ledger_extra(), body).unwrap();
+    let t = checkout(&[("docs/trackers/ledgers/frictions/readme.md", &text)]);
+    let loaded = load_collection_dir(t.path(), "docs/trackers/ledgers/frictions").unwrap();
+    assert_eq!(loaded.key, k("frictions"));
+    assert_eq!(loaded.lifecycle, Lifecycle::Ledger);
+    assert_eq!(loaded.schema().title, "Frictions");
+    assert_eq!(loaded.schema().review_every_days, Some(30));
+    assert_eq!(loaded.template.as_deref(), Some("Write what happened."));
+    assert!(
+        loaded.tree.problems.is_empty(),
+        "{:?}",
+        loaded.tree.problems
+    );
 }

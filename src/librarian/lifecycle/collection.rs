@@ -9,13 +9,16 @@
 //! included. A subfolder that is a symbolic link is not entered; a file that is one is offered to
 //! the door, which refuses a link that leaves the repository.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
+use serde_json::Value;
+
 use super::layout::{place, Lifecycle, Role, TRACKERS_DIR};
-use super::schema::CollectionSchema;
+use super::schema::{parse_schema, CollectionSchema, SchemaError, SCHEMA_KEYS};
 use super::tree::{CollectionNode, DocInput, LifecycleTree};
 use super::write::entry_template;
-use crate::librarian::frontmatter;
+use crate::librarian::frontmatter::{self, Frontmatter};
 use crate::librarian::identity::key::{components, folder_of, is_folder_index, Key};
 use crate::librarian::read_door::{self, ReadError};
 
@@ -234,6 +237,76 @@ pub fn load_collection_dir(
         dir,
         template,
     })
+}
+/// The `kind` a collection readme carries.
+const README_KIND: &str = "collection";
+
+/// Render the text of a collection readme: a frontmatter block holding `kind: collection`, the
+/// `title` and the schema keys of `extra`, then `body`. It carries no `id:`.
+///
+/// `extra` may hold only the keys of [`SCHEMA_KEYS`]; any other key (an `id`, a `kind` and a
+/// misspelt key alike) is `Malformed` with the key in `detail`, because `frontmatter::write`
+/// would drop a reserved key without a word. The rendered text is read back with
+/// [`parse_schema`], so a text that returns `Ok` is a readme whose schema parses; every problem
+/// found is returned, the unknown keys first.
+pub fn collection_readme(
+    lifecycle: Lifecycle,
+    title: &str,
+    extra: &BTreeMap<String, Value>,
+    body: &str,
+) -> Result<String, Vec<SchemaError>> {
+    // `Malformed.key` is a `&'static str`: an unknown key is dynamic, so the error is filed
+    // under the `extra` map and carries the key in `detail`.
+    let mut errs: Vec<SchemaError> = extra
+        .keys()
+        .filter(|k| !SCHEMA_KEYS.contains(&k.as_str()))
+        .map(|k| SchemaError::Malformed {
+            key: "extra",
+            detail: format!(
+                "unknown key {k:?}; a collection readme takes only {}",
+                SCHEMA_KEYS.join(", ")
+            ),
+        })
+        .collect();
+    let fm = Frontmatter {
+        kind: Some(README_KIND.to_string()),
+        title: Some(title.trim().to_string()),
+        extra: extra
+            .iter()
+            .filter(|(k, _)| SCHEMA_KEYS.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        ..Frontmatter::default()
+    };
+    let body = if body.trim().is_empty() {
+        String::new()
+    } else {
+        frontmatter::render_body(body)
+    };
+    let text = frontmatter::write(&fm, &body);
+    match frontmatter::parse(&text) {
+        Ok((Some(reread), _)) => {
+            if let Err(found) = parse_schema(lifecycle, &reread) {
+                errs.extend(found);
+            }
+        }
+        Ok((None, _)) => errs.push(SchemaError::Malformed {
+            key: "extra",
+            detail: "the rendered readme has no frontmatter; pass schema values that render as YAML"
+                .to_string(),
+        }),
+        Err(e) => errs.push(SchemaError::Malformed {
+            key: "extra",
+            detail: format!(
+                "the rendered readme does not read back ({e}); pass schema values that render as YAML"
+            ),
+        }),
+    }
+    if errs.is_empty() {
+        Ok(text)
+    } else {
+        Err(errs)
+    }
 }
 
 #[cfg(test)]

@@ -140,6 +140,31 @@ fn is_reserved_field_name(name: &str) -> bool {
         || crate::librarian::frontmatter::RESERVED_KEYS.contains(&name)
 }
 
+/// The frontmatter keys of a collection readme that [`parse_schema`] reads, besides `title`.
+/// The readme renderer writes the same names, so a key is spelled once.
+pub const KEY_ENTRY_KINDS: &str = "entry_kinds";
+pub const KEY_STATUSES: &str = "statuses";
+pub const KEY_INITIAL_STATUS: &str = "initial_status";
+pub const KEY_KEY_STYLE: &str = "key_style";
+pub const KEY_FIELDS: &str = "fields";
+pub const KEY_OWNER: &str = "owner";
+pub const KEY_EXIT_WHEN: &str = "exit_when";
+pub const KEY_WRITER: &str = "writer";
+pub const KEY_REVIEW_EVERY: &str = "review_every";
+
+/// Every schema key, in the order a readme lists them.
+pub const SCHEMA_KEYS: [&str; 9] = [
+    KEY_ENTRY_KINDS,
+    KEY_STATUSES,
+    KEY_INITIAL_STATUS,
+    KEY_KEY_STYLE,
+    KEY_FIELDS,
+    KEY_OWNER,
+    KEY_EXIT_WHEN,
+    KEY_WRITER,
+    KEY_REVIEW_EVERY,
+];
+
 fn malformed(key: &'static str, detail: impl Into<String>) -> SchemaError {
     SchemaError::Malformed {
         key,
@@ -217,12 +242,15 @@ fn parse_statuses(
     fm: &Frontmatter,
     errs: &mut Vec<SchemaError>,
 ) -> Option<(Vec<String>, BTreeMap<String, StatusClass>)> {
-    let Some(v) = present(fm, "statuses") else {
-        errs.push(SchemaError::MissingKey("statuses"));
+    let Some(v) = present(fm, KEY_STATUSES) else {
+        errs.push(SchemaError::MissingKey(KEY_STATUSES));
         return None;
     };
     let Some(map) = v.as_object() else {
-        errs.push(malformed("statuses", "must be a mapping of word to class"));
+        errs.push(malformed(
+            KEY_STATUSES,
+            "must be a mapping of word to class",
+        ));
         return None;
     };
     let mut declared = Vec::new();
@@ -240,7 +268,7 @@ fn parse_statuses(
                 }),
             },
             None => errs.push(malformed(
-                "statuses",
+                KEY_STATUSES,
                 format!("the class of {word:?} must be a string"),
             )),
         }
@@ -253,12 +281,12 @@ fn parse_statuses(
 
 fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<String, FieldType> {
     let mut out = BTreeMap::new();
-    let Some(v) = present(fm, "fields") else {
+    let Some(v) = present(fm, KEY_FIELDS) else {
         return out;
     };
     let Some(map) = v.as_object() else {
         errs.push(malformed(
-            "fields",
+            KEY_FIELDS,
             "must be a mapping of field name to type",
         ));
         return out;
@@ -277,22 +305,22 @@ fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<Strin
             }
             Some("enum") => match spec.get("values") {
                 None => errs.push(malformed(
-                    "fields",
+                    KEY_FIELDS,
                     format!("enum field {name:?} needs `values`"),
                 )),
                 Some(vals) => {
                     let what = format!("`values` of {name:?}");
-                    if let Some(w) = string_list(vals, "fields", &what, errs) {
+                    if let Some(w) = string_list(vals, KEY_FIELDS, &what, errs) {
                         out.insert(name.clone(), FieldType::Enum(w));
                     }
                 }
             },
             Some(other) => errs.push(malformed(
-                "fields",
+                KEY_FIELDS,
                 format!("field {name:?} has unknown type {other:?} (scalar, enum or list)"),
             )),
             None => errs.push(malformed(
-                "fields",
+                KEY_FIELDS,
                 format!("field {name:?} needs a `type` (scalar, enum or list)"),
             )),
         }
@@ -302,7 +330,7 @@ fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<Strin
 
 /// `"<n>d"` with `n` a positive whole number.
 fn parse_review_every(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u32> {
-    let raw = present(fm, "review_every")?;
+    let raw = present(fm, KEY_REVIEW_EVERY)?;
     let days = raw
         .as_str()
         .and_then(|s| s.strip_suffix('d'))
@@ -311,7 +339,7 @@ fn parse_review_every(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u
         .filter(|n| *n > 0);
     if days.is_none() {
         errs.push(malformed(
-            "review_every",
+            KEY_REVIEW_EVERY,
             "must be `<n>d` with n a positive whole number, for example `30d`",
         ));
     }
@@ -333,22 +361,22 @@ pub fn parse_schema(
         }
     };
 
-    let entry_kinds = match present(fm, "entry_kinds") {
+    let entry_kinds = match present(fm, KEY_ENTRY_KINDS) {
         None => {
-            errs.push(SchemaError::MissingKey("entry_kinds"));
+            errs.push(SchemaError::MissingKey(KEY_ENTRY_KINDS));
             None
         }
-        Some(v) => string_list(v, "entry_kinds", "`entry_kinds`", &mut errs),
+        Some(v) => string_list(v, KEY_ENTRY_KINDS, "`entry_kinds`", &mut errs),
     };
 
     let statuses = parse_statuses(fm, &mut errs);
 
-    let initial_status = match present(fm, "initial_status") {
+    let initial_status = match present(fm, KEY_INITIAL_STATUS) {
         None => {
-            errs.push(SchemaError::MissingKey("initial_status"));
+            errs.push(SchemaError::MissingKey(KEY_INITIAL_STATUS));
             None
         }
-        Some(v) => string_of(v, "initial_status", &mut errs),
+        Some(v) => string_of(v, KEY_INITIAL_STATUS, &mut errs),
     };
     if let (Some(init), Some((declared, known))) = (&initial_status, &statuses) {
         if !declared.contains(init) {
@@ -358,26 +386,26 @@ pub fn parse_schema(
         }
     }
 
-    let key_style = match present(fm, "key_style") {
+    let key_style = match present(fm, KEY_KEY_STYLE) {
         None => KeyStyle::Dated,
         Some(v) => match v.as_str() {
             Some("dated") => KeyStyle::Dated,
             Some("name") => KeyStyle::Name,
             _ => {
-                errs.push(malformed("key_style", "must be `dated` or `name`"));
+                errs.push(malformed(KEY_KEY_STYLE, "must be `dated` or `name`"));
                 KeyStyle::Dated
             }
         },
     };
 
     let fields = parse_fields(fm, &mut errs);
-    let owner = optional_string(fm, "owner", &mut errs);
-    let exit_when = optional_string(fm, "exit_when", &mut errs);
-    let writer = optional_string(fm, "writer", &mut errs);
+    let owner = optional_string(fm, KEY_OWNER, &mut errs);
+    let exit_when = optional_string(fm, KEY_EXIT_WHEN, &mut errs);
+    let writer = optional_string(fm, KEY_WRITER, &mut errs);
     let review_every_days = parse_review_every(fm, &mut errs);
 
     // A malformed `exit_when` still counts as declared; it is reported as malformed above.
-    let exit_declared = present(fm, "exit_when").is_some();
+    let exit_declared = present(fm, KEY_EXIT_WHEN).is_some();
     if lifecycle.requires_exit() && !exit_declared {
         errs.push(SchemaError::ExitRequired);
     } else if !lifecycle.requires_exit() && exit_declared {
