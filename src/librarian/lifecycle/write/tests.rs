@@ -47,7 +47,7 @@ fn a_crlf_readme_body_works() {
 // ---- new_entry -------------------------------------------------------------------------------
 
 use crate::librarian::frontmatter::{self, Frontmatter};
-use crate::librarian::lifecycle::entry::{parse_entry, validate_entry, EntryMeta};
+use crate::librarian::lifecycle::entry::{parse_entry, validate_entry, EntryError, EntryMeta};
 use crate::librarian::lifecycle::layout::Lifecycle;
 use crate::librarian::lifecycle::naming::StemError;
 use crate::librarian::lifecycle::schema::{parse_schema, CollectionSchema, FieldType};
@@ -861,6 +861,11 @@ fn every_problem_text_names_its_remedy() {
         WriteProblem::Invalid(vec![entry_problem("waiting")]),
         // Several inner problems must not add a second separator.
         WriteProblem::Invalid(vec![entry_problem("waiting"), entry_problem("parked")]),
+        // `parse_entry` collects several errors at once; `Unparsed` carries them all.
+        WriteProblem::Invalid(vec![EntryProblem::Unparsed(vec![
+            EntryError::Missing("created"),
+            EntryError::Missing("status_since"),
+        ])]),
     ];
     // No wildcard: a new variant fails to compile here until a case is added above.
     let _exhaustive = |p: &WriteProblem| match p {

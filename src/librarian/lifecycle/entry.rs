@@ -219,13 +219,14 @@ pub enum EntryProblem {
     Unparsed(Vec<EntryError>),
 }
 
-/// The messages of `errors`, `; `-separated.
+/// The messages of `errors`, ` | `-separated: a `; ` here would add a second separator to the
+/// `<what is wrong>; <remedy>` text of a `WriteProblem` that holds them.
 fn joined(errors: &[EntryError]) -> String {
     errors
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
-        .join("; ")
+        .join(" | ")
 }
 
 /// The class the schema gives this entry's status word, if it declares one.
