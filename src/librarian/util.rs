@@ -23,8 +23,8 @@ pub fn normalize_rel_path(rel: &str) -> String {
 /// **Why a refusal, not a replace and not a conditional write-through.** Every librarian writer
 /// takes its path from the catalog (`row.abs_path`), from a frontmatter declaration or from
 /// `base_dir.join(rel_path)` — none of them passes through `validate_write_path`, so nothing else
-/// asks where the write lands. `std::fs::write` follows a leaf link, and a catalogued row can be
-/// one: the indexer no longer catalogs a link out of the repository (the read door refuses it,
+/// asks where the write lands. A write that follows a leaf link changes the link's target, and a
+/// catalogued row can be a link: the indexer no longer catalogs a link out of the repository (the read door refuses it,
 /// `read_door`), but a pulled commit can turn a catalogued file into a link, and a catalog an
 /// older indexer wrote still holds such rows, so a row can name a file the repository does not
 /// own.
@@ -44,9 +44,12 @@ pub fn normalize_rel_path(rel: &str) -> String {
 /// other reason: the write that follows will fail by itself and say why.
 ///
 /// Limit, stated so it is not read as a guarantee: this checks the LEAF only (a link in a parent
-/// directory is [`refuse_path_outside_root`]'s question, asked by [`write_catalogued_file`]), and
-/// the check and the write are two syscalls, so a link planted between them still wins.
-/// `fs::write` has no `O_NOFOLLOW` form in `std`.
+/// directory is [`refuse_path_outside_root`]'s question, asked by [`write_catalogued_file`]).
+/// The check and the write are two steps. [`write_catalogued_file`] replaces the document with
+/// `util::fs::atomic_write`, so a link planted in that window is REPLACED by a regular file, and
+/// the call reports success. The first bullet above calls that outcome wrong. It is accepted here
+/// because the window is two syscalls wide, and the old outcome was worse: the write went
+/// THROUGH the link and changed a file the repository does not own.
 pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Result<()> {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return Ok(());
@@ -78,18 +81,40 @@ pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Re
 /// empty where the caller has none, in which case only the repositories the spelling names are
 /// available to judge by).
 ///
-/// The one door the librarian's "rewrite a catalogued file in place" writers go through, so a
-/// fourth writer added later takes the guard by calling this rather than by remembering it.
+/// The one door the librarian's "rewrite a catalogued file" writers go through, so a fourth writer
+/// added later takes the guard by calling this rather than by remembering it.
+///
+/// **The write replaces the document atomically** (`util::fs::atomic_write`: a staging file in the
+/// same directory, then a rename). A write that fails, for example on a full disk, leaves the old
+/// bytes in place, and no staging file remains. So an `io::Error` from this function means the
+/// document is unchanged. The order of the steps is fixed: the symbolic-link refusal, the
+/// outside-repository refusal, [`crate::util::fs::refuse_unwritable_existing`], then the write.
+///
+/// Three consequences of a replace, all accepted (plan `2026-11-14-atomic-catalogued-write-door`,
+/// ruling A-R7):
+///
+/// * A rename replaces a read-only file. The probe asks the file first, so a document that was
+///   refused before is still refused.
+/// * A replace needs write and search permission on the DIRECTORY. A writable document in a
+///   read-only directory is now refused. The old in-place write needed only the file's own
+///   permission.
+/// * The new file belongs to the writer. Owner, group, ACLs and extended attributes are not kept,
+///   and a hard link to the document is broken. The mode is kept (without setuid and setgid).
+///
+/// Not fsynced: atomic against a failed write, not durable across power loss.
+///
 /// Returns `anyhow::Error` (the refusal is a recoverable error, an `io::Error` is wrapped) so a
-/// caller's `?` and `.with_context` read the same as they did over `std::fs::write`.
+/// caller's `?` and `.with_context` read the same as they did over `std::fs::write`. Every caller
+/// passes text, so `contents` is `impl AsRef<str>`.
 pub(crate) fn write_catalogued_file(
     roots: &[std::path::PathBuf],
     path: &std::path::Path,
-    contents: impl AsRef<[u8]>,
+    contents: impl AsRef<str>,
 ) -> anyhow::Result<()> {
     refuse_write_through_symlink(path)?;
     refuse_catalogued_path_outside_repo(roots, path, "write")?;
-    std::fs::write(path, contents)?;
+    crate::util::fs::refuse_unwritable_existing(path)?;
+    crate::util::fs::atomic_write(path, contents.as_ref())?;
     Ok(())
 }
 
@@ -794,5 +819,183 @@ mod tests {
             descendant_path_like("?1"),
             format!(r"LIKE {r}({r}({r}(?1, '\', '\\'), '%', '\%'), '_', '\_') || '/%' ESCAPE '\'")
         );
+    }
+    /// The names in `dir` that an interrupted or failed `atomic_write` would leave behind.
+    fn staging_files(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect()
+    }
+
+    /// The `io::Error` the door wrapped, if its error holds one.
+    fn io_kind(e: &anyhow::Error) -> Option<std::io::ErrorKind> {
+        e.downcast_ref::<std::io::Error>().map(|io| io.kind())
+    }
+
+    #[test]
+    fn a_write_replaces_the_document_and_leaves_no_staging_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "old\n").unwrap();
+
+        write_catalogued_file(&roots, &doc, "new\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), "new\n");
+        assert_eq!(staging_files(dir.path()), Vec::<String>::new());
+    }
+
+    /// `augmentation_sidecar::write` and `repo_name::write` create their file through the door.
+    #[test]
+    fn a_missing_target_is_created_and_leaves_no_staging_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let doc = dir.path().join("fresh.md");
+
+        write_catalogued_file(&roots, &doc, "created\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), "created\n");
+        assert_eq!(staging_files(dir.path()), Vec::<String>::new());
+    }
+
+    /// A replace needs write and search permission on the DIRECTORY (ruling A-R7). The old
+    /// in-place write needed only the file's own permission, so this pins the new behaviour: the
+    /// write is refused, the old bytes stay, and no staging file is left.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_in_a_read_only_directory_is_refused_and_leaves_the_old_bytes() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let docs = dir.path().join("docs");
+        std::fs::create_dir(&docs).unwrap();
+        let doc = docs.join("doc.md");
+        std::fs::write(&doc, "old\n").unwrap();
+        std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::File::create(docs.join("probe")).is_ok() {
+            // A process that ignores directory modes (root) cannot show the refusal.
+            std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let result = write_catalogued_file(&roots, &doc, "new\n");
+        std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let e = result.expect_err("a replace in a read-only directory must be refused");
+        assert_eq!(
+            io_kind(&e),
+            Some(std::io::ErrorKind::PermissionDenied),
+            "{e:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), "old\n");
+        assert_eq!(staging_files(&docs), Vec::<String>::new());
+    }
+
+    /// A rename would replace a mode-0444 file, so the door asks the file first (ruling A-R2).
+    /// Mutation named: a bare `atomic_write` without the probe replaces the file and fails this.
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_document_is_still_refused_and_unchanged() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let doc = dir.path().join("doc.md");
+        std::fs::write(&doc, "old\n").unwrap();
+        std::fs::set_permissions(&doc, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().write(true).open(&doc).is_ok() {
+            // A process that ignores file modes (root) cannot show the refusal.
+            return;
+        }
+
+        let e = write_catalogued_file(&roots, &doc, "new\n")
+            .expect_err("a read-only document must stay refused");
+
+        assert_eq!(
+            io_kind(&e),
+            Some(std::io::ErrorKind::PermissionDenied),
+            "{e:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), "old\n");
+        assert_eq!(staging_files(dir.path()), Vec::<String>::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_document_keeps_its_exec_bit_and_a_private_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        for mode in [0o755, 0o600] {
+            let doc = dir.path().join(format!("doc-{mode:o}.md"));
+            std::fs::write(&doc, "old\n").unwrap();
+            std::fs::set_permissions(&doc, std::fs::Permissions::from_mode(mode)).unwrap();
+
+            write_catalogued_file(&roots, &doc, "new\n").unwrap();
+
+            assert_eq!(std::fs::read_to_string(&doc).unwrap(), "new\n");
+            let got = std::fs::metadata(&doc).unwrap().permissions().mode() & 0o777;
+            assert_eq!(got, mode, "mode {mode:o} must survive the replace");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_at_the_target_is_refused_before_any_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let real = dir.path().join("real.md");
+        std::fs::write(&real, "real\n").unwrap();
+        let link = dir.path().join("link.md");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let e = write_catalogued_file(&roots, &link, "new\n")
+            .expect_err("a symbolic link is never written");
+
+        assert_eq!(io_kind(&e), None, "a refusal is not an I/O error: {e:#}");
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "real\n");
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(staging_files(dir.path()), Vec::<String>::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_path_outside_the_roots_is_refused_before_any_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let outside = tempfile::tempdir().unwrap();
+        let victim = outside.path().join("doc.md");
+        std::fs::write(&victim, "outside\n").unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("out")).unwrap();
+
+        let e = write_catalogued_file(&roots, &dir.path().join("out/doc.md"), "new\n")
+            .expect_err("a path that leaves the root through a link is refused");
+
+        assert_eq!(io_kind(&e), None, "a refusal is not an I/O error: {e:#}");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "outside\n");
+        assert_eq!(staging_files(outside.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_directory_at_the_path_is_an_error_and_nothing_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let target = dir.path().join("doc.md");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("inner.txt"), "inner\n").unwrap();
+
+        let result = write_catalogued_file(&roots, &target, "new\n");
+
+        assert!(result.is_err(), "a directory is not a document");
+        assert!(target.is_dir(), "the directory must not be replaced");
+        assert_eq!(
+            std::fs::read_to_string(target.join("inner.txt")).unwrap(),
+            "inner\n"
+        );
+        assert_eq!(staging_files(dir.path()), Vec::<String>::new());
     }
 }
