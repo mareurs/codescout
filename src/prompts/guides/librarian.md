@@ -111,8 +111,9 @@ named by the augmentation's `entry_collection` field instead of querying the SQL
 `contains` is case-insensitive (matches SQL LIKE behaviour). A filter field absent from
 every entry yields a `filter_warnings.unknown_fields` list in the response — the in-memory
 engine has no field allowlist (unlike the SQL side, which errors on unknown columns), so an
-empty result there may be a field-name typo, not a true zero-match. Only augmented trackers that
-declare an `entry_collection` support this; prose trackers need retrofit first.
+empty result there may be a field-name typo, not a true zero-match. Lifecycle collection readmes
+and augmented trackers that declare an `entry_collection` support this; other prose trackers need
+retrofit first.
 
 ---
 

@@ -346,7 +346,7 @@ impl Tool for Artifact {
                 },
                 "entry_filter": {
                     "type": "object",
-                    "description": "get: filter AST (same shape as find's `filter`) applied to the rows of the tracker's declared entry_collection; returns matching rows as `entries` + `entry_total`. Requires the artifact to be augmented with an entry_collection naming the params array to filter. e.g. {\"and\":[{\"status\":{\"eq\":\"open\"}}]}"
+                    "description": "get: filter AST (same shape as find's `filter`) applied to a collection readme's entries, or to the params rows its augmentation's entry_collection names; returns matches as `entries` + `entry_total`. e.g. {\"and\":[{\"status\":{\"eq\":\"open\"}}]}"
                 },
                 "start_line": { "type": "integer", "description": "get: 1-indexed FILE line to start at" },
                 "end_line": { "type": "integer", "description": "get: 1-indexed inclusive FILE end line" },
