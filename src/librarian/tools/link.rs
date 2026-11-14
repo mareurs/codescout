@@ -156,13 +156,17 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // not reentrant — holding it across that call deadlocks rather than failing. Same
     // shape as `event_create::call`, which takes the lock in narrow blocks for exactly
     // this reason.
-    let (src_id, dst_write_id, dst) = {
+    let (src_id, dst_write_id, dst, src_not_here) = {
         let mut cat = ctx.catalog.lock();
         // Before ANY fork: a destination whose file the worktree lacks cannot take the
         // frontmatter write, and forking the source first would leave rows behind.
         if superseding {
             super::worktree::require_shadow_file(&cat, ctx, &a.dst_id)?;
         }
+        // A source that exists only in the main checkout is still forked and still gets its row,
+        // as before the text twin; only its relation line is skipped, because the worktree has no
+        // file to hold it. Asked before the fork, which does not create the file.
+        let src_not_here = super::worktree::shadow_file_missing(&cat, ctx, &a.src_id)?;
         let src_id = super::worktree::resolve_write_target(&mut cat, ctx, &a.src_id)?;
 
         if artifact::get(&cat, &src_id)?.is_none() {
@@ -183,7 +187,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let dst = artifact::get(&cat, &dst_write_id)?.ok_or_else(|| {
             LibrarianRecoverableError::new(format!("dst artifact `{}` not found", a.dst_id))
         })?;
-        (src_id, dst_write_id, dst)
+        (src_id, dst_write_id, dst, src_not_here)
     };
 
     let previous_status = dst.status.clone();
@@ -200,8 +204,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     // source's content. The real plan stays after the destination write because the two documents
     // can be one file, and bytes planned before that write would put the old status back.
     let dst_label = if superseding {
-        let cat = ctx.catalog.lock();
-        plan_relation_line(ctx, &cat, &src_id, &a)?;
+        if !src_not_here {
+            let cat = ctx.catalog.lock();
+            plan_relation_line(ctx, &cat, &src_id, &a)?;
+        }
         crate::librarian::catalog::dual_write::document_label(&dst.abs_path)
     } else {
         String::new()
@@ -223,7 +229,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // and the transaction drops with no row recorded.
         let tx = cat.conn.unchecked_transaction()?;
         let mut twin_file: Option<TwinWrite> = None;
-        let text_twin = match plan_relation_line(ctx, &cat, &src_id, &a)? {
+        let plan = if src_not_here {
+            Twin::Skip("source file is not in this worktree".to_string())
+        } else {
+            plan_relation_line(ctx, &cat, &src_id, &a)?
+        };
+        let text_twin = match plan {
             Twin::Skip(reason) => format!("skipped: {reason}"),
             Twin::Write(file) => {
                 let label = crate::librarian::catalog::dual_write::document_label(&file.path);
@@ -1305,5 +1316,164 @@ mod tests {
             text.contains("`[[dst]]` was already changed to `status: superseded`"),
             "{text}"
         );
+    }
+
+    // ---- a worktree session whose source file exists only in the main checkout ----
+
+    struct Worktree {
+        _tmp: TempDir,
+        ctx: ToolContext,
+        wt: std::path::PathBuf,
+        main_src: std::path::PathBuf,
+        src: String,
+        dst: String,
+    }
+
+    /// A main checkout `repo` (a `.git` directory) and its linked worktree `repo/.worktrees/feat`
+    /// (a `.git` pointer file), with a session in the worktree. `docs/src.md` exists in the main
+    /// checkout only; `docs/dst.md` exists in both. The rows are the main checkout's.
+    fn worktree() -> Worktree {
+        use crate::librarian::current_project::CurrentProject;
+        use std::sync::Arc;
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        let wt = repo.join(".worktrees/feat");
+        std::fs::create_dir_all(repo.join(".git/worktrees/feat")).unwrap();
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        std::fs::create_dir_all(wt.join("docs")).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}/.git/worktrees/feat\n", repo.display()),
+        )
+        .unwrap();
+        let main_src = repo.join("docs/src.md");
+        std::fs::write(&main_src, SRC_TEXT).unwrap();
+        for root in [&repo, &wt] {
+            std::fs::write(root.join("docs/dst.md"), DST_TEXT).unwrap();
+        }
+        let ctx = TestToolContextBuilder::new(Catalog::open_in_memory().unwrap())
+            .with_current_project(Arc::new(CurrentProject {
+                abs_path: wt.clone(),
+                git_root: wt.clone(),
+                main_root: Some(repo.clone()),
+                umbrella: None,
+            }))
+            .build();
+        let src = crate::librarian::ids::artifact_id_from_abs(&main_src);
+        let dst = crate::librarian::ids::artifact_id_from_abs(&repo.join("docs/dst.md"));
+        for (id, rel) in [(&src, "docs/src.md"), (&dst, "docs/dst.md")] {
+            artifact::upsert(
+                &ctx.catalog.lock(),
+                &TestArtifactRowBuilder::new(id)
+                    .with_abs_path(repo.join(rel))
+                    .build(),
+            )
+            .unwrap();
+        }
+        Worktree {
+            _tmp: tmp,
+            ctx,
+            wt,
+            main_src,
+            src,
+            dst,
+        }
+    }
+
+    const NOT_IN_WORKTREE: &str = "skipped: source file is not in this worktree";
+
+    /// The link rows of one rel; the fork's lineage links (`worktree_of`) are not counted.
+    fn rel_rows(ctx: &ToolContext, rel: &str) -> i64 {
+        ctx.catalog
+            .lock()
+            .conn
+            .query_row(
+                "SELECT count(*) FROM artifact_link WHERE rel = ?1",
+                [rel],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    /// Before the text twin, a plain link from a worktree session to a source that exists only in
+    /// the main checkout recorded its row. It still does: the line is skipped with its own reason,
+    /// and no file is created at the shadow path. The second call runs with the shadow row already
+    /// forked, the path a check made only before the fork would miss.
+    #[tokio::test]
+    async fn a_plain_link_from_a_worktree_whose_source_file_is_not_there_keeps_its_row() {
+        let w = worktree();
+        let args = json!({"src_id": w.src, "dst_id": w.dst, "rel": "implements"});
+
+        for round in 0..2 {
+            let v = call(&w.ctx, args.clone())
+                .await
+                .unwrap_or_else(|e| panic!("round {round}: {e:#}"));
+            assert_eq!(
+                v,
+                json!({"ok": true, "text_twin": NOT_IN_WORKTREE}),
+                "round {round}"
+            );
+        }
+
+        assert_eq!(
+            rel_rows(&w.ctx, "implements"),
+            1,
+            "the row is recorded once"
+        );
+        let shadow_src = w.wt.join("docs/src.md");
+        let shadow_id = crate::librarian::ids::artifact_id_from_abs(&shadow_src);
+        let out = links::outgoing(&w.ctx.catalog.lock(), &shadow_id).unwrap();
+        assert!(
+            out.iter()
+                .any(|l| l.dst_id == w.dst && l.rel == "implements"),
+            "the row goes from the source's shadow, as before: {:?}",
+            out.iter().map(|l| (&l.dst_id, &l.rel)).collect::<Vec<_>>()
+        );
+        assert!(!shadow_src.exists(), "no file is created in the worktree");
+        assert_eq!(
+            std::fs::read_to_string(&w.main_src).unwrap(),
+            SRC_TEXT,
+            "the main checkout's file is untouched"
+        );
+    }
+
+    /// The same source with `supersedes`: the destination's shadow takes the new status and the row
+    /// is recorded, as before the text twin; the line is skipped for the same reason. The preflight
+    /// must not turn the missing source file into an error after the source was forked.
+    #[tokio::test]
+    async fn a_supersedes_link_from_a_worktree_whose_source_file_is_not_there_skips_the_line() {
+        let w = worktree();
+
+        let v = supersedes(&w.ctx, &w.src, &w.dst).await.unwrap();
+
+        assert_eq!(v["text_twin"], json!(NOT_IN_WORKTREE), "{v}");
+        assert_eq!(v["superseded"]["status"], json!("superseded"), "{v}");
+        let shadow_dst = std::fs::read_to_string(w.wt.join("docs/dst.md")).unwrap();
+        assert!(shadow_dst.contains("status: superseded"), "{shadow_dst}");
+        assert_eq!(rel_rows(&w.ctx, "supersedes"), 1);
+        assert!(!w.wt.join("docs/src.md").exists());
+        assert_eq!(std::fs::read_to_string(&w.main_src).unwrap(), SRC_TEXT);
+    }
+
+    /// The control: when the worktree holds the source file, the line is written there (the skip
+    /// is for a missing shadow file only, not for every worktree session).
+    #[tokio::test]
+    async fn a_plain_link_from_a_worktree_that_holds_the_source_file_writes_the_line() {
+        let w = worktree();
+        let shadow_src = w.wt.join("docs/src.md");
+        std::fs::write(&shadow_src, SRC_TEXT).unwrap();
+
+        let v = call(
+            &w.ctx,
+            json!({"src_id": w.src, "dst_id": w.dst, "rel": "implements"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(v, json!("ok"));
+        assert!(std::fs::read_to_string(&shadow_src)
+            .unwrap()
+            .contains("**Implements:** [[dst]]"));
+        assert_eq!(std::fs::read_to_string(&w.main_src).unwrap(), SRC_TEXT);
     }
 }
