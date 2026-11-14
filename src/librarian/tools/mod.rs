@@ -325,12 +325,7 @@ pub(crate) fn arm_write_roots(
 /// trimmed there — rewriting separators would corrupt real names.
 fn comparable_path(path: &std::path::Path) -> Vec<u8> {
     #[cfg(windows)]
-    let normalized: Vec<u8> = {
-        let raw = path.to_string_lossy();
-        let slashed = raw.replace('\\', "/");
-        let stripped = slashed.strip_prefix("//?/").unwrap_or(&slashed);
-        stripped.as_bytes().to_vec()
-    };
+    let normalized: Vec<u8> = windows_comparable(&path.to_string_lossy()).into_bytes();
     // On Unix the comparison is over the RAW bytes: a lossy UTF-8 conversion maps every invalid
     // byte to U+FFFD, so the roots `n\xff` and `n\xfe` compared equal and one "contained" the
     // other's rows.
@@ -346,6 +341,14 @@ fn comparable_path(path: &std::path::Path) -> Vec<u8> {
         out.pop();
     }
     out
+}
+
+/// The Windows half of [`comparable_path`], on a string: `\` becomes `/` and a leading `//?/`
+/// goes. A plain function so the rule can be tested on any host; `lifecycle_update` reads a
+/// catalogued path below its root with it.
+fn windows_comparable(raw: &str) -> String {
+    let slashed = raw.replace('\\', "/");
+    slashed.strip_prefix("//?/").unwrap_or(&slashed).to_string()
 }
 
 /// The first managed root that contains `abs_path`, if any.

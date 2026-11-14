@@ -563,3 +563,80 @@ async fn an_update_in_a_worktree_reads_the_schema_from_the_worktree() {
     let text = refusal(&ctx, &id, json!({"status": "parked"})).await;
     assert!(text.contains("\"parked\" is not declared"), "{text}");
 }
+
+/// The catalog spells a Windows path `//?/C:/…` and `current_project` spells its root
+/// `\\?\C:\…`; the entry route must see one below the other (the spelling mismatch of
+/// `comparable_path`). Fed as plain strings, so it runs on any host.
+#[test]
+fn a_catalog_spelling_is_below_a_native_verbatim_root_on_windows() {
+    use super::lifecycle_update::rel_path_below;
+    let rel = rel_path_below(
+        r"\\?\C:\Users\dev\proj",
+        "//?/C:/Users/dev/proj/docs/trackers/ledgers/d/2026-11-01-pick-x.md",
+        true,
+    );
+    assert_eq!(
+        rel.as_deref(),
+        Some("docs/trackers/ledgers/d/2026-11-01-pick-x.md")
+    );
+    assert_eq!(
+        rel_path_below(
+            r"C:\Users\dev\proj",
+            "//?/C:/Users/dev/proj/docs/a.md",
+            true
+        )
+        .as_deref(),
+        Some("docs/a.md"),
+        "one side verbatim"
+    );
+    assert_eq!(
+        rel_path_below(
+            r"C:\Users\dev\proj",
+            "//?/C:/Users/dev/projx/docs/a.md",
+            true
+        ),
+        None,
+        "a component boundary, not a string prefix"
+    );
+}
+
+/// On Unix the bytes are compared as they are: a `\` is a name byte, and only a trailing `/` of
+/// the root is dropped.
+#[test]
+fn on_unix_the_path_below_a_root_keeps_its_bytes() {
+    use super::lifecycle_update::rel_path_below;
+    assert_eq!(
+        rel_path_below("/p/", "/p/docs/a.md", false).as_deref(),
+        Some("docs/a.md")
+    );
+    assert_eq!(rel_path_below("/p", "/pq/docs/a.md", false), None);
+    assert_eq!(rel_path_below("/p", "/p", false), None);
+}
+
+/// A lifecycle file that no managed root contains is refused, never sent down the generic path
+/// in silence; any other file outside every root keeps the generic path.
+#[test]
+fn a_lifecycle_file_below_no_managed_root_is_refused() {
+    use super::lifecycle_update::root_and_rel_path;
+    let roots = [std::path::PathBuf::from("/proj")];
+    let outside = Path::new("/elsewhere/docs/trackers/ledgers/d/2026-11-01-pick-x.md");
+    let text = format!("{:#}", root_and_rel_path(&roots, outside).unwrap_err());
+    assert!(text.contains("no managed root"), "{text}");
+    assert_one_remedy(&text);
+    for other in [
+        "/elsewhere/docs/notes/x.md",
+        "/elsewhere/docs/trackers/legacy.md",
+    ] {
+        assert!(
+            root_and_rel_path(&roots, Path::new(other))
+                .unwrap()
+                .is_none(),
+            "{other}"
+        );
+    }
+    let (root, rel) = root_and_rel_path(&roots, Path::new("/proj/docs/trackers/ledgers/d/x.md"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(root, roots[0]);
+    assert_eq!(rel, "docs/trackers/ledgers/d/x.md");
+}

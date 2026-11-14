@@ -37,13 +37,60 @@ fn refuse(text: impl Into<String>) -> anyhow::Error {
 }
 
 /// The root `full` is read against, and `full` below it as a `/` path: the first of `roots`
-/// that contains it. `managed_roots` lists the session's git root first, so a worktree session
-/// reads its own checkout.
-pub(super) fn root_and_rel_path(roots: &[PathBuf], full: &Path) -> Option<(PathBuf, String)> {
-    roots.iter().find_map(|root| {
-        let rel = full.strip_prefix(root).ok()?;
-        Some((root.clone(), crate::util::fs::to_forward_slash(rel)))
-    })
+/// that contains it, matched by `containing_root`, so the catalog's Windows spelling
+/// (`//?/C:/…`) is found below a root spelled `\\?\C:\…`. `managed_roots` lists the session's
+/// git root first, so a worktree session reads its own checkout. `Ok(None)`: the generic path
+/// runs. A file in a lifecycle tree that no root gives a path for is refused, never `Ok(None)`.
+pub(super) fn root_and_rel_path(
+    roots: &[PathBuf],
+    full: &Path,
+) -> Result<Option<(PathBuf, String)>> {
+    if let Some(root) = super::containing_root(roots, full) {
+        if let (Some(r), Some(f)) = (root.to_str(), full.to_str()) {
+            if let Some(rel) = rel_path_below(r, f, cfg!(windows)) {
+                return Ok(Some((root.clone(), rel)));
+            }
+        }
+    }
+    // No root gives a path to place. A file that sits in a lifecycle tree is refused rather than
+    // updated on the generic path, which would skip every lifecycle check in silence.
+    let lossy = full.to_string_lossy();
+    let spelled = if cfg!(windows) {
+        super::windows_comparable(&lossy)
+    } else {
+        lossy.into_owned()
+    };
+    let in_lifecycle_tree = spelled
+        .match_indices("docs/trackers/")
+        .any(|(i, _)| (i == 0 || spelled[..i].ends_with('/')) && place(&spelled[i..]).is_some());
+    if in_lifecycle_tree {
+        return Err(refuse(format!(
+            "{} is a lifecycle tracker file that no managed root of this session holds at a \
+             UTF-8 path, so its collection cannot be loaded; use a session whose project holds \
+             the file",
+            full.display()
+        )));
+    }
+    Ok(None)
+}
+
+/// `full` below `root`, both as spelled, as a repo-relative path; `None` when `root` does not
+/// contain it (a component boundary, not a string prefix) or is `full` itself. `windows`: read
+/// both as `comparable_path` does on Windows (`\` is `/`, a leading `//?/` goes); else the bytes
+/// are compared as they are, as `comparable_path` does on Unix.
+pub(super) fn rel_path_below(root: &str, full: &str, windows: bool) -> Option<String> {
+    let spell = |s: &str| {
+        if windows {
+            super::windows_comparable(s)
+        } else {
+            s.to_string()
+        }
+    };
+    let (root, full) = (spell(root), spell(full));
+    let rel = full
+        .strip_prefix(root.trim_end_matches('/'))?
+        .strip_prefix('/')?;
+    (!rel.is_empty()).then(|| rel.to_string())
 }
 
 /// The `extra` of a patch, split as `update_entry` takes it.
