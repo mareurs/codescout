@@ -198,7 +198,9 @@ pub fn change_status(
 /// Set or delete declared fields of an entry document. `Some(v)` sets a field; `None` and
 /// `Some(Value::Null)` delete it. Every refusal is collected before any edit: a reserved name
 /// (set or deleted) and an undeclared name being set are `FieldUndeclared`. An undeclared,
-/// non-reserved key the document already carries may be deleted, so a stray key can be repaired.
+/// non-reserved key the document already carries may be deleted, so a stray key can be repaired;
+/// one it does not carry is refused too, so a typo is not a silent no-op (a declared key that is
+/// absent still deletes, as a no-op).
 /// A wrong type or any other defect is caught by the re-read, which every `Ok` passes, an empty
 /// edit included (a valid document then comes back unchanged).
 pub fn change_fields(

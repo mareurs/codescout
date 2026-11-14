@@ -734,12 +734,34 @@ fn a_stray_undeclared_key_can_be_deleted() {
         invalid(&problems).contains(&EntryProblem::FieldUndeclared("colour".into())),
         "{problems:?}"
     );
-    let fixed = alter(&stray, &[("colour", None)]).unwrap();
-    assert!(!fixed.contains("colour"), "{fixed}");
+    for gone in [None, Some(Value::Null)] {
+        let fixed = alter(&stray, &[("colour", gone)]).unwrap();
+        assert!(!fixed.contains("colour"), "{fixed}");
+    }
     assert_eq!(
         alter(&stray, &[("colour", Some(json!("blue")))]).unwrap_err(),
         vec![WriteProblem::FieldUndeclared("colour".into())]
     );
+}
+
+#[test]
+fn deleting_an_undeclared_key_the_document_lacks_is_refused() {
+    for gone in [None, Some(Value::Null)] {
+        assert_eq!(
+            alter(&bare(), &[("colour", gone)]).unwrap_err(),
+            vec![WriteProblem::FieldUndeclared("colour".into())]
+        );
+    }
+    // A declared key that is absent still deletes, as a no-op.
+    let same = alter(&bare(), &[("severity", None)]).unwrap();
+    assert_eq!(same, bare());
+}
+
+#[test]
+fn an_empty_edit_returns_a_hand_laid_document_byte_for_byte() {
+    let hand = "---\nkind: entry\nstatus: open\ntitle: 'Hand laid'\ntags: [a, b]\nowners: [marius]\ncreated: 2026-11-01\nentry_kind: friction\nseverity: 'high'\nstatus_since: 2026-11-01\n---\n\nbody   \n";
+    assert_eq!(meta(hand).fields["severity"], json!("high"));
+    assert_eq!(alter(hand, &[]).unwrap(), hand);
 }
 
 #[test]
