@@ -118,16 +118,22 @@ fn entry_args<'a>(collection: &'a str, a: &'a Args) -> Result<EntryArgs<'a>> {
     })
 }
 
-/// The problems `new_entry` found, as one `<problem>; <remedy>` text: each problem's own `; ` is
-/// written `, `, and several join with ` | `.
-fn problems_refusal(problems: &[WriteProblem]) -> anyhow::Error {
-    let joined = problems
+/// The problems a write function found, as the problem half of one `<problem>; <remedy>` text:
+/// each problem's own `; ` is written `, `, and several join with ` | `. `update` on an entry
+/// words its refusal with it too.
+pub(super) fn problems_text(problems: &[WriteProblem]) -> String {
+    problems
         .iter()
         .map(|p| p.to_string().replace("; ", ", "))
         .collect::<Vec<_>>()
-        .join(" | ");
+        .join(" | ")
+}
+
+/// The problems `new_entry` found, as one `<problem>; <remedy>` text (see [`problems_text`]).
+fn problems_refusal(problems: &[WriteProblem]) -> anyhow::Error {
     refuse(format!(
-        "the entry cannot be created: {joined}; fix each problem named"
+        "the entry cannot be created: {}; fix each problem named",
+        problems_text(problems)
     ))
 }
 

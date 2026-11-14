@@ -489,6 +489,8 @@ pub mod create;
 // Not a registered `Tool`: the entry mode of `create` (`collection` = a lifecycle collection's key),
 // called from `create::call`.
 pub(crate) mod create_lifecycle;
+// Not a registered `Tool`: `update` on a lifecycle entry, called from `update::call`.
+pub(crate) mod lifecycle_update;
 pub mod update;
 
 pub mod link;
@@ -570,6 +572,10 @@ pub(crate) mod testfixture;
 /// Entry mode of `create` (see `create_lifecycle`).
 #[cfg(test)]
 mod create_lifecycle_tests;
+
+/// `update` on a lifecycle entry (see `lifecycle_update`).
+#[cfg(test)]
+mod lifecycle_update_tests;
 
 #[cfg(test)]
 mod containing_root_tests {
