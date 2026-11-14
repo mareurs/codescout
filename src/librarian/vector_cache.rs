@@ -136,7 +136,8 @@ struct Inner {
 ///
 /// The version is read before any pragma that could write, so a file of a newer
 /// format or a file that is not a database is left as it is. A file at the current
-/// version takes no write lock here.
+/// version takes no write lock here. A new file is initialised under the write lock,
+/// which re-reads the version first.
 fn open_connection(path: Option<&Path>, busy: Duration) -> Result<Connection, String> {
     let conn = match path {
         Some(p) => {
@@ -150,13 +151,9 @@ fn open_connection(path: Option<&Path>, busy: Duration) -> Result<Connection, St
     }
     .map_err(|e| e.to_string())?;
     conn.busy_timeout(busy).map_err(|e| e.to_string())?;
-    let version: i64 = conn
-        .pragma_query_value(None, "user_version", |r| r.get(0))
-        .map_err(|e| e.to_string())?;
+    let version = read_version(&conn)?;
     if version > FORMAT_VERSION {
-        return Err(format!(
-            "format version {version} is newer than {FORMAT_VERSION}"
-        ));
+        return Err(newer_format(version));
     }
     conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(|e| e.to_string())?;
@@ -165,12 +162,39 @@ fn open_connection(path: Option<&Path>, busy: Duration) -> Result<Connection, St
             conn.pragma_update(None, "journal_mode", "WAL")
                 .map_err(|e| e.to_string())?;
         }
-        conn.execute_batch(&format!(
-            "BEGIN IMMEDIATE; {CREATE_TABLE}; PRAGMA user_version = {FORMAT_VERSION}; COMMIT;"
+        initialise(&conn)?;
+    }
+    Ok(conn)
+}
+
+fn read_version(conn: &Connection) -> Result<i64, String> {
+    conn.pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(|e| e.to_string())
+}
+
+fn newer_format(version: i64) -> String {
+    format!("format version {version} is newer than {FORMAT_VERSION}")
+}
+
+/// Create the table and set the version, under the write lock.
+///
+/// The unlocked read said the file is new. Another process may have finished the job
+/// or written a newer format since, so the version is read again inside the lock.
+/// Only a file that still reads 0 is written. Any other outcome rolls back.
+fn initialise(conn: &Connection) -> Result<(), String> {
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let version = read_version(&tx)?;
+    if version > FORMAT_VERSION {
+        return Err(newer_format(version));
+    }
+    if version == 0 {
+        tx.execute_batch(&format!(
+            "{CREATE_TABLE}; PRAGMA user_version = {FORMAT_VERSION};"
         ))
         .map_err(|e| e.to_string())?;
     }
-    Ok(conn)
+    tx.commit().map_err(|e| e.to_string())
 }
 
 /// One `INSERT OR REPLACE` per row, all in one immediate transaction.
@@ -498,7 +522,17 @@ mod tests {
         let raw = Connection::open(tmp.path().join(VECTOR_CACHE_FILE)).unwrap();
         raw.execute_batch("UPDATE vec SET vector = zeroblob(5)")
             .unwrap();
-        assert_eq!(c.get(&key(), 4, "h1"), CacheLookup::Failed);
+        assert_eq!(c.get(&key(), 4, "h1"), CacheLookup::Failed, "too short");
+        raw.execute_batch("UPDATE vec SET vector = zeroblob(20)")
+            .unwrap();
+        assert_eq!(c.get(&key(), 4, "h1"), CacheLookup::Failed, "too long");
+        raw.execute_batch("UPDATE vec SET vector = zeroblob(16)")
+            .unwrap();
+        assert_eq!(
+            c.get(&key(), 4, "h1"),
+            CacheLookup::Hit(vec![0.0; 4]),
+            "exactly dim * 4 bytes is read"
+        );
     }
 
     #[test]
@@ -524,6 +558,51 @@ mod tests {
         assert_eq!(c.transactions(), 2);
         assert_eq!(c.len(), 403);
     }
+    #[test]
+    fn a_flush_that_fails_on_one_row_stores_none_of_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = file_cache(&tmp);
+        // Opens the file and creates the table.
+        assert_eq!(c.get(&key(), 1, "none"), CacheLookup::Miss);
+        let raw = Connection::open(tmp.path().join(VECTOR_CACHE_FILE)).unwrap();
+        raw.execute_batch(
+            "CREATE TRIGGER refuse BEFORE INSERT ON vec WHEN NEW.input_hash = 'bad' \
+             BEGIN SELECT RAISE(ABORT, 'refused'); END",
+        )
+        .unwrap();
+        for h in ["good1", "bad", "good2"] {
+            assert!(c.stage(&key(), h, &[1.0]));
+        }
+        assert_eq!(
+            c.flush(),
+            FlushOutcome {
+                stored: 0,
+                failed: 3
+            }
+        );
+        assert_eq!(c.len(), 0, "a per-row commit would leave the first row");
+        assert_eq!(c.get(&key(), 1, "good1"), CacheLookup::Miss);
+        assert_eq!(c.transactions(), 0, "a rolled back flush is not counted");
+    }
+
+    #[test]
+    fn the_blob_is_little_endian_f32() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = file_cache(&tmp);
+        let v = [0.5f32, -1.25, 3.0e-7];
+        put(&c, "h1", &v);
+        let raw = Connection::open(tmp.path().join(VECTOR_CACHE_FILE)).unwrap();
+        let (dim, blob): (i64, Vec<u8>) = raw
+            .query_row(
+                "SELECT dim, vector FROM vec WHERE input_hash = 'h1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let want: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect();
+        assert_eq!(dim, 3);
+        assert_eq!(blob, want);
+    }
 
     #[test]
     fn the_table_is_a_rowid_table_keyed_by_model_and_input_hash() {
@@ -541,6 +620,10 @@ mod tests {
         assert!(sql.contains("PRIMARY KEY (model_key, input_hash)"), "{sql}");
         assert!(!sql.contains("WITHOUT ROWID"), "{sql}");
         assert!(!sql.contains("last_used"), "{sql}");
+        let mode: String = raw
+            .pragma_query_value(None, "journal_mode", |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal", "a file-backed cache is in WAL mode");
     }
 
     #[test]
@@ -678,6 +761,7 @@ mod tests {
                 failed: 1
             }
         );
+        assert_eq!(c.transactions(), 0, "a failed flush commits nothing");
 
         holder.execute_batch("ROLLBACK").unwrap();
         assert!(c.stage(&key(), "h1", &[1.0, 2.0]));
@@ -689,6 +773,43 @@ mod tests {
             }
         );
         assert_eq!(c.get(&key(), 2, "h1"), CacheLookup::Hit(vec![1.0, 2.0]));
+        assert_eq!(c.transactions(), 1, "the next flush commits once");
+    }
+    #[test]
+    fn a_new_file_is_initialised_only_if_it_still_reads_version_zero_under_the_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(VECTOR_CACHE_FILE);
+        // A newer binary holds the write lock on a new file and is about to set version 99.
+        // WAL is set first, so the opener's own journal pragma needs no lock.
+        let holder = Connection::open(&path).unwrap();
+        holder.pragma_update(None, "journal_mode", "WAL").unwrap();
+        holder
+            .execute_batch("BEGIN IMMEDIATE; PRAGMA user_version = 99;")
+            .unwrap();
+        let p = path.clone();
+        let opener = std::thread::spawn(move || {
+            let c = VectorCache::open_with_busy_timeout(&p, Duration::from_secs(10));
+            let got = c.get(&key(), 2, "h1");
+            (got, c.status())
+        });
+        // The opener reads version 0 without the lock, then waits for the lock.
+        std::thread::sleep(Duration::from_millis(400));
+        holder.execute_batch("COMMIT").unwrap();
+        let (got, status) = opener.join().unwrap();
+        assert_eq!(got, CacheLookup::Failed);
+        assert_eq!(status, CacheStatus::Unavailable);
+        let v: i64 = holder
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 99, "an older binary must not downgrade the file");
+        let tables: i64 = holder
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'vec'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0);
     }
 
     #[test]
@@ -714,14 +835,23 @@ mod tests {
 
     #[test]
     fn the_tally_counts_and_prints_what_a_run_did() {
-        let mut t = CacheTally::default();
+        let mut t = CacheTally {
+            status: CacheStatus::On,
+            ..CacheTally::default()
+        };
+        t.note_item(true, false);
         t.note_item(true, false);
         t.note_item(false, true);
         t.note_flush(FlushOutcome {
-            stored: 3,
+            stored: 4,
             failed: 2,
         });
-        assert_eq!((t.hits, t.errors, t.stored), (1, 3, 3));
+        assert_eq!((t.hits, t.errors, t.stored), (2, 3, 4));
+        let j = t.to_json();
+        assert_eq!(j["status"], "on");
+        assert_eq!(j["hits"], 2);
+        assert_eq!(j["stored"], 4);
+        assert_eq!(j["errors"], 3);
         let d = CacheTally::default().to_json();
         let obj = d.as_object().unwrap();
         let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
