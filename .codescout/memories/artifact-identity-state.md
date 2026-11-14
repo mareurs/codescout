@@ -18,6 +18,12 @@ Plan C2 LANDED 2026-11-14 (subagent-driven; operator chose it, then "merge local
 
 Atomic write plan WRITTEN 2026-11-14: `docs/superpowers/plans/2026-11-14-atomic-catalogued-write-door.md` (3 tasks plus the gate; rulings A-R1..A-R6). The door will call the existing `util::fs::atomic_write` with a writability probe (a read-only file stays refused); the Plan C2 stopgap sentence is removed; an inventory files bugs for other writers outside the door. Waiting for the operator's review and execution choice.
 
+## Status 2026-11-14 (after C3 build)
+
+Atomic write door: executed by peer session codescout-eb (SID 6f2f7046) from my reviewed plan `aa6d7327e`; LANDED on `experiments` (`0f26f04fd`, bug `a806db1ec4ea162b` fixed, writers outside the door filed as bugs). C1 bugs N-1, N-3, N-4, N-5, N-6 filed 2026-11-14 (`6cdad2fd3`; M-2 already `f0d4a3093cbb9b63`).
+
+Plan C3 BUILT (subagent-driven; operator said "do c1 and then c3 in subagents"): branch `feat/c3-vector-cache-20261114`, merged with `experiments` (HEAD `b3535ceb7`), gate green (lean 10129, default 10224, python 1836). NOT merged into `experiments`: waits for the operator's finishing choice. Record, rulings R1-R8, deferred findings, follow-ups (seeding, eviction, per-run handle, embed URL in the key, cache location vs the cutover): `docs/research/2026-11-14-artifact-identity-plan-c3-execution-state.md` (id `512e01311fe5d7bb`). Honest limit: on ship day the cache is EMPTY for the existing corpus (queueing is per artifact); the cutover rebuild needs `reembed=true` per project or seeding first. Next: finishing choice, then the Plan D plan (open: who commits; file-only variant vs scratch copy; C3 cache location), then E.
+
 ## Rules that bite when resuming
 
 - A full gate runs only on an UNTOUCHED tree (no implementer holds an open round); see session-log F-16.
