@@ -316,8 +316,8 @@ mod tests {
         );
         assert_eq!(printed["scope"]["abs_path_root"], "/work/p");
     }
-    /// The cache counts are printed beside the others: `hits` says how many of `embedded` the
-    /// cache supplied, and `status` says whether the cache was on, off or unusable.
+    /// The cache counts are printed beside the others: `hits` says how many vectors the cache
+    /// supplied, and `status` says whether the cache was on, off or unusable.
     #[test]
     fn the_printed_report_carries_the_cache_counts() {
         use crate::librarian::vector_cache::{CacheStatus, CacheTally};

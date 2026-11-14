@@ -155,8 +155,9 @@ costs embed calls and nothing else.
 `reindex` reports the cache as `embed_cache` (`status` is `off`, `on` or
 `unavailable`; then `hits`, `stored` and `errors`). `embedded` counts only
 vectors the embedder made. `reembed=true` skips cache reads and rewrites the
-rows. A failing cache never fails a reindex: each failure degrades to an embed
-and is counted in `errors`. A cache that failed to open is tried again by the
+rows. A failing cache never fails a reindex: a failed lookup degrades to an embed
+and a failed write drops that batch's rows; each is counted in `errors`. A cache
+that failed to open is tried again by the
 next reindex.
 
 The file is never pruned and only grows, by about 3 KB for each distinct embed

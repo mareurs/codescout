@@ -74,17 +74,19 @@ The file belongs to one user. Every repository, worktree and profile of that use
 
 The cache key has two parts. The first part is the embedding setup: the model name, the text budget and the version of the text format. The second part is the exact title and text that the librarian embeds. The same text under a different title, model name, budget or format version does not match. It gets its own vector.
 
-Two embedding servers can run under one model name. They then share keys. If the weights behind a model name change, stop every codescout process. Delete the cache files, as the last paragraphs of this section say. Then run `reindex` with `reembed=true` in each project.
+Two embedding servers can run under one model name. They then share keys. If the weights behind a model name change, stop every codescout process. Delete the cache file and its `-wal` and `-shm` files, as the paragraph that starts "To remove the cache" says. Then run `reindex` with `reembed=true` in each project.
 
 A vector goes into the cache only when the librarian embeds the text. The cache is empty when it is new. The librarian does not embed a file that has not changed. So the cache holds no vector for such a file. When the cache first appears, it holds no vector for any file that you already indexed.
 
 The cache fills from text that the librarian embeds after the cache exists. This text comes from a new file, from a changed file, or from a `reindex` with `reembed=true`. To fill the cache for a project, run `reindex` with `reembed=true` for that project. This embeds each chunk again. It takes the full embedding time, one time.
 
-When a file moves, its chunks get new identifiers. The text does not change. If the cache holds the vectors of that text, the librarian takes them from the cache. It does not call the embedding server. It stores each vector in the search index under the new chunk identifier. A copied file and a rebuilt catalog work the same way. If the cache does not hold the vectors, the librarian embeds the text and keeps the new vectors in the cache.
-
-A remote embedding server reports no vector size until its first embed. So the first lookups of a process can miss one time, and the librarian embeds that text.
+When a file moves inside a project, its chunks get new identifiers. The text does not change. If the cache holds the vectors of that text, the librarian takes them from the cache. It does not call the embedding server. It stores each vector in the search index under the new chunk identifier. A copied file and a rebuilt catalog work the same way. If the cache does not hold the vectors, the librarian embeds the text and keeps the new vectors in the cache.
 
 So a file that git moves reuses its vectors only if the librarian embedded its text after the cache existed. Until then, the librarian embeds the moved file one time.
+
+A project can set `chunk_grain` in the `[librarian]` section of its `.codescout/project.toml`. If a file moves into a project with another `chunk_grain`, its chunks have other text. The cache holds no vector for that text, so the librarian embeds it.
+
+A remote embedding server reports no vector size until its first embed. So the first lookups of a process can miss one time, and the librarian embeds that text.
 
 The result of `reindex` has an `embed_cache` field. It has four fields:
 
@@ -99,7 +101,7 @@ The `backfill-chunks` command uses the cache in the same way. Its result has the
 
 `reindex` with `reembed=true` does not read the cache. It embeds each chunk again and writes the new vector to the cache. This replaces the old row.
 
-The cache only saves time. A cache problem never makes `reindex` or `backfill-chunks` fail. If the cache file is damaged, locked or of a newer format, the librarian calls the embedding server for each chunk. It counts each problem in `embed_cache.errors`. If the cache file is missing, the librarian makes a new empty file. If the cache file could not be opened, the next `reindex` or `backfill-chunks` call tries to open it again.
+The cache only saves time. A cache problem never makes `reindex` or `backfill-chunks` fail. If the cache file is damaged or of a newer format, the librarian calls the embedding server for each chunk. If another process holds the cache's write lock for more than 250 ms, the librarian does not keep the new vectors of that batch. It counts each problem in `embed_cache.errors`. If the cache file is missing, the librarian makes a new empty file. If the cache file could not be opened, the next `reindex` or `backfill-chunks` call tries to open it again.
 
 Nothing removes rows from the cache. The file only grows. Each distinct embed input adds about 3 KB for a model with 768 dimensions. A model with more dimensions adds more.
 
