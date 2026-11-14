@@ -139,26 +139,30 @@ that uses that directory. A `LIBRARIAN_DB` override moves it with the catalog.
 A row is keyed by the exact title and text a chunk is embedded from, the model
 string, the text budget and the text-format version. The same text under another
 title, model string, budget or format version never hits. Two servers behind one
-model name share a key, so after the weights behind a name change, run
-`reembed=true` and remove the file.
+model name share a key, so after the weights behind a name change, remove the
+cache by the steps in the last paragraph below, then run `reembed=true` in
+each project.
 
 The cache starts empty and fills only from text that is embedded: a new or
 changed file, or a `reembed=true` reindex. An unchanged file is not queued, so
 its vectors reach the cache only through `reembed=true`. A moved or copied file
 and a rebuilt catalog take vectors from the cache when their text is in it, and
-then call no embedder. The cache holds no fact about any document, so losing it
+then call no embedder. With a remote embedding server, the first lookups of a
+process can miss once, because the server reports no vector size until its
+first embed. The cache holds no fact about any document, so losing it
 costs embed calls and nothing else.
 
 `reindex` reports the cache as `embed_cache` (`status` is `off`, `on` or
 `unavailable`; then `hits`, `stored` and `errors`). `embedded` counts only
 vectors the embedder made. `reembed=true` skips cache reads and rewrites the
-rows. A failing cache never fails a reindex: each failure costs one embed call
+rows. A failing cache never fails a reindex: each failure degrades to an embed
 and is counted in `errors`. A cache that failed to open is tried again by the
 next reindex.
 
 The file is never pruned and only grows, by about 3 KB for each distinct embed
-input. To remove it, stop every codescout process, then delete
-`vector-cache.db`, `vector-cache.db-wal` and `vector-cache.db-shm`.
+input with a 768-dimension model (more with a wider one). To remove it, stop
+every codescout process, then delete `vector-cache.db`, `vector-cache.db-wal`
+and `vector-cache.db-shm`.
 
 ## Per-project classifier overrides
 
