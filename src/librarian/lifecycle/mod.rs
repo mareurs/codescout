@@ -3,6 +3,7 @@
 //! impure entry point (git to list the files, the read door to read them) that feeds the core.
 
 pub mod checks;
+pub mod collection;
 pub mod entry;
 pub mod layout;
 pub mod naming;
