@@ -12,7 +12,7 @@
 //!   entry-token lookalikes (`F-NNN`, sample ids);
 //! - inline code IS scanned — real citations live there ("id: `f2ec…efb`").
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -479,6 +479,59 @@ mod memo_tests {
 }
 
 pub fn extract(text: &str) -> DocExtract {
+    // Frontmatter yields no definitions and no citations — the offset guard in `scan_events`
+    // drops every event inside it. It does, however, DECLARE the artifact's id namespaces, and
+    // that declaration is what lets the dangling gate tell a wholly-undefined ledger apart
+    // from `UTF-8` in prose. Read with the guard's own parser rather than a second one:
+    // `librarian_guard` compiles under `--no-default-features` where
+    // `librarian::frontmatter` does not exist, and the two readers' agreement on every
+    // YAML form is already pinned by `both_entry_prefix_readers_agree_on_every_yaml_form`.
+    let mut out = DocExtract {
+        declared_prefixes: crate::util::librarian_guard::declared_entry_prefixes(text),
+        ..Default::default()
+    };
+    // (kind, raw) -> index into `out.citations`, so a repeat mention appends its line to
+    // the Citation already emitted instead of being dropped. A set would lose the
+    // position; see `Citation::repeat_lines`.
+    let mut seen_cites = std::collections::BTreeMap::new();
+    // No ranges: `extract` is the hot path of every doctor scan and nothing here reads one.
+    out.definitions = scan_events(text, false, &mut |s| {
+        push_citation(&mut out, &mut seen_cites, s.raw, s.kind, s.line)
+    });
+    out
+}
+
+/// Every hit [`extract`] folds into a citation, one per occurrence and not one per
+/// `(kind, raw)`, with the bytes it came from. `extract`'s citations are these folded by
+/// `push_citation`, because both run [`scan_events`].
+///
+/// Hits come in the scanner's own order: event by event, and inside one text chunk the
+/// malformed qualifiers, then the cross-repo tokens, then the entry tokens, then the ids.
+/// Sort by `range.start` for source order.
+///
+/// A range is a slice of `text`, and exists only where the hit's text is its own source slice.
+/// It is `None` for: a hit in inline code (`in_code`; the code span's content is not the bytes
+/// between its backticks), a text run an entity makes differ from its source (`&amp; F-1`), and
+/// a link that is not inline (`[t][x]` with `[x]: a.md`: its destination lies in another line).
+/// A backslash escape splits one run of prose into several text events (`R\-91` is Text `R` and
+/// Text `-91`), so no hit spans an escape. A hit in a bare URL has a range (this scanner reads
+/// plain text, URLs included); test it with `identity::grammar::in_url_word`. A path link's range
+/// is the whole `[text](dest)`.
+///
+/// Never hits: frontmatter, fenced and indented code, HTML (a comment included), and link
+/// reference definitions (the parser consumes them and emits no event). A hit in inline code is
+/// kept, with `in_code` set.
+#[allow(dead_code)] // read by the cutover citation rewrite (Plan D task 4); tests read it now
+pub(crate) fn citation_spans(text: &str) -> Vec<CitationSpan> {
+    let mut spans = Vec::new();
+    scan_events(text, true, &mut |s| spans.push(s));
+    spans
+}
+
+/// The event loop behind [`extract`] and [`citation_spans`]. Citation hits go to `sink`;
+/// definitions are returned. With `ranges` false no hit carries a range, and no source slice is
+/// compared.
+fn scan_events(text: &str, ranges: bool, sink: &mut impl FnMut(CitationSpan)) -> Vec<Definition> {
     // `ENABLE_TABLES` only — NOT `ENABLE_YAML_STYLE_METADATA_BLOCKS`. That option
     // pairs ANY two bare `---` lines anywhere in the document as a YAML metadata
     // block, not just a leading frontmatter block. Session-log trackers use a
@@ -494,22 +547,8 @@ pub fn extract(text: &str) -> DocExtract {
         Err(_) => 0,
     };
 
-    // Frontmatter yields no definitions and no citations — the offset guard below drops
-    // every event inside it. It does, however, DECLARE the artifact's id namespaces, and
-    // that declaration is what lets the dangling gate tell a wholly-undefined ledger apart
-    // from `UTF-8` in prose. Read with the guard's own parser rather than a second one:
-    // `librarian_guard` compiles under `--no-default-features` where
-    // `librarian::frontmatter` does not exist, and the two readers' agreement on every
-    // YAML form is already pinned by `both_entry_prefix_readers_agree_on_every_yaml_form`.
-    let mut out = DocExtract {
-        declared_prefixes: crate::util::librarian_guard::declared_entry_prefixes(text),
-        ..Default::default()
-    };
+    let mut definitions = Vec::new();
     let mut seen_defs = std::collections::BTreeSet::new();
-    // (kind, raw) -> index into `out.citations`, so a repeat mention appends its line to
-    // the Citation already emitted instead of being dropped. A set would lose the
-    // position; see `Citation::repeat_lines`.
-    let mut seen_cites = std::collections::BTreeMap::new();
 
     let mut in_code_block = false;
     let mut in_heading = false;
@@ -528,15 +567,20 @@ pub fn extract(text: &str) -> DocExtract {
                 heading_first_inline = true;
             }
             Event::End(TagEnd::Heading(_)) => in_heading = false,
-            Event::Start(Tag::Link { dest_url, .. }) if !in_code_block => {
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                ..
+            }) if !in_code_block => {
                 if let Some(target) = link_target(dest_url.as_ref()) {
-                    push_citation(
-                        &mut out,
-                        &mut seen_cites,
-                        target,
-                        CitationKind::RelPathLink,
+                    sink(CitationSpan {
+                        kind: CitationKind::RelPathLink,
+                        raw: target,
                         line,
-                    );
+                        // Only an inline link holds its destination in its own bytes.
+                        range: (ranges && link_type == LinkType::Inline).then(|| span.clone()),
+                        in_code: false,
+                    });
                 }
             }
             Event::Code(content) if !in_code_block => {
@@ -545,7 +589,7 @@ pub fn extract(text: &str) -> DocExtract {
                 if in_heading && heading_first_inline {
                     heading_first_inline = false;
                 }
-                scan_tokens(&mut out, &mut seen_cites, content.as_ref(), line);
+                scan_tokens(sink, content.as_ref(), line, None, true);
             }
             Event::Text(content) if !in_code_block => {
                 let mut rest = content.as_ref();
@@ -554,14 +598,18 @@ pub fn extract(text: &str) -> DocExtract {
                     if let Some(m) = def_re().captures(rest) {
                         let token = m.get(1).unwrap().as_str().to_string();
                         if seen_defs.insert(token.clone()) {
-                            out.definitions.push(Definition { token, line });
+                            definitions.push(Definition { token, line });
                         }
                         // The defining token is not a citation of itself;
                         // scan only the remainder of the heading text.
                         rest = &rest[m.get(0).unwrap().end()..];
                     }
                 }
-                scan_tokens(&mut out, &mut seen_cites, rest, line);
+                // `rest` is a suffix of `content`, so it sits `content.len() - rest.len()`
+                // bytes into the event's source when the event is its own source slice.
+                let src = (ranges && text.get(span.clone()) == Some(content.as_ref()))
+                    .then(|| (text, span.start + (content.len() - rest.len())));
+                scan_tokens(sink, rest, line, src, false);
             }
             _ => {}
         }
@@ -595,12 +643,26 @@ pub fn extract(text: &str) -> DocExtract {
         if let Some(m) = def_re().captures(&h.text) {
             let token = m.get(1).unwrap().as_str().to_string();
             if seen_defs.insert(token.clone()) {
-                out.definitions.push(Definition { token, line });
+                definitions.push(Definition { token, line });
             }
         }
     }
 
-    out
+    definitions
+}
+
+/// One hit of [`citation_spans`]: what `extract` records as a citation, with where it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CitationSpan {
+    pub kind: CitationKind,
+    pub raw: String,
+    /// The line of the hit's event, as `extract` reports it.
+    pub line: u32,
+    /// Bytes of `text`; None when the event's text is not its source slice (an escape or an
+    /// entity), for a hit in inline code, and for a link that is not inline.
+    pub range: Option<std::ops::Range<usize>>,
+    /// True for a hit inside an inline code span: `extract` counts it, a rewrite never edits it.
+    pub in_code: bool,
 }
 
 /// Scan one text chunk for double-qualified (malformed), cross-repo, and entry
@@ -609,11 +671,30 @@ pub fn extract(text: &str) -> DocExtract {
 /// citation; cross-repo matches are then found and masked so the embedded entry
 /// token is not double-reported.
 fn scan_tokens(
-    out: &mut DocExtract,
-    seen: &mut std::collections::BTreeMap<(CitationKind, String), usize>,
+    sink: &mut impl FnMut(CitationSpan),
     chunk: &str,
     line: u32,
+    src: Option<(&str, usize)>,
+    in_code: bool,
 ) {
+    // `src` is the document and the offset of `chunk[0]` in it, when `chunk` is its own source
+    // slice; a hit then carries its bytes as its range if the source agrees with the match (see
+    // `source_range`), and no range otherwise.
+    let mut emit = |m: &regex::Match<'_>, kind: CitationKind| {
+        sink(CitationSpan {
+            kind,
+            raw: m.as_str().to_string(),
+            line,
+            range: src.and_then(|(text, base)| {
+                let qualified = matches!(
+                    kind,
+                    CitationKind::CrossRepoToken | CitationKind::MalformedQualifier
+                );
+                source_range(text, base + m.start()..base + m.end(), qualified)
+            }),
+            in_code,
+        });
+    };
     let mut masked: Vec<(usize, usize)> = Vec::new();
     // Both qualified shapes end in an entry token (`:<TOKEN>`), and a `\b` holds between
     // the `:` and the token, so a chunk where `entry_re` finds nothing cannot match either
@@ -623,49 +704,47 @@ fn scan_tokens(
     if entry_re().is_match(chunk) {
         for m in double_qualified_re().find_iter(chunk) {
             masked.push((m.start(), m.end()));
-            push_citation(
-                out,
-                seen,
-                m.as_str().to_string(),
-                CitationKind::MalformedQualifier,
-                line,
-            );
+            emit(&m, CitationKind::MalformedQualifier);
         }
         for m in cross_repo_re().find_iter(chunk) {
             if masked.iter().any(|&(s, e)| m.start() >= s && m.end() <= e) {
                 continue;
             }
             masked.push((m.start(), m.end()));
-            push_citation(
-                out,
-                seen,
-                m.as_str().to_string(),
-                CitationKind::CrossRepoToken,
-                line,
-            );
+            emit(&m, CitationKind::CrossRepoToken);
         }
     }
     for m in entry_re().find_iter(chunk) {
         if masked.iter().any(|&(s, e)| m.start() >= s && m.end() <= e) {
             continue;
         }
-        push_citation(
-            out,
-            seen,
-            m.as_str().to_string(),
-            CitationKind::EntryToken,
-            line,
-        );
+        emit(&m, CitationKind::EntryToken);
     }
     for m in id_re().find_iter(chunk) {
-        push_citation(
-            out,
-            seen,
-            m.as_str().to_string(),
-            CitationKind::ArtifactId,
-            line,
-        );
+        emit(&m, CitationKind::ArtifactId);
     }
+}
+
+/// `range` when the document's own bytes around it agree with the match, else `None`.
+///
+/// Every pattern here is `\b..\b`, judged inside one text event. pulldown-cmark ends an event at
+/// a backslash escape, so a match at an event edge can sit against a character the regex never
+/// saw: `F-1\_x` renders `F-1_x` (no token), and `foo\-bar:F-5` renders `foo-bar:F-5` (qualifier
+/// `foo-bar`, not `bar`). Such a hit stays a citation, as `extract` counts it, but a rewrite
+/// must not edit bytes the author's text reads differently. So a range needs a non-word
+/// character before it (and, for a qualified token, not `-`) and a non-word character after it
+/// that is not a backslash.
+fn source_range(
+    text: &str,
+    range: std::ops::Range<usize>,
+    qualified: bool,
+) -> Option<std::ops::Range<usize>> {
+    let before = text.get(..range.start)?.chars().next_back();
+    let after = text.get(range.end..)?.chars().next();
+    let word = |c: char| c == '_' || c.is_alphanumeric();
+    let bad_before = before.is_some_and(|c| word(c) || (qualified && c == '-'));
+    let bad_after = after.is_some_and(|c| word(c) || c == '\\');
+    (!bad_before && !bad_after).then_some(range)
 }
 
 fn push_citation(
@@ -695,7 +774,7 @@ fn push_citation(
 
 /// A markdown link target that could name a catalog artifact: not an external
 /// URI, not a pure fragment; fragment suffix stripped.
-fn link_target(dest: &str) -> Option<String> {
+pub(crate) fn link_target(dest: &str) -> Option<String> {
     if dest.is_empty() || dest.starts_with('#') || has_uri_scheme(dest) {
         return None;
     }
@@ -1603,5 +1682,264 @@ gamma
             unexpected.len(),
             unexpected.join("\n  ")
         );
+    }
+    // ---- Span variant (`citation_spans`) ----
+
+    /// `citation_spans` folded the way `extract` folds its hits.
+    fn folded(spans: Vec<CitationSpan>) -> Vec<Citation> {
+        let mut out = DocExtract::default();
+        let mut seen = std::collections::BTreeMap::new();
+        for s in spans {
+            push_citation(&mut out, &mut seen, s.raw, s.kind, s.line);
+        }
+        out.citations
+    }
+
+    /// Hits that carry a range, as (kind, source slice).
+    fn sliced(text: &str) -> Vec<(CitationKind, &str)> {
+        citation_spans(text)
+            .into_iter()
+            .filter_map(|s| s.range.map(|r| (s.kind, &text[r])))
+            .collect()
+    }
+
+    const MIXED: &str = "---\ntags: [F-90]\n---\n# Doc\n\n## F-1 — def and F-8\n\nSee F-2, codescout:F-3, ab:cd:F-4 and 0123456789abcdef. [t](other.md#x) `F-5` F-2 again\n\n```\nF-9\n```\n\n    F-10\n\n&amp; F-6 R\\-7 https://h.io/R-11 My_Notes:F-12\n\n| a |\n|---|\n| F-13 [u](b.md) |\n";
+
+    #[test]
+    fn extract_citations_are_the_spans_folded() {
+        let plain = extract(MIXED).citations;
+        let from_spans = folded(citation_spans(MIXED));
+        assert_eq!(plain, from_spans);
+        // Not vacuous: every kind, a repeat, and a second line are in it.
+        for kind in [
+            CitationKind::EntryToken,
+            CitationKind::ArtifactId,
+            CitationKind::RelPathLink,
+            CitationKind::CrossRepoToken,
+            CitationKind::MalformedQualifier,
+        ] {
+            assert!(plain.iter().any(|c| c.kind == kind), "{kind:?}");
+        }
+        assert!(plain.iter().any(|c| !c.repeat_lines.is_empty()));
+        assert!(plain.len() >= 12, "{}", plain.len());
+    }
+
+    #[test]
+    fn a_span_covers_exactly_its_match() {
+        let text = "id 0123456789abcdef, see codescout:F-1 and F-2, [t](a.md) and [u](b/c.md#frag \"ti\")\n";
+        assert_eq!(
+            sliced(text),
+            vec![
+                (CitationKind::CrossRepoToken, "codescout:F-1"),
+                (CitationKind::EntryToken, "F-2"),
+                (CitationKind::ArtifactId, "0123456789abcdef"),
+                (CitationKind::RelPathLink, "[t](a.md)"),
+                (CitationKind::RelPathLink, "[u](b/c.md#frag \"ti\")"),
+            ]
+        );
+        // A malformed double qualifier covers its whole run, after multibyte text.
+        assert_eq!(
+            sliced("é ab:b-c:F-4"),
+            vec![(CitationKind::MalformedQualifier, "ab:b-c:F-4")]
+        );
+    }
+
+    #[test]
+    fn an_escaped_or_entity_run_has_no_range() {
+        // `R\-91` is Text `R` and Text `-91`: no token at all.
+        assert!(citation_spans("R\\-91").is_empty());
+        // So is an entity inside a token: `F&#45;1` is Text `F`, Text `-`, Text `1`.
+        assert!(citation_spans("F&#45;1").is_empty());
+        // pulldown-cmark gives an entity its own event, so a run after it is its own exact slice.
+        assert_eq!(sliced("&amp; F-1"), vec![(CitationKind::EntryToken, "F-1")]);
+        assert_eq!(citation_spans("&amp; F-1")[0].range, Some(6..9));
+        assert_eq!(
+            sliced("R\\-91 F-7"),
+            vec![(CitationKind::EntryToken, "F-7")]
+        );
+        assert_eq!(sliced("\\*F-1"), vec![(CitationKind::EntryToken, "F-1")]);
+    }
+
+    // `F-1\_x` renders `F-1_x` and `foo\-bar:F-5` renders `foo-bar:F-5`. The scanner still reads
+    // `F-1` and `bar:F-5` (it judges `\b` inside one event; `extract` counts both), but the
+    // author's bytes read differently, so those hits carry no range.
+    #[test]
+    fn a_hit_against_an_escape_has_no_range() {
+        for (text, raw, kind) in [
+            ("F-1\\_x", "F-1", CitationKind::EntryToken),
+            ("F-6\\.", "F-6", CitationKind::EntryToken),
+            ("foo\\-bar:F-5", "bar:F-5", CitationKind::CrossRepoToken),
+        ] {
+            let spans = citation_spans(text);
+            assert_eq!(spans.len(), 1, "{text:?}: {spans:?}");
+            assert_eq!(
+                (spans[0].kind, spans[0].raw.as_str()),
+                (kind, raw),
+                "{text:?}"
+            );
+            assert_eq!(spans[0].range, None, "{text:?}");
+            assert!(extract(text)
+                .citations
+                .iter()
+                .any(|c| c.raw == raw && c.kind == kind));
+        }
+    }
+    // pulldown-cmark ends an event at an escape or an entity, so an event edge is the one place
+    // where the regex's `\b` and the author's bytes can disagree; `source_range` reads the bytes.
+    #[test]
+    fn source_range_reads_the_bytes_around_a_match() {
+        // (text, range, qualified) -> kept?
+        for (text, range, qualified, kept) in [
+            ("x F-1 y", 2..5, false, true),
+            ("F-1", 0..3, false, true),
+            ("(F-1)", 1..4, false, true),
+            ("aF-1", 1..4, false, false),
+            ("_F-1", 1..4, false, false),
+            ("F-1b", 0..3, false, false),
+            ("éF-1", 2..5, false, false),
+            ("F-1\\.", 0..3, false, false),
+            ("-F-1", 1..4, false, true),
+            ("-bar:F-5", 1..8, true, false),
+            ("x-bar:F-5", 2..9, true, false),
+            (" bar:F-5", 1..8, true, true),
+        ] {
+            assert_eq!(
+                source_range(text, range.clone(), qualified).is_some(),
+                kept,
+                "{text:?} {range:?} qualified={qualified}"
+            );
+        }
+        // A range that is not on char boundaries is refused, not sliced.
+        assert_eq!(source_range("éF-1", 1..4, false), None);
+    }
+
+    #[test]
+    fn an_inline_code_hit_is_marked_in_code() {
+        for text in ["`F-1`", "``x ` F-1``", "a `codescout:F-1` b"] {
+            let spans = citation_spans(text);
+            assert_eq!(spans.len(), 1, "{text:?}: {spans:?}");
+            assert!(spans[0].in_code, "{text:?}");
+            assert_eq!(spans[0].range, None, "{text:?}");
+        }
+        let both = citation_spans("`F-1` and F-2");
+        assert_eq!(
+            both.iter().map(|s| s.in_code).collect::<Vec<_>>(),
+            vec![true, false]
+        );
+        assert_eq!(both[1].range, Some(10..13));
+    }
+
+    #[test]
+    fn fenced_and_indented_code_and_frontmatter_have_no_span() {
+        let text = "---\ntags: [F-90]\nid: 0123456789abcdef\n---\n\n```\nF-9 [t](a.md)\n```\n\n~~~\nF-8\n~~~\n\n    F-10 0123456789abcdef\n\nF-1\n";
+        assert_eq!(sliced(text), vec![(CitationKind::EntryToken, "F-1")]);
+        assert_eq!(citation_spans(text).len(), 1);
+    }
+
+    // The scanner does not read an HTML comment or a link reference definition (the parser
+    // emits an Html event for the one and no event at all for the other), so neither is a span.
+    // A reference-style link is a link whose destination is not in its own bytes: it is a hit
+    // with no range.
+    #[test]
+    fn an_html_comment_and_a_reference_definition_have_no_span() {
+        assert!(citation_spans("<!--\nF-1 0123456789abcdef [t](a.md)\n-->\n").is_empty());
+        assert!(citation_spans("a <!-- F-1 --> b").is_empty());
+        assert!(citation_spans("[x]: a.md \"F-2\"\n").is_empty());
+        let spans = citation_spans("see [t][x]\n\n[x]: a.md\n");
+        assert_eq!(spans.len(), 1, "{spans:?}");
+        assert_eq!(
+            (spans[0].kind, spans[0].raw.as_str()),
+            (CitationKind::RelPathLink, "a.md")
+        );
+        assert_eq!(spans[0].range, None);
+    }
+
+    #[test]
+    fn a_heading_remainder_span_skips_the_definition() {
+        let text = "## F-1 — see F-2 and `F-3`\n";
+        assert_eq!(sliced(text), vec![(CitationKind::EntryToken, "F-2")]);
+    }
+
+    // `cross_repo_re` is lowercase-only: a mixed-case qualifier is no qualifier, so the token
+    // stands alone and no span covers `My_Notes:F-2`.
+    #[test]
+    fn a_mixed_case_qualifier_gets_no_cross_repo_span() {
+        let text = "My_Notes:F-2 and my-notes:F-3";
+        assert_eq!(
+            sliced(text),
+            vec![
+                (CitationKind::CrossRepoToken, "my-notes:F-3"),
+                (CitationKind::EntryToken, "F-2"),
+            ]
+        );
+    }
+
+    // A bare URL is plain text to this scanner, so its tokens and ids are hits with ranges;
+    // `grammar::in_url_word` is the guard a rewrite applies to them.
+    #[test]
+    fn a_hit_in_a_bare_url_has_a_range_that_in_url_word_rejects() {
+        use crate::librarian::identity::grammar::in_url_word;
+        let text = "see https://host/runs/R-91/0123456789abcdef and R-92 [t](a.md)";
+        let flags: Vec<(&str, bool)> = citation_spans(text)
+            .iter()
+            .map(|s| {
+                let r = s.range.clone().expect("plain text has a range");
+                (&text[r.clone()], in_url_word(text, &r))
+            })
+            .collect();
+        assert_eq!(
+            flags,
+            vec![
+                ("R-91", true),
+                ("R-92", false),
+                ("0123456789abcdef", true),
+                ("[t](a.md)", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn spans_agree_with_extract_and_slice_their_source_across_the_live_corpus() {
+        let docs_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs");
+        let (mut files, mut ranged, mut rangeless) = (0, 0, 0);
+        for entry in ignore::WalkBuilder::new(&docs_root)
+            .build()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "md") {
+                continue;
+            }
+            let text = std::fs::read_to_string(path).unwrap();
+            let spans = citation_spans(&text);
+            assert_eq!(
+                extract(&text).citations,
+                folded(spans.clone()),
+                "{}",
+                path.display()
+            );
+            for s in spans {
+                let Some(r) = s.range else {
+                    rangeless += 1;
+                    continue;
+                };
+                let slice = text.get(r.clone()).expect("a char boundary range");
+                match s.kind {
+                    CitationKind::RelPathLink => assert!(
+                        slice.starts_with('[') && slice.contains(&s.raw),
+                        "{slice:?} for {:?} in {}",
+                        s.raw,
+                        path.display()
+                    ),
+                    _ => assert_eq!(slice, s.raw, "{}", path.display()),
+                }
+                assert!(!s.in_code);
+                ranged += 1;
+            }
+            files += 1;
+        }
+        assert!(files > 500, "the walk found {files} files");
+        assert!(ranged > 1000, "{ranged} ranged hits");
+        eprintln!("live corpus: {files} files, {ranged} ranged hits, {rangeless} rangeless");
     }
 }

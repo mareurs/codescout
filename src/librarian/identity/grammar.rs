@@ -96,12 +96,40 @@ fn parse_trimmed(raw: &str) -> Option<Reference> {
 /// closing `]]` takes the wiki link out of the citations. With a space between them (`[[x]] (y)`),
 /// or a `[` after it, the wiki link is still a citation.
 pub fn extract(text: &str) -> Vec<Citation> {
+    extract_spanned(text)
+        .into_iter()
+        .map(|s| s.citation)
+        .collect()
+}
+
+/// One citation and the bytes of the text it came from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpannedCitation {
+    pub citation: Citation,
+    /// Bytes of the text handed to [`extract_spanned`]: the whole `[[...]]` for a wiki link, the
+    /// token for a bare token.
+    pub range: Range<usize>,
+}
+
+/// [`extract`] with the byte range of each citation in `text`; `extract` is this mapped to
+/// `.citation`, so the two cannot disagree.
+///
+/// A wiki link's range is the whole `[[...]]` (the range of its link event). A bare token's range
+/// is the token. Both are slices of the original bytes: a bare token has a range only when its
+/// text event equals its source slice (`bare_tokens`), so nothing that spans a backslash escape
+/// or an entity gets one. A token inside a bare URL keeps its citation and its range, because the
+/// scanner reads it (`a_token_in_a_bare_url_is_scanned`); a rewrite must test it with
+/// [`in_url_word`].
+pub fn extract_spanned(text: &str) -> Vec<SpannedCitation> {
     // A suffix start of `text` (`len - body.len()`), so a char boundary.
     let base = frontmatter_end(text);
     let starts = line_starts(text);
-    let cite = |reference, offset: usize| Citation {
-        reference,
-        line: starts.partition_point(|&s| s <= offset) as u32,
+    let cite = |reference, range: Range<usize>| SpannedCitation {
+        citation: Citation {
+            reference,
+            line: starts.partition_point(|&s| s <= range.start) as u32,
+        },
+        range,
     };
 
     let mut out = Vec::new();
@@ -138,7 +166,7 @@ pub fn extract(text: &str) -> Vec<Citation> {
                     } else {
                         dest
                     };
-                    out.push(cite(parse_target(dest), range.start));
+                    out.push(cite(parse_target(dest), range.clone()));
                 }
                 opaque.push(wiki || matches!(link_type, LinkType::Autolink | LinkType::Email));
             }
@@ -149,13 +177,31 @@ pub fn extract(text: &str) -> Vec<Citation> {
             }
             Event::Text(s) if !in_code && !in_heading && !opaque.contains(&true) => {
                 for (offset, token) in bare_tokens(text, &s, &range) {
-                    out.push(cite(Reference::Bare { token }, offset));
+                    let span = offset..offset + token.len();
+                    out.push(cite(Reference::Bare { token }, span));
                 }
             }
             _ => {}
         }
     }
     out
+}
+
+/// True when the whitespace-delimited word around `range` holds `://`: the range is part of a
+/// URL (or sits against one), and a rewrite must leave it alone. A range that is not on char
+/// boundaries of `text` counts as in a URL, so the answer errs towards no rewrite.
+#[allow(dead_code)] // read by the cutover citation rewrite (Plan D task 4); tests read it now
+pub(crate) fn in_url_word(text: &str, range: &Range<usize>) -> bool {
+    let (Some(before), Some(slice), Some(after)) = (
+        text.get(..range.start),
+        text.get(range.clone()),
+        text.get(range.end..),
+    ) else {
+        return true;
+    };
+    let head = before.rsplit(char::is_whitespace).next().unwrap_or("");
+    let tail = after.split(char::is_whitespace).next().unwrap_or("");
+    [head, slice, tail].concat().contains("://")
 }
 
 /// Byte length of the leading YAML frontmatter block, as `link_scan::extract` computes it.
@@ -566,5 +612,184 @@ mod tests {
             refs("| a | [[a-doc]] (x) |\n|---|---|\n| x | y |\n"),
             vec![file("a-doc")]
         );
+    }
+    /// Every text the module's own tests feed `extract`, kept in one place so the span variant
+    /// is held to the same inputs.
+    const FIXTURE_TEXTS: &[&str] = &[
+        "[[a-doc]] [[a-doc:F-3]] [[other/b-doc]] [[other/b-doc:R-91|see this]]",
+        "---\nrests_on: \"[[x-doc]]\"\n---\n# Heading F-1 and [[h-doc]]\n\nInline `[[c-doc]]` and `F-2`.\n\n```toml\n[[rule]]\nF-3\n```\n\n    [[indented-doc]] F-4\n\n[[l-doc|label F-5]] and bare F-6.\n",
+        "intro\n\nsee R-91, not XR-91a or R-9x.\n",
+        "[[a-doc]]\n\n```\n[[b-doc]]\n",
+        "| a | [[t-doc:B-2]] |\n|---|---|\n| x | y |\n",
+        "foo_R-91 R-91_x R-91é éR-91 **R-91** R-91 X&amp;R-91",
+        "<https://example.com/R-91> then R-92",
+        "![[a-doc:F-3|alt F-4]] and [[b-doc]]",
+        "> quote [[q-doc]]\n\n- item [[i-doc]]\n\n[x [[n-doc]] y](https://example.com)\n",
+        "\\[[a-doc]] [[ tracker-hygiene-log ]] [[two words]] [[]] [[a-doc|]]",
+        "one\r\ntwo\r\n\r\nsee [[a-doc]] and R-4\r\n",
+        "## F-1 — title\n\n> quote F-2\n\n- item F-3\n\n| a |\n|---|\n| F-4 |\n",
+        "R-1 [[a-doc]] [[a-doc]] R-2",
+        "| a | [[t-doc\\|lbl]] |\n|---|---|\n| x | [[t-doc:B-2\\|lbl]] |\n",
+        "[[x-doc]](https://e.com) and [[y-doc]] (z) and [[w-doc]][v]",
+        "<details>R-91 [[a-doc]]</details>\n\nsee https://host/runs/R-91 and R-92",
+        "R\\-91 and F\\-1 and &amp; F-7 and é [[a-doc]] ü R-3",
+    ];
+
+    /// The citations of `text` with the exact source slice each one points at.
+    fn slices(text: &str) -> Vec<(Reference, &str)> {
+        extract_spanned(text)
+            .into_iter()
+            .map(|s| (s.citation.reference, &text[s.range]))
+            .collect()
+    }
+
+    #[test]
+    fn extract_is_extract_spanned_without_ranges() {
+        let mut total = 0;
+        for text in FIXTURE_TEXTS {
+            let spanned: Vec<Citation> = extract_spanned(text)
+                .into_iter()
+                .map(|s| s.citation)
+                .collect();
+            assert_eq!(extract(text), spanned, "{text:?}");
+            total += spanned.len();
+        }
+        assert!(total >= 30, "the fixtures must hold citations: {total}");
+    }
+
+    #[test]
+    fn a_wiki_link_span_covers_its_brackets() {
+        assert_eq!(
+            slices("x [[a-doc:F-1]] y"),
+            vec![(
+                Reference::Entry {
+                    repo: None,
+                    key: k("a-doc"),
+                    token: "F-1".into()
+                },
+                "[[a-doc:F-1]]"
+            )]
+        );
+        assert_eq!(
+            slices("é [[b-doc|the label]] and [[ c-doc ]]"),
+            vec![
+                (file("b-doc"), "[[b-doc|the label]]"),
+                (file("c-doc"), "[[ c-doc ]]"),
+            ]
+        );
+        // In a table cell the escaped pipe is part of the span.
+        assert_eq!(
+            slices("| a | [[t-doc\\|lbl]] |\n|---|---|\n| x | y |\n"),
+            vec![(file("t-doc"), "[[t-doc\\|lbl]]")]
+        );
+        // A malformed target keeps its brackets too.
+        assert_eq!(
+            slices("see [[two words]]"),
+            vec![(malformed("two words"), "[[two words]]")]
+        );
+    }
+
+    #[test]
+    fn a_bare_token_span_is_its_token() {
+        let text = "é see R-91, and **F-2**\n\n| a |\n|---|\n| B-3 |\n";
+        assert_eq!(
+            slices(text),
+            vec![
+                (bare("R-91"), "R-91"),
+                (bare("F-2"), "F-2"),
+                (bare("B-3"), "B-3"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_span_starts_on_the_line_the_citation_reports() {
+        let text = "one\n\n[[a-doc]] and\nR-4\n";
+        for s in extract_spanned(text) {
+            let line = text[..s.range.start].matches('\n').count() as u32 + 1;
+            assert_eq!(s.citation.line, line, "{:?}", s.citation);
+        }
+        assert_eq!(extract_spanned(text).len(), 2);
+    }
+
+    #[test]
+    fn an_escaped_run_has_no_span_and_a_neighbour_keeps_its_own() {
+        // `R\-91`: Text `R` and Text `-91`, so no token and no span for either.
+        assert_eq!(slices("R\\-91 and F\\-1"), vec![]);
+        // An escaped opener is text, not a wiki link.
+        assert_eq!(slices("\\[[a-doc]]"), vec![]);
+        // A run after an escape is its own slice, so its span is exact.
+        assert_eq!(
+            slices("R\\-91 and F-7 [[a-doc]]"),
+            vec![(bare("F-7"), "F-7"), (file("a-doc"), "[[a-doc]]")]
+        );
+    }
+
+    #[test]
+    fn an_entity_is_never_part_of_a_span() {
+        // The entity's Text is `&` over five bytes: it is not its source slice, so it is skipped.
+        assert_eq!(slices("&amp; R-91"), vec![(bare("R-91"), "R-91")]);
+        assert_eq!(
+            slices("&amp;R-91 and X&amp;R-92"),
+            vec![(bare("R-91"), "R-91"), (bare("R-92"), "R-92")]
+        );
+    }
+
+    #[test]
+    fn frontmatter_code_html_and_labels_have_no_span() {
+        let text = "---\nrests_on: \"[[x-doc]] F-9\"\n---\nInline `[[c-doc]]` and ``F-2 `x` [[d-doc]]``.\n\n```toml\n[[rule]]\nF-3\n```\n\n    [[indented-doc]] F-4\n\n<details>R-91 [[e-doc]]</details>\n\n[[l-doc|label F-5]] and ![[m-doc]] and <https://e.com/R-92>.\n";
+        assert_eq!(slices(text), vec![(file("l-doc"), "[[l-doc|label F-5]]")]);
+    }
+
+    // The scanner reads no HTML comment and no link reference definition (the parser consumes a
+    // definition and emits no event for it), so neither yields a span.
+    #[test]
+    fn an_html_comment_and_a_link_reference_definition_have_no_span() {
+        assert_eq!(slices("<!--\n[[a-doc]] R-1\n-->\n\nafter"), vec![]);
+        assert_eq!(slices("a <!-- [[a-doc]] R-1 --> b"), vec![]);
+        assert_eq!(
+            slices("[x]: https://e.com/R-91 \"F-2 [[a-doc]]\"\n\nbody"),
+            vec![]
+        );
+    }
+
+    // The scanner reads tokens in a bare URL (`a_token_in_a_bare_url_is_scanned`), so they keep
+    // their citation and their span; `in_url_word` is the guard a rewrite applies to them.
+    #[test]
+    fn a_token_in_a_bare_url_has_a_span_that_in_url_word_rejects() {
+        let text = "see https://host/runs/R-91 and R-92, (https://h.io/x?id=F-3) [[a-doc]]";
+        let spans = extract_spanned(text);
+        let inside: Vec<(&str, bool)> = spans
+            .iter()
+            .map(|s| (&text[s.range.clone()], in_url_word(text, &s.range)))
+            .collect();
+        assert_eq!(
+            inside,
+            vec![
+                ("R-91", true),
+                ("R-92", false),
+                ("F-3", true),
+                ("[[a-doc]]", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_span_slices_the_exact_original_bytes() {
+        let mut seen = 0;
+        for text in FIXTURE_TEXTS {
+            for s in extract_spanned(text) {
+                let slice = text.get(s.range.clone()).expect("a char boundary range");
+                match &s.citation.reference {
+                    Reference::Bare { token } => assert_eq!(slice, token, "{text:?}"),
+                    _ => assert!(
+                        slice.starts_with("[[") && slice.ends_with("]]"),
+                        "{slice:?} in {text:?}"
+                    ),
+                }
+                seen += 1;
+            }
+        }
+        assert!(seen >= 30, "{seen}");
     }
 }
