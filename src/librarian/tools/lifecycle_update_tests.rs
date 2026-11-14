@@ -225,6 +225,26 @@ async fn an_empty_extra_with_body_edits_applies_and_alone_is_refused() {
     assert!(text.contains("the update changes nothing"), "{text}");
     assert!(read(tmp.path(), ENTRY).contains("We pick Y."), "unchanged");
 }
+/// The entry route keeps the prefix guard of the generic path: a schema that declares a field
+/// named `entry_prefix` lets `update_entry` accept the value, and the guard still refuses a prefix
+/// no citation can address, with nothing written.
+#[tokio::test]
+async fn an_entry_update_claiming_an_uncitable_prefix_is_refused() {
+    let ledger = LEDGER.replace(
+        "  area: {type: scalar}\n",
+        "  area: {type: scalar}\n  entry_prefix: {type: scalar}\n",
+    );
+    let tmp = TempDir::new().unwrap();
+    write(tmp.path(), README, &ledger);
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), ENTRY, &open_entry(), "entry", "open");
+
+    let text = refusal(&ctx, &id, json!({"extra": {"entry_prefix": "dctx"}})).await;
+
+    assert!(text.contains("cannot be cited"), "{text}");
+    assert_eq!(read(tmp.path(), ENTRY), open_entry(), "nothing written");
+    assert_eq!(row(&ctx, &id).status, "open");
+}
 
 /// C3: `commit_refresh` alone is a legitimate empty patch, and on an entry it must not reach
 /// `update_entry`, which would refuse it as `EmptyUpdate`.
