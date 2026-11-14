@@ -45,10 +45,13 @@ enum Twin {
 /// Decide the relation line for `a` in the source document `src_id` without writing anything.
 ///
 /// A rule that leaves the line out is a [`Twin::Skip`] with its reason: a rel that gives no label,
-/// a source or target the grammar cannot name (`grammar_form_of` refuses: outside the key space,
-/// a shared key, no git repository), or the identical line already in the document. A document
-/// that cannot be read, or whose text cannot take the line, is an error: the writer owns the
-/// document, so a line it cannot add is a failed write and records nothing.
+/// a source document that lies in no git repository, a target the grammar cannot name
+/// (`grammar_form_of` refuses: outside the key space, a shared key, no git repository), or the
+/// identical line already in the document. The source's own key is not checked, so a source
+/// outside the key space still gets the line. A document that cannot be read, or whose text cannot
+/// take the line, is an error: the writer owns the document, so a line it cannot add is a failed
+/// write and records nothing. A source whose file is not in this worktree is `call`'s to skip
+/// before it asks here.
 fn plan_relation_line(ctx: &ToolContext, cat: &Catalog, src_id: &str, a: &Args) -> Result<Twin> {
     use crate::librarian::catalog::dual_write::document_label;
 
