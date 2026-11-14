@@ -239,6 +239,88 @@ mod tests {
         assert_eq!(read[1].reference, parse_target("dst-key:F-3"));
     }
 
+    /// One document holding both sections, written in turn: event, relation, event, relation. The
+    /// second relation has the label `Mutates`, the same label as each event's own `**Mutates:**`
+    /// line, and the second event mutates the same target, so the identical line stands once in
+    /// each section. Each writer must keep its own heading single, put its text in its own section,
+    /// and not take the other's line for its own: an idempotence check that looked outside
+    /// `## Relations` would return `None` for the last splice, and an event splice that ended its
+    /// section at the wrong heading would lose or misorder the second event.
+    #[test]
+    fn one_document_holds_events_and_relation_lines_in_turn() {
+        use crate::librarian::catalog::event_text::{
+            parse_event_sections, splice_event, EventText,
+        };
+        let event = |id: &str, mutates: &str| EventText {
+            id: id.to_owned(),
+            kind: "note".to_owned(),
+            created_at_ms: 1_794_637_800_000,
+            author: Some("alice".to_owned()),
+            anchor_commit: None,
+            head_commit: None,
+            parent: None,
+            resolves: None,
+            source: None,
+            mutates: vec![mutates.to_owned()],
+            payload: serde_json::json!({ "text": format!("text of {id}") }),
+        };
+        let mutates = label_for_rel("mutates").unwrap();
+        assert_eq!(mutates, "Mutates");
+
+        let doc = splice_event(DOC, &event("ev-1", "[[a]]")).unwrap();
+        let doc = splice_relation(&doc, "Implements", "[[x]]")
+            .unwrap()
+            .unwrap();
+        let doc = splice_event(&doc, &event("ev-2", "[[y]]")).unwrap();
+        let doc = splice_relation(&doc, &mutates, "[[y]]")
+            .unwrap()
+            .expect("the event's identical line is not the idempotent copy");
+
+        assert_eq!(count_of(&doc, "\n## Events\n"), 1, "{doc}");
+        assert_eq!(count_of(&doc, "\n## Relations\n"), 1, "{doc}");
+        let events = parse_event_sections(&doc);
+        assert_eq!(
+            events.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            ["ev-1", "ev-2"],
+            "{doc}"
+        );
+        assert_eq!(events[0].mutates, ["[[a]]"]);
+        assert_eq!(events[1].mutates, ["[[y]]"]);
+
+        // The reader takes every column-0 label line, so each event's `**Mutates:**` line is a
+        // relation too, in document order before the `## Relations` lines.
+        let read: Vec<(String, &str)> = relations(&doc)
+            .into_iter()
+            .map(|r| {
+                (
+                    r.label,
+                    doc.lines().nth(r.line as usize - 1).unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("Mutates".to_owned(), "**Mutates:** [[a]]"),
+                ("Mutates".to_owned(), "**Mutates:** [[y]]"),
+                ("Implements".to_owned(), "**Implements:** [[x]]"),
+                ("Mutates".to_owned(), "**Mutates:** [[y]]"),
+            ],
+            "{doc}"
+        );
+        let relations_at = doc.find("\n## Relations\n").unwrap();
+        assert!(
+            doc.find("\n## Events\n").unwrap() < relations_at,
+            "the events section was written first and stays first: {doc}"
+        );
+        assert!(
+            doc[relations_at..].ends_with("**Implements:** [[x]]\n\n**Mutates:** [[y]]\n"),
+            "both relation lines sit in the relations section, in call order: {doc}"
+        );
+        // A repeat of the last link changes nothing, although the event holds the same line.
+        assert_eq!(splice_relation(&doc, &mutates, "[[y]]").unwrap(), None);
+    }
+
     #[test]
     fn the_frontmatter_block_stays_byte_for_byte() {
         let doc = "---\r\ntitle: T\r\ntags: [a]\r\n---\nbody\n";
