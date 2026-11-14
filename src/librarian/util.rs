@@ -24,10 +24,10 @@ pub fn normalize_rel_path(rel: &str) -> String {
 /// takes its path from the catalog (`row.abs_path`), from a frontmatter declaration or from
 /// `base_dir.join(rel_path)` — none of them passes through `validate_write_path`, so nothing else
 /// asks where the write lands. A write that follows a leaf link changes the link's target, and a
-/// catalogued row can be a link: the indexer no longer catalogs a link out of the repository (the read door refuses it,
-/// `read_door`), but a pulled commit can turn a catalogued file into a link, and a catalog an
-/// older indexer wrote still holds such rows, so a row can name a file the repository does not
-/// own.
+/// catalogued row can be a link: the indexer no longer catalogs a link out of the repository
+/// (the read door refuses it, `read_door`), but a pulled commit can turn a catalogued file into a
+/// link, and a catalog an older indexer wrote still holds such rows, so a row can name a file the
+/// repository does not own.
 ///
 /// * Replacing the link with a regular file (what `util::fs::atomic_write` does for the
 ///   `create_file` / `edit_*` tools) is wrong HERE: the caller asked to update a document and the
@@ -43,13 +43,27 @@ pub fn normalize_rel_path(rel: &str) -> String {
 /// `Ok` (a create has nothing to refuse until it exists), and so is an `lstat` that fails for any
 /// other reason: the write that follows will fail by itself and say why.
 ///
-/// Limit, stated so it is not read as a guarantee: this checks the LEAF only (a link in a parent
-/// directory is [`refuse_path_outside_root`]'s question, asked by [`write_catalogued_file`]).
-/// The check and the write are two steps. [`write_catalogued_file`] replaces the document with
-/// `util::fs::atomic_write`, so a link planted in that window is REPLACED by a regular file, and
-/// the call reports success. The first bullet above calls that outcome wrong. It is accepted here
-/// because the window is two syscalls wide, and the old outcome was worse: the write went
-/// THROUGH the link and changed a file the repository does not own.
+/// Limits, stated so they are not read as a guarantee. This checks the LEAF only (a link in a
+/// parent directory is [`refuse_path_outside_root`]'s question, asked by
+/// [`write_catalogued_file`]). The check and the write are separate steps, so a link can appear
+/// between them. The outcome depends on when it appears:
+///
+/// * A link that is there at this check is refused. The error is recoverable and nothing is
+///   written.
+/// * A link planted after this check and before the open in
+///   [`crate::util::fs::refuse_unwritable_existing`] makes that open fail. On Unix the open uses
+///   `O_NOFOLLOW`, so the error is `ELOOP`. It is an `io::Error`, and nothing is written. (Where
+///   the open has no `O_NOFOLLOW`, the open follows the link and this outcome does not apply.)
+/// * A link planted after that open is REPLACED by a regular file, at the `rename` in
+///   `util::fs::atomic_write`. The link's target is not changed, and the call reports success.
+///   The first bullet above calls that outcome wrong. This interval is many steps wide:
+///   `check_write`, `observe_write` (Linux), `metadata`, the staging file create, `write_all`,
+///   `set_permissions` and then the `rename`. It grows with the size of the document. If the link
+///   is planted before the `metadata` call, the new file takes the mode of the link's target,
+///   because `metadata` follows the link.
+///
+/// The last outcome is accepted because no outcome writes THROUGH the link. A write through the
+/// link would change a file the repository does not own.
 pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Result<()> {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return Ok(());
@@ -89,9 +103,10 @@ pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Re
 /// bytes in place, and no staging file remains. So an `io::Error` from this function means the
 /// document is unchanged. The order of the steps is fixed: the symbolic-link refusal, the
 /// outside-repository refusal, [`crate::util::fs::refuse_unwritable_existing`], then the write.
+/// For a link that appears during the call, see [`refuse_write_through_symlink`].
 ///
-/// Three consequences of a replace, all accepted (plan `2026-11-14-atomic-catalogued-write-door`,
-/// ruling A-R7):
+/// Five consequences of a replace, all accepted (plan `2026-11-14-atomic-catalogued-write-door`,
+/// rulings A-R2 and A-R7):
 ///
 /// * A rename replaces a read-only file. The probe asks the file first, so a document that was
 ///   refused before is still refused.
@@ -100,6 +115,13 @@ pub(crate) fn refuse_write_through_symlink(path: &std::path::Path) -> anyhow::Re
 ///   permission.
 /// * The new file belongs to the writer. Owner, group, ACLs and extended attributes are not kept,
 ///   and a hard link to the document is broken. The mode is kept (without setuid and setgid).
+/// * A document that is a bind-mount point fails with `EBUSY`, because a rename cannot replace a
+///   mount point.
+/// * The write needs free space equal to the size of the document, because the staging file and
+///   the old file exist together until the rename.
+///
+/// A refusal for want of write permission on the directory carries a hint that says the
+/// directory must be writable (see `explain_denied_replace`).
 ///
 /// Not fsynced: atomic against a failed write, not durable across power loss.
 ///
@@ -114,8 +136,28 @@ pub(crate) fn write_catalogued_file(
     refuse_write_through_symlink(path)?;
     refuse_catalogued_path_outside_repo(roots, path, "write")?;
     crate::util::fs::refuse_unwritable_existing(path)?;
-    crate::util::fs::atomic_write(path, contents.as_ref())?;
+    crate::util::fs::atomic_write(path, contents.as_ref()).map_err(explain_denied_replace)?;
     Ok(())
+}
+
+/// The error of a failed replace, as an `anyhow::Error`. On Unix an `EACCES` from the replace gets
+/// one line of context: the probe passed, so the document is writable, and an agent that sees only
+/// "Permission denied" would look at the file mode and find no lead. The replace needs write and
+/// search permission on the directory that holds the document. The text does not spell a path.
+///
+/// The test is on the raw OS error. `atomic_write` also returns `PermissionDenied` for a refusal
+/// by the protected-files guard, and that error has no OS error, so it gets no hint (the hint
+/// would be wrong for it). The context wraps the `io::Error`, so the error stays reachable with
+/// `downcast_ref::<std::io::Error>()`.
+fn explain_denied_replace(e: std::io::Error) -> anyhow::Error {
+    #[cfg(unix)]
+    if e.raw_os_error() == Some(libc::EACCES) {
+        return anyhow::Error::new(e).context(
+            "the directory that holds the document must be writable, because replacing the \
+             document needs write permission on that directory",
+        );
+    }
+    anyhow::Error::new(e)
 }
 
 /// [`refuse_path_outside_root`] for a catalog-supplied FILE path, against the root [`door_root`]
@@ -820,6 +862,7 @@ mod tests {
             format!(r"LIKE {r}({r}({r}(?1, '\', '\\'), '%', '\%'), '_', '\_') || '/%' ESCAPE '\'")
         );
     }
+
     /// The names in `dir` that an interrupted or failed `atomic_write` would leave behind.
     fn staging_files(dir: &std::path::Path) -> Vec<String> {
         std::fs::read_dir(dir)
@@ -830,9 +873,14 @@ mod tests {
     }
 
     /// The `io::Error` the door wrapped, if its error holds one.
+    #[cfg(unix)]
     fn io_kind(e: &anyhow::Error) -> Option<std::io::ErrorKind> {
         e.downcast_ref::<std::io::Error>().map(|io| io.kind())
     }
+
+    /// The start of the line the door adds to an `EACCES` from the replace.
+    #[cfg(unix)]
+    const DIRECTORY_HINT: &str = "the directory that holds the document must be writable";
 
     #[test]
     fn a_write_replaces_the_document_and_leaves_no_staging_file() {
@@ -889,8 +937,50 @@ mod tests {
             Some(std::io::ErrorKind::PermissionDenied),
             "{e:#}"
         );
+        assert!(
+            format!("{e:#}").contains(DIRECTORY_HINT),
+            "an EACCES from the replace names the directory: {e:#}"
+        );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), "old\n");
         assert_eq!(staging_files(&docs), Vec::<String>::new());
+    }
+
+    /// `atomic_write` also returns `PermissionDenied` when the protected-files guard refuses the
+    /// content. That error has no OS error, and the directory is not its cause, so it must not
+    /// get the directory hint. The file is a loaded-config name (`.codescout/project.toml`) and the
+    /// new text is not TOML.
+    #[cfg(unix)]
+    #[test]
+    fn a_protected_file_refusal_does_not_carry_the_directory_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let config_dir = dir.path().join(".codescout");
+        std::fs::create_dir(&config_dir).unwrap();
+        let doc = config_dir.join("project.toml");
+        std::fs::write(&doc, "[security]\nprofile = \"default\"\n").unwrap();
+
+        let e = write_catalogued_file(&roots, &doc, "not toml [\n")
+            .expect_err("the protected-files guard must refuse this content");
+
+        assert_eq!(
+            io_kind(&e),
+            Some(std::io::ErrorKind::PermissionDenied),
+            "{e:#}"
+        );
+        assert_eq!(
+            e.downcast_ref::<std::io::Error>().unwrap().raw_os_error(),
+            None,
+            "a guard refusal has no OS error: {e:#}"
+        );
+        assert!(
+            !format!("{e:#}").contains(DIRECTORY_HINT),
+            "the directory is not the cause of a guard refusal: {e:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            "[security]\nprofile = \"default\"\n"
+        );
+        assert_eq!(staging_files(&config_dir), Vec::<String>::new());
     }
 
     /// A rename would replace a mode-0444 file, so the door asks the file first (ruling A-R2).
@@ -916,6 +1006,10 @@ mod tests {
             io_kind(&e),
             Some(std::io::ErrorKind::PermissionDenied),
             "{e:#}"
+        );
+        assert!(
+            !format!("{e:#}").contains(DIRECTORY_HINT),
+            "the probe refused, not the replace, so the directory is not the cause: {e:#}"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), "old\n");
         assert_eq!(staging_files(dir.path()), Vec::<String>::new());

@@ -510,6 +510,7 @@ fn atomic_write_with(
         let _ = std::fs::remove_file(&tmp);
     })
 }
+
 /// Ask whether an EXISTING target can be written, without writing it. Run it before
 /// [`atomic_write`] replaces a file that the caller is not allowed to change.
 ///
@@ -520,15 +521,21 @@ fn atomic_write_with(
 /// **What it does.** A missing path gives `Ok`: the caller creates the file, and the check never
 /// creates it. An existing path is opened for writing, WITHOUT create and WITHOUT truncate, and
 /// closed again, so no byte changes. On Unix the open adds `O_NONBLOCK` (a FIFO with no reader
-/// must not hold the call) and `O_NOFOLLOW` (a link planted after the caller's own leaf check
-/// is not followed; the open fails with `ELOOP`). The opened descriptor must be a regular file.
+/// must not hold the call), `O_NOCTTY` (opening a terminal device cannot make it this process's
+/// controlling terminal, as in `open_regular`) and `O_NOFOLLOW` (a link planted after the
+/// caller's own leaf check is not followed; the open fails with `ELOOP`). The opened descriptor
+/// must be a regular file.
 /// Anything else is refused with an error that does not spell the path. Any other open error
 /// returns unchanged: `EACCES` for mode 0444, `EISDIR` for a directory, `EROFS`, `EPERM`.
 ///
 /// **Limits.** A process that may write anyway (root) is admitted, as an in-place write would
 /// have admitted it. `access(W_OK)` is not used: it checks the real user id, not the effective
 /// one. The check and the replace are two steps, so a change between them is not seen. It costs
-/// one extra `open` per write.
+/// one extra `open` per write. On Linux, `open(2)` with `O_NONBLOCK` returns `EWOULDBLOCK` for a
+/// file under an incompatible lease (knfsd delegations, Samba kernel oplocks). The old in-place
+/// write blocked until the lease broke and then succeeded. Now such a write is refused. The check
+/// opens a device node for writing before it tests the type (the same open-then-check order as
+/// `open_regular`). A device node in a repository needs `mknod`.
 ///
 /// It lives here, beside [`atomic_write`], because the librarian's source gate counts every
 /// production `OpenOptions` under `src/librarian` as a raw read.
@@ -538,7 +545,7 @@ pub(crate) fn refuse_unwritable_existing(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY | libc::O_NOFOLLOW);
     }
     let file = match options.open(path) {
         Ok(file) => file,
@@ -2459,10 +2466,14 @@ mod refuse_unwritable_existing_tests {
         })
         .unwrap_err();
 
-        assert_ne!(
-            e.raw_os_error(),
-            Some(libc::ENXIO),
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::InvalidInput,
             "the open must have succeeded, so the type check did the refusing: {e}"
+        );
+        assert!(
+            e.raw_os_error().is_none(),
+            "the type check's error is not an OS error: {e}"
         );
         assert!(
             !e.to_string().contains(&*dir.path().to_string_lossy()),

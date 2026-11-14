@@ -349,12 +349,14 @@ pub(crate) fn restore_section_after_failed_commit(
     match crate::librarian::read_door::ReadDoor::new(Vec::new()).text_for_write(path) {
         // The write that put `written` there was guarded; the check is repeated because the
         // file is protected by nothing between the two (see the comment above), and a link
-        // planted in that window would turn this restore into a write through it.
+        // planted in that window cannot be written through: the probe in the door fails its open
+        // with ELOOP, or the replace swaps the link for a regular file.
         Ok(current) if current == written => {
             match crate::librarian::util::write_catalogued_file(
                 // Empty on purpose: this restores a path the SAME call just wrote through the door
                 // (leaf and containment already passed), so the only thing left to defend is a link
-                // planted in between, which the leaf rule and the spelled-repo fallback cover.
+                // planted in between, which the leaf rule, the probe in the door and the spelled-repo
+                // fallback cover.
                 &[],
                 path,
                 original,
