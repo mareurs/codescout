@@ -9,8 +9,8 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 24
-entry_high_water_W: 12
+entry_high_water_F: 29
+entry_high_water_W: 13
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
 
@@ -124,6 +124,11 @@ entry_high_water_W: 12
 | F-22 | 2026-11-14 | med | plan-prose | open | **Plan C3 contradicts two SQLite documents: WITHOUT ROWID with 3 KB blobs, and "delete the file at any time"** — withoutrowid.html § 4; howtocorrupt.html § 2.5 |
 | F-23 | 2026-11-14 | low | plan-prose | open | **Plan C3: five small drifts between its text and the code** — guide claims a model switch-back reads the cache; R11 "one extra embed" ignores concurrency; a failed open is sticky; two tests cannot fail as named |
 | F-24 | 2026-11-14 | med | plan-prose | open | **Plan C3 Task 1: four store tests pass on the broken build they should catch** — the flush counter is kept by the caller of the write, so a per-row commit stays at 1; symmetric tally inputs; WAL unpinned; only a short blob tested |
+| F-25 | 2026-11-14 | high | plan-prose | open | **Plan D renames and rewrites markdown that code, harnesses and mdBook read by path, and can create a key collision** — `include_str!` targets, `.github` templates, `_TEMPLATE.md`, two `render_prompt.md` to one key, SUMMARY.md links |
+| F-26 | 2026-11-14 | high | plan-prose | open | **Plan D drops augmentation params outside the entry collection with no report line** — also unshown fields of body-defined entries and a stale sidecar's newer shape; Task 8 asserts no derived row |
+| F-27 | 2026-11-14 | med | plan-prose | open | **Plan D's plan of the committed export misreports exported observations and renamed documents as unrecoverable** — `splice_event` refuses the duplicate id; old `rel_path`s miss HEAD; the e2e checks writes, not the tally |
+| F-28 | 2026-11-14 | med | plan-prose | open | **Plan D's citation rewrite can write the wrong bytes or guess** — lowercase-only qualifier regex vs its own `My_Notes:F-2` test; merged Text runs across escapes; tokens inside URLs; history maps a deleted file's id by key equality |
+| F-29 | 2026-11-14 | low | plan-prose | open | **Plan D: nine smaller drifts between its text and the code** — a byte-for-byte stamp test vs `frontmatter::write`; fence length; a refusal with no command; two dry runs reading two catalogs; no side-file re-check; report overwritten |
 
 ## Wins Index
 
@@ -141,6 +146,7 @@ entry_high_water_W: 12
 | W-10 | 2026-11-13 | high | two independent Opus reviews of a plan before execution | cross-repo cites written as unqualified keys; a duplicate-key check counting worktree shadow rows; a renumber check reading the survivor body; tasks that end red on clippy; gates that stay green while the code refuses the recipe | validated |
 | W-11 | 2026-11-14 | med | independent review of a plan: read every named test and caller | a probe that turns the read-door source gate red after the Task 1 commit; a test predicted green that is red | validated |
 | W-12 | 2026-11-14 | high | independent review of a plan: read each fill and eviction rule against the path that reaches it | a cache that starts empty and evicts stable content at 90 days while every test passes; a guard rustfmt breaks | validated |
+| W-13 | 2026-11-14 | high | independent review of a plan: test the riskiest claim with a scratch experiment and each rule against the real file list | an immutable open that reads stale data without the side-file refusal; renames of `include_str!` targets and harness-named files | validated |
 
 ---
 
@@ -1131,6 +1137,142 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 **Fix idea / Pointer:** (1) An atomicity oracle: a raw connection adds `CREATE TRIGGER refuse BEFORE INSERT ON vec WHEN NEW.input_hash = 'bad' BEGIN SELECT RAISE(ABORT, 'refused'); END`; stage good, bad, good; flush is `{stored: 0, failed: 3}` and no row landed. (2) Use asymmetric inputs. (3) Read `PRAGMA journal_mode` through a second connection. (4) Add a `zeroblob(20)` case.
 
 ---
+
+## F-25 — Plan D renames and rewrites markdown that code, harnesses and mdBook read by path, and can create a key collision
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent Opus review of `docs/superpowers/plans/2026-11-14-artifact-identity-plan-d-cutover-tool.md` (uncommitted draft) before any implementer ran.
+
+**When:** Checking Task 4 (D-R14 renames) and Task 3 (path-link rewrite) against this repository's real population.
+
+**Expected:** A rename or rewrite that breaks a reader outside the markdown corpus is reported, never applied silently. A rename never makes a valid key ambiguous.
+
+**Got:** (1) `git ls-files` lists in-scope markdown with invalid keys that other files read by path: `src/prompts/workspace_onboarding_prompt.md` (`include_str!`, `src/prompts/mod.rs:1088`), `src/librarian/tools/audit_doc_refs/render_prompt.md` and `src/librarian/tools/legibility_scan/render_prompt.md` (`include_str!`, `audit_doc_refs/mod.rs:966`, `legibility_scan/mod.rs:424`), `docs/PROGRESSIVE_DISCOVERABILITY.md` (`include_str!`, `src/server.rs:2972`; `build.rs:34`), `docs/issues/_TEMPLATE.md` (18 code, script and test files), `scripts/measure/judge_prompt.md` (`scripts/measure/judge.py:55`), `.github/ISSUE_TEMPLATE/bug_report.md` and `.github/pull_request_template.md` (names GitHub dictates). None is excluded by `.codescout/key-space.toml`. The plan renames them all and reports no non-markdown reference. (2) The two `render_prompt.md` files both canonicalise to `render-prompt`. D-R14 refuses only an existing target path or two renames to one PATH, so both renames run and create a duplicate key. A rename onto a key that another folder already holds also runs and turns that document's valid `[[key]]` citations into `key_collision`. (3) The path-link rewrite turns `docs/manual/src/SUMMARY.md` (mdBook navigation, 20+ `[x](y.md)` links) and `src/prompts/*.md` (prompt surfaces pinned by snapshot tests) into wiki links, which breaks the book build and the gate. The plan's own Global Constraint "no prompt surface changes" holds for its code but not for the tool's output.
+
+**Probable cause:** The plan treats every in-key-space `.md` as a document that only other documents read.
+
+**Workaround:** Reported as Critical in the review.
+
+**Severity:** high
+
+**Status:** open
+
+**Rests on:** `src/librarian/identity/key.rs:127` (`key_of` refuses `_` and `.` stems); `.codescout/key-space.toml` exclude list read this session.
+
+**Fix idea / Pointer:** `plan_renames` refuses a new key that any HEAD document or another rename holds (reason `key collision`). For each rename, scan HEAD's non-markdown blobs for the old file name and the old path, and refuse the rename with the hits as `path:line`. Before the run, the operator either extends the key space (`src/`, `.github/`, `scripts/measure`, `docs/manual/src`) or the tool takes `--no-rewrite <glob>`. The dry run prints both lists.
+
+## F-26 — Plan D drops augmentation params outside the entry collection with no report line
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent Opus review of the Plan D draft.
+
+**When:** Tracing each catalog-only fact class from the old row to committed text to what the derived index reads back.
+
+**Expected:** Lossless-or-reported (D-R7): every catalog fact either lands in committed text or gets a report line that says it is lost.
+
+**Got:** (1) `AugmentationRow.params` is the whole raw JSON (`src/librarian/catalog/augmentation.rs:15-40`). `AugmentationSidecar` holds only prompt, entry_collection, params_schema, render_template, append_mode and history_cap (`src/librarian/augmentation_sidecar.rs:49-64`). Task 5 exports only the rows of `entry_collection`. Params keys outside the collection, and all params of an augmentation with no `entry_collection`, are dropped, and no `Class` counts or reports them. (2) An entry whose token the body defines is `Skipped` with "the body defines it". Its params fields that the section does not show (status, severity, category) are dropped, and the reason does not say so. (3) The `doctor` skip rule that Task 5 reuses ("already exported and declared", `src/librarian/tools/doctor.rs:2075-2085`) never refreshes a sidecar. A shape that changed in the catalog after an earlier `export_augmentations` is reported as skipped and its newer prompt or schema is lost. (4) The derived index has no event, observation, augmentation or relation-label table (`src/librarian/derived/schema.rs:31-108`). The exported text is chunked and its wiki links become edges, but nothing round-trips the event fields, and Task 8 asserts no `derived.db` row at all.
+
+**Probable cause:** The spec's store-boundary table lists "ledger entries in augmentation params" and no other params content, and the plan follows the table, not the rows.
+
+**Workaround:** Reported as Critical/Important in the review.
+
+**Severity:** high
+
+**Status:** open
+
+**Rests on:** Spec § The store boundary ("Nothing in the catalog lacks [a committed home]") and the plan's D-R7.
+
+**Fix idea / Pointer:** Add a `ParamsOther` class: one `Unrecoverable` item per augmentation and params key outside the entry collection (or export a params snapshot beside the sidecar). Name the dropped fields in the `Skipped` reason of a body-defined entry. Compare the rendered sidecar with HEAD's and report a difference as `shape drift`. In Task 8, assert `derived.db` rows: entry `(docs/ledger.md, F-2)`, an `entry` edge for `[[ledger:F-1]]`, a `file` edge from `docs/log.md` to `ledger`, and no `malformed` edge on a rewritten line.
+
+## F-27 — Plan D's plan of the committed export misreports exported observations and renamed documents as unrecoverable
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent Opus review of the Plan D draft.
+
+**When:** Checking D-R2 and D-R10 ("a run after the commit is safe") per export class.
+
+**Expected:** A plan of the committed export writes nothing and reports nothing new as unrecoverable, so the report the operator reads after the commit is true.
+
+**Got:** (1) An observation with no matching catalog note becomes a note section with id `observation-<rowid>`. On the next plan its "covered" test still reads only the catalog's notes, so the plan builds the same section again, and `splice_event` refuses it ("event id … is already in this document", `src/librarian/catalog/event_text.rs:385-387`). Task 6 turns that error into `Unrecoverable`. The text does not change, so Task 8's "second `--apply` reports every file unchanged" and "a dry run after the commit reports `writes` 0" both pass while the tally is wrong. (2) Old rows hold `rel_path` from before the rename. After the commit, renames come only from HEAD's `IndexProblem`s, and HEAD has none, so every row of a renamed document becomes `document not in HEAD`. (3) After a partial commit, `[[My_Notes]]` in a file that was not yet rewritten can no longer follow the rename: `renamed_keys` is empty, and `key_of("docs/My_Notes.md")` fails, so the history map cannot map the hex id either.
+
+**Probable cause:** Each detector is specified for the first run; the post-commit plan was checked only for writes, not for items.
+
+**Workaround:** Reported as Important in the review.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** Plan D Review Focus line 1 and D-R10 (a plan is a function of `HEAD` and the old catalog).
+
+**Fix idea / Pointer:** Skip an observation whose `observation-<rowid>` id `parse_event_sections` already finds (reason `the text carries it`). Map an old `rel_path` that HEAD lacks through `canonical_stem` in the same folder (the same D-R14 rule) before you report `document not in HEAD`. Task 8 asserts the post-commit dry run's full tally: no `unrecoverable` count grows and the observation is `skipped`.
+
+## F-28 — Plan D's citation rewrite can write the wrong bytes or guess a target
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent Opus review of the Plan D draft, Task 3 algorithm against `src/librarian/identity/grammar.rs:98-208` and `src/librarian/tools/link_scan/extract.rs:287-290, 698-711`.
+
+**When:** Looking for a rewrite that guesses or writes the wrong bytes.
+
+**Expected:** A rewrite is applied only where the target is certain and the byte range is the source's; everything else is reported.
+
+**Got:** (1) Task 3 says `<qualifier>:TOKEN` uses "the old `cross_repo_re` shape", which is `\b[a-z][a-z0-9_-]{1,119}:[A-Z]{1,3}-\d+\b`, lowercase only. Task 4's test expects `My_Notes:F-2` to follow the rename, which that shape does not match. With that shape, the bare-token pass then rewrites `F-2` alone and gives `My_Notes:[[my-notes:F-2]]`. (2) "Merge adjacent `Text` events into one run" then edits "byte ranges of the original text". pulldown-cmark splits Text at a backslash escape (`R\-91` gives Text `R` at 0..1 and Text `-91` at 2.., as `grammar.rs` documents) and gives an entity a Text that is not its source slice. Offsets in a merged run then point at the wrong bytes. The grammar skips such events (`bare_tokens`, `grammar.rs:189-203`). The plan does not. (3) A bare token or 16-hex id inside a bare URL (`https://host/runs/R-91`) is a Text match, because the grammar scans bare URLs (`a_token_in_a_bare_url_is_scanned`), and a rewrite inside it breaks the URL. (4) `ids_from_history` maps a historical path to "the HEAD path with the same key". A deleted `docs/a/notes.md` and an unrelated surviving `docs/b/notes.md` share the key, so a stale id of the deleted file is rewritten to point at the unrelated file. That is a guess, which D-R7 forbids.
+
+**Probable cause:** The algorithm restates the grammar's event loop but not its offset and boundary rules, and history recovery uses key equality as evidence of identity.
+
+**Workaround:** Reported as Important in the review.
+
+**Severity:** med
+
+**Status:** open
+
+**Rests on:** D-R7 ("ambiguous ... reported, never guessed") and spec § The citation grammar.
+
+**Fix idea / Pointer:** State the qualifier regex (ASCII, case-insensitive, then compare to stems as written). Merge only Text events whose range is contiguous with the previous one and whose text equals its source slice, and scan the source slice. Skip and report a match inside a `://` word. Map a historical id only when git rename detection (`find_similar`) or an unchanged path links it to a HEAD file. Otherwise report it with a suggestion. Add a test for each case.
+
+## F-29 — Plan D: nine smaller drifts between its extraction, refusal and report text and the code
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent Opus review of the Plan D draft.
+
+**When:** Reading each extraction, refusal and report rule against the code it names.
+
+**Expected:** Each step's text agrees with the code it extracts, and an operator in the refusal case knows the exact next command.
+
+**Got:** (1) `declaration_stamped` is extracted from `stamp_augmentation_declaration`, which runs `frontmatter::parse` then `frontmatter::write` (`src/librarian/tools/doctor.rs:2151-2172`). `write` re-serialises every key: first-class fields first, extras after, and comments dropped (`src/librarian/frontmatter.rs:174-219`). The test `declaration_stamped_sets_only_expects_augmentation` ("other keys ... byte for byte") cannot pass unless the extraction changes doctor's behaviour, which contradicts "the extractions change no behaviour". (2) The `params-entry` block (D-R13) does not state its fence length. `render_event_section` uses the longest backtick run plus one (`src/librarian/catalog/event_text.rs:178-183`). A JSON string with three backticks closes a fixed fence and turns the rest into prose that the scanner reads. (3) The side-file refusal says "open the catalog once with the current binary and close it", which names no command. The common case is a server that the harness killed and that left a `-wal`. (4) D-R18 keeps `derive-shadow`'s data-dir default while `cutover` reads `LIBRARIAN_DB` first. With `LIBRARIAN_DB` set, `derive-shadow --cutover` and `cutover export` print the dry runs of two different catalogs. (5) The side files are checked once, before the open. Nothing re-checks them after `old_rows::load`, so a session that starts during the run goes unseen. (6) A second `--apply` overwrites `cutover-report-<repo>.md`, which is the record of what the first run moved. (7) `NoOldRowsUnderRoot` with no `--old-root` keeps `git_root.display()` (`src/librarian/derived/diff.rs:330-341`). (8) `take_at` at the git root is not `lock_root` (the nearest `.codescout/project.toml`, `src/cli/write_lock.rs:31-41`). (9) A shallow clone and a hot `-journal` are not named.
+
+**Probable cause:** Extractions and refusals are named by their callers, not read for their outputs.
+
+**Workaround:** Reported as Important (4) and Minor (the rest) in the review.
+
+**Severity:** low
+
+**Status:** open
+
+**Rests on:** Plan D Global Constraints (no absolute path, STE refusals) and D-R1 (one text format per writer).
+
+**Fix idea / Pointer:** (1) Implement `declaration_stamped` as a line upsert, as `upsert_int_line` is, or weaken the test to "parses to the same frontmatter plus the key". (2) Reuse the event fence rule. (3) Name `sqlite3 <file> 'PRAGMA wal_checkpoint(TRUNCATE)'`, then run again. (4) Drop `derive-shadow --cutover`, or give it D-R18's resolution. (5) Re-check `side_files_present` and the file's size and mtime after load and before apply. (6) Name the report `<repo>-<commit12>` and never overwrite it. (7)-(9) as stated.
+
+## W-13 — A scratch SQLite experiment and a check against the real file list tested Plan D's two riskiest claims
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, independent Opus review of the Plan D draft before any implementer ran.
+
+**Pattern:** test the riskiest claim with a scratch experiment, and test each rename and rewrite rule against the repository's real file list, not against the plan's fixtures.
+
+**What it confirmed:** (1) A scratch experiment (Python `sqlite3`, SQLite 3.54.1, in the session scratchpad) showed: a cleanly closed WAL database opened with `file:…?mode=ro&immutable=1` reads every row and creates no `-wal` or `-shm`. With a writer holding the database and one row only in the `-wal`, the immutable open reads 1 row while a plain `mode=ro` open reads 2. So the immutable open reads stale data without an error, and D-R8/D-R16's side-file refusal before the open carries the whole safety claim. A live server is detectable, because a WAL connection keeps both side files while it is open. (2) The plan's named seams exist with the stated shapes: `open_old_read_only` (`diff.rs:372`), `refuse_if_open_would_write` (`derive_shadow.rs:115`), `write_entry_into_ledger` ending in `record_written_file` (`dual_write.rs:120-183`, `UPDATE artifact` at `:58-66`), `splice_pending_section` (`augmentation.rs:2362`), `body_defined_indices` (`:2767`), `TWIN_KINDS` and the ledger refusal (`event_create.rs:336, 385-392`), `splice_event`, `parse_event_sections` (`event_text.rs:383, 297`), `label_for_rel`, `splice_relation` (`link_text.rs:23, 44`), `link_target` (`extract.rs:698`), `BuildInput` (`build.rs:76-83`), `VectorCache::beside` (`vector_cache.rs:268`), `TOOL_SURFACE_CHAR_BUDGET` (`server.rs:6625`), and every old-caller test the plan names.
+
+**What it caught:** F-25 (in-scope rename candidates that code reads: `include_str!` prompt files, `.github` templates, `_TEMPLATE.md`, and two `render_prompt.md` files that map to one key), F-26 (params loss), F-27 (post-commit misreport), F-28 (rewrite guesses), F-29.
+
+**Counterfactual:** without the population check, the first `cutover export --apply` on this repository renames `src/prompts/workspace_onboarding_prompt.md` and the two `render_prompt.md` files. The build then fails on `include_str!`, the GitHub issue templates stop working, and the mdBook SUMMARY links break. The fixture-only Task 8 test passes throughout.
+
+**Status:** validated
 
 ## Template for new entries
 
