@@ -94,6 +94,20 @@ The lifecycle layer can read, check and (since the write core) render entries, b
 - A table for a collection with zero entries, an archived entry and a declared field that shares a column name (refused at schema parse).
 - A worktree session: create, update and table must read the schema from the worktree's checkout.
 
+## Calls made in the plan review (2026-11-14, delegated to the controller)
+
+The second Opus review (of the plan) found these. They refine the calls above and the plan carries them as P-R1 to P-R9.
+
+- **One write path (anti-goal).** Entry and collection create go through one helper extracted from `create::call`, so every guard `create` has applies. They obey `.codescout/requirements.toml`.
+- **The exclusive create must not harm the first writer.** The row id is `sha256(abs_path)` and `artifact::upsert` is `ON CONFLICT(id) DO UPDATE`, so the helper uses a plain `INSERT` and, on `AlreadyExists`, deletes only a row it inserted and never the file.
+- **The key check reads paths, not files** (`list_paths` plus `key_of`): the first draft read about 4600 files per create.
+- **Update and get load a collection by folder**, so an archived collection works; only create looks one up by key.
+- **`doc(update)` keeps the catalog row in step with the file** (status, title, tags are read back from the final text), and a body-only update of an entry still applies.
+- **`revisit_by` alone re-dates** a blocked or deferred entry and keeps `status_since`.
+- **The table gains an `Archived` column** and shows archived entries; `entries` and `entry_total` appear only with `entry_filter`.
+- **Declared field names are refused when they equal a table column, an `entry::RESERVED` name or a `frontmatter::RESERVED_KEYS` name.**
+- Correction: an ambiguous key gives a `CollectionLoadError::Ambiguous`, not a `TreeProblem` (no such variant exists).
+
 ## Calls the operator delegated
 
 The operator said "you choose, you have better context" on 2026-11-14. These are controller calls, not operator rulings. The operator may overrule any of them.
