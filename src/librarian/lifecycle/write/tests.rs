@@ -365,3 +365,223 @@ fn problems_print_with_their_own_display_text() {
     let text = WriteProblem::Stem(stem.clone()).to_string();
     assert!(text.contains(&stem.to_string()), "{text}");
 }
+
+// ---- change_status ---------------------------------------------------------------------------
+
+fn d0() -> NaiveDate {
+    d("2026-11-01")
+}
+
+fn d1() -> NaiveDate {
+    d("2026-11-14")
+}
+
+fn x() -> NaiveDate {
+    d("2026-12-01")
+}
+
+fn y() -> NaiveDate {
+    d("2026-12-24")
+}
+
+/// A document `new_entry` wrote on `d0`.
+fn doc_with(status: &str, revisit_by: Option<NaiveDate>, body: Option<&str>) -> String {
+    let mut i = input("friction", "Status moves");
+    i.status = Some(status);
+    i.revisit_by = revisit_by;
+    i.body = body;
+    i.fields.insert("severity".into(), json!("high"));
+    new_entry(&schema(), DIR, None, &i, d0()).unwrap().text
+}
+
+fn doc(status: &str) -> String {
+    doc_with(status, None, None)
+}
+
+fn change(
+    text: &str,
+    status: &str,
+    revisit_by: Option<NaiveDate>,
+) -> Result<String, Vec<WriteProblem>> {
+    change_status(text, &schema(), status, revisit_by, d1())
+}
+
+#[test]
+fn rewriting_the_same_status_advances_status_since() {
+    let before = doc("open");
+    let after = change(&before, "open", None).unwrap();
+    let (b, a) = (meta(&before), meta(&after));
+    assert_eq!(b.status_since, d0());
+    assert_eq!(a.status, "open");
+    assert_eq!(a.status_since, d1());
+    assert_eq!(a.closed, None);
+    assert_eq!(
+        a,
+        EntryMeta {
+            status_since: d1(),
+            ..b
+        }
+    );
+}
+
+#[test]
+fn closing_sets_status_since_and_closed() {
+    let m = meta(&change(&doc("open"), "fixed", None).unwrap());
+    assert_eq!(m.status, "fixed");
+    assert_eq!(m.status_since, d1());
+    assert_eq!(m.closed, Some(d1()));
+}
+
+#[test]
+fn terminal_to_terminal_keeps_closed() {
+    let m = meta(&change(&doc("fixed"), "wontfix", None).unwrap());
+    assert_eq!(m.status, "wontfix");
+    assert_eq!(m.status_since, d1());
+    assert_eq!(m.closed, Some(d0()));
+    let same = meta(&change(&doc("fixed"), "fixed", None).unwrap());
+    assert_eq!(same.status_since, d1());
+    assert_eq!(same.closed, Some(d0()));
+}
+
+#[test]
+fn reopening_removes_closed() {
+    let m = meta(&change(&doc("fixed"), "open", None).unwrap());
+    assert_eq!(m.status, "open");
+    assert_eq!(m.status_since, d1());
+    assert_eq!(m.closed, None);
+}
+
+#[test]
+fn a_hand_reopened_entry_is_repaired() {
+    let text = doc("open").replacen("status: open\n", "status: open\nclosed: 2026-11-01\n", 1);
+    assert_eq!(meta_unvalidated(&text).closed, Some(d0()));
+    let m = meta(&change(&text, "open", None).unwrap());
+    assert_eq!(m.closed, None);
+    assert_eq!(m.status, "open");
+}
+
+/// `parse_entry` only: the input of a repair is not a valid entry, so it cannot go through `meta`.
+fn meta_unvalidated(text: &str) -> EntryMeta {
+    parse_entry(&read(text).0).unwrap()
+}
+
+#[test]
+fn a_blocked_or_deferred_target_needs_revisit_by_and_the_call_wins() {
+    for status in ["waiting", "parked"] {
+        let problems = change(&doc("open"), status, None).unwrap_err();
+        assert!(
+            invalid(&problems).contains(&EntryProblem::RevisitMissing {
+                status: status.into()
+            }),
+            "{status}: {problems:?}"
+        );
+        let m = meta(&change(&doc("open"), status, Some(x())).unwrap());
+        assert_eq!(m.status, status);
+        assert_eq!(m.revisit_by, Some(x()));
+    }
+    let stored = doc_with("waiting", Some(x()), None);
+    let kept = meta(&change(&stored, "parked", None).unwrap());
+    assert_eq!(kept.status, "parked");
+    assert_eq!(kept.revisit_by, Some(x()));
+    let won = meta(&change(&stored, "parked", Some(y())).unwrap());
+    assert_eq!(won.revisit_by, Some(y()));
+}
+
+#[test]
+fn an_open_or_terminal_target_drops_the_stored_revisit_by_and_refuses_an_argument() {
+    let stored = doc_with("waiting", Some(x()), None);
+    let open = meta(&change(&stored, "open", None).unwrap());
+    assert_eq!(open.status, "open");
+    assert_eq!(open.revisit_by, None);
+    let fixed = meta(&change(&stored, "fixed", None).unwrap());
+    assert_eq!(fixed.status, "fixed");
+    assert_eq!(fixed.revisit_by, None);
+    assert_eq!(fixed.closed, Some(d1()));
+    for status in ["open", "fixed"] {
+        let problems = change(&stored, status, Some(y())).unwrap_err();
+        assert_eq!(
+            problems,
+            vec![WriteProblem::RevisitNotNeeded(status.into())]
+        );
+    }
+}
+
+#[test]
+fn a_terminal_entry_without_closed_is_repaired() {
+    let text: String = doc("fixed")
+        .split_inclusive('\n')
+        .filter(|l| !l.starts_with("closed:"))
+        .collect();
+    assert_eq!(meta_unvalidated(&text).closed, None);
+    let m = meta(&change(&text, "wontfix", None).unwrap());
+    assert_eq!(m.status, "wontfix");
+    assert_eq!(m.closed, Some(d1()));
+    assert_eq!(m.status_since, d1());
+}
+#[test]
+fn a_stale_closed_is_not_kept_when_a_non_terminal_entry_closes() {
+    let text = doc("open").replacen("status: open\n", "status: open\nclosed: 2026-11-01\n", 1);
+    assert_eq!(meta_unvalidated(&text).closed, Some(d0()));
+    let m = meta(&change(&text, "fixed", None).unwrap());
+    assert_eq!(m.closed, Some(d1()));
+}
+
+#[test]
+fn an_undeclared_word_is_refused() {
+    let problems = change(&doc("open"), "nope", None).unwrap_err();
+    assert!(problems.contains(&WriteProblem::StatusUndeclared("nope".into())));
+}
+
+#[test]
+fn no_frontmatter_bad_yaml_and_a_non_entry_are_named() {
+    assert_eq!(
+        change("just text", "fixed", None).unwrap_err(),
+        vec![WriteProblem::NoFrontmatter]
+    );
+    let bad = change("---\nkind: [unclosed\n---\nbody\n", "fixed", None).unwrap_err();
+    assert!(
+        matches!(bad.as_slice(), [WriteProblem::BadYaml(_)]),
+        "{bad:?}"
+    );
+    let no_created = "---\nkind: entry\nstatus: open\ntitle: T\nentry_kind: friction\nstatus_since: 2026-11-01\n---\nbody\n";
+    let problems = change(no_created, "fixed", None).unwrap_err();
+    assert!(
+        invalid(&problems)
+            .iter()
+            .any(|p| matches!(p, EntryProblem::Unparsed(_))),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn an_invalid_input_is_not_returned_as_ok() {
+    let text = doc("open").replace("entry_kind: friction", "entry_kind: bug");
+    assert!(text.contains("entry_kind: bug"));
+    let problems = change(&text, "open", None).unwrap_err();
+    assert!(
+        invalid(&problems).contains(&EntryProblem::KindUndeclared("bug".into())),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn a_crlf_document_works() {
+    let lf = doc_with("open", None, Some("line one\nline two\n"));
+    let crlf = lf.replace('\n', "\r\n");
+    let after = change(&crlf, "fixed", None).unwrap();
+    assert_eq!(meta(&after).status, "fixed");
+    assert_eq!(read(&after).1, read(&crlf).1);
+    assert!(read(&after).1.contains("line one\r\nline two\r\n"));
+}
+
+#[test]
+fn body_and_unknown_keys_survive() {
+    let body = "# Heading\n\ntext with --- and\n```\ncode\n```\n\n\ntrailing  \n";
+    let before = doc_with("open", None, Some(body));
+    let after = change(&before, "fixed", None).unwrap();
+    assert_eq!(read(&after).1, read(&before).1);
+    let m = meta(&after);
+    assert_eq!(m.fields["severity"], json!("high"));
+    assert_eq!(m.title, "Status moves");
+    assert_eq!(m.created, d0());
+}

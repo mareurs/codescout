@@ -113,19 +113,87 @@ pub(crate) fn reread(
     schema: &CollectionSchema,
     text: &str,
 ) -> Result<EntryMeta, Vec<WriteProblem>> {
-    let fm = match frontmatter::parse(text) {
-        Ok((Some(fm), _)) => fm,
-        Ok((None, _)) => return Err(vec![WriteProblem::NoFrontmatter]),
-        Err(e) => return Err(vec![WriteProblem::BadYaml(e.to_string())]),
-    };
-    let meta = parse_entry(&fm)
-        .map_err(|errors| vec![WriteProblem::Invalid(vec![EntryProblem::Unparsed(errors)])])?;
+    let meta = read_entry(text)?;
     let problems = validate_entry(schema, &meta);
     if problems.is_empty() {
         Ok(meta)
     } else {
         Err(vec![WriteProblem::Invalid(problems)])
     }
+}
+
+/// Parse a document as an entry, without checking it against a schema: the first half of
+/// `reread`, and what an edit starts from. A document with no frontmatter is `NoFrontmatter`,
+/// which must be known before any normalising rewrite (that inserts a frontmatter).
+pub(crate) fn read_entry(text: &str) -> Result<EntryMeta, Vec<WriteProblem>> {
+    let fm = match frontmatter::parse(text) {
+        Ok((Some(fm), _)) => fm,
+        Ok((None, _)) => return Err(vec![WriteProblem::NoFrontmatter]),
+        Err(e) => return Err(vec![WriteProblem::BadYaml(e.to_string())]),
+    };
+    parse_entry(&fm)
+        .map_err(|errors| vec![WriteProblem::Invalid(vec![EntryProblem::Unparsed(errors)])])
+}
+
+/// Set the date key `key` to `date`, or remove it when `None`.
+pub(crate) fn set_date(fm: &mut Frontmatter, key: &str, date: Option<NaiveDate>) {
+    match date {
+        Some(date) => {
+            fm.extra.insert(key.to_string(), iso(date));
+        }
+        None => {
+            fm.extra.remove(key);
+        }
+    }
+}
+
+/// Move an entry document to `new_status`. Refusals return before any edit. `status_since` is
+/// always `today`. `closed` is present iff the target is terminal: kept when the entry is itself
+/// terminal and has one, else `today`. A blocked or deferred target takes the call's `revisit_by`
+/// over the stored one; an open or terminal target drops the stored one and refuses a passed one.
+/// The result is re-read.
+pub fn change_status(
+    doc: &str,
+    schema: &CollectionSchema,
+    new_status: &str,
+    revisit_by: Option<NaiveDate>,
+    today: NaiveDate,
+) -> Result<String, Vec<WriteProblem>> {
+    let meta = read_entry(doc)?;
+    let Some(class) = schema.statuses.get(new_status).copied() else {
+        return Err(vec![WriteProblem::StatusUndeclared(new_status.to_string())]);
+    };
+    if !class.needs_revisit() && revisit_by.is_some() {
+        return Err(vec![WriteProblem::RevisitNotNeeded(new_status.to_string())]);
+    }
+    let revisit = if class.needs_revisit() {
+        match revisit_by.or(meta.revisit_by) {
+            Some(date) => Some(date),
+            None => {
+                return Err(vec![WriteProblem::Invalid(vec![
+                    EntryProblem::RevisitMissing {
+                        status: new_status.to_string(),
+                    },
+                ])])
+            }
+        }
+    } else {
+        None
+    };
+    let was_terminal = schema.statuses.get(&meta.status) == Some(&StatusClass::Terminal);
+    let closed = (class == StatusClass::Terminal).then(|| match meta.closed {
+        Some(date) if was_terminal => date,
+        _ => today,
+    });
+    let text = frontmatter::rewrite_frontmatter_normalizing(doc, |fm| {
+        fm.status = Some(new_status.to_string());
+        set_date(fm, "status_since", Some(today));
+        set_date(fm, "closed", closed);
+        set_date(fm, "revisit_by", revisit);
+    })
+    .map_err(|e| vec![WriteProblem::BadYaml(e.to_string())])?;
+    reread(schema, &text)?;
+    Ok(text)
 }
 
 /// Render a new entry file. Every problem the pre-checks find is returned together; the text is
