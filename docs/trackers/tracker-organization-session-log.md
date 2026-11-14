@@ -432,6 +432,8 @@ be reshaped after the plan was written.
 
 **Fix:** correct the memory. The decision on how to sequence L-B2 against Plan E goes to the operator.
 
+**Follow-up (2026-11-14):** the addressing-free write rules now exist as pure library functions in `src/librarian/lifecycle/write.rs` (merged, spec `0904b912ffaffdf6`). Only the wiring to `doc` waits on Plan E. The open design inputs for L-B2 are in that spec's § Open for the L-B2 plan.
+
 ## Template for new entries
 
 <!-- New F-N / W-N entries land above this line. This heading is the anchor:

@@ -1,7 +1,7 @@
 ---
 id: '65d71884a8e84758'
 kind: plan
-status: draft
+status: done
 title: Tracker Lifecycle Write Core — Implementation Plan
 ---
 

@@ -1,4 +1,4 @@
-# Tracker lifecycle: what is built, and what is parked (updated 2026-11-12, after the cleanup merge)
+# Tracker lifecycle: what is built, and what is parked (updated 2026-11-14, after the write-core merge)
 
 Plans L-A (core), L-B (core completion), a follow-up (30-day grace, ledger-only `terminal_in_live_dir`) and the lifecycle cleanup plan (`docs/superpowers/plans/2026-11-12-tracker-lifecycle-cleanup.md`, spec `…/specs/2026-11-12-lifecycle-cleanup-design.md`) are on `experiments` (cleanup merged fast-forward, tip 3c7a2d3d9). Code: `src/librarian/lifecycle/` (layout, schema, entry, relations, naming, tree, checks, checks/tests, table, scan, testkit). Spec: `docs/superpowers/specs/2026-11-11-tracker-lifecycle-design.md`. Plans: `docs/superpowers/plans/2026-11-11-tracker-lifecycle-plan-{a-core,b-core-completion}.md`.
 
@@ -21,6 +21,17 @@ Plans L-A (core), L-B (core completion), a follow-up (30-day grace, ledger-only 
 - `scan.rs` tests run git with `LC_ALL=C`; one test asks for German to pin it: 943afee9e / 2123926a66d8.
 - `checks.rs` tests moved to `checks/tests.rs`: a30b674b6 / 31001c8e9b53.
 - Wording fixes from the reviews: 4d9a90d04 / 5c62af639a2e and 9939b4829 / 325603fba89d.
+
+## Built: the write core (merged 2026-11-14, fast-forward to 941a5ad19)
+Pure library functions in `src/librarian/lifecycle/write.rs` (tests in `write/tests.rs`): `entry_template`, `new_entry`, `change_status`, `change_fields`, `WriteProblem`. No I/O, no catalog. Nothing calls them yet: the L-B2 tools wire them in. Plan `docs/superpowers/plans/2026-11-14-tracker-lifecycle-write-core.md`, spec `docs/superpowers/specs/2026-11-14-lifecycle-write-core-design.md`. Every `Ok` text is re-read through `frontmatter::parse`, `entry::parse_entry` and `entry::validate_entry`.
+
+## Open design inputs for the L-B2 plan (from the write-core final review)
+- I-1: `change_status` then `change_fields` can deadlock a repair when a document has two defect classes (a stray key plus a bad status). Propose one combined update function.
+- I-2: a `revisit_by` in the past is accepted; the doctor then reports `revisit_due` the same day. Needs the operator's ruling.
+- I-3: nothing can change `valid`, `tags`, `title` or `entry_kind`.
+- M-4: `Display` texts should name the remedy. M-5: a blank body should become `None`. M-6: tags normalisation. M-7: reopening an archived entry gives `NonTerminalArchived`.
+- Cosmetic, not fixed: missing blank lines in `write.rs`, `NewEntry` has no `Debug`, `set_date` should be private, the lifecycle `mod.rs` doc does not mention writing, `tests.rs` is 778 lines (split along its section markers if L-B2 adds more).
+- Rules held by the core: Call A (`change_fields` may delete a stray key the document carries, refuses one it does not); Call B (`change_status` stays strict about a stray key).
 
 ## Parked, not in any plan yet
 - A `Finding::subject()` accessor would help the doctor (L-B2).

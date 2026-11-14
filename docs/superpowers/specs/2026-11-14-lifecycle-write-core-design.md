@@ -1,13 +1,13 @@
 ---
 id: '0904b912ffaffdf6'
 kind: spec
-status: draft
+status: active
 title: 'Tracker lifecycle write core: the pure functions behind doc(create) and doc(update) for entries (design)'
 ---
 
 # Tracker lifecycle write core: the pure functions behind `doc(create)` and `doc(update)` for entries (design)
 
-Status: draft, awaiting the Opus review. Parent spec: `docs/superpowers/specs/2026-11-11-tracker-lifecycle-design.md` (§ D4, § Tools). Session-log entry: F-3 in `docs/trackers/tracker-organization-session-log.md`.
+Status: implemented and merged into `experiments` on 2026-11-14 (plan `65d71884a8e84758`); the L-B2 tools that call it are not built. Parent spec: `docs/superpowers/specs/2026-11-11-tracker-lifecycle-design.md` (§ D4, § Tools). Session-log entry: F-3 in `docs/trackers/tracker-organization-session-log.md`.
 
 ## Intent
 
@@ -71,6 +71,16 @@ A new module `src/librarian/lifecycle/write.rs` (tests in `write/tests.rs`), reg
 - A CRLF document and a document with no frontmatter given to `change_status`; a document whose frontmatter parses but is not an entry.
 - Each status transition: same status, open to terminal, terminal to terminal, terminal to open, open to blocked, blocked to deferred, and a hand-reopened entry that still has `closed`.
 - A `NewEntry.valid` that names no class.
+
+## Open for the L-B2 plan
+
+The final whole-branch review raised these. None is code in this branch, because nothing calls the functions yet.
+
+- **I-1:** `change_status` followed by `change_fields` can deadlock a repair when one document has two defect classes (a stray key and a bad status). L-B2 should add one combined update function.
+- **I-2:** a `revisit_by` in the past is accepted, and the doctor then reports `revisit_due` the same day. This needs the operator's ruling.
+- **I-3:** nothing can change `valid`, `tags`, `title` or `entry_kind`.
+- **M-4:** `Display` texts should name the remedy. **M-5:** a blank body should become `None`. **M-6:** tags normalisation. **M-7:** an archived entry that is reopened gives `NonTerminalArchived`.
+- Cosmetic, not fixed: missing blank lines in `write.rs`, `NewEntry` has no `Debug`, `set_date` should be private, the `mod.rs` doc does not mention writing, and `write/tests.rs` is 778 lines.
 
 ## What is left to the builder
 
