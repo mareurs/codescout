@@ -1,6 +1,26 @@
+use crate::librarian::catalog::chunk::embed_input_hash;
+use crate::librarian::vector_cache::{
+    CacheLookup, CacheStatus, FlushOutcome, ModelKey, VectorCache,
+};
 use anyhow::Result;
 use codescout_embed::Embedder;
 use std::sync::Arc;
+
+/// What [`EmbeddingService::embed_artifact_cached`] returns.
+pub struct CachedEmbed {
+    /// The vector, or the embedder's error. A cache problem is never an error here.
+    pub vector: Result<Vec<f32>>,
+    /// The vector came from the cache and the embedder was not called.
+    pub from_cache: bool,
+    /// The cache failed on this item (lookup, or the vector could not be staged).
+    pub cache_failed: bool,
+}
+
+/// A cache and the key a service reads and writes it under.
+struct CacheSeam {
+    cache: Arc<VectorCache>,
+    model: ModelKey,
+}
 
 pub struct EmbeddingService {
     pub embedder: Arc<dyn Embedder>,
@@ -23,6 +43,10 @@ pub struct EmbeddingService {
     /// llama-server (CodeRankEmbed, ROCm GPU, `--parallel 16`): 12.2 ms per text at 1 request in
     /// flight, 16.6 ms at 8, 19.0 ms at 16. A server on other hardware may scale the other way.
     concurrency: usize,
+    /// The vector cache and the key this service uses it under. `None` in `new` and
+    /// `with_budget`, so the cache seam passes through for every service that never asked for it.
+    /// Set only by [`Self::with_vector_cache`], which sets both together.
+    seam: Option<CacheSeam>,
 }
 
 impl EmbeddingService {
@@ -38,6 +62,7 @@ impl EmbeddingService {
             embedder: e,
             budget_chars: usize::MAX,
             concurrency: 1,
+            seam: None,
         }
     }
 
@@ -52,6 +77,7 @@ impl EmbeddingService {
             embedder: e,
             budget_chars,
             concurrency: 1,
+            seam: None,
         }
     }
 
@@ -69,6 +95,104 @@ impl EmbeddingService {
     /// How many artifact embeds a reindex keeps in flight at once; always at least 1.
     pub fn concurrency(&self) -> usize {
         self.concurrency
+    }
+
+    /// Sets the cache and the model key together (C3-R10). Chain it after `with_budget`,
+    /// because the key carries the budget. `model` is the configured model string, never a
+    /// literal.
+    pub fn with_vector_cache(mut self, model: &str, cache: Arc<VectorCache>) -> Self {
+        let model = ModelKey::new(model, self.budget_chars);
+        self.seam = Some(CacheSeam { cache, model });
+        self
+    }
+
+    /// The key this service reads and writes cache rows under. `None` without a cache.
+    pub fn model_key(&self) -> Option<&ModelKey> {
+        self.seam.as_ref().map(|s| &s.model)
+    }
+
+    pub fn vector_cache(&self) -> Option<&VectorCache> {
+        self.seam.as_ref().map(|s| s.cache.as_ref())
+    }
+
+    /// `Off` without a cache.
+    pub fn cache_status(&self) -> CacheStatus {
+        self.seam
+            .as_ref()
+            .map_or(CacheStatus::Off, |s| s.cache.status())
+    }
+
+    /// Lets the next call that needs the cache file open it again after a failed open.
+    /// Nothing without a cache.
+    pub fn rearm_cache(&self) {
+        if let Some(seam) = &self.seam {
+            seam.cache.rearm();
+        }
+    }
+
+    /// Embed an artifact through the vector cache.
+    ///
+    /// Without a cache this is `embed_artifact` and nothing else. With one:
+    /// - `read_cache` true: look the vector up first, under the live dimension. A hit skips
+    ///   the embedder. A dimension of 0 (a remote embedder before its first embed) is a miss.
+    /// - The embedder's vector is staged for the next `flush_cache`, whatever `read_cache` was,
+    ///   so `read_cache = false` still refreshes the row. A vector whose width differs from the
+    ///   live dimension is returned to the caller but never staged.
+    ///
+    /// A cache problem never fails the call. It sets `cache_failed`. No lock is held across the
+    /// embed: the cache takes its lock inside each synchronous call.
+    pub async fn embed_artifact_cached(
+        &self,
+        title: Option<&str>,
+        body: &str,
+        read_cache: bool,
+    ) -> CachedEmbed {
+        let Some(seam) = &self.seam else {
+            return CachedEmbed {
+                vector: self.embed_artifact(title, body).await,
+                from_cache: false,
+                cache_failed: false,
+            };
+        };
+        let hash = embed_input_hash(title, body);
+        let mut cache_failed = false;
+        if read_cache {
+            match seam
+                .cache
+                .get(&seam.model, self.embedder.dimensions(), &hash)
+            {
+                CacheLookup::Hit(vector) => {
+                    return CachedEmbed {
+                        vector: Ok(vector),
+                        from_cache: true,
+                        cache_failed: false,
+                    };
+                }
+                CacheLookup::Failed => cache_failed = true,
+                CacheLookup::Miss => {}
+            }
+        }
+        let vector = self.embed_artifact(title, body).await;
+        if let Ok(v) = &vector {
+            let live = self.embedder.dimensions();
+            let width_agrees = live == 0 || live == v.len();
+            if !(width_agrees && seam.cache.stage(&seam.model, &hash, v)) {
+                cache_failed = true;
+            }
+        }
+        CachedEmbed {
+            vector,
+            from_cache: false,
+            cache_failed,
+        }
+    }
+
+    /// Write the staged vectors to the cache in one transaction. The default outcome
+    /// (nothing stored, nothing failed) without a cache.
+    pub fn flush_cache(&self) -> FlushOutcome {
+        self.seam
+            .as_ref()
+            .map_or_else(FlushOutcome::default, |s| s.cache.flush())
     }
 
     /// Embed one text on the **document** side.
@@ -133,7 +257,115 @@ impl EmbeddingService {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use parking_lot::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    enum Shape {
+        /// `[1, 0, 0, ...]`
+        Unit,
+        /// `v[0]` is the chars of the text, `v[1]` is `1.0`, the rest are `0`.
+        Lengths,
+    }
+
+    /// Counts the texts it embeds. It can declare one width and return another, learn its
+    /// width late (as `RemoteEmbedder` does), and fail.
+    pub(crate) struct CountingEmbedder {
+        declared: usize,
+        returned: usize,
+        shape: Shape,
+        learns_late: bool,
+        learned: AtomicBool,
+        failing: AtomicBool,
+        seen: Mutex<Vec<String>>,
+    }
+
+    impl CountingEmbedder {
+        fn build(declared: usize, returned: usize, shape: Shape, learns_late: bool) -> Arc<Self> {
+            Arc::new(Self {
+                declared,
+                returned,
+                shape,
+                learns_late,
+                learned: AtomicBool::new(false),
+                failing: AtomicBool::new(false),
+                seen: Mutex::new(Vec::new()),
+            })
+        }
+
+        /// Declares and returns `dim`.
+        pub(crate) fn new(dim: usize) -> Arc<Self> {
+            Self::build(dim, dim, Shape::Unit, false)
+        }
+
+        /// Declares `declared` and returns vectors `returned` wide.
+        pub(crate) fn declaring(declared: usize, returned: usize) -> Arc<Self> {
+            Self::build(declared, returned, Shape::Unit, false)
+        }
+
+        /// `dimensions()` is 0 until the first embed has returned.
+        pub(crate) fn learning(dim: usize) -> Arc<Self> {
+            Self::build(dim, dim, Shape::Unit, true)
+        }
+
+        /// The vector tells the length of the text it was made from.
+        pub(crate) fn lengths(dim: usize) -> Arc<Self> {
+            Self::build(dim, dim, Shape::Lengths, false)
+        }
+
+        pub(crate) fn set_failing(&self, on: bool) {
+            self.failing.store(on, Ordering::SeqCst);
+        }
+
+        /// Texts embedded. A failed call records nothing.
+        pub(crate) fn calls(&self) -> usize {
+            self.seen.lock().len()
+        }
+
+        /// The exact texts, in order.
+        pub(crate) fn seen(&self) -> Vec<String> {
+            self.seen.lock().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Embedder for CountingEmbedder {
+        fn dimensions(&self) -> usize {
+            if self.learns_late && !self.learned.load(Ordering::SeqCst) {
+                0
+            } else {
+                self.declared
+            }
+        }
+
+        async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+            anyhow::ensure!(
+                !self.failing.load(Ordering::SeqCst),
+                "the counting embedder is set to fail"
+            );
+            let mut out = Vec::with_capacity(texts.len());
+            for t in texts {
+                self.seen.lock().push((*t).to_owned());
+                let mut v = vec![0.0_f32; self.returned];
+                match self.shape {
+                    Shape::Unit => v[0] = 1.0,
+                    Shape::Lengths => {
+                        v[0] = t.chars().count() as f32;
+                        v[1] = 1.0;
+                    }
+                }
+                out.push(v);
+            }
+            self.learned.store(true, Ordering::SeqCst);
+            Ok(out)
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::test_support::CountingEmbedder;
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -212,6 +444,27 @@ mod tests {
 
     // cap-class: NOT_A_CAP — test-only fixture ceiling handed to CeilingEmbedder::new and EmbeddingService::with_budget; it parameterises the test's own embedder and bounds no runtime path
     const BUDGET: usize = 500;
+
+    /// The failure text of the two pins on how `embed_artifact` builds a vector.
+    const BUMP_COMPOSITION_VERSION: &str = "the join, the segmentation or the pooling in \
+         embed_artifact changed: bump COMPOSITION_VERSION in vector_cache.rs, or cached vectors \
+         made the old way are served for the new text";
+
+    fn cached(emb: &Arc<CountingEmbedder>, cache: &Arc<VectorCache>) -> EmbeddingService {
+        EmbeddingService::new(emb.clone()).with_vector_cache("test-model", cache.clone())
+    }
+
+    /// The key `cached` builds: model `test-model`, no budget.
+    fn test_key() -> ModelKey {
+        ModelKey::new("test-model", usize::MAX)
+    }
+
+    /// Put one row in the cache, as an earlier process would have.
+    fn seed(cache: &VectorCache, title: &str, body: &str, vector: &[f32]) {
+        let hash = embed_input_hash(Some(title), body);
+        assert!(cache.stage(&test_key(), &hash, vector));
+        assert_eq!(cache.flush().stored, 1);
+    }
 
     #[tokio::test]
     async fn an_artifact_whose_single_line_exceeds_the_budget_is_segmented_under_the_ceiling() {
@@ -466,6 +719,274 @@ mod tests {
         assert!(
             !emb2.via_query.load(Ordering::SeqCst),
             "a segmented artifact reached the query seam"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_service_without_a_cache_embeds_every_time() {
+        let emb = CountingEmbedder::new(4);
+        let svc = EmbeddingService::new(emb.clone());
+        let a = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        let b = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(!a.from_cache && !b.from_cache);
+        assert!(!a.cache_failed && !b.cache_failed);
+        assert_eq!(emb.calls(), 2);
+        assert_eq!(svc.cache_status(), CacheStatus::Off);
+        assert!(svc.model_key().is_none());
+        assert!(svc.vector_cache().is_none());
+        assert_eq!(svc.flush_cache(), FlushOutcome::default());
+    }
+
+    #[tokio::test]
+    async fn a_second_identical_input_is_served_from_the_cache_after_a_flush() {
+        let emb = CountingEmbedder::new(4);
+        let cache = Arc::new(VectorCache::in_memory());
+        let svc = cached(&emb, &cache);
+
+        let first = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(!first.from_cache);
+        assert!(!first.cache_failed);
+        assert_eq!(
+            svc.flush_cache(),
+            FlushOutcome {
+                stored: 1,
+                failed: 0
+            }
+        );
+
+        let key = svc.model_key().expect("a cache brings a key").clone();
+        let hash = embed_input_hash(Some("t"), "b");
+        assert_eq!(
+            cache.get(&key, 4, &hash),
+            CacheLookup::Hit(vec![1.0, 0.0, 0.0, 0.0])
+        );
+
+        let second = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(second.from_cache);
+        assert_eq!(emb.calls(), 1);
+        assert_eq!(second.vector.unwrap(), first.vector.unwrap());
+    }
+
+    #[tokio::test]
+    async fn an_unflushed_vector_is_not_served() {
+        let emb = CountingEmbedder::new(4);
+        let cache = Arc::new(VectorCache::in_memory());
+        let svc = cached(&emb, &cache);
+
+        svc.embed_artifact_cached(Some("t"), "b", true).await;
+        let second = svc.embed_artifact_cached(Some("t"), "b", true).await;
+
+        assert!(!second.from_cache);
+        assert_eq!(emb.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_model_string_and_the_budget_each_change_the_key() {
+        let emb = CountingEmbedder::new(4);
+        let cache = Arc::new(VectorCache::in_memory());
+        let first = cached(&emb, &cache);
+        first.embed_artifact_cached(Some("t"), "b", true).await;
+        assert_eq!(first.flush_cache().stored, 1);
+
+        let other_model = EmbeddingService::new(emb.clone()).with_vector_cache("m2", cache.clone());
+        let got = other_model
+            .embed_artifact_cached(Some("t"), "b", true)
+            .await;
+        assert!(!got.from_cache, "another model string must miss");
+
+        let other_budget = EmbeddingService::with_budget(emb.clone(), 999)
+            .with_vector_cache("test-model", cache.clone());
+        let got = other_budget
+            .embed_artifact_cached(Some("t"), "b", true)
+            .await;
+        assert!(!got.from_cache, "another budget must miss");
+
+        let same = cached(&emb, &cache);
+        let got = same.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(got.from_cache, "the same model and budget must hit");
+    }
+
+    #[tokio::test]
+    async fn the_same_text_under_another_title_is_a_miss() {
+        let emb = CountingEmbedder::new(4);
+        let cache = Arc::new(VectorCache::in_memory());
+        let svc = cached(&emb, &cache);
+        svc.embed_artifact_cached(Some("A"), "body", true).await;
+        assert_eq!(svc.flush_cache().stored, 1);
+
+        let b = svc.embed_artifact_cached(Some("B"), "body", true).await;
+        assert!(!b.from_cache);
+        let none = svc.embed_artifact_cached(None, "body", true).await;
+        assert!(!none.from_cache);
+        let a = svc.embed_artifact_cached(Some("A"), "body", true).await;
+        assert!(a.from_cache, "the stored title still hits");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_live_dimension_makes_the_first_lookup_a_miss() {
+        // The `RemoteEmbedder` shape: `dimensions()` is 0 until its first embed.
+        let emb = CountingEmbedder::learning(4);
+        let cache = Arc::new(VectorCache::in_memory());
+        seed(&cache, "t", "b", &[9.0; 4]);
+        seed(&cache, "t", "c", &[7.0; 4]);
+        let svc = cached(&emb, &cache);
+        assert_eq!(emb.dimensions(), 0, "the double must start without a width");
+
+        let first = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(!first.from_cache, "a lookup at dimension 0 is a miss");
+        assert_eq!(first.vector.unwrap(), vec![1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(emb.calls(), 1);
+        assert_eq!(emb.dimensions(), 4);
+
+        let second = svc.embed_artifact_cached(Some("t"), "c", true).await;
+        assert!(second.from_cache);
+        assert_eq!(second.vector.unwrap(), vec![7.0; 4]);
+        assert_eq!(emb.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_vector_of_the_wrong_width_is_not_cached() {
+        let emb = CountingEmbedder::declaring(4, 3);
+        let cache = Arc::new(VectorCache::in_memory());
+        let svc = cached(&emb, &cache);
+
+        let got = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert_eq!(got.vector.unwrap().len(), 3, "the caller still gets it");
+        assert!(got.cache_failed);
+        assert_eq!(
+            svc.flush_cache(),
+            FlushOutcome {
+                stored: 0,
+                failed: 0
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn reading_the_cache_can_be_skipped_and_the_write_still_refreshes_it() {
+        let emb = CountingEmbedder::new(4);
+        let cache = Arc::new(VectorCache::in_memory());
+        seed(&cache, "t", "b", &[9.0; 4]);
+        let svc = cached(&emb, &cache);
+
+        let skipped = svc.embed_artifact_cached(Some("t"), "b", false).await;
+        assert!(!skipped.from_cache);
+        assert_eq!(skipped.vector.unwrap(), vec![1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(svc.flush_cache().stored, 1);
+
+        let after = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(after.from_cache);
+        assert_eq!(
+            after.vector.unwrap(),
+            vec![1.0, 0.0, 0.0, 0.0],
+            "the refresh replaced the seeded row"
+        );
+        assert_eq!(emb.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failing_cache_degrades_to_the_embedder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("vector-cache.db");
+        let garbage: Vec<u8> = (0..200u32).map(|i| (i * 7 + 3) as u8).collect();
+        std::fs::write(&path, &garbage).unwrap();
+        let emb = CountingEmbedder::new(4);
+        let cache = Arc::new(VectorCache::open(&path));
+        let svc = cached(&emb, &cache);
+
+        let got = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(!got.from_cache);
+        assert!(got.cache_failed);
+        assert_eq!(got.vector.unwrap(), vec![1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(svc.cache_status(), CacheStatus::Unavailable);
+    }
+
+    #[tokio::test]
+    async fn an_embedder_error_is_returned_and_nothing_is_cached() {
+        let emb = CountingEmbedder::new(4);
+        let cache = Arc::new(VectorCache::in_memory());
+        let svc = cached(&emb, &cache);
+        emb.set_failing(true);
+
+        let got = svc.embed_artifact_cached(Some("t"), "b", true).await;
+        assert!(got.vector.is_err());
+        assert!(!got.from_cache);
+        assert!(!got.cache_failed, "the cache did nothing wrong");
+        assert_eq!(
+            svc.flush_cache(),
+            FlushOutcome {
+                stored: 0,
+                failed: 0
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn the_text_sent_to_the_embedder_is_pinned_to_the_composition_version() {
+        let emb = CountingEmbedder::new(4);
+        let svc = EmbeddingService::new(emb.clone());
+        svc.embed_artifact(Some("T"), "B").await.unwrap();
+        svc.embed_artifact(None, "B").await.unwrap();
+        assert_eq!(
+            emb.seen(),
+            vec!["T\n\nB".to_owned(), "\n\nB".to_owned()],
+            "{BUMP_COMPOSITION_VERSION}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_segmentation_and_pooling_of_a_long_input_are_pinned_to_the_composition_version() {
+        // Measured on the code before the cache seam existed. The unit-length test above
+        // checks the norm only, so a changed segment size would pass it. This one would not.
+        let emb = CountingEmbedder::lengths(4);
+        let svc = EmbeddingService::with_budget(emb.clone(), 50);
+        let v = svc.embed_artifact(None, &"x".repeat(500)).await.unwrap();
+
+        let lengths: Vec<usize> = emb.seen().iter().map(|s| s.chars().count()).collect();
+        assert_eq!(
+            lengths,
+            vec![3, 49, 50, 50, 50, 50, 50, 50, 50, 50, 50],
+            "{BUMP_COMPOSITION_VERSION}"
+        );
+        let rounded: Vec<String> = v.iter().map(|x| format!("{x:.6}")).collect();
+        assert_eq!(
+            rounded,
+            vec!["0.999760", "0.021907", "0.000000", "0.000000"],
+            "{BUMP_COMPOSITION_VERSION}"
+        );
+    }
+
+    /// Same device as the budget and concurrency guards. Each chained call is one short line
+    /// that rustfmt leaves alone, so plain substrings keep matching after formatting.
+    #[test]
+    fn every_production_construction_site_attaches_the_vector_cache_with_its_model() {
+        let src =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/librarian/mod.rs"))
+                .expect("src/librarian/mod.rs must be readable");
+
+        let sites = src.matches("EmbeddingService::with_budget(").count();
+        let attached = src.matches(".with_vector_cache(model, cache)").count();
+        let bound = src.matches("VectorCache::beside(Some(&db_path))").count();
+
+        assert!(sites >= 1, "found no construction site; the scan is stale");
+        assert!(
+            attached >= 1,
+            "no site attaches the cache; the paired check against a removal"
+        );
+        assert_eq!(
+            attached, sites,
+            "every `EmbeddingService::with_budget(` in src/librarian/mod.rs must be followed by \
+             `.with_vector_cache(model, cache)`, or that site embeds without the vector cache"
+        );
+        assert_eq!(
+            bound, sites,
+            "every site binds `cache` with `VectorCache::beside(Some(&db_path))`, so the cache \
+             sits beside the catalog the site opens"
+        );
+        assert_eq!(
+            src.matches(".with_vector_cache(\"").count(),
+            0,
+            "the model passed to `with_vector_cache` is the configured one, never a literal"
         );
     }
 }

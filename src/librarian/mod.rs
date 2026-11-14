@@ -319,6 +319,7 @@ pub async fn build_tool_context_with(
             .unwrap_or_else(|| PathBuf::from("/tmp"))
             .join("librarian/catalog.db")
     });
+    let cache = std::sync::Arc::new(vector_cache::VectorCache::beside(Some(&db_path)));
     let ws_arc = std::sync::Arc::new(ws);
     let catalog = catalog::Catalog::open_with_workspace(&db_path, &ws_arc)?;
 
@@ -340,7 +341,8 @@ pub async fn build_tool_context_with(
                     std::sync::Arc::from(e),
                     codescout_embed::chunk_size_for_model(model),
                 )
-                .with_concurrency(env.embed_concurrency.unwrap_or(1)),
+                .with_concurrency(env.embed_concurrency.unwrap_or(1))
+                .with_vector_cache(model, cache),
             )),
             Err(err) => {
                 tracing::warn!("embedding service unavailable: {err:#}");
@@ -615,6 +617,7 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Resul
             .unwrap_or_else(|| PathBuf::from("/tmp"))
             .join("librarian/catalog.db")
     });
+    let cache = std::sync::Arc::new(vector_cache::VectorCache::beside(Some(&db_path)));
     let cat = catalog::Catalog::open(&db_path)?;
 
     let embedding = if let Some(model) = env.embed_model.as_deref() {
@@ -627,7 +630,8 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Resul
                     std::sync::Arc::from(e),
                     codescout_embed::chunk_size_for_model(model),
                 )
-                .with_concurrency(env.embed_concurrency.unwrap_or(1)),
+                .with_concurrency(env.embed_concurrency.unwrap_or(1))
+                .with_vector_cache(model, cache),
             ),
             Err(err) => {
                 eprintln!("warn: embedding service unavailable: {err:#}");
@@ -929,6 +933,49 @@ kind = "spec"
     #[tokio::test]
     async fn no_concurrency_setting_builds_a_sequential_service() {
         assert_eq!(embedding_concurrency_built_from(None).await, 1);
+    }
+
+    /// `RemoteEmbedder::dimensions()` is 0 until its first embed, and the cache file is created
+    /// at the first call that needs it, so a fresh service has neither a width nor a file.
+    #[cfg(feature = "remote-embed")]
+    #[tokio::test]
+    async fn the_service_a_reindex_runs_on_carries_a_vector_cache_beside_the_catalog() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let workspace = tmp.path().join("workspace.toml");
+        std::fs::write(&workspace, "").unwrap();
+        let env = LibrarianEnv {
+            workspace: Some(workspace),
+            db: Some(tmp.path().join("catalog.db")),
+            embed_model: Some("any-model".into()),
+            embed_url: Some("http://127.0.0.1:1/v1".into()),
+            ..Default::default()
+        };
+        let ctx = build_tool_context_with(crate::lsp::LspManager::new_arc(), &env)
+            .await
+            .expect("an empty workspace file is a valid workspace");
+        let svc = ctx
+            .embedding
+            .expect("a model and a URL build an embedding service");
+
+        assert_eq!(svc.cache_status(), vector_cache::CacheStatus::On);
+        assert_eq!(
+            svc.vector_cache().expect("a cache is attached").path(),
+            Some(tmp.path().join("vector-cache.db").as_path())
+        );
+        assert!(svc
+            .model_key()
+            .expect("a cache brings a key")
+            .as_str()
+            .starts_with("any-model|"));
+        assert_eq!(
+            svc.embedder.dimensions(),
+            0,
+            "a remote embedder learns its width at its first embed"
+        );
+        assert!(
+            !tmp.path().join("vector-cache.db").exists(),
+            "the file is created at the first call that needs it"
+        );
     }
 
     #[test]
