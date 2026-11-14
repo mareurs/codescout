@@ -19,7 +19,7 @@ Written 2026-11-14, after the whole-branch review and the gate. The SDD ledger (
 ## Where the work is
 
 - Branch `feat/artifact-identity-plan-c2-20261114` in the worktree `.worktrees/identity-plan-c2`. Head `ca5928d81`. Forked from `experiments` at `5eb2ab4da`; `experiments` has not moved since, so the branch fast-forwards.
-- **Not landed.** The finishing option (merge locally, push and PR, keep) waits for the operator. Nothing is pushed.
+- **LANDED 2026-11-14.** The operator chose "merge locally". `experiments` was merged into the branch (merge commit), the gate ran green on that tree (lean 9996/9996, default 10090/10090, python 1836, fmt and clippy 0), and `experiments` fast-forwarded from `e1bd818b7` to `5fc3680f4`. The worktree and the branch were removed. Nothing is pushed.
 - Gate on the head: nextest lean 9996/9996, default 10090/10090, python 1836 passed, fmt and clippy exit 0.
 - Whole-branch review (Opus): "With fixes", no Critical. One fix wave and one scoped re-review followed.
 
@@ -65,10 +65,13 @@ Written 2026-11-14, after the whole-branch review and the gate. The SDD ledger (
 
 ## Open decisions for the operator
 
-1. **Landing:** merge locally by the W-5 route, push and PR, or keep. Nothing is merged, pushed or deleted before the answer.
-2. **I-2 — link merge conflicts.** `doc(link)` appends at the end of `## Relations` in any source document, including shared ledgers and readmes. Two branches that link from one source conflict. The spec says both "`doc(link)` writes into the source document" and "append only in a document one writer owns". Options: accept; insert lines in sorted order; apply `single_writer` to links too. Decide before Plan E fixes the format.
-3. **I-4 — truncating writes.** Bug `a806db1ec4ea162b` (`write_catalogued_file` truncates in place). `doc(link)` now rewrites any source document whole, which widens the exposure. Recommendation: fix it (temp file plus rename) before Plan D's bulk export. C2 only adds a stopgap sentence to the error.
-4. **M-5 — visible change.** A `doc(link)` whose line is skipped returns an object instead of `ok`. Calls that worked now error when the source is missing on disk, a symlink, read-only, not UTF-8, has an unclosed fence or has malformed frontmatter.
+The operator answered "choose yourself where needed" on 2026-11-14. The controller decided as follows. Each decision may be reopened.
+
+1. **Landing: done** (see above).
+2. **I-2, link merge conflicts: accept for now.** `doc(link)` keeps appending at the end of `## Relations`. Reason: the spec says `doc(link)` writes into the source document, and two branches that link from one source are rare. Cost if wrong: an add/add conflict in a shared document. Revisit before Plan E fixes the format; sorted insertion is the cheapest remedy and also fixes bug `133504302d03e590`.
+3. **I-4, truncating writes: fix before Plan D.** Bug `a806db1ec4ea162b` (temp file plus rename in `write_catalogued_file`) is a precondition of Plan D's bulk export. It is small and independent of C3. Cost if wrong: none beyond one small plan.
+4. **M-5, visible change of `doc(link)`: accept.** A skipped line returns an object. A missing, symlinked, read-only or non-UTF-8 source, an unclosed fence or malformed frontmatter now fails the call. Reason: rulings R8 and R15; the failure names its cause and records nothing.
+5. **Bugs M-6 to M-9: filed 2026-11-14** as `84e6e61e03beace6` (lossy rel to label), `b2ec2d2e35fbbf30` (`Supersedes` is case-sensitive in the code, not in the label), `46099dbdb68e0d7b` (`source.uri` and `author` are committed unchanged), `133504302d03e590` (same link on branch and main gives two lines).
 
 ## Deferred findings (Minor)
 
@@ -80,6 +83,7 @@ Written 2026-11-14, after the whole-branch review and the gate. The SDD ledger (
 
 ## Bugs to file (from the main checkout, from `docs/issues/_TEMPLATE.md`)
 
+- FILED 2026-11-14 (ids `84e6e61e03beace6`, `b2ec2d2e35fbbf30`, `46099dbdb68e0d7b`, `133504302d03e590`).
 - M-6: rel to label is lossy (`depends_on`, `depends-on`, `Depends On` give one label; a second rel gets "already present"; Plan E cannot recover the rel).
 - M-7: a rel spelled `Supersedes` (not exactly `supersedes`) writes a backward `**Supersedes:**` line without the status write.
 - M-8: `source.uri` and `author` go into committed text raw (an absolute path in a uri is committed; `[[x]]` in an author heading becomes a derived citation).
@@ -99,6 +103,6 @@ Written 2026-11-14, after the whole-branch review and the gate. The SDD ledger (
 
 ## Next steps, in order
 
-1. Operator: the landing choice and the four decisions above.
-2. After landing: file bugs M-6 to M-9; update the state memory and this document's "Where the work is".
-3. Plan C3 (content-keyed vector cache; needs a persistent derived-file location first), then the Plan D plan.
+1. Fix bug `a806db1ec4ea162b` (atomic write door): a small plan and one reviewed task. Precondition of Plan D.
+2. Plan C3 (content-keyed vector cache; needs a persistent derived-file location first).
+3. The Plan D plan (the scout is `489339eef5f9e93b`; its open questions: who commits, and a file-only variant of the dual-write library against a scratch copy of the old catalog). Then Plan E.
