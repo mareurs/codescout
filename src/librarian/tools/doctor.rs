@@ -9100,6 +9100,9 @@ mod tests {
     use crate::librarian::catalog::events::{self, TestEventRowBuilder};
     use crate::librarian::catalog::worktree as reg;
     use crate::librarian::catalog::Catalog;
+    use crate::librarian::tools::testfixture::{
+        git_fixture_with_commit, repo_with_registered_worktree,
+    };
     use crate::librarian::tools::TestToolContextBuilder;
     use rusqlite::params;
 
@@ -11757,28 +11760,6 @@ mod tests {
     }
 
     // ---- archived_fix_sha_unresolvable ----------------------------------------------
-
-    /// A real git repo with one real commit, so resolution is genuine rather than mocked.
-    fn git_fixture_with_commit() -> (tempfile::TempDir, std::path::PathBuf, String) {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join("repo");
-        std::fs::create_dir_all(&root).unwrap();
-        let repo = git2::Repository::init(&root).unwrap();
-        let mut config = repo.config().unwrap();
-        config.set_str("user.name", "Test").unwrap();
-        config.set_str("user.email", "test@test.com").unwrap();
-        std::fs::write(root.join("a.txt"), "hello").unwrap();
-        let mut index = repo.index().unwrap();
-        index.add_path(std::path::Path::new("a.txt")).unwrap();
-        index.write().unwrap();
-        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-        let sig = repo.signature().unwrap();
-        let sha = repo
-            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap()
-            .to_string();
-        (tmp, root, sha)
-    }
 
     fn seed_archived_bug(cat: &Catalog, root: &std::path::Path, name: &str, body: &str) {
         let dir = root.join("docs").join("issues").join("archive");
@@ -20507,19 +20488,6 @@ root = "work/elsewhere/ghost"
     }
 
     // ---- unregistered_worktree_dir ----------------------------------------------------
-
-    /// A real repo (one commit, so a worktree can be added) whose `.worktrees/` holds one
-    /// REGISTERED linked worktree, `registered`, made by git itself rather than faked, so the
-    /// registration the check reads is the one `git worktree add` writes.
-    fn repo_with_registered_worktree() -> (tempfile::TempDir, std::path::PathBuf) {
-        let (tmp, root, _sha) = git_fixture_with_commit();
-        let wt_parent = root.join(".worktrees");
-        std::fs::create_dir_all(&wt_parent).unwrap();
-        let repo = git2::Repository::open(&root).unwrap();
-        repo.worktree("registered", &wt_parent.join("registered"), None)
-            .unwrap();
-        (tmp, root)
-    }
 
     const GHOST_SESSION: &str = "b80a27d4-9729-40ef-8c28-ad8982df6d13";
     const GHOST_SESSION_2: &str = "bf44ba81-4cb3-4fdc-a92b-0780646ca7b9";

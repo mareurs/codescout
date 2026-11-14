@@ -561,6 +561,10 @@ mod link_dir_tests;
 #[cfg(test)]
 mod read_door_tests;
 
+/// Git fixtures (a repository with one commit, one with a linked worktree) shared by tool tests.
+#[cfg(test)]
+pub(crate) mod testfixture;
+
 #[cfg(test)]
 mod containing_root_tests {
     use super::containing_root;
