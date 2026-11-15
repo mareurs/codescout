@@ -41,9 +41,11 @@ pub struct IdTarget {
 pub struct Resolver<'a> {
     pub index: &'a KeyIndex,
     pub this_repo: &'a RepoName,
-    /// Old file stem to the key of the file renamed from it.
+    /// Old key (the lowercase stem) of a renamed file to the key it has now.
     pub renamed_keys: &'a BTreeMap<String, Key>,
-    /// Exact `HEAD` file stem to the final paths that carry it.
+    /// Old path of a renamed file to its path now: a link written with the old path follows it.
+    pub renamed_paths: &'a BTreeMap<String, String>,
+    /// Old file stem (as written in the file name) to the final paths of the files that carried it.
     pub stems: &'a BTreeMap<String, Vec<String>>,
     /// A 16-hex id to the file it names.
     pub ids: &'a BTreeMap<String, IdTarget>,
@@ -271,29 +273,43 @@ impl<'a> Pass<'a> {
 
     /// `[[key:TOKEN]]`, when it resolves to an entry from this document.
     fn entry_form(&self, key: &Key, token: &str) -> Option<String> {
-        let reference = Reference::Entry {
-            repo: None,
-            key: key.clone(),
-            token: token.to_owned(),
-        };
-        matches!(
-            self.r.index.resolve(self.rel_path, &reference),
-            Resolution::Entry { .. }
-        )
-        .then(|| format!("[[{key}:{token}]]"))
+        self.render(None, key, Some(token))
     }
 
     /// `[[key]]`, when it resolves to a file from this document.
     fn file_form(&self, key: &Key) -> Option<String> {
-        let reference = Reference::File {
-            repo: None,
-            key: key.clone(),
-        };
-        matches!(
-            self.r.index.resolve(self.rel_path, &reference),
-            Resolution::File { .. }
-        )
-        .then(|| format!("[[{key}]]"))
+        self.render(None, key, None)
+    }
+
+    /// The wiki link to `key` (to its entry `token`), written with `repo` when the old link was.
+    /// `None` unless the index resolves exactly that form to a file (to an entry).
+    fn render(&self, repo: Option<&RepoName>, key: &Key, token: Option<&str>) -> Option<String> {
+        let prefix = repo.map(|r| format!("{}/", r.as_str())).unwrap_or_default();
+        match token {
+            Some(token) => {
+                let reference = Reference::Entry {
+                    repo: repo.cloned(),
+                    key: key.clone(),
+                    token: token.to_owned(),
+                };
+                matches!(
+                    self.r.index.resolve(self.rel_path, &reference),
+                    Resolution::Entry { .. }
+                )
+                .then(|| format!("[[{prefix}{key}:{token}]]"))
+            }
+            None => {
+                let reference = Reference::File {
+                    repo: repo.cloned(),
+                    key: key.clone(),
+                };
+                matches!(
+                    self.r.index.resolve(self.rel_path, &reference),
+                    Resolution::File { .. }
+                )
+                .then(|| format!("[[{prefix}{key}]]"))
+            }
+        }
     }
 
     /// The rewrite of a token that one or several documents define, after every guard has
@@ -373,12 +389,24 @@ impl<'a> Pass<'a> {
 
     /// A malformed wiki link whose target is a file the cutover renamed: `[[Old_Name]]` follows
     /// the rename. A malformed link with no rename on record is not this tool's to judge.
+    ///
+    /// The old key is the lowercase stem, so the lookup folds ASCII case. A `repo/` qualifier is
+    /// kept when it names this repository and ends the matter when it names another: only this
+    /// repository's files were renamed.
     fn renamed_key(&mut self, range: &Range<usize>, raw: &str) {
-        let (stem, token) = match raw.rsplit_once(':') {
-            Some((stem, token)) if is_entry_token(token) => (stem, Some(token)),
+        let (target, token) = match raw.rsplit_once(':') {
+            Some((target, token)) if is_entry_token(token) => (target, Some(token)),
             _ => (raw, None),
         };
-        let Some(new_key) = self.r.renamed_keys.get(stem) else {
+        let (repo, stem) = match target.split_once('/') {
+            Some((repo, stem)) if !stem.contains('/') => match RepoName::parse(repo) {
+                Ok(repo) if repo == *self.r.this_repo => (Some(repo), stem),
+                _ => return,
+            },
+            Some(_) => return,
+            None => (None, target),
+        };
+        let Some(new_key) = self.r.renamed_keys.get(&stem.to_ascii_lowercase()) else {
             return;
         };
         let new_key = new_key.clone();
@@ -399,11 +427,7 @@ impl<'a> Pass<'a> {
             );
             return;
         }
-        let to = match token {
-            Some(token) => self.entry_form(&new_key, token),
-            None => self.file_form(&new_key),
-        };
-        match to {
+        match self.render(repo.as_ref(), &new_key, token) {
             Some(to) => self.rewrite(Form::RenamedKey, range.clone(), to),
             None => self.unresolved(Form::RenamedKey, range, REASON_NOT_RENDERABLE, None),
         }
@@ -489,10 +513,15 @@ impl<'a> Pass<'a> {
         self.note_on_line(form, s.line, s.raw.clone(), outcome);
     }
 
-    /// The key of the document a link destination names, written in this document.
+    /// The key of the document a link destination names, written in this document, after the renames.
     fn target_key(&self, dest: &str) -> Option<Key> {
         let target = join_path(&folder_of(self.rel_path), dest)?;
-        self.r.index.key_at(&target).cloned()
+        self.r.index.key_at(self.current_path(&target)).cloned()
+    }
+
+    /// Where the document written at `path` in `HEAD` lies after the renames.
+    fn current_path<'p>(&'p self, path: &'p str) -> &'p str {
+        self.r.renamed_paths.get(path).map_or(path, String::as_str)
     }
 
     /// A hit of the old scanner with its bytes, not inside another span.
@@ -536,6 +565,7 @@ impl<'a> Pass<'a> {
                 None => self.unresolved(form, range, "the document has no unique key", None),
             }
         } else if let Some(historical) = self.r.id_hints.get(id) {
+            let historical = self.current_path(historical);
             let suggestion = key_of(historical).ok().and_then(|key| self.file_form(&key));
             self.unresolved(
                 form,
@@ -637,7 +667,7 @@ impl<'a> Pass<'a> {
             self.unresolved(form, range, "the destination is not a plain path", None);
             return;
         }
-        let Some(target) = join_path(&folder_of(self.rel_path), path_part) else {
+        let Some(written) = join_path(&folder_of(self.rel_path), path_part) else {
             self.unresolved(
                 form,
                 range,
@@ -646,7 +676,7 @@ impl<'a> Pass<'a> {
             );
             return;
         };
-        let Some(key) = self.r.index.key_at(&target).cloned() else {
+        let Some(key) = self.r.index.key_at(self.current_path(&written)).cloned() else {
             self.unresolved(form, range, REASON_NO_DOCUMENT, None);
             return;
         };
@@ -658,7 +688,7 @@ impl<'a> Pass<'a> {
             self.unresolved(form, range, "link with a fragment", Some(file_form));
             return;
         }
-        let file_name = target.rsplit('/').next().unwrap_or(&target);
+        let file_name = written.rsplit('/').next().unwrap_or(&written);
         let to = if label == key.as_str() || label == file_name || label == path_part {
             file_form
         } else if label.contains('\n') {
@@ -909,6 +939,7 @@ mod tests {
         index: KeyIndex,
         repo: RepoName,
         renamed: BTreeMap<String, Key>,
+        paths: BTreeMap<String, String>,
         stems: BTreeMap<String, Vec<String>>,
         ids: BTreeMap<String, IdTarget>,
         hints: BTreeMap<String, String>,
@@ -928,6 +959,7 @@ mod tests {
                 index,
                 repo,
                 renamed: BTreeMap::new(),
+                paths: BTreeMap::new(),
                 stems: BTreeMap::new(),
                 ids: BTreeMap::new(),
                 hints: BTreeMap::new(),
@@ -935,6 +967,21 @@ mod tests {
         }
         fn standard() -> Fx {
             Fx::new(&default_docs())
+        }
+        /// The index holds the renamed file at its final path; the side maps record the rename of
+        /// `docs/<old stem>.md`, as the plan builds them.
+        fn after_rename(old_stem: &str) -> Fx {
+            let mut docs = default_docs();
+            docs.retain(|(p, _)| *p != "docs/my-notes.md");
+            docs.push(("docs/my-notes.md", "# My\n\n## F-2 — two\n"));
+            let mut fx = Fx::new(&docs);
+            let old_key = old_stem.to_ascii_lowercase();
+            fx.renamed.insert(old_key, k("my-notes"));
+            fx.paths
+                .insert(format!("docs/{old_stem}.md"), "docs/my-notes.md".to_owned());
+            fx.stems
+                .insert(old_stem.to_owned(), vec!["docs/my-notes.md".to_owned()]);
+            fx
         }
         fn run(&self, src: &str, text: &str) -> (String, Vec<Finding>) {
             rewrite_document(
@@ -944,6 +991,7 @@ mod tests {
                     index: &self.index,
                     this_repo: &self.repo,
                     renamed_keys: &self.renamed,
+                    renamed_paths: &self.paths,
                     stems: &self.stems,
                     ids: &self.ids,
                     id_hints: &self.hints,
@@ -1400,7 +1448,7 @@ mod tests {
     #[test]
     fn a_renamed_key_in_a_wiki_link_follows_the_rename() {
         let mut fx = Fx::standard();
-        fx.renamed.insert("My_Notes".into(), k("my-notes"));
+        fx.renamed.insert("my_notes".into(), k("my-notes"));
         let (out, f) = fx.run(
             "docs/b.md",
             "# B\n\nsee [[My_Notes]] and [[My_Notes|label]]\n",
@@ -1416,6 +1464,83 @@ mod tests {
         let (out, f) = fx.run("docs/b.md", text);
         assert_eq!(out, text);
         assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn a_wiki_link_to_an_old_key_follows_the_rename() {
+        let fx = Fx::after_rename("My_Notes");
+        let text = "# B\n\n[[My_Notes]] [[my_notes:F-2]] [[demo/My_Notes]] [[demo/My_Notes:F-2]]\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(
+            out,
+            "# B\n\n[[my-notes]] [[my-notes:F-2]] [[demo/my-notes]] [[demo/my-notes:F-2]]\n"
+        );
+        assert_eq!(f.len(), 4, "{f:?}");
+        assert!(f.iter().all(|f| f.form == Form::RenamedKey), "{f:?}");
+        // The qualifier is this repository's: another repository's file was not renamed here.
+        let text = "# B\n\n[[other/My_Notes]] [[a:b:c]]\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(out, text);
+        assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn a_rename_that_gives_no_renderable_form_is_reported_not_written() {
+        // The renamed file does not define the token: the rendered form would not resolve.
+        let fx = Fx::after_rename("My_Notes");
+        let text = "# B\n\n[[my_notes:F-9]]\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(out, text);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(unresolved(&f[0]).0, REASON_NOT_RENDERABLE);
+    }
+
+    #[test]
+    fn a_lowercase_stem_token_and_a_path_link_follow_the_rename() {
+        let fx = Fx::after_rename("my_notes");
+        let text = "# B\n\nsee my_notes:F-2 and [n](my_notes.md) here\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(out, "# B\n\nsee [[my-notes:F-2]] and [[my-notes|n]] here\n");
+        assert_eq!(f.len(), 2, "{f:?}");
+        assert_eq!(f[0].form, Form::StemToken);
+        assert_eq!(f[1].form, Form::PathLink);
+        // A path link keeps its spelling of the old name, whatever the case.
+        let fx = Fx::after_rename("My_Notes");
+        let (out, f) = fx.run("docs/b.md", "# B\n\n[My_Notes.md](My_Notes.md)\n");
+        assert_eq!(out, "# B\n\n[[my-notes]]\n");
+        assert_eq!(f.len(), 1, "{f:?}");
+        // Another folder reaches the old path through `..`.
+        let (out, _) = fx.run("docs/notes/a-doc.md", "# A\n\n[n](../My_Notes.md)\n");
+        assert_eq!(out, "# A\n\n[[my-notes|n]]\n");
+        // A label that is the old file name reads as the file itself.
+        let (out, _) = fx.run(
+            "docs/notes/a-doc.md",
+            "# A\n\n[My_Notes.md](../My_Notes.md)\n",
+        );
+        assert_eq!(out, "# A\n\n[[my-notes]]\n");
+    }
+
+    #[test]
+    fn a_reference_style_link_to_a_renamed_file_carries_the_new_form_as_its_suggestion() {
+        let fx = Fx::after_rename("My_Notes");
+        let (out, f) = fx.run("docs/b.md", "# B\n\n[n][ref]\n\n[ref]: My_Notes.md\n");
+        assert_eq!(out, "# B\n\n[n][ref]\n\n[ref]: My_Notes.md\n");
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(
+            unresolved(&f[0]),
+            ("reference-style link", Some("[[my-notes]]"))
+        );
+    }
+
+    #[test]
+    fn an_id_hint_for_a_file_the_cutover_renamed_suggests_the_new_form() {
+        let mut fx = Fx::after_rename("My_Notes");
+        fx.hints
+            .insert("0123456789abcdef".into(), "docs/My_Notes.md".into());
+        let (out, f) = fx.run("docs/b.md", "# B\n\nsee 0123456789abcdef\n");
+        assert_eq!(out, "# B\n\nsee 0123456789abcdef\n");
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(unresolved(&f[0]).1, Some("[[my-notes]]"));
     }
 
     #[test]

@@ -168,10 +168,10 @@ fn is_not_moved(item: &Item) -> bool {
     matches!(item.status, Status::Skipped | Status::Unrecoverable)
 }
 
-/// A rename the plan does not apply, or a change to a frozen file.
+/// A rename the plan does not apply, or a change to a frozen file. A rename that `HEAD` already
+/// holds is not blocked.
 fn is_blocked(item: &Item) -> bool {
-    (item.class == Class::Rename && item.status != Status::Moved)
-        || item.reason.starts_with("frozen")
+    (item.class == Class::Rename && is_not_moved(item)) || item.reason.starts_with("frozen")
 }
 
 /// `<path>[:<line>] — <reason>[ — use <suggestion>]`.
@@ -393,6 +393,32 @@ mod tests {
         let text = render_markdown(&plan, &header());
         assert!(text.contains("\nHistory: shallow clone: history recovery skipped\n"));
         assert_eq!(render_json(&plan, &header())["shallow"], true);
+    }
+
+    #[test]
+    fn a_rename_head_already_holds_is_not_listed_as_blocked() {
+        let mut plan = sample();
+        plan.items.clear();
+        plan.items.push(item(
+            Class::Rename,
+            Status::AlreadyExported,
+            "the rename is already in HEAD",
+            Some("docs/my-notes.md"),
+        ));
+        plan.items.push(item(
+            Class::Rename,
+            Status::Moved,
+            "renamed to a name that gives a valid key",
+            Some("docs/Other_Notes.md"),
+        ));
+        let text = render_markdown(&plan, &header());
+        let section = text
+            .split("## Frozen files and blocked renames\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .unwrap();
+        assert!(section.contains("None."), "{section}");
+        assert!(!section.contains("my-notes"), "{section}");
     }
 
     #[test]

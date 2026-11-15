@@ -13,13 +13,16 @@ use crate::librarian::catalog::augmentation::AugmentationRow;
 use crate::librarian::cutover::code_refs::CodeRefs;
 use crate::librarian::cutover::history::HistoryIds;
 use crate::librarian::cutover::old_rows::{OldRows, OutOfScope};
+use crate::librarian::cutover::rename::{
+    applied_item, in_head_item, plan_renames, renames_already_in_head, RenameSet,
+};
 use crate::librarian::cutover::rewrite::{
     rewrite_document, Finding, Form, IdSource, IdTarget, Outcome, Resolver, REASON_UNKNOWN_ID,
 };
 use crate::librarian::derived::build::{key_space_from_commit, repo_name_of};
 use crate::librarian::derived::scan::{scan_commit, Skip};
 use crate::librarian::identity::index::{DocInput, KeyIndex};
-use crate::librarian::identity::key::markdown_stem;
+use crate::librarian::identity::key::{key_of, markdown_stem, Key};
 use crate::librarian::identity::repo_name::RepoName;
 use crate::librarian::tools::link_scan::extract::{citation_spans, CitationKind};
 
@@ -144,8 +147,8 @@ impl ExportPlan {
 /// markdown file in the key space, the paths the key space leaves out, and the repository name.
 struct Head {
     files: BTreeMap<String, String>,
-    /// Read by the rename step, which asks which paths are outside the key space.
-    #[allow(dead_code)]
+    /// The markdown paths of `HEAD` that are not in `files`: outside the key space, or a file
+    /// with no text (not UTF-8, a symlink). A rename never lands on one of them.
     outside: BTreeSet<String>,
     repo_name: RepoName,
 }
@@ -164,8 +167,11 @@ impl Head {
                 Err(Skip::OutsideKeySpace) => {
                     outside.insert(scanned.rel_path);
                 }
-                // A blob with no text or a symlink has no text to plan against.
-                Err(Skip::NotUtf8 | Skip::Symlink) => {}
+                // A blob with no text or a symlink has no text to plan against, but its path
+                // is taken.
+                Err(Skip::NotUtf8 | Skip::Symlink) => {
+                    outside.insert(scanned.rel_path);
+                }
             }
         }
         let (repo_name, _) = repo_name_of(repo, commit)?;
@@ -179,14 +185,17 @@ impl Head {
 
 /// Plan the export of `commit` for the rows in `old`.
 ///
-/// Fills the population of the old rows by class, and the items for the events whose kind has
-/// no home in any text and for the entry citations that are reported and not exported.
+/// Fills the population of the old rows by class, the renames of the files whose names give no
+/// valid key (with the ones it cannot make as items), the items for the events whose kind has no
+/// home in any text, and the rewrite of every citation. Old rows follow a renamed document to the
+/// path it has after the renames, and every citation is rendered against that final path set.
 pub fn plan_export(
     repo: &git2::Repository,
     commit: &git2::Commit,
     old: &OldRows,
 ) -> anyhow::Result<ExportPlan> {
     let head = Head::load(repo, commit)?;
+    let code = CodeRefs::load(repo, commit)?;
     let mut plan = ExportPlan {
         repo_name: head.repo_name.to_string(),
         commit: commit.id().to_string(),
@@ -196,58 +205,90 @@ pub fn plan_export(
         files: BTreeMap::new(),
         out_of_scope: old.out_of_scope.clone(),
     };
-    plan_skipped_events(old, &mut plan);
+    let renames = plan_file_renames(&head, old, &code, &mut plan);
+    plan_skipped_events(old, &renames.paths(), &mut plan);
     plan_write_cites(old, &mut plan);
-    plan_citations(repo, commit, old, &head, &mut plan)?;
+    plan_citations(repo, commit, old, &head, &code, &renames, &mut plan)?;
     Ok(plan)
 }
 
-/// Rewrite the old citation forms of every in-space document (D-R5). A document that code,
-/// a dot directory or an mdBook reads by path is frozen (D-R26): its text stays, and each
-/// rewrite it would have had is an `unrecoverable` item.
-fn plan_citations(
-    repo: &git2::Repository,
-    commit: &git2::Commit,
-    old: &OldRows,
+/// The renames of the run (D-R14): the ones this run applies, with an item for each and for each
+/// it cannot make, and the ones `HEAD` already holds (D-R25), each an `already_exported` item.
+fn plan_file_renames(
     head: &Head,
+    old: &OldRows,
+    code: &CodeRefs,
     plan: &mut ExportPlan,
-) -> anyhow::Result<()> {
-    let index = KeyIndex::build(
+) -> RenameSet {
+    let before = KeyIndex::build(
         head.repo_name.clone(),
         head.files.iter().map(|(path, text)| DocInput {
             rel_path: path.clone(),
             text: text.clone(),
         }),
     );
-    let stems = stems_of(head);
-    let (ids, id_hints) = recover_ids(repo, commit, old, head, plan.shallow)?;
-    let renamed_keys = BTreeMap::new();
+    let paths: Vec<String> = head.files.keys().chain(&head.outside).cloned().collect();
+    let keys: BTreeSet<Key> = head.files.keys().filter_map(|p| key_of(p).ok()).collect();
+    let (planned, blocked) = plan_renames(&paths, &keys, before.problems(), code);
+    let head_paths: BTreeSet<String> = paths.into_iter().collect();
+    let in_head = renames_already_in_head(old, &head_paths);
+    plan.items.extend(blocked);
+    plan.items.extend(planned.iter().map(applied_item));
+    plan.items.extend(in_head.iter().map(in_head_item));
+    RenameSet { planned, in_head }
+}
+
+/// Rewrite the old citation forms of every in-space document (D-R5). A document that code,
+/// a dot directory or an mdBook reads by path is frozen (D-R26): its text stays, and each
+/// rewrite it would have had is an `unrecoverable` item.
+///
+/// The index, the stem table and the id targets all use the final paths (after `renames`), so a
+/// form is rendered with the key the file has once the plan is applied. A renamed file is one
+/// entry of the plan, under its new path.
+fn plan_citations(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    old: &OldRows,
+    head: &Head,
+    code: &CodeRefs,
+    renames: &RenameSet,
+    plan: &mut ExportPlan,
+) -> anyhow::Result<()> {
+    let moved = renames.paths();
+    let index = KeyIndex::build(
+        head.repo_name.clone(),
+        head.files.iter().map(|(path, text)| DocInput {
+            rel_path: final_path(&moved, path).to_owned(),
+            text: text.clone(),
+        }),
+    );
+    let stems = stems_of(head, renames);
+    let (ids, id_hints) = recover_ids(repo, commit, old, head, &moved, plan.shallow)?;
+    let renamed_keys = renames.keys();
     let resolver = Resolver {
         index: &index,
         this_repo: &head.repo_name,
         renamed_keys: &renamed_keys,
+        renamed_paths: &moved,
         stems: &stems,
         ids: &ids,
         id_hints: &id_hints,
     };
-    let code = CodeRefs::load(repo, commit)?;
     for (path, text) in &head.files {
+        let now = final_path(&moved, path);
         let frozen = code.frozen(path);
-        let (new_text, findings) = rewrite_document(path, text, &resolver);
+        let (new_text, findings) = rewrite_document(now, text, &resolver);
         for finding in &findings {
-            plan.items.push(citation_item(
-                path,
-                finding,
-                frozen.as_deref(),
-                plan.shallow,
-            ));
+            plan.items
+                .push(citation_item(now, finding, frozen.as_deref(), plan.shallow));
         }
-        if frozen.is_none() && new_text != *text {
+        let renamed_from = (now != path).then(|| path.clone());
+        if frozen.is_none() && (new_text != *text || renamed_from.is_some()) {
             plan.files.insert(
-                path.clone(),
+                now.to_owned(),
                 FileChange {
-                    path: path.clone(),
-                    renamed_from: None,
+                    path: now.to_owned(),
+                    renamed_from,
                     head_text: Some(text.clone()),
                     new_text,
                 },
@@ -255,6 +296,11 @@ fn plan_citations(
         }
     }
     Ok(())
+}
+
+/// The path of the document written at `path` in `HEAD`, after the renames.
+fn final_path<'a>(moved: &'a BTreeMap<String, String>, path: &'a str) -> &'a str {
+    moved.get(path).map_or(path, String::as_str)
 }
 
 /// The plan item of one citation the rewrite looked at.
@@ -306,28 +352,44 @@ fn citation_item(path: &str, finding: &Finding, frozen: Option<&str>, shallow: b
     }
 }
 
-/// Exact file stem of each in-space document to the paths that carry it.
-fn stems_of(head: &Head) -> BTreeMap<String, Vec<String>> {
+/// Each file stem of `HEAD` (as written in the file name) to the final paths of the files that
+/// carried it. The old stem of a file `HEAD` already holds under its new name names it too.
+fn stems_of(head: &Head, renames: &RenameSet) -> BTreeMap<String, Vec<String>> {
+    let moved = renames.paths();
     let mut stems: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for path in head.files.keys() {
         let name = path.rsplit('/').next().unwrap_or(path);
         if let Some(stem) = markdown_stem(name) {
-            stems.entry(stem.to_owned()).or_default().push(path.clone());
+            stems
+                .entry(stem.to_owned())
+                .or_default()
+                .push(final_path(&moved, path).to_owned());
+        }
+    }
+    for rename in &renames.in_head {
+        let name = rename.from.rsplit('/').next().unwrap_or(&rename.from);
+        if let Some(stem) = markdown_stem(name) {
+            let paths = stems.entry(stem.to_owned()).or_default();
+            if !paths.contains(&rename.to) {
+                paths.push(rename.to.clone());
+            }
         }
     }
     stems
 }
 
 /// What each old artifact id names. The old catalog first (`Catalog`): an id of a document that
-/// `HEAD` holds is its target. Then, for every cited id with no target yet, git history
-/// (`History`): the file may have moved since the catalog saw it. Last, an id of a document `HEAD`
-/// lacks that history did not settle is a hint with the path the catalog knew. A shallow clone
-/// has incomplete history and skips it: an id nothing else names is reported so.
+/// `HEAD` holds is its target, at the path the document has after the renames. Then, for every
+/// cited id with no target yet, git history (`History`): the file may have moved since the catalog
+/// saw it. Last, an id of a document `HEAD` lacks that history did not settle is a hint with the
+/// path the catalog knew. A shallow clone has incomplete history and skips it: an id nothing else
+/// names is reported so.
 fn recover_ids(
     repo: &git2::Repository,
     commit: &git2::Commit,
     old: &OldRows,
     head: &Head,
+    moved: &BTreeMap<String, String>,
     shallow: bool,
 ) -> anyhow::Result<(BTreeMap<String, IdTarget>, BTreeMap<String, String>)> {
     let mut ids = BTreeMap::new();
@@ -335,9 +397,12 @@ fn recover_ids(
     // The path the catalog knew for each id whose file `HEAD` lacks.
     let mut gone: BTreeMap<&str, &str> = BTreeMap::new();
     for doc in old.documents.values() {
-        if head.files.contains_key(&doc.rel_path) {
+        // `HEAD` holds the file under its old name (this run renames it) or already under its new
+        // one (a run after the commit).
+        let now = final_path(moved, &doc.rel_path);
+        if head.files.contains_key(&doc.rel_path) || head.files.contains_key(now) {
             ids.entry(doc.id.clone()).or_insert(IdTarget {
-                rel_path: doc.rel_path.clone(),
+                rel_path: now.to_owned(),
                 source: IdSource::Catalog,
             });
         } else {
@@ -356,10 +421,11 @@ fn recover_ids(
         for id in &open {
             match history.head_path(id) {
                 Some(Ok(rel_path)) => {
+                    let now = final_path(moved, &rel_path).to_owned();
                     ids.insert(
                         id.clone(),
                         IdTarget {
-                            rel_path,
+                            rel_path: now,
                             source: IdSource::History,
                         },
                     );
@@ -400,8 +466,9 @@ fn no_text_home(kind: &str) -> Option<&'static str> {
     }
 }
 
-/// One `skipped` item per event of a kind that no text holds.
-fn plan_skipped_events(old: &OldRows, plan: &mut ExportPlan) {
+/// One `skipped` item per event of a kind that no text holds. The path is the document's path
+/// after the renames: its rows follow the file.
+fn plan_skipped_events(old: &OldRows, moved: &BTreeMap<String, String>, plan: &mut ExportPlan) {
     for event in &old.events {
         let Some(reason) = no_text_home(&event.kind) else {
             continue;
@@ -413,7 +480,7 @@ fn plan_skipped_events(old: &OldRows, plan: &mut ExportPlan) {
             path: old
                 .documents
                 .get(&event.artifact_id)
-                .map(|d| d.rel_path.clone()),
+                .map(|d| final_path(moved, &d.rel_path).to_owned()),
             line: None,
             detail: Some(event.kind.clone()),
             suggestion: None,
@@ -883,6 +950,306 @@ mod tests {
             items[0].reason,
             "the id names a file that HEAD no longer holds"
         );
+    }
+
+    fn rename_items(plan: &ExportPlan) -> Vec<&Item> {
+        plan.items
+            .iter()
+            .filter(|i| i.class == Class::Rename)
+            .collect()
+    }
+
+    #[test]
+    fn a_renamed_file_appears_once_under_its_new_path() {
+        let plan = plan_of_files(
+            &[
+                ("docs/My_Notes.md", b"# My\n\n## F-2 \xe2\x80\x94 two\n"),
+                ("docs/b.md", b"# B\n"),
+            ],
+            |_, _| {},
+        );
+        let paths: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(paths, ["docs/my-notes.md"], "one entry, under the new path");
+        let file = &plan.files["docs/my-notes.md"];
+        assert_eq!(file.path, "docs/my-notes.md");
+        assert_eq!(file.renamed_from.as_deref(), Some("docs/My_Notes.md"));
+        assert_eq!(
+            file.head_text.as_deref(),
+            Some("# My\n\n## F-2 \u{2014} two\n")
+        );
+        assert_eq!(file.new_text, "# My\n\n## F-2 \u{2014} two\n");
+        assert_eq!(
+            plan.writes(),
+            1,
+            "a rename is a write even with the text unchanged"
+        );
+        let items = rename_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].status, Status::Moved);
+        assert_eq!(items[0].path.as_deref(), Some("docs/My_Notes.md"));
+        assert_eq!(
+            items[0].detail.as_deref(),
+            Some("docs/My_Notes.md -> docs/my-notes.md")
+        );
+    }
+
+    #[test]
+    fn a_rewrite_inside_a_renamed_file_is_reported_under_its_new_path() {
+        let plan = plan_of_files(
+            &[
+                ("docs/My_Notes.md", b"# My\n\nsee F-9.\n"),
+                ("docs/ledger.md", b"# L\n\n## F-9 \xe2\x80\x94 nine\n"),
+            ],
+            |_, _| {},
+        );
+        let file = &plan.files["docs/my-notes.md"];
+        assert_eq!(file.renamed_from.as_deref(), Some("docs/My_Notes.md"));
+        assert_eq!(file.new_text, "# My\n\nsee [[ledger:F-9]].\n");
+        assert_eq!(
+            file.head_text.as_deref(),
+            Some("# My\n\nsee F-9.\n"),
+            "the text of HEAD is kept to compare the working tree against"
+        );
+        let items = citation_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].path.as_deref(), Some("docs/my-notes.md"));
+        assert_eq!(plan.files.len(), 1);
+    }
+
+    #[test]
+    fn a_bare_token_is_rendered_against_the_final_paths() {
+        let plan = plan_of_files(
+            &[
+                ("docs/My_Notes.md", b"# My\n\n## F-2 \xe2\x80\x94 two\n"),
+                ("docs/b.md", b"# B\n\nsee F-2 and [[My_Notes:F-2]].\n"),
+            ],
+            |_, _| {},
+        );
+        assert_eq!(
+            plan.files["docs/b.md"].new_text, "# B\n\nsee [[my-notes:F-2]] and [[my-notes:F-2]].\n",
+            "never [[my_notes:F-2]]: the key of the file after the rename"
+        );
+    }
+
+    #[test]
+    fn every_old_form_of_a_renamed_file_follows_it() {
+        let plan = plan_of_files(
+            &[
+                ("docs/my_notes.md", b"# My\n\n## F-2 \xe2\x80\x94 two\n"),
+                (
+                    "docs/b.md",
+                    b"# B\n\n[[my_notes]] my_notes:F-2 [n](my_notes.md) 0123456789abcdef\n",
+                ),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "0123456789abcdef", "docs/my_notes.md");
+            },
+        );
+        assert_eq!(
+            plan.files["docs/b.md"].new_text,
+            "# B\n\n[[my-notes]] [[my-notes:F-2]] [[my-notes|n]] [[my-notes]]\n"
+        );
+        let open: Vec<&Item> = citation_items(&plan)
+            .into_iter()
+            .filter(|i| i.status != Status::Moved)
+            .collect();
+        assert!(open.is_empty(), "{open:?}");
+    }
+
+    #[test]
+    fn a_refused_rename_leaves_the_citations_of_the_file_alone() {
+        let plan = plan_of_files(
+            &[
+                ("docs/My_Notes.md", b"# My\n\n## F-2 \xe2\x80\x94 two\n"),
+                (
+                    "docs/b.md",
+                    b"# B\n\n[[My_Notes]] and [n](My_Notes.md) and F-2.\n",
+                ),
+                ("src/x.rs", b"const P: &str = \"../docs/My_Notes.md\";\n"),
+            ],
+            |_, _| {},
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let items = rename_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].status, Status::Unrecoverable);
+        assert!(
+            items[0].reason.starts_with("frozen: "),
+            "{}",
+            items[0].reason
+        );
+        assert!(
+            items[0].reason.contains("src/x.rs:1"),
+            "{}",
+            items[0].reason
+        );
+        // Nothing is rewritten: the path link has no target with a key, and the one document
+        // that defines the token has none either.
+        let reasons: Vec<&str> = citation_items(&plan)
+            .iter()
+            .map(|i| i.reason.as_str())
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                "the target is not a document with a unique key",
+                "the one document that defines the token has no unique key"
+            ],
+            "{reasons:?}"
+        );
+    }
+
+    #[test]
+    fn a_target_outside_the_key_space_is_taken() {
+        let plan = plan_of_files(
+            &[
+                (
+                    ".codescout/key-space.toml",
+                    b"exclude = [\"**/my-notes.md\"]\n",
+                ),
+                ("docs/My_Notes.md", b"# My\n"),
+                ("docs/my-notes.md", b"# Vendored\n"),
+            ],
+            |_, _| {},
+        );
+        assert!(plan.files.is_empty());
+        let items = rename_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].reason, "target exists");
+    }
+
+    #[test]
+    fn rows_of_a_renamed_document_follow_it_after_the_commit() {
+        // `HEAD` already holds the rename: the old catalog still knows `docs/My_Notes.md`.
+        let plan = plan_of_files(
+            &[
+                ("docs/my-notes.md", b"# My\n\n## F-2 \xe2\x80\x94 two\n"),
+                (
+                    "docs/b.md",
+                    b"# B\n\nsee [[My_Notes]] and 0123456789abcdef and [n](My_Notes.md) and My_Notes:F-2.\n",
+                ),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "0123456789abcdef", "docs/My_Notes.md");
+                add_event(cat, "e1", "0123456789abcdef", "field_patch", "{}");
+            },
+        );
+        assert_eq!(
+            plan.files["docs/b.md"].new_text,
+            "# B\n\nsee [[my-notes]] and [[my-notes]] and [[my-notes|n]] and My_Notes:F-2.\n"
+        );
+        assert_eq!(plan.files.len(), 1, "no file is renamed again");
+        let renames = rename_items(&plan);
+        assert_eq!(renames.len(), 1, "{renames:?}");
+        assert_eq!(renames[0].status, Status::AlreadyExported);
+        assert_eq!(renames[0].path.as_deref(), Some("docs/my-notes.md"));
+        assert_eq!(
+            renames[0].detail.as_deref(),
+            Some("docs/My_Notes.md -> docs/my-notes.md")
+        );
+        // The rows land on the new path, and no citation says the document is gone.
+        let skipped: Vec<&Item> = plan
+            .items
+            .iter()
+            .filter(|i| i.class == Class::Event)
+            .collect();
+        assert_eq!(skipped.len(), 1, "{skipped:?}");
+        assert_eq!(skipped[0].path.as_deref(), Some("docs/my-notes.md"));
+        let gone: Vec<&Item> = citation_items(&plan)
+            .into_iter()
+            .filter(|i| i.reason.contains("no longer holds"))
+            .collect();
+        assert!(gone.is_empty(), "{gone:?}");
+    }
+
+    #[test]
+    fn a_blocker_of_one_rename_is_a_report_line_and_the_others_still_happen() {
+        let plan = plan_of_files(
+            &[
+                ("docs/My_Notes.md", b"# My\n"),
+                ("docs/Other_Notes.md", b"# O\n"),
+                ("scripts/run.sh", b"cat docs/Other_Notes.md\n"),
+            ],
+            |_, _| {},
+        );
+        let paths: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(paths, ["docs/my-notes.md"]);
+        let blocked: Vec<&Item> = rename_items(&plan)
+            .into_iter()
+            .filter(|i| i.status == Status::Unrecoverable)
+            .collect();
+        assert_eq!(blocked.len(), 1, "{blocked:?}");
+        assert_eq!(blocked[0].path.as_deref(), Some("docs/Other_Notes.md"));
+    }
+
+    #[test]
+    fn a_history_target_this_run_renames_is_followed_to_its_new_path() {
+        use crate::librarian::derived::testkit::commit_files;
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        const BODY: &[u8] =
+            b"# Notes\n\nSome text that makes the file big enough to match.\n\nMore.\n";
+        let repo = repo_with(
+            &root,
+            &[("docs/old.md", FILE, BODY), ("docs/a.md", FILE, b"# A\n")],
+        );
+        let first = repo.head().unwrap().peel_to_commit().unwrap();
+        let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/old.md"));
+        let a_text = format!("# A\n\nsee {id}.\n");
+        // Git moved the file to a name that is no key; this run renames it again.
+        let tip = commit_files(
+            &repo,
+            &[
+                ("docs/New_Notes.md", BODY),
+                ("docs/a.md", a_text.as_bytes()),
+            ],
+            &[&first],
+            "move",
+        );
+        let old = old_catalog_with(|_| {});
+        let rows = load(&old, &RootMap::new(root.clone())).unwrap();
+        let commit = repo.find_commit(tip).unwrap();
+        let plan = plan_export(&repo, &commit, &rows).unwrap();
+        assert_eq!(
+            plan.files["docs/a.md"].new_text,
+            "# A\n\nsee [[new-notes]].\n"
+        );
+        assert_eq!(
+            plan.files["docs/new-notes.md"].renamed_from.as_deref(),
+            Some("docs/New_Notes.md")
+        );
+    }
+
+    #[test]
+    fn a_stem_token_of_a_file_head_already_renamed_follows_it() {
+        let plan = plan_of_files(
+            &[
+                ("docs/my-notes.md", b"# My\n\n## F-2 \xe2\x80\x94 two\n"),
+                ("docs/b.md", b"# B\n\nsee my_notes:F-2 and [[my_notes]].\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "0123456789abcdef", "docs/my_notes.md");
+            },
+        );
+        assert_eq!(
+            plan.files["docs/b.md"].new_text,
+            "# B\n\nsee [[my-notes:F-2]] and [[my-notes]].\n"
+        );
+    }
+
+    #[test]
+    fn a_target_with_no_text_is_taken() {
+        let plan = plan_of_files(
+            &[
+                ("docs/My_Notes.md", b"# My\n"),
+                ("docs/my-notes.md", b"\xff\xfe not text"),
+            ],
+            |_, _| {},
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let items = rename_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].reason, "target exists");
     }
 
     #[test]
