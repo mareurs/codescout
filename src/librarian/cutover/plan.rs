@@ -23,7 +23,9 @@ use crate::librarian::cutover::rewrite::{
     join_path, rewrite_document, Finding, Form, IdSource, IdTarget, Outcome, Resolver,
     REASON_UNKNOWN_ID,
 };
-use crate::librarian::cutover::sidecars::{plan_shape, sidecar_rel, ShapeExport};
+use crate::librarian::cutover::sidecars::{
+    compare_declared, declared_sidecar, plan_shape, sidecar_rel, ShapeExport,
+};
 use crate::librarian::derived::build::{key_space_from_commit, repo_name_of};
 use crate::librarian::derived::scan::{scan_commit, Skip};
 use crate::librarian::identity::index::{DocInput, KeyIndex};
@@ -387,6 +389,14 @@ const REASON_NOT_IN_SPACE: &str = "document is outside the key space or has no t
 /// A path that `HEAD` does not hold, one outside the key space, and a frozen document (D-R26) get
 /// `unrecoverable` items for their entries and their shape; their other params are reported as
 /// everywhere else.
+///
+/// The sidecar name is not injective (`docs/a-b.md` and `docs/a/b.md` give one name). A sidecar
+/// path that another document names, by its own name or by its declaration in `HEAD`, is a claim:
+/// every document that names it gets an `unrecoverable` shape item and none is planned, so the
+/// result does not depend on the order of the rows. A document that declares a committed sidecar
+/// under another name (a rename gave it a new one) has the catalog shape compared with that file:
+/// a difference is drift and nothing is re-pointed; an equal one is replaced by the new sidecar
+/// and the old file is reported as no longer declared. The tool never plans a deletion.
 fn plan_augmentations(
     repo: &git2::Repository,
     commit: &git2::Commit,
@@ -405,15 +415,41 @@ fn plan_augmentations(
         let now = final_path(&moved, &document.rel_path).to_owned();
         by_path.entry(now).or_default().push(row);
     }
-    for (now, rows) in by_path {
-        let renamed_from = plan.files.get(&now).and_then(|f| f.renamed_from.clone());
-        let head_path = renamed_from.unwrap_or_else(|| now.clone());
+    for rows in by_path.values_mut() {
+        rows.sort_by(|a, b| a.artifact_id.cmp(&b.artifact_id));
+    }
+    let refusal_of = |plan: &ExportPlan, now: &str| -> (String, Option<String>) {
+        let renamed_from = plan.files.get(now).and_then(|f| f.renamed_from.clone());
+        let head_path = renamed_from.unwrap_or_else(|| now.to_owned());
         let refusal = match (head.files.get(&head_path), code.frozen(&head_path)) {
             (None, _) if head.outside.contains(&head_path) => Some(REASON_NOT_IN_SPACE.to_owned()),
             (None, _) => Some(REASON_NOT_IN_HEAD.to_owned()),
             (Some(_), Some(why)) => Some(format!("frozen: {why}")),
             (Some(_), None) => None,
         };
+        (head_path, refusal)
+    };
+
+    // Who names each sidecar path: a document with a shape to plan, by its name, and a document of
+    // `HEAD`, by its declaration.
+    let mut claims: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for now in by_path.keys() {
+        if refusal_of(plan, now).1.is_none() {
+            claims
+                .entry(sidecar_rel(now))
+                .or_default()
+                .insert(now.clone());
+        }
+    }
+    for (path, text) in &head.files {
+        if let Some(declared) = declared_sidecar(text) {
+            let now = final_path(&moved, path).to_owned();
+            claims.entry(declared).or_default().insert(now);
+        }
+    }
+
+    for (now, rows) in by_path {
+        let (head_path, refusal) = refusal_of(plan, &now);
         if let Some(reason) = refusal {
             for row in rows {
                 plan.items.extend(refuse_entries(&now, row, &reason));
@@ -431,7 +467,17 @@ fn plan_augmentations(
         let mut text = base.clone();
 
         let sidecar_path = sidecar_rel(&now);
+        let claimed_by = claims
+            .get(&sidecar_path)
+            .and_then(|names| names.iter().find(|name| **name != now))
+            .cloned();
         let committed = committed_at(repo, commit, &sidecar_path)?;
+        // A committed sidecar the document declares under another name.
+        let elsewhere = declared_sidecar(&base).filter(|declared| *declared != sidecar_path);
+        let elsewhere_committed = match &elsewhere {
+            Some(declared) => Some(committed_at(repo, commit, declared)?),
+            None => None,
+        };
         // The text of the sidecar this path will have: the committed one, or the one the first row
         // planned.
         let mut sidecar: Option<String> = match &committed {
@@ -444,6 +490,16 @@ fn plan_augmentations(
             plan.items.extend(items);
             plan.items.extend(other_params(&now, row));
 
+            if let Some(other) = &claimed_by {
+                let reason = format!("sidecar path {sidecar_path} is claimed by {other}");
+                plan.items.push(shape_item(
+                    &now,
+                    Status::Unrecoverable,
+                    &reason,
+                    Some(sidecar_path.clone()),
+                ));
+                continue;
+            }
             if matches!(committed, Committed::Unreadable) {
                 let reason = "the committed sidecar cannot be read as text";
                 plan.items.push(shape_item(
@@ -453,6 +509,30 @@ fn plan_augmentations(
                     Some(sidecar_path.clone()),
                 ));
                 continue;
+            }
+            if let (Some(declared), Some(old_committed)) = (&elsewhere, &elsewhere_committed) {
+                let blocked = match old_committed {
+                    Committed::Text(old_text) => match compare_declared(row, old_text, declared) {
+                        Some(ShapeExport::Drift { fields }) => {
+                            Some(format!("shape drift: {}", fields.join(", ")))
+                        }
+                        Some(ShapeExport::Refused(why)) => Some(why),
+                        _ => None,
+                    },
+                    Committed::Unreadable => {
+                        Some("the committed sidecar cannot be read as text".to_owned())
+                    }
+                    Committed::Absent => None,
+                };
+                if let Some(reason) = blocked {
+                    plan.items.push(shape_item(
+                        &now,
+                        Status::Unrecoverable,
+                        &reason,
+                        Some(declared.clone()),
+                    ));
+                    continue;
+                }
             }
             let item = match plan_shape(&now, &text, row, sidecar.as_deref()) {
                 ShapeExport::Export {
@@ -504,6 +584,19 @@ fn plan_augmentations(
                 ShapeExport::Refused(why) => shape_item(&now, Status::Unrecoverable, &why, None),
             };
             plan.items.push(item);
+        }
+
+        // The old sidecar stays in the repository when the declaration now names the new one.
+        if let (Some(declared), Some(Committed::Text(_))) = (&elsewhere, &elsewhere_committed) {
+            if declared_sidecar(&text).as_deref() != Some(declared.as_str()) {
+                let reason = format!("sidecar {declared} is no longer declared; remove it by hand");
+                plan.items.push(shape_item(
+                    &now,
+                    Status::Skipped,
+                    &reason,
+                    Some(declared.clone()),
+                ));
+            }
         }
 
         if text != base {
@@ -2184,7 +2277,7 @@ mod tests {
     /// Two live rows may name one path (the same file under two spellings of the root). Both rows'
     /// params are reported under that path, the path's text and sidecar are planned once, and no
     /// entry is lost: an entry the first row recovered is already exported for the second.
-    fn two_rows_plan(second_prompt: Option<&'static str>) -> ExportPlan {
+    fn two_rows_plan(second_prompt: Option<&'static str>, reverse_rows: bool) -> ExportPlan {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let repo = repo_with(&root, &[("docs/ledger.md", FILE, LEDGER_MD.as_bytes())]);
@@ -2213,7 +2306,10 @@ mod tests {
         });
         let map =
             RootMap::with_old_roots(root.clone(), vec![PathBuf::from("/old/spelling")]).unwrap();
-        let rows = load(&old, &map).unwrap();
+        let mut rows = load(&old, &map).unwrap();
+        if reverse_rows {
+            rows.augmentations.reverse();
+        }
         assert_eq!(rows.documents.len(), 2);
         let commit = open_commit(&repo, "HEAD").unwrap();
         plan_export(&repo, &commit, &rows).unwrap()
@@ -2221,7 +2317,7 @@ mod tests {
 
     #[test]
     fn two_rows_naming_one_path_are_exported_once_and_both_reported() {
-        let plan = two_rows_plan(None);
+        let plan = two_rows_plan(None, false);
         let files: Vec<&str> = plan.files.keys().map(String::as_str).collect();
         assert_eq!(
             files,
@@ -2251,7 +2347,7 @@ mod tests {
 
     #[test]
     fn two_rows_naming_one_path_with_two_shapes_report_the_second_as_drift() {
-        let plan = two_rows_plan(Some("another prompt"));
+        let plan = two_rows_plan(Some("another prompt"), false);
         let sidecars = plan
             .files
             .keys()
@@ -2346,5 +2442,182 @@ mod tests {
                 "document is outside the key space or has no text"
             );
         }
+    }
+
+    /// The same plan, as text: items and files, for comparing two plans.
+    fn plan_text(plan: &ExportPlan) -> String {
+        let files: Vec<(&String, &Option<String>, &String)> = plan
+            .files
+            .values()
+            .map(|f| (&f.path, &f.renamed_from, &f.new_text))
+            .collect();
+        format!("{}\n{files:?}", serde_json::to_string(&plan.items).unwrap())
+    }
+
+    #[test]
+    fn rows_are_planned_in_id_order_whatever_order_the_loader_gave() {
+        let forward = two_rows_plan(None, false);
+        let reversed = two_rows_plan(None, true);
+        assert_eq!(plan_text(&forward), plan_text(&reversed));
+        let forward = two_rows_plan(Some("another prompt"), false);
+        let reversed = two_rows_plan(Some("another prompt"), true);
+        assert_eq!(plan_text(&forward), plan_text(&reversed));
+    }
+
+    const CLAIMED: &str = "docs/augmentations/docs-a-b.yaml";
+
+    /// `docs/a-b.md` and `docs/a/b.md` both name `docs/augmentations/docs-a-b.yaml`.
+    fn two_documents_one_sidecar(swap_ids: bool) -> ExportPlan {
+        plan_of_files(
+            &[
+                ("docs/a-b.md", LEDGER_MD.as_bytes()),
+                ("docs/a/b.md", LEDGER_MD.as_bytes()),
+            ],
+            |cat, root| {
+                let (first, second) = if swap_ids { ("d2", "d1") } else { ("d1", "d2") };
+                add_doc(cat, root, first, "docs/a-b.md");
+                add_doc(cat, root, second, "docs/a/b.md");
+                add_augmentation(cat, first, "{}", None);
+                add_augmentation(cat, second, "{}", None);
+            },
+        )
+    }
+
+    #[test]
+    fn two_documents_naming_one_sidecar_path_are_both_reported_and_neither_is_planned() {
+        let plan = two_documents_one_sidecar(false);
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let shape = items_of(&plan, Class::AugmentationShape);
+        assert_eq!(shape.len(), 2);
+        assert!(shape.iter().all(|i| i.status == Status::Unrecoverable));
+        let by_path: Vec<(&str, &str)> = shape
+            .iter()
+            .map(|i| (i.path.as_deref().unwrap(), i.reason.as_str()))
+            .collect();
+        assert_eq!(
+            by_path,
+            [
+                (
+                    "docs/a-b.md",
+                    format!("sidecar path {CLAIMED} is claimed by docs/a/b.md").as_str()
+                ),
+                (
+                    "docs/a/b.md",
+                    format!("sidecar path {CLAIMED} is claimed by docs/a-b.md").as_str()
+                ),
+            ]
+        );
+        // Whichever row is read first, the plan is the same.
+        assert_eq!(
+            plan_text(&plan),
+            plan_text(&two_documents_one_sidecar(true))
+        );
+    }
+
+    #[test]
+    fn a_document_naming_the_sidecar_another_document_declares_is_reported_not_overwritten() {
+        let declared = LEDGER_MD.replace(
+            "entry_prefix: F\n",
+            &format!("entry_prefix: F\nexpects_augmentation: {CLAIMED}\n"),
+        );
+        let plan = plan_of_files(
+            &[
+                ("docs/a-b.md", LEDGER_MD.as_bytes()),
+                ("docs/a/b.md", declared.as_bytes()),
+                (CLAIMED, b"prompt: keep it current\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "d1", "docs/a-b.md");
+                add_augmentation(cat, "d1", "{}", None);
+            },
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let shape = items_of(&plan, Class::AugmentationShape);
+        assert_eq!(shape.len(), 1);
+        assert_eq!(shape[0].status, Status::Unrecoverable);
+        assert_eq!(
+            shape[0].reason,
+            format!("sidecar path {CLAIMED} is claimed by docs/a/b.md")
+        );
+    }
+
+    /// `docs/my_notes.md` was exported by doctor: it declares and has a committed sidecar under its
+    /// old name. The cutover renames it to `docs/my-notes.md`.
+    fn renamed_ledger_declaring_its_old_sidecar(committed_prompt: &str) -> ExportPlan {
+        let doc = "---\nkind: tracker\nentry_prefix: F\nexpects_augmentation: docs/augmentations/docs-my_notes.yaml\n---\n\n# L\n\n## F-1 — one\n\nx\n";
+        let yaml = format!("prompt: {committed_prompt}\nentry_collection: entries\n");
+        plan_of_files(
+            &[
+                ("docs/my_notes.md", doc.as_bytes()),
+                ("docs/augmentations/docs-my_notes.yaml", yaml.as_bytes()),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "led", "docs/my_notes.md");
+                add_augmentation(cat, "led", "{}", Some("entries"));
+            },
+        )
+    }
+
+    #[test]
+    fn a_differing_sidecar_declared_at_the_old_name_is_drift_and_nothing_is_repointed() {
+        let plan = renamed_ledger_declaring_its_old_sidecar("an older prompt");
+        let files: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(files, ["docs/my-notes.md"], "the rename only");
+        assert_eq!(
+            declared_in(&plan.files["docs/my-notes.md"].new_text).as_deref(),
+            Some("docs/augmentations/docs-my_notes.yaml")
+        );
+        let shape = items_of(&plan, Class::AugmentationShape);
+        assert_eq!(shape.len(), 1);
+        assert_eq!(shape[0].status, Status::Unrecoverable);
+        assert_eq!(shape[0].reason, "shape drift: prompt");
+        assert_eq!(shape[0].path.as_deref(), Some("docs/my-notes.md"));
+    }
+
+    #[test]
+    fn an_equal_sidecar_declared_at_the_old_name_is_replaced_and_the_old_one_is_reported() {
+        let plan = renamed_ledger_declaring_its_old_sidecar("keep it current");
+        let files: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(
+            files,
+            ["docs/augmentations/docs-my-notes.yaml", "docs/my-notes.md"]
+        );
+        assert_eq!(
+            declared_in(&plan.files["docs/my-notes.md"].new_text).as_deref(),
+            Some("docs/augmentations/docs-my-notes.yaml")
+        );
+        let shape = items_of(&plan, Class::AugmentationShape);
+        let statuses: Vec<Status> = shape.iter().map(|i| i.status).collect();
+        assert_eq!(statuses.len(), 2, "{shape:?}");
+        assert!(statuses.contains(&Status::Moved));
+        let skipped = shape.iter().find(|i| i.status == Status::Skipped).unwrap();
+        assert_eq!(
+            skipped.reason,
+            "sidecar docs/augmentations/docs-my_notes.yaml is no longer declared; remove it by hand"
+        );
+        assert_eq!(skipped.path.as_deref(), Some("docs/my-notes.md"));
+        // Nothing deletes a file.
+        assert!(plan
+            .files
+            .values()
+            .all(|f| f.renamed_from.as_deref() != Some("docs/augmentations/docs-my_notes.yaml")));
+    }
+
+    #[test]
+    fn a_declared_path_with_no_file_in_head_is_planned_as_if_there_were_no_sidecar() {
+        let doc = LEDGER_MD.replace(
+            "entry_prefix: F\n",
+            "entry_prefix: F\nexpects_augmentation: docs/augmentations/gone.yaml\n",
+        );
+        let plan = plan_of_files(&[("docs/ledger.md", doc.as_bytes())], |cat, root| {
+            add_doc(cat, root, "led", "docs/ledger.md");
+            add_augmentation(cat, "led", "{}", None);
+        });
+        assert!(plan
+            .files
+            .contains_key("docs/augmentations/docs-ledger.yaml"));
+        let shape = items_of(&plan, Class::AugmentationShape);
+        assert_eq!(shape.len(), 1);
+        assert_eq!(shape[0].status, Status::Moved);
     }
 }

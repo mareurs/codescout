@@ -29,6 +29,8 @@ pub const REASON_ENTRY_DEFINED: &str = "entry is defined in the text";
 pub const REASON_NOT_A_TOKEN: &str = "entry id is not a token";
 pub const REASON_NOT_AN_OBJECT: &str = "params entry is not an object";
 pub const REASON_NOT_AN_ARRAY: &str = "the entry collection is not an array";
+pub const REASON_FRONTMATTER: &str =
+    "frontmatter does not parse; the high-water mark cannot be kept";
 pub const REASON_PARAMS_NOT_JSON: &str = "params is not JSON";
 pub const REASON_PARAMS_NOT_AN_OBJECT: &str = "params is not a JSON object";
 /// The reason of a params key outside the entry collection: neither a sidecar nor a text holds it.
@@ -147,22 +149,6 @@ fn section_texts(text: &str) -> BTreeMap<String, String> {
     sections
 }
 
-/// Whether `section` holds `value`: the value as a string, or in the form a JSON string escapes
-/// it to (the params block the recovery writes holds the second).
-fn text_holds(section: &str, value: &Value) -> bool {
-    match value {
-        Value::String(s) => {
-            let escaped = serde_json::to_string(s).unwrap_or_default();
-            let inner = escaped
-                .strip_prefix('"')
-                .and_then(|e| e.strip_suffix('"'))
-                .unwrap_or(&escaped);
-            section.contains(s.as_str()) || section.contains(inner)
-        }
-        other => section.contains(&other.to_string()),
-    }
-}
-
 /// A value that says nothing: `null`, an empty string, array or object.
 fn says_nothing(value: &Value) -> bool {
     match value {
@@ -174,12 +160,81 @@ fn says_nothing(value: &Value) -> bool {
     }
 }
 
-/// The fields of `entry` (other than `id`) that `section` does not hold, sorted.
+/// The `params-entry` block of a section (its JSON object) and the prose lines of the section:
+/// every line outside the block, outside heading lines and outside the `**Valid:**` line.
+fn block_and_prose(section: &str) -> (Option<Map<String, Value>>, Vec<&str>) {
+    let mut block: Option<Map<String, Value>> = None;
+    let mut prose = Vec::new();
+    // `Some((fence length, collected JSON text))` while inside the block.
+    let mut open: Option<(usize, String)> = None;
+    for line in section.lines() {
+        if let Some((fence, json)) = open.as_mut() {
+            let ticks = line.trim();
+            if ticks.len() >= *fence && ticks.bytes().all(|b| b == b'`') {
+                if block.is_none() {
+                    block = serde_json::from_str::<Value>(json)
+                        .ok()
+                        .and_then(|v| v.as_object().cloned());
+                }
+                open = None;
+            } else {
+                json.push_str(line);
+                json.push('\n');
+            }
+            continue;
+        }
+        let trimmed = line.trim_start();
+        let ticks = trimmed.bytes().take_while(|&b| b == b'`').count();
+        if ticks >= 3 && trimmed[ticks..].trim() == ENTRY_INFO {
+            open = Some((ticks, String::new()));
+        } else if !trimmed.starts_with('#') && !trimmed.starts_with("**Valid:**") {
+            prose.push(line);
+        }
+    }
+    (block, prose)
+}
+
+/// Whether `line` holds `token` as a whole token: not inside a longer word, number or id.
+fn holds_token(line: &str, token: &str) -> bool {
+    line.match_indices(token).any(|(at, _)| {
+        let before = line[..at].chars().next_back();
+        let after = line[at + token.len()..].chars().next();
+        let word = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+        let digit_dot = |dot: Option<char>, beyond: Option<char>| {
+            dot == Some('.') && beyond.is_some_and(|c| c.is_ascii_digit())
+        };
+        let before_ok =
+            !before.is_some_and(word) && !digit_dot(before, line[..at].chars().rev().nth(1));
+        let tail = line[at + token.len()..].chars().nth(1);
+        let after_ok = !after.is_some_and(word) && !digit_dot(after, tail);
+        before_ok && after_ok
+    })
+}
+
+/// Whether a prose line says `key` and `value`: the key name in the line, and the value as text
+/// (a string) or as a whole token (anything else).
+fn line_says(line: &str, key: &str, value: &Value) -> bool {
+    line.contains(key)
+        && match value {
+            Value::String(s) => line.contains(s.as_str()),
+            other => holds_token(line, &other.to_string()),
+        }
+}
+
+/// The fields of `entry` (other than `id`) that `section` does not hold, sorted. A field is held
+/// when the section's `params-entry` block has the key with an equal value, or one prose line
+/// (outside the heading and the validity stamp) says the key and the value. A value that says
+/// nothing is always held.
 fn missing_fields(entry: &Map<String, Value>, section: &str) -> Vec<String> {
+    let (block, prose) = block_and_prose(section);
+    let held = |key: &String, value: &Value| {
+        block.as_ref().and_then(|b| b.get(key)) == Some(value)
+            || prose.iter().any(|line| line_says(line, key, value))
+    };
     let missing: BTreeSet<&String> = entry
         .iter()
         .filter(|(key, value)| key.as_str() != "id" && !says_nothing(value))
-        .filter(|(_, value)| !text_holds(section, value))
+        .filter(|(key, value)| !held(key, value))
         .map(|(key, _)| key)
         .collect();
     missing.into_iter().cloned().collect()
@@ -279,6 +334,14 @@ pub fn recover_params_entries(
         );
         return (text.to_owned(), vec![reported]);
     };
+    // A block that exists and does not parse hides its mark: a line editor would lower
+    // `entry_high_water_<P>` to the recovered number. The text stays as it is.
+    if frontmatter::parse(text).is_err() {
+        return (
+            text.to_owned(),
+            refuse_entries(rel_path, row, REASON_FRONTMATTER),
+        );
+    }
 
     let mut doc = text.to_owned();
     let mut sections = section_texts(&doc);
@@ -483,14 +546,15 @@ mod tests {
         let (out, items) = recover_params_entries("l.md", &held, &row);
         assert_eq!(out, held);
         assert_eq!(statuses(&items), [Status::AlreadyExported]);
-        // Every missing field is named, sorted; fields that carry nothing are not missing.
+        // Every missing field is named, sorted; fields that carry nothing are not missing. A value
+        // that is in the text without its key on the same line (`id2`) is missing.
         let row = entries_row(
             r#"[{"id":"F-1","zeta":"z1","alpha":3,"empty":"","none":null,"list":[],"id2":"body one"}]"#,
         );
         let (_, items) = recover_params_entries("l.md", &text, &row);
         assert_eq!(
             items[0].reason,
-            "entry exists; fields not in text: alpha, zeta"
+            "entry exists; fields not in text: alpha, id2, zeta"
         );
     }
 
@@ -635,6 +699,94 @@ mod tests {
             statuses(&second),
             [Status::AlreadyExported, Status::AlreadyExported]
         );
+    }
+
+    #[test]
+    fn an_unparseable_frontmatter_block_refuses_the_entries_and_keeps_the_mark() {
+        // `title: Fix: thing` is not YAML: the mark cannot be read, and a line editor would lower
+        // `entry_high_water_F: 50` to the recovered number. The text stays as it is.
+        let text = "---\nkind: tracker\ntitle: Fix: thing\nentry_prefix: F\nentry_high_water_F: 50\n---\n\n# L\n\n## F-1 — a\n\nx\n";
+        assert!(
+            frontmatter::parse(text).is_err(),
+            "the fixture must not parse"
+        );
+        let row = entries_row(r#"[{"id":"F-1"},{"id":"F-2","title":"t"}]"#);
+        let (out, items) = recover_params_entries("l.md", text, &row);
+        assert_eq!(out, text);
+        assert!(out.contains("entry_high_water_F: 50"));
+        assert_eq!(
+            statuses(&items),
+            [Status::Unrecoverable, Status::Unrecoverable]
+        );
+        for item in &items {
+            assert_eq!(item.class, Class::ParamsEntry);
+            assert_eq!(
+                item.reason,
+                "frontmatter does not parse; the high-water mark cannot be kept"
+            );
+        }
+        assert_eq!(items[1].detail.as_deref(), Some("F-2"));
+    }
+
+    const FIELD_DOC: &str =
+        "---\nentry_prefix: F\n---\n\n# L\n\n## F-1 — x\n\n**Valid:** dated 2026-01-01\n\nprose\n";
+
+    fn field_reasons(doc: &str, entry: &str) -> Vec<String> {
+        let row = entries_row(&format!("[{entry}]"));
+        let (out, items) = recover_params_entries("l.md", doc, &row);
+        assert_eq!(out, doc, "a defined entry never changes the text");
+        items.into_iter().map(|i| i.reason).collect()
+    }
+
+    #[test]
+    fn a_number_is_not_found_in_the_heading_or_the_stamp() {
+        // The `1` of `F-1` and of the date must not make `severity: 1` present.
+        let reasons = field_reasons(FIELD_DOC, r#"{"id":"F-1","severity":1}"#);
+        assert_eq!(reasons, ["entry exists; fields not in text: severity"]);
+        let reasons = field_reasons(FIELD_DOC, r#"{"id":"F-1","date":"2026-01-01"}"#);
+        assert_eq!(
+            reasons,
+            ["entry exists; fields not in text: date"],
+            "the stamp line is not prose"
+        );
+        let reasons = field_reasons(FIELD_DOC, r#"{"id":"F-1","note":"x"}"#);
+        assert_eq!(
+            reasons,
+            ["entry exists; fields not in text: note"],
+            "the heading line is not prose"
+        );
+    }
+
+    #[test]
+    fn a_field_is_present_as_a_prose_line_naming_key_and_value_or_as_its_block_entry() {
+        let present = |extra: &str, entry: &str| {
+            let doc = FIELD_DOC.replace("prose\n", extra);
+            field_reasons(&doc, entry) == [REASON_ENTRY_DEFINED]
+        };
+        assert!(present("severity: 1\n", r#"{"id":"F-1","severity":1}"#));
+        assert!(present(
+            "severity: high\n",
+            r#"{"id":"F-1","severity":"high"}"#
+        ));
+        assert!(present("- done: true.\n", r#"{"id":"F-1","done":true}"#));
+        // Key without the value, value without the key, a longer token, a different line.
+        assert!(!present("severity: 12\n", r#"{"id":"F-1","severity":1}"#));
+        assert!(!present("severity: 1.5\n", r#"{"id":"F-1","severity":1}"#));
+        assert!(!present("severity: F-1\n", r#"{"id":"F-1","severity":1}"#));
+        assert!(!present(
+            "severity: low\n",
+            r#"{"id":"F-1","severity":"high"}"#
+        ));
+        assert!(!present("high\n", r#"{"id":"F-1","severity":"high"}"#));
+        assert!(!present(
+            "severity here\n\nand 1 there\n",
+            r#"{"id":"F-1","severity":1}"#
+        ));
+        // The exported block form: the key with an equal value.
+        let block = "```params-entry\n{\"severity\":1,\"tags\":[\"a\"]}\n```\n";
+        assert!(present(block, r#"{"id":"F-1","severity":1,"tags":["a"]}"#));
+        let other = "```params-entry\n{\"severity\":2}\n```\n";
+        assert!(!present(other, r#"{"id":"F-1","severity":1}"#));
     }
 
     #[test]

@@ -87,6 +87,32 @@ pub fn plan_shape(
     }
 }
 
+/// The sidecar path the frontmatter of `doc_text` declares (`expects_augmentation: <path>.yaml`).
+pub fn declared_sidecar(doc_text: &str) -> Option<String> {
+    let (fm, _) = frontmatter::parse(doc_text).ok()?;
+    let value = fm?.extra.get("expects_augmentation").cloned()?;
+    match parse_declaration(&value) {
+        Declaration::Declared { sidecar } => sidecar,
+        _ => None,
+    }
+}
+
+/// Compare the catalog shape with the committed sidecar `committed` that the document declares at
+/// `rel`, a path other than the one its name gives. `None` when they agree; `Drift` or `Refused`
+/// otherwise.
+pub fn compare_declared(row: &AugmentationRow, committed: &str, rel: &str) -> Option<ShapeExport> {
+    let parsed: AugmentationSidecar = match serde_yml::from_str(committed) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            return Some(ShapeExport::Refused(format!(
+                "the committed sidecar {rel} does not parse"
+            )));
+        }
+    };
+    let fields = drifting_fields(row, &parsed);
+    (!fields.is_empty()).then_some(ShapeExport::Drift { fields })
+}
+
 /// The repo-relative path of the sidecar of the document at `doc_rel`.
 pub fn sidecar_rel(doc_rel: &str) -> String {
     sidecar::rel_path_for(Path::new(""), Path::new(doc_rel))
@@ -255,5 +281,48 @@ mod tests {
             plan_shape(DOC_REL, "# T\n", &row, Some(&committed)),
             ShapeExport::Refused(_)
         ));
+    }
+
+    #[test]
+    fn a_declared_sidecar_path_is_read_from_the_frontmatter() {
+        let doc = |declaration: &str| format!("---\nkind: tracker\n{declaration}\n---\n\n# T\n");
+        assert_eq!(
+            declared_sidecar(&doc("expects_augmentation: docs/augmentations/x.yaml")).as_deref(),
+            Some("docs/augmentations/x.yaml")
+        );
+        for none in [
+            "expects_augmentation: true",
+            "expects_augmentation: no",
+            "status: open",
+        ] {
+            assert_eq!(declared_sidecar(&doc(none)), None, "{none}");
+        }
+        assert_eq!(declared_sidecar("# T\n"), None);
+        assert_eq!(declared_sidecar("---\nkind: [unclosed\n---\n"), None);
+    }
+
+    #[test]
+    fn a_sidecar_declared_at_another_path_is_compared_with_the_shape() {
+        let row = row();
+        let equal = sidecar_text(&row);
+        assert_eq!(
+            compare_declared(&row, &equal, "docs/augmentations/old.yaml"),
+            None
+        );
+        let mut older = row.clone();
+        older.prompt = "An older prompt.".into();
+        assert_eq!(
+            compare_declared(&row, &sidecar_text(&older), "docs/augmentations/old.yaml"),
+            Some(ShapeExport::Drift {
+                fields: vec!["prompt"]
+            })
+        );
+        let Some(ShapeExport::Refused(why)) =
+            compare_declared(&row, "prompt: [unclosed", "docs/augmentations/old.yaml")
+        else {
+            panic!("a sidecar that does not parse is refused");
+        };
+        assert!(why.contains("docs/augmentations/old.yaml"), "{why}");
+        assert!(why.contains("does not parse"), "{why}");
     }
 }
