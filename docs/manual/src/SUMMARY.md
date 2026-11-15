@@ -61,6 +61,7 @@
   - [Worktree Overlay](concepts/worktree-overlay.md)
   - [Catalog GC & Repair](concepts/catalog-gc.md)
   - [Entry Citations](concepts/entry-citations.md)
+  - [Artifact Cutover](concepts/artifact-cutover.md)
   - [link_scan](concepts/link-scan.md)
   - [Statement Validity](concepts/statement-validity.md)
   - [artifact (action="graft")](concepts/artifact-graft.md)

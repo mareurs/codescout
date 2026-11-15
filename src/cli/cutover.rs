@@ -28,12 +28,15 @@ use crate::librarian::cutover::plan::{plan_export, ExportPlan};
 use crate::librarian::cutover::report::{
     render_apply_markdown, render_json, render_markdown, ReportHeader,
 };
+use crate::librarian::derived::build::{
+    build_full, key_space_from_commit, rules_from_commit, BuildInput,
+};
 use crate::librarian::derived::diff::{
     file_stamp, open_old_immutable, side_files_present, NoOldRowsUnderRoot, RootMap,
 };
 use crate::librarian::derived::old_catalog::resolve_old_catalog;
 use crate::librarian::derived::scan::open_commit;
-use crate::librarian::derived::schema::{derived_catalog_beside, DERIVED_CATALOG_FILE};
+use crate::librarian::derived::schema::{self, derived_catalog_beside, DERIVED_CATALOG_FILE};
 use crate::librarian::util::write_catalogued_file;
 
 #[derive(Debug, Args)]
@@ -49,6 +52,10 @@ pub enum CutoverAction {
     /// Write the plan into the working tree, one atomic write per file, and keep the report
     /// beside the old catalog. Never commits.
     Export(CommonArgs),
+    /// Build the new catalog (`derived.db`, in the directory of the old catalog) from `HEAD`.
+    /// Refuses while a plan of `HEAD` would still change a file: run `export` and commit first.
+    /// A second run rebuilds the same file.
+    Build(CommonArgs),
 }
 
 /// The options every `cutover` subcommand takes.
@@ -387,6 +394,135 @@ async fn export_run(
     Ok(Outcome { code, stdout })
 }
 
+/// Run `cutover build`: plan `HEAD`, refuse while the plan still writes a file, then build
+/// `derived.db` from `HEAD` in the directory of the old catalog. It returns no error: whatever
+/// stops the run becomes an outcome with code 2. A second run rebuilds the same file.
+///
+/// The build reads git objects alone, so it does not take the project write lock: it writes no
+/// file of the repository. The old catalog is read for the plan and never written.
+pub async fn evaluate_build(
+    args: &CommonArgs,
+    cwd: &Path,
+    librarian_db: Option<OsString>,
+    data_dir: Option<PathBuf>,
+) -> Outcome {
+    build_with(args, cwd, librarian_db, data_dir, &|_| {})
+}
+
+/// [`evaluate_build`] with a hook that runs after the plan and before the build reads `HEAD`
+/// again, with the git root: a test uses it to move `HEAD` at the one moment the re-check exists
+/// for.
+fn build_with(
+    args: &CommonArgs,
+    cwd: &Path,
+    librarian_db: Option<OsString>,
+    data_dir: Option<PathBuf>,
+    after_plan: &dyn Fn(&Path),
+) -> Outcome {
+    match build_run(args, cwd, librarian_db, data_dir, after_plan) {
+        Ok(outcome) => outcome,
+        Err(e) => did_not_run(args.json, &one_line(&e)),
+    }
+}
+
+/// Why the new catalog could not be opened, on one line that names no path: the text of
+/// `schema::open` names the file as the caller spelled it.
+fn open_refusal(e: &rusqlite::Error) -> anyhow::Error {
+    use rusqlite::ErrorCode;
+    match e.sqlite_error_code() {
+        Some(ErrorCode::NotADatabase) => anyhow!(
+            "{DERIVED_CATALOG_FILE} is not a derived index: it is not a database, or it holds \
+             another database's tables. Move it away, then run this again"
+        ),
+        Some(ErrorCode::SchemaChanged) => {
+            anyhow!("{DERIVED_CATALOG_FILE} was made by a newer codescout than this one")
+        }
+        Some(code) => anyhow!("{DERIVED_CATALOG_FILE} cannot be opened: {code:?}"),
+        None => anyhow!("{DERIVED_CATALOG_FILE} cannot be opened"),
+    }
+}
+
+/// The steps of `build`; an `Err` is a refusal before the new catalog is touched, or a build that
+/// failed (the build is one transaction: an error leaves the previous rows as they were).
+fn build_run(
+    args: &CommonArgs,
+    cwd: &Path,
+    librarian_db: Option<OsString>,
+    data_dir: Option<PathBuf>,
+    after_plan: &dyn Fn(&Path),
+) -> Result<Outcome> {
+    let loaded = load_and_plan(args, cwd, librarian_db, data_dir)?;
+    let writes = loaded.plan.writes();
+    if writes > 0 {
+        bail!(
+            "the export is not committed: {writes} files would change. Run codescout cutover \
+             export, commit, then run this again"
+        );
+    }
+    after_plan(&loaded.git_root);
+    let repo = git2::Repository::open(&loaded.git_root)
+        .map_err(|_| anyhow!("the git repository cannot be opened"))?;
+    let commit = open_commit(&repo, "HEAD")?;
+    // The plan above judged one commit; the build must read that one.
+    if commit.id().to_string() != loaded.plan.commit {
+        bail!("HEAD changed while the plan was made; run this again");
+    }
+    let rules = rules_from_commit(&repo, &commit)?;
+    let space = key_space_from_commit(&repo, &commit)?;
+    let mut conn =
+        schema::open(&derived_catalog_beside(&loaded.old_db)).map_err(|e| open_refusal(&e))?;
+    let built = build_full(
+        &mut conn,
+        &BuildInput {
+            repo: &repo,
+            commit: &commit,
+            root: &loaded.git_root,
+            rules: &rules,
+            space: &space,
+        },
+    )
+    .map_err(|e| anyhow!("building the new catalog failed: {}", one_line(&e)))?;
+    drop(conn);
+
+    let commit12: String = loaded.plan.commit.chars().take(12).collect();
+    let sentence = format!(
+        "Built from {commit12}; the new catalog is {DERIVED_CATALOG_FILE}, in the directory of \
+         the old catalog."
+    );
+    let stdout = if args.json {
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "ran": true,
+                "commit": loaded.plan.commit,
+                "catalog": DERIVED_CATALOG_FILE,
+                "location": "in the directory of the old catalog",
+                "built": {
+                    "documents": built.documents,
+                    "entries": built.entries,
+                    "edges": built.edges,
+                    "chunks": built.chunks,
+                    "skipped": built.skipped,
+                    "problems": built.problems,
+                },
+            })
+        )
+    } else {
+        format!(
+            "# Cutover build — {} at {commit12}\n\n- documents: {}\n- entries: {}\n- edges: {}\n\
+             - chunks: {}\n- skipped: {}\n- problems: {}\n\n{sentence}\n",
+            loaded.plan.repo_name,
+            built.documents,
+            built.entries,
+            built.edges,
+            built.chunks,
+            built.skipped,
+            built.problems
+        )
+    };
+    Ok(Outcome { code: 0, stdout })
+}
+
 /// The first of `cutover-report-<name>-<commit12>.md`, `…-2.md`, `…-3.md`, … in `dir` that does
 /// not exist, with its `.json` twin: a report is never overwritten (D-R17). Only the name and the
 /// first 12 characters of `commit` are used, and every character of the repository name that is
@@ -438,6 +574,15 @@ pub async fn run(args: CutoverArgs) -> Result<()> {
         ),
         CutoverAction::Export(common) => {
             evaluate_export(
+                common,
+                &cwd,
+                std::env::var_os("LIBRARIAN_DB"),
+                dirs::data_local_dir(),
+            )
+            .await
+        }
+        CutoverAction::Build(common) => {
+            evaluate_build(
                 common,
                 &cwd,
                 std::env::var_os("LIBRARIAN_DB"),
@@ -1169,5 +1314,284 @@ mod tests {
                 .starts_with("cutover-report-a_b_c"),
             "{md:?}"
         );
+    }
+    // ---- cutover build ----
+
+    /// Commit every file of the working tree on top of `HEAD`, as the operator does after `export`.
+    fn commit_all(f: &Fixture, message: &str) -> git2::Oid {
+        let repo = git2::Repository::open(&f.root).unwrap();
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        let sig = crate::librarian::derived::testkit::fixed_sig();
+        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
+            .unwrap()
+    }
+
+    /// The state `build` runs from: the export written and committed.
+    async fn exported_and_committed(f: &Fixture) -> git2::Oid {
+        let out = evaluate_export(&args(f), &f.root, None, None).await;
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        commit_all(f, "export")
+    }
+
+    fn derived(f: &Fixture) -> rusqlite::Connection {
+        rusqlite::Connection::open(f.catalog_dir.join("derived.db")).unwrap()
+    }
+
+    fn count(conn: &rusqlite::Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    // mutation: remove the `writes() > 0` refusal.
+    #[tokio::test]
+    async fn build_refuses_while_the_export_is_not_committed() {
+        let f = fixture();
+        let planned = load_and_plan(&args(&f), &f.root, None, None).unwrap();
+        let n = planned.plan.writes();
+        assert!(n > 0, "the fixture needs a file the export changes");
+        let want = format!(
+            "the export is not committed: {n} files would change. Run codescout cutover export, \
+             commit, then run this again"
+        );
+        let catalog_before = snapshot(&f.catalog_dir);
+        let repo_before = snapshot(&f.root);
+
+        // Before `export`, and after it with nothing committed: a plan of `HEAD` still writes.
+        for step in ["before the export", "after the export, uncommitted"] {
+            let out = evaluate_build(&args(&f), &f.root, None, None).await;
+            assert_eq!(out.code, 2, "{step}: {}", out.stdout);
+            assert!(out.stdout.contains(&want), "{step}: {}", out.stdout);
+            no_absolute_path(&f, &out.stdout);
+            assert!(
+                !f.catalog_dir.join("derived.db").exists(),
+                "{step}: no new catalog is created"
+            );
+            if step == "before the export" {
+                assert_eq!(snapshot(&f.catalog_dir), catalog_before);
+                assert_eq!(snapshot(&f.root), repo_before);
+                let exported = evaluate_export(&args(&f), &f.root, None, None).await;
+                assert_eq!(exported.code, 0, "{}", exported.stdout);
+            }
+        }
+
+        let mut json = args(&f);
+        json.json = true;
+        let out = evaluate_build(&json, &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        let v: serde_json::Value = serde_json::from_str(out.stdout.trim()).unwrap();
+        assert_eq!(v["ran"], false);
+        assert_eq!(v["reason"], want);
+    }
+
+    // mutation: build from `HEAD~1`; build from the working tree's files (a fresh `git add`).
+    #[tokio::test]
+    async fn build_writes_the_new_catalog_from_head() {
+        use sha2::{Digest, Sha256};
+        let f = fixture();
+        let head = exported_and_committed(&f).await;
+        let catalog_before = std::fs::read(f.db.clone()).unwrap();
+        // The working tree differs from `HEAD`: an edit and a new file. Neither is in the build.
+        std::fs::write(f.root.join("a.md"), "# A edited after the commit\n").unwrap();
+        std::fs::write(f.root.join("z.md"), "# Z\n").unwrap();
+
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains("the new catalog is derived.db, in the directory of the old catalog"),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+
+        assert!(f.catalog_dir.join("derived.db").is_file());
+        assert_eq!(
+            std::fs::read(&f.db).unwrap(),
+            catalog_before,
+            "the old catalog is not written"
+        );
+        let conn = derived(&f);
+        let commit_sha: String = conn
+            .query_row("SELECT commit_sha FROM checkout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(commit_sha, head.to_string(), "built from HEAD");
+        let paths: Vec<String> = conn
+            .prepare("SELECT rel_path FROM document ORDER BY rel_path")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            paths,
+            ["a.md", "c.md", "d.md", "sub/b.md"],
+            "the files of HEAD, and not z.md"
+        );
+        let a_sha: String = conn
+            .query_row(
+                "SELECT sha256 FROM document WHERE rel_path='a.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            a_sha,
+            hex::encode(Sha256::digest(b"# A\n")),
+            "a.md as HEAD has it, not as the working tree has it"
+        );
+        let exported_dst: Option<String> = conn
+            .query_row(
+                "SELECT dst_key FROM edge WHERE src_rel_path='c.md' AND kind='file'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            exported_dst.as_deref(),
+            Some("d"),
+            "the citation the export rewrote is read from the committed text"
+        );
+
+        // The counts printed are the rows stored.
+        for (label, table) in [
+            ("documents", "document"),
+            ("entries", "entry"),
+            ("edges", "edge"),
+            ("chunks", "chunk"),
+            ("skipped", "skipped"),
+            ("problems", "problem"),
+        ] {
+            assert!(
+                out.stdout
+                    .contains(&format!("- {label}: {}\n", count(&conn, table))),
+                "{label}: {}",
+                out.stdout
+            );
+        }
+
+        // `--json` carries the same counts.
+        let mut json = args(&f);
+        json.json = true;
+        let out = evaluate_build(&json, &f.root, None, None).await;
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        let v: serde_json::Value = serde_json::from_str(out.stdout.trim()).unwrap();
+        assert_eq!(v["ran"], true);
+        assert_eq!(v["built"]["documents"], 4);
+        assert_eq!(v["catalog"], "derived.db");
+        no_absolute_path(&f, &out.stdout);
+    }
+
+    // mutation: skip the side-file refusal of the old catalog's open.
+    #[tokio::test]
+    async fn build_refuses_when_a_side_file_lies_beside_the_old_catalog() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        std::fs::write(f.catalog_dir.join("catalog.db-wal"), b"x").unwrap();
+        let before = snapshot(&f.catalog_dir);
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout.contains("lies beside the old catalog"),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+        assert!(!f.catalog_dir.join("derived.db").exists());
+        assert_eq!(snapshot(&f.catalog_dir), before);
+    }
+
+    // mutation: refuse when `derived.db` exists; leave the old rows in place (no `DELETE`).
+    #[tokio::test]
+    async fn a_second_build_rebuilds_in_place() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let first = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(first.code, 0, "{}", first.stdout);
+        {
+            // A row no build writes: a rebuild in place removes it.
+            let conn = derived(&f);
+            conn.execute(
+                "INSERT INTO problem (kind, \"key\", rel_paths) VALUES ('stale', 'x', '[]')",
+                [],
+            )
+            .unwrap();
+            assert_eq!(count(&conn, "problem"), 1);
+        }
+        let second = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(second.code, 0, "{}", second.stdout);
+        assert_eq!(
+            second.stdout, first.stdout,
+            "the same commit, the same counts"
+        );
+        {
+            let conn = derived(&f);
+            assert_eq!(count(&conn, "problem"), 0, "the stale row is gone");
+            assert_eq!(count(&conn, "document"), 4);
+            assert_eq!(count(&conn, "checkout"), 1, "one checkout row, not two");
+        }
+        let names: Vec<String> = std::fs::read_dir(&f.catalog_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("derived.db"))
+            .collect();
+        assert_eq!(names, ["derived.db"], "no side file is left");
+    }
+
+    // mutation: remove the comparison of `HEAD` with the commit the plan judged.
+    #[tokio::test]
+    async fn build_refuses_when_head_moves_after_the_plan() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let move_head = |root: &Path| {
+            let repo = git2::Repository::open(root).unwrap();
+            let head = repo.head().unwrap().peel_to_commit().unwrap();
+            let sig = crate::librarian::derived::testkit::fixed_sig();
+            repo.commit(
+                Some("HEAD"),
+                &sig,
+                &sig,
+                "moved",
+                &head.tree().unwrap(),
+                &[&head],
+            )
+            .unwrap();
+        };
+        let out = build_with(&args(&f), &f.root, None, None, &move_head);
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout.contains("HEAD changed while the plan was made"),
+            "{}",
+            out.stdout
+        );
+        assert!(!f.catalog_dir.join("derived.db").exists());
+    }
+
+    // mutation: forward the error chain of `schema::open` (it names the path).
+    #[tokio::test]
+    async fn build_refuses_a_file_that_is_not_a_derived_index_and_names_no_path() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let foreign = f.catalog_dir.join("derived.db");
+        {
+            let conn = rusqlite::Connection::open(&foreign).unwrap();
+            conn.execute_batch("CREATE TABLE somebody_elses (x TEXT);")
+                .unwrap();
+        }
+        let before = std::fs::read(&foreign).unwrap();
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout.contains("derived.db is not a derived index"),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+        assert_eq!(std::fs::read(&foreign).unwrap(), before, "left as it was");
     }
 }
