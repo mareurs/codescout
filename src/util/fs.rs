@@ -2347,6 +2347,25 @@ mod no_clobber_tests {
         assert!(from.symlink_metadata().is_err());
     }
 
+    /// The fallback's reason for `symlink_metadata` is the dangling link: `exists()` follows it
+    /// and says the path is free, and the `rename` would then replace the link.
+    #[cfg(unix)]
+    #[test]
+    fn the_fallback_refuses_a_dangling_symlink_and_leaves_it_a_link() {
+        let dir = tempdir().unwrap();
+        let (from, to) = (dir.path().join("from.txt"), dir.path().join("to.txt"));
+        let missing = dir.path().join("missing-target");
+        write(&from, "NEW");
+        std::os::unix::fs::symlink(&missing, &to).unwrap();
+
+        let err = rename_refusing_occupied(&from, &to).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert_eq!(std::fs::read_link(&to).unwrap(), missing);
+        assert_eq!(read(&from), "NEW");
+        assert!(missing.symlink_metadata().is_err());
+    }
+
     /// The dispatch: any link error but `AlreadyExists` reaches the fallback, which still
     /// refuses an occupied path. The link step is injected, so the real file system is not
     /// asked to lack hard links. A dispatch that returned the link error would give
@@ -2460,7 +2479,7 @@ mod no_clobber_tests {
     }
 
     #[test]
-    fn write_new_utf8_treats_a_directory_at_the_path_as_occupied() {
+    fn the_precheck_refuses_a_directory_at_the_path() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("sub");
         std::fs::create_dir(&path).unwrap();
@@ -2477,7 +2496,7 @@ mod no_clobber_tests {
     /// replace the link. Either way the link must survive.
     #[cfg(unix)]
     #[test]
-    fn write_new_utf8_counts_a_dangling_symlink_as_occupied_and_leaves_it_a_link() {
+    fn the_precheck_counts_a_dangling_symlink_as_occupied_and_leaves_it_a_link() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("x.txt");
         let missing = dir.path().join("missing-target");
@@ -2534,6 +2553,47 @@ mod no_clobber_tests {
         assert_eq!(read(&from), "NEW");
     }
 
+    /// A dangling link that appears in the window. `exists()` follows it and says no, so a link
+    /// step built on it, or a `rename`, would replace the link. The pre-check cannot see it (it
+    /// ran before), so only the link step can refuse: this holds the link step itself.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_planted_in_the_window_is_not_replaced() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        let missing = dir.path().join("missing-target");
+        let _seam = {
+            let missing = missing.clone();
+            set_before_publish(move |target| std::os::unix::fs::symlink(&missing, target).unwrap())
+        };
+
+        let err = write_new_utf8(&path, "NEW").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert_eq!(
+            std::fs::read_link(&path).unwrap(),
+            missing,
+            "the planted link must survive as a link"
+        );
+        assert!(missing.symlink_metadata().is_err());
+        assert_eq!(names(dir.path()), vec!["x.txt"], "the staging file leaked");
+    }
+
+    /// A directory that appears in the window. A `rename` onto it fails with `EISDIR`, not
+    /// `AlreadyExists`, so only a link step that refuses gives the caller the right answer.
+    #[test]
+    fn a_directory_planted_in_the_window_is_not_replaced() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        let _seam = set_before_publish(|target| std::fs::create_dir(target).unwrap());
+
+        let err = write_new_utf8(&path, "NEW").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert!(path.is_dir());
+        assert_eq!(names(dir.path()), vec!["x.txt"], "the staging file leaked");
+    }
+
     /// The seam is scoped to its guard: after the guard drops, the next write on this thread
     /// runs with no hook, so one test cannot leak a racer into another.
     #[test]
@@ -2564,6 +2624,26 @@ mod no_clobber_tests {
 
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
         assert_eq!(read(&path), "[security]\nshell_enabled = true\n");
+    }
+
+    /// The same protected path with a DANGLING link at it. `exists()` follows the link and says
+    /// the path is free, so a pre-check built on it lets `check_write` run, and the new content's
+    /// `[security]` table then differs from the (unreadable) "before": `PermissionDenied`.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_at_a_protected_path_gives_already_exists_not_permission_denied() {
+        let dir = tempdir().unwrap();
+        let codescout = dir.path().join(".codescout");
+        std::fs::create_dir(&codescout).unwrap();
+        let path = codescout.join("project.toml");
+        let missing = dir.path().join("missing-target");
+        std::os::unix::fs::symlink(&missing, &path).unwrap();
+
+        let err = write_new_utf8(&path, "[security]\nshell_enabled = true\n").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert_eq!(std::fs::read_link(&path).unwrap(), missing);
+        assert_eq!(names(&codescout), vec!["project.toml"]);
     }
 
     /// `AlreadyExists` means the target is occupied and nothing else. An ancestor that is a
