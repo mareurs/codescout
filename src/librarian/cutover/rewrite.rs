@@ -148,6 +148,57 @@ pub fn rewrite_document(rel_path: &str, text: &str, r: &Resolver) -> (String, Ve
     pass.finish()
 }
 
+/// Rewrite the old citation forms in the lines that `after` adds to `before` (an export step's
+/// new section, D-R9): the edits and findings of [`rewrite_document`] over all of `after` that
+/// start in those lines. The rest of `after` was rewritten (and reported) before the step ran,
+/// and the whole text is the context, so a form is read here as a plan of the committed text
+/// reads it.
+///
+/// The added lines are the lines of `after` between the longest run of equal leading lines and
+/// the longest run of equal trailing lines (line ends ignored). A step adds one block per call,
+/// so that run is exactly the block.
+pub fn rewrite_added(
+    rel_path: &str,
+    before: &str,
+    after: &str,
+    r: &Resolver,
+) -> (String, Vec<Finding>) {
+    let window = added_lines(before, after);
+    let mut pass = Pass::new(rel_path, after, r);
+    pass.scan();
+    pass.edits.retain(|e| window.contains(&e.range.start));
+    pass.findings.retain(|(pos, _)| window.contains(pos));
+    pass.finish()
+}
+
+/// The byte range of `after` that holds the lines it adds to `before`; empty when the two hold
+/// the same lines.
+fn added_lines(before: &str, after: &str) -> Range<usize> {
+    let line = |l: &str| l.trim_end_matches(['\n', '\r']).to_owned();
+    let old: Vec<String> = before.split_inclusive('\n').map(line).collect();
+    let new: Vec<&str> = after.split_inclusive('\n').collect();
+    let lead = old
+        .iter()
+        .zip(&new)
+        .take_while(|(a, b)| **a == line(b))
+        .count();
+    let room = old.len().min(new.len()) - lead;
+    let trail = old
+        .iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take(room)
+        .take_while(|(a, b)| **a == line(b))
+        .count();
+    let start: usize = new[..lead].iter().map(|l| l.len()).sum();
+    let end: usize = after.len()
+        - new[new.len() - trail..]
+            .iter()
+            .map(|l| l.len())
+            .sum::<usize>();
+    start..end.max(start)
+}
+
 const REASON_URL: &str = "inside a URL";
 const REASON_NO_RANGE: &str = "escape or entity in the text run";
 const REASON_BACKSLASH: &str = "escape";
@@ -1039,6 +1090,23 @@ mod tests {
                 },
             )
         }
+        fn run_added(&self, src: &str, before: &str, after: &str) -> (String, Vec<Finding>) {
+            rewrite_added(
+                src,
+                before,
+                after,
+                &Resolver {
+                    index: &self.index,
+                    this_repo: &self.repo,
+                    renamed_keys: &self.renamed,
+                    renamed_paths: &self.paths,
+                    ambiguous_keys: &self.ambiguous,
+                    stems: &self.stems,
+                    ids: &self.ids,
+                    id_hints: &self.hints,
+                },
+            )
+        }
     }
 
     fn unresolved(f: &Finding) -> (&str, Option<&str>) {
@@ -1067,6 +1135,36 @@ mod tests {
         assert_eq!(f[0].line, 3);
         assert_eq!(f[0].raw, "a-doc:T-5");
         assert_eq!(rewritten(&f[0]), "[[a-doc:T-5]]");
+    }
+
+    /// Only the lines a step adds are rewritten and reported: the text before them was rewritten
+    /// and reported by the pass over the committed text. The rest of the text is still the context
+    /// (a token the document defines stays local).
+    #[test]
+    fn rewrite_added_edits_and_reports_the_added_lines_only() {
+        let fx = Fx::standard();
+        let before = "# Src\n\nsee F-1 here.\n\n## Events\n";
+        let after = "# Src\n\nsee F-1 here.\n\n## Events\n\n> see F-2 too\n\nend F-1\n";
+        // A block added between two lines of the text.
+        let after_mid = "# Src\n\nsee F-1 here.\n\n> see F-2 too\n\n## Events\n";
+        let (out, f) = fx.run_added("docs/src.md", before, after_mid);
+        assert_eq!(
+            out,
+            "# Src\n\nsee F-1 here.\n\n> see [[ledger:F-2]] too\n\n## Events\n"
+        );
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(f[0].line, 5);
+        assert_eq!(f[0].raw, "F-2");
+        // A block added at the end: every line after the common start is added.
+        let (out, f) = fx.run_added("docs/src.md", before, after);
+        assert!(out.starts_with("# Src\n\nsee F-1 here.\n"), "{out}");
+        assert!(out.contains("> see [[ledger:F-2]] too\n"), "{out}");
+        assert!(out.ends_with("end [[ledger:F-1]]\n"), "{out}");
+        assert_eq!(f.len(), 2, "{f:?}");
+        // Nothing added: nothing is edited or found.
+        let (out, f) = fx.run_added("docs/src.md", before, before);
+        assert_eq!(out, before);
+        assert!(f.is_empty(), "{f:?}");
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::librarian::catalog::augmentation::{
 use crate::librarian::catalog::dual_write::frontmatter_mark;
 use crate::librarian::catalog::event_text::{fence_for, one_line, EVENTS_HEADING};
 use crate::librarian::catalog::link_text::RELATIONS_HEADING;
-use crate::librarian::cutover::plan::{Class, Item, Status};
+use crate::librarian::cutover::plan::{Class, Item, RewriteAdded, Status};
 use crate::librarian::entry_token::entry_tokens_by_line;
 use crate::librarian::frontmatter;
 use crate::librarian::preview::headings;
@@ -25,6 +25,10 @@ use crate::librarian::preview::headings;
 const ENTRY_INFO: &str = "params-entry";
 
 pub const REASON_ENTRY_RECOVERED: &str = "section recovered from params";
+/// The reason of an entry whose section would not read back: an unclosed code fence before the
+/// insertion point swallows it, so every run would add it again.
+pub const REASON_SECTION_UNREADABLE: &str =
+    "the section would not read back (an unclosed code fence before it?)";
 pub const REASON_ENTRY_DEFINED: &str = "entry is defined in the text";
 pub const REASON_NOT_A_TOKEN: &str = "entry id is not a token";
 pub const REASON_NOT_AN_OBJECT: &str = "params entry is not an object";
@@ -300,19 +304,28 @@ fn insert_section(doc: &str, section: &str) -> String {
 }
 
 /// Give every params entry of `row` whose token `text` does not define a section, and report each
-/// entry (D-R13). Returns the new text and one item per entry, in the order of the collection.
+/// entry (D-R13). Returns the new text and one item per entry, in the order of the collection; the
+/// citation items of a recovered section follow its entry's item.
 ///
-/// An entry whose token the text defines is `already_exported` when its fields are in the section
-/// (a field is in the text when its value, as a string, appears in the section of that token; a
-/// value that says nothing is always in), and `skipped` with the fields it lacks otherwise. The
-/// section of a recovered entry is a `params-entry` block holding the entry's JSON without `id`
-/// (keys sorted), under the heading and validity stamp of a live write. `entry_high_water_<P>`
-/// rises to the highest recovered number when the document has a frontmatter block, and never
-/// falls.
+/// An entry whose token the text defines is `already_exported` when its fields are in the section,
+/// and `skipped` with the fields it lacks otherwise. A field is in the section when the section's
+/// `params-entry` block holds the key with an equal value, or when one prose line of the section
+/// (outside its headings and its `**Valid:**` line) holds the key and the value; a value that says
+/// nothing is always in. The section of a recovered entry is a `params-entry` block holding the
+/// entry's JSON without `id` (keys sorted), under the heading and validity stamp of a live write.
+/// `rewrite` reads the old citation forms of the new section in the context of the whole text: the
+/// heading holds the entry's title, where no form is rewritten, so they are reported here as the
+/// plan of the commit that holds the section reports them (D-R9).
+///
+/// A section that would not read back as the token's section (an unclosed code fence before it
+/// swallows it) is not written: the entry is `unrecoverable`, so a rerun does not add it again.
+/// `entry_high_water_<P>` rises to the highest recovered number when the document has a
+/// frontmatter block, and never falls.
 pub fn recover_params_entries(
     rel_path: &str,
     text: &str,
     row: &AugmentationRow,
+    rewrite: &RewriteAdded,
 ) -> (String, Vec<Item>) {
     let unchanged = || (text.to_owned(), Vec::new());
     let Some(collection) = row.entry_collection.as_deref() else {
@@ -395,11 +408,22 @@ pub fn recover_params_entries(
         let level = body_entry_heading_level(&doc, prefix).unwrap_or(2);
         match render_pending_section(token, level, &pending) {
             Ok(section) => {
-                doc = insert_section(&doc, &section);
-                sections = section_texts(&doc);
+                let (next, cites) = rewrite(&doc, &insert_section(&doc, &section));
+                let next_sections = section_texts(&next);
+                if !next_sections.contains_key(token) {
+                    items.push(report(
+                        Status::Unrecoverable,
+                        REASON_SECTION_UNREADABLE,
+                        detail,
+                    ));
+                    continue;
+                }
+                doc = next;
+                sections = next_sections;
                 let mark = marks.entry(prefix.to_owned()).or_default();
                 *mark = (*mark).max(number);
                 items.push(report(Status::Moved, REASON_ENTRY_RECOVERED, detail));
+                items.extend(cites);
             }
             Err(e) => {
                 let reason = format!("section cannot be rendered: {e}");
@@ -479,6 +503,55 @@ mod tests {
         }
     }
 
+    /// [`recover_params_entries`] with a rewrite that changes nothing and finds nothing.
+    fn recover(rel_path: &str, text: &str, row: &AugmentationRow) -> (String, Vec<Item>) {
+        let keep = |_: &str, after: &str| (after.to_owned(), Vec::new());
+        recover_params_entries(rel_path, text, row, &keep)
+    }
+
+    /// I2: a document that ends inside an unclosed code fence swallows a section added at its end.
+    /// The entry is reported and the text is not touched, so a rerun is a fixed point.
+    #[test]
+    fn an_entry_whose_section_would_land_in_an_unclosed_fence_is_unrecoverable() {
+        let row = row(r#"{"e":[{"id":"F-2","title":"two"}]}"#, Some("e"));
+        let text = format!("{LEDGER}\n```\nunclosed\n");
+        let (out, items) = recover("l.md", &text, &row);
+        assert_eq!(out, text, "the text is not touched");
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].status, Status::Unrecoverable);
+        assert_eq!(items[0].reason, REASON_SECTION_UNREADABLE);
+        assert_eq!(items[0].detail.as_deref(), Some("F-2"));
+        let (again, items) = recover("l.md", &out, &row);
+        assert_eq!(again, out, "a rerun adds nothing");
+        assert_eq!(items[0].status, Status::Unrecoverable);
+    }
+
+    #[test]
+    fn the_citation_items_of_a_recovered_section_follow_its_entry() {
+        let row = row(r#"{"e":[{"id":"F-2","title":"see old-form"}]}"#, Some("e"));
+        let cite = |before: &str, after: &str| {
+            // One item when the added lines hold the form (the heading and the block both do).
+            let found =
+                usize::from(after.matches("old-form").count() > before.matches("old-form").count());
+            let items = (0..found)
+                .map(|_| {
+                    item(
+                        "l.md",
+                        Class::Citation,
+                        Status::Unrecoverable,
+                        "inside a heading",
+                        None,
+                    )
+                })
+                .collect();
+            (after.to_owned(), items)
+        };
+        let (out, items) = recover_params_entries("l.md", LEDGER, &row, &cite);
+        assert!(out.contains("F-2 \u{2014} see old-form"), "{out}");
+        let classes: Vec<Class> = items.iter().map(|i| i.class).collect();
+        assert_eq!(classes, [Class::ParamsEntry, Class::Citation]);
+    }
+
     /// A row whose entry collection `entries` holds the JSON array `entries`.
     fn entries_row(entries: &str) -> AugmentationRow {
         row(&format!(r#"{{"entries":{entries}}}"#), Some("entries"))
@@ -509,7 +582,7 @@ mod tests {
     #[test]
     fn an_entry_without_a_heading_gets_a_section_and_the_mark() {
         let row = entries_row(r#"[{"id":"F-1"},{"id":"F-2","title":"second","status":"open"}]"#);
-        let (out, items) = recover_params_entries("docs/l.md", LEDGER, &row);
+        let (out, items) = recover("docs/l.md", LEDGER, &row);
         let stamp = format!("## F-2 — second\n\n**Valid:** dated {}\n\n", today());
         assert!(out.contains(&stamp), "{out}");
         assert!(
@@ -534,7 +607,7 @@ mod tests {
         // `severity: high`: F-1's section does not hold "high", F-2's does. Another entry's text
         // does not count for F-1.
         let row = entries_row(r#"[{"id":"F-1","severity":"high"}]"#);
-        let (out, items) = recover_params_entries("l.md", &text, &row);
+        let (out, items) = recover("l.md", &text, &row);
         assert_eq!(out, text);
         assert_eq!(statuses(&items), [Status::Skipped]);
         assert_eq!(
@@ -543,7 +616,7 @@ mod tests {
         );
         // The same field, now in the entry's own section, is exported.
         let held = text.replace("body one", "severity: high");
-        let (out, items) = recover_params_entries("l.md", &held, &row);
+        let (out, items) = recover("l.md", &held, &row);
         assert_eq!(out, held);
         assert_eq!(statuses(&items), [Status::AlreadyExported]);
         // Every missing field is named, sorted; fields that carry nothing are not missing. A value
@@ -551,7 +624,7 @@ mod tests {
         let row = entries_row(
             r#"[{"id":"F-1","zeta":"z1","alpha":3,"empty":"","none":null,"list":[],"id2":"body one"}]"#,
         );
-        let (_, items) = recover_params_entries("l.md", &text, &row);
+        let (_, items) = recover("l.md", &text, &row);
         assert_eq!(
             items[0].reason,
             "entry exists; fields not in text: alpha, id2, zeta"
@@ -561,14 +634,14 @@ mod tests {
     #[test]
     fn a_value_with_backticks_gets_a_longer_fence() {
         let row = entries_row(r#"[{"id":"F-2","note":"a ``` b"}]"#);
-        let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+        let (out, items) = recover("l.md", LEDGER, &row);
         assert_eq!(statuses(&items), [Status::Moved]);
         assert!(
             out.contains("\n````params-entry\n{\"note\":\"a ``` b\"}\n````\n"),
             "{out}"
         );
         assert!(!out.contains("\n```params-entry"), "{out}");
-        let (again, items) = recover_params_entries("l.md", &out, &row);
+        let (again, items) = recover("l.md", &out, &row);
         assert_eq!(again, out);
         assert_eq!(statuses(&items), [Status::AlreadyExported]);
     }
@@ -586,7 +659,7 @@ mod tests {
             ("## Events\n\n- e\n\n## Relations\n\n- r\n", "## Events\n"),
         ] {
             let text = format!("{body}{tail}");
-            let (out, _) = recover_params_entries("l.md", &text, &row);
+            let (out, _) = recover("l.md", &text, &row);
             let at = out.find(&new).unwrap_or_else(|| panic!("{out}"));
             let section_end = out[at..].find("```\n\n").unwrap() + at + 5;
             assert!(out[section_end..].starts_with(anchor), "{out}");
@@ -595,7 +668,7 @@ mod tests {
         // An anchor inside a code fence is not an anchor: the section goes at the end.
         let lead = "# L\n\n## F-1 — a\n\nx\n\n```\n## Events\n```\n";
         let fenced = format!("---\nentry_prefix: F\n---\n\n{lead}");
-        let (out, _) = recover_params_entries("l.md", &fenced, &row);
+        let (out, _) = recover("l.md", &fenced, &row);
         assert!(out.contains(&format!("{lead}\n## F-2 — t\n")), "{out}");
         assert!(out.trim_end().ends_with("```"), "{out}");
         assert!(
@@ -604,7 +677,7 @@ mod tests {
         );
         // A body with no anchor and no trailing newline still gets a blank line before it.
         let bare = "# L\n\n## F-1 — a\n\nx";
-        let (out, _) = recover_params_entries("l.md", bare, &row);
+        let (out, _) = recover("l.md", bare, &row);
         assert!(
             out.starts_with("# L\n\n## F-1 — a\n\nx\n\n## F-2 — t\n\n"),
             "{out}"
@@ -616,10 +689,10 @@ mod tests {
     fn the_heading_level_follows_the_ledger() {
         let row = entries_row(r#"[{"id":"F-3"}]"#);
         let text = "---\nentry_prefix: F\n---\n\n# L\n\n### F-1 — a\n\nx\n\n### F-2 — b\n\ny\n";
-        let (out, _) = recover_params_entries("l.md", text, &row);
+        let (out, _) = recover("l.md", text, &row);
         assert!(out.contains("\n### F-3 — F-3\n"), "{out}");
         // A ledger with no heading for the prefix has no level to follow: `##`.
-        let (out, _) = recover_params_entries("l.md", "# L\n\n## G-1 — a\n\nx\n", &row);
+        let (out, _) = recover("l.md", "# L\n\n## G-1 — a\n\nx\n", &row);
         assert!(out.contains("\n## F-3 — F-3\n"), "{out}");
     }
 
@@ -627,7 +700,7 @@ mod tests {
     fn a_document_without_frontmatter_gets_the_section_and_no_mark() {
         let row = entries_row(r#"[{"id":"F-2","title":"second"}]"#);
         let text = "# L\n\n## F-1 — first\n\nx\n";
-        let (out, items) = recover_params_entries("l.md", text, &row);
+        let (out, items) = recover("l.md", text, &row);
         assert!(out.starts_with(text), "{out}");
         assert!(out.contains("\n## F-2 — second\n"), "{out}");
         assert!(!out.contains("entry_high_water"), "{out}");
@@ -638,7 +711,7 @@ mod tests {
     fn the_mark_only_rises_and_is_kept_per_prefix() {
         let text = "---\nentry_prefix: [F, W]\nentry_high_water_F: 9\n---\n\n# L\n";
         let row = entries_row(r#"[{"id":"F-2"},{"id":"W-4"},{"id":"W-3"}]"#);
-        let (out, _) = recover_params_entries("l.md", text, &row);
+        let (out, _) = recover("l.md", text, &row);
         assert_eq!(
             frontmatter_mark(&out, "F"),
             Some(9),
@@ -647,7 +720,7 @@ mod tests {
         assert_eq!(frontmatter_mark(&out, "W"), Some(4), "{out}");
         // Entries of one prefix keep the highest number, whatever the order.
         let row = entries_row(r#"[{"id":"W-7"},{"id":"W-3"}]"#);
-        let (out, _) = recover_params_entries("l.md", "---\nentry_prefix: W\n---\n", &row);
+        let (out, _) = recover("l.md", "---\nentry_prefix: W\n---\n", &row);
         assert_eq!(frontmatter_mark(&out, "W"), Some(7), "{out}");
     }
 
@@ -656,7 +729,7 @@ mod tests {
         let row = entries_row(
             r#"[{"id":"nope"},{"id":7},{"title":"no id"},"a string",{"id":"f-1"},{"id":"ABCD-1"},{"id":"F-"},{"id":"F-1x"}]"#,
         );
-        let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+        let (out, items) = recover("l.md", LEDGER, &row);
         assert_eq!(out, LEDGER);
         assert_eq!(items.len(), 8);
         assert!(items.iter().all(|i| i.status == Status::Unrecoverable));
@@ -672,7 +745,7 @@ mod tests {
         let row = entries_row(
             r#"[{"id":"F-2","title":"line one\nline two  more"},{"id":"F-3","summary":"from summary"},{"id":"F-4"},{"id":"F-5","title":"  ","summary":""},{"id":"F-6","title":7,"summary":"s"}]"#,
         );
-        let (out, _) = recover_params_entries("l.md", LEDGER, &row);
+        let (out, _) = recover("l.md", LEDGER, &row);
         for heading in [
             "## F-2 — line one line two  more\n",
             "## F-3 — from summary\n",
@@ -691,9 +764,9 @@ mod tests {
         let row = entries_row(
             r#"[{"id":"F-2","title":"a \"quoted\" title\nsecond line","body":"back\\slash ``` fence","n":3,"obj":{"k":["v",1]}},{"id":"F-3"}]"#,
         );
-        let (once, first) = recover_params_entries("l.md", LEDGER, &row);
+        let (once, first) = recover("l.md", LEDGER, &row);
         assert_eq!(statuses(&first), [Status::Moved, Status::Moved]);
-        let (twice, second) = recover_params_entries("l.md", &once, &row);
+        let (twice, second) = recover("l.md", &once, &row);
         assert_eq!(twice, once);
         assert_eq!(
             statuses(&second),
@@ -711,7 +784,7 @@ mod tests {
             "the fixture must not parse"
         );
         let row = entries_row(r#"[{"id":"F-1"},{"id":"F-2","title":"t"}]"#);
-        let (out, items) = recover_params_entries("l.md", text, &row);
+        let (out, items) = recover("l.md", text, &row);
         assert_eq!(out, text);
         assert!(out.contains("entry_high_water_F: 50"));
         assert_eq!(
@@ -733,7 +806,7 @@ mod tests {
 
     fn field_reasons(doc: &str, entry: &str) -> Vec<String> {
         let row = entries_row(&format!("[{entry}]"));
-        let (out, items) = recover_params_entries("l.md", doc, &row);
+        let (out, items) = recover("l.md", doc, &row);
         assert_eq!(out, doc, "a defined entry never changes the text");
         items.into_iter().map(|i| i.reason).collect()
     }
@@ -794,7 +867,7 @@ mod tests {
         let row = entries_row(
             r#"[{"id":"F-2","title":"t"},{"id":"F-2","title":"t"},{"id":"F-2","title":"other"}]"#,
         );
-        let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+        let (out, items) = recover("l.md", LEDGER, &row);
         assert_eq!(out.matches("\n## F-2 — ").count(), 1, "{out}");
         assert_eq!(
             statuses(&items),
@@ -812,7 +885,7 @@ mod tests {
             row("not json", Some("entries")),
             row(r#"{"entries":[]}"#, Some("entries")),
         ] {
-            let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+            let (out, items) = recover("l.md", LEDGER, &row);
             assert_eq!(out, LEDGER);
             assert!(items.is_empty(), "{items:?}");
         }
@@ -821,7 +894,7 @@ mod tests {
     #[test]
     fn an_entry_collection_that_is_not_an_array_is_reported() {
         let row = row(r#"{"entries":{"F-2":{}}}"#, Some("entries"));
-        let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+        let (out, items) = recover("l.md", LEDGER, &row);
         assert_eq!(out, LEDGER);
         assert_eq!(statuses(&items), [Status::Unrecoverable]);
         assert_eq!(items[0].class, Class::ParamsEntry);

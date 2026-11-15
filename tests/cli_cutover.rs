@@ -184,7 +184,12 @@ fn make_old_catalog(db: &Path) {
             },
         )
         .unwrap();
-        events::insert(&cat, &note("ev-log", "docs/log.md", "decided to wait")).unwrap();
+        // The note and the observation cite old forms: the export writes them rewritten (D-R9).
+        events::insert(
+            &cat,
+            &note("ev-log", "docs/log.md", "decided to wait for ledger:F-1"),
+        )
+        .unwrap();
         events::insert(
             &cat,
             &note("ev-shared", "docs/shared.md", "a note nobody holds"),
@@ -195,7 +200,7 @@ fn make_old_catalog(db: &Path) {
             &ObservationRow {
                 id: None,
                 artifact_id: id_of("docs/log.md"),
-                text: "seen once, in a meeting".to_owned(),
+                text: "seen once, in a meeting; see [notes](My_Notes.md)".to_owned(),
                 source: None,
                 created_at: 2_000,
             },
@@ -358,7 +363,7 @@ fn the_cutover_exports_every_class_and_leaves_the_old_catalog_unchanged() {
         ("observation", [1, 0, 0, 0]),
         ("manual_link", [1, 0, 0, 0]),
         ("rename", [1, 0, 0, 1]),
-        ("citation", [4, 0, 0, 1]),
+        ("citation", [6, 0, 0, 1]),
     ]);
     assert_eq!(tally(&exported), first, "{exported:#}");
 
@@ -374,6 +379,14 @@ fn the_cutover_exports_every_class_and_leaves_the_old_catalog_unchanged() {
         "the observation section: {log}"
     );
     assert!(log.contains("**Depends on:** [[ledger]]"), "{log}");
+    assert!(
+        log.contains("> decided to wait for [[ledger:F-1]]\n"),
+        "{log}"
+    );
+    assert!(
+        log.contains("> seen once, in a meeting; see [[my-notes|notes]]\n"),
+        "{log}"
+    );
     assert!(root.join("docs/my-notes.md").is_file());
     assert!(!root.join("docs/My_Notes.md").exists());
     let shared = read(&root, "docs/shared.md");

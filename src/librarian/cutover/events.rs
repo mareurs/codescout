@@ -5,7 +5,7 @@
 //! `event_create` (`event_text::splice_event`), and the home rules are `event_text::twin_home_refusal`,
 //! so a live writer and the cutover share one format and one rule.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 
@@ -14,7 +14,7 @@ use crate::librarian::catalog::event_text::{
 };
 use crate::librarian::cutover::entries::item;
 use crate::librarian::cutover::old_rows::{OldEvent, OldObservation};
-use crate::librarian::cutover::plan::{Class, Item, Status};
+use crate::librarian::cutover::plan::{Class, Item, RewriteAdded, Status};
 
 /// The start of the reason of a row that stays a row because its document is no home for it.
 const REASON_NO_HOME: &str = "no committed home yet";
@@ -22,23 +22,32 @@ const REASON_CARRIED: &str = "carried by its note event";
 const REASON_HELD: &str = "the text already holds it";
 const REASON_WRITTEN: &str = "section written";
 const REASON_UNNAMEABLE: &str = "a mutates target has no name in the key space";
+const REASON_REWRITE_UNREADABLE: &str =
+    "the section would not read back once its citations are rewritten";
 
 /// `text` with the events and observations of one document written as sections, and one item per
-/// row (D-R6, D-R12).
+/// row (D-R6, D-R12), followed by the citation items of the section it wrote.
 ///
 /// `events` are the document's events of the kinds a text can hold (the planner reports the others
 /// itself); `notes_of_artifact` are its `note` events, which carry an observation whose text they
 /// repeat (C2-R2: a live `note` call records the observation as well). `form_of` names a target
-/// document by its grammar form, or `None` when the grammar cannot name it.
+/// document by its grammar form, or `None` when the grammar cannot name it. `rewrite` rewrites the
+/// old citation forms of a new section in the context of the whole text (D-R9): a section is
+/// written as the plan of the commit that holds it would leave it, so that plan writes nothing.
 ///
 /// Events go in `created_at_ms` order (ties by id), then observations (the same order), after the
 /// sections the text already holds, whatever the order of the input. A row is:
 /// - `skipped` with `no committed home yet: <why>` when the text is no home for a `note` (an
 ///   unflagged document, a ledger, an entry document; `event_create`'s rules) or the kind has no
 ///   twin; the row stays in the old catalog;
-/// - `already_exported` when the text holds a section with its id (`observation-<rowid>` for an
-///   observation); `splice_event` is not called, so a rerun is quiet;
-/// - `skipped` as carried, for an observation whose note is in `notes_of_artifact`;
+/// - `already_exported` when the text holds a section with its id; for an observation
+///   (`observation-<rowid>`) the held section must also have the content this run would write
+///   (the rewritten text, its source, its creation time). `splice_event` is not called, so a rerun
+///   is quiet;
+/// - `unrecoverable` with `another section holds id observation-<rowid>` when the held section of
+///   an observation has other content: another machine's catalog gave that rowid to another fact;
+/// - `skipped` as carried, for an observation whose note is in `notes_of_artifact` (the catalog
+///   texts are compared, before any rewrite);
 /// - `unrecoverable` when a `mutates` target has no form (the event is not written with half its
 ///   targets), or `splice_event` refuses (an unclosed code fence before the insertion point is the
 ///   usual cause); the error text carries no path, and the text stays as it was;
@@ -50,6 +59,7 @@ pub fn export_events(
     observations: &[&OldObservation],
     notes_of_artifact: &[&OldEvent],
     form_of: &dyn Fn(&str) -> Option<String>,
+    rewrite: &RewriteAdded,
 ) -> (String, Vec<Item>) {
     let mut text = text.to_owned();
     let mut items = Vec::new();
@@ -96,8 +106,9 @@ pub fn export_events(
             mutates,
             payload: event.payload.clone(),
         };
-        let (status, reason) = write_section(&section, &mut text, &mut held);
+        let (status, reason, cites) = write_section(&section, &mut text, &mut held, rewrite);
         items.push(report(status, &reason));
+        items.extend(cites);
     }
 
     for row in sorted_observations(observations) {
@@ -131,7 +142,11 @@ pub fn export_events(
         if let Some(holder) = held.get(&section.id) {
             // An observation id is a rowid of one machine's catalog: a section another machine wrote
             // under the same id is another fact, so the content is compared (events carry ULIDs).
-            if same_content(holder, &section) {
+            // The held section is this row when it holds the row's text as written, or as this run
+            // writes it (its old citation forms rewritten).
+            if same_content(holder, &section)
+                || same_content(holder, &as_written(&text, &section, rewrite))
+            {
                 items.push(report(Status::AlreadyExported, REASON_HELD));
             } else {
                 let reason = format!("another section holds id {}", section.id);
@@ -139,8 +154,9 @@ pub fn export_events(
             }
             continue;
         }
-        let (status, reason) = write_section(&section, &mut text, &mut held);
+        let (status, reason, cites) = write_section(&section, &mut text, &mut held, rewrite);
         items.push(report(status, &reason));
+        items.extend(cites);
     }
     (text, items)
 }
@@ -190,30 +206,75 @@ fn no_home(why: &str) -> String {
     format!("{REASON_NO_HOME}: {why}")
 }
 
-/// Whether `note` is a `note` event whose text is exactly the observation's.
+/// Whether `note` is a `note` event whose text is exactly the observation's. Both texts are the
+/// catalog's, before any rewrite, so a cited text is compared as the live `note` call recorded it.
 fn carries(note: &OldEvent, row: &OldObservation) -> bool {
     note.kind == "note"
         && note.payload.get("text").and_then(Value::as_str) == Some(row.text.as_str())
 }
 
-/// Splice `section` into `text`: the status and reason of the item. The text is left as it was when
-/// the splice is refused.
+/// Splice `section` into `text` and rewrite the old citation forms of the new section: the status
+/// and reason of the item, and the citation items of the section. The text is left as it was when
+/// the splice is refused, or when the rewritten section would not read back as one section.
 fn write_section(
     section: &EventText,
     text: &mut String,
     held: &mut BTreeMap<String, EventText>,
-) -> (Status, String) {
-    match splice_event(text, section) {
-        Ok(next) => {
-            *text = next;
-            held.insert(section.id.clone(), section.clone());
-            (Status::Moved, REASON_WRITTEN.to_owned())
+    rewrite: &RewriteAdded,
+) -> (Status, String, Vec<Item>) {
+    let spliced = match splice_event(text, section) {
+        Ok(next) => next,
+        Err(err) => {
+            let reason = format!("the section cannot be added to the text: {err:#}");
+            return (Status::Unrecoverable, reason, Vec::new());
         }
-        Err(err) => (
+    };
+    let (rewritten, cites) = rewrite(text, &spliced);
+    let Some(written) = read_back(&rewritten, &section.id) else {
+        return (
             Status::Unrecoverable,
-            format!("the section cannot be added to the text: {err:#}"),
-        ),
+            REASON_REWRITE_UNREADABLE.to_owned(),
+            Vec::new(),
+        );
+    };
+    *text = rewritten;
+    held.insert(section.id.clone(), written);
+    (Status::Moved, REASON_WRITTEN.to_owned(), cites)
+}
+
+/// `section` as this run would write it into `text`: its citation forms rewritten in the context
+/// of `text`. The trial splice uses an id `text` cannot hold, because `text` may hold `section`'s
+/// id already. `section` as it is when the trial cannot be made.
+fn as_written(text: &str, section: &EventText, rewrite: &RewriteAdded) -> EventText {
+    let mut trial = section.clone();
+    let ids: BTreeSet<String> = parse_event_sections(text)
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    trial.id = (0..)
+        .map(|k| format!("{}-trial-{k}", section.id))
+        .find(|id| !ids.contains(id))
+        .expect("the range has no end");
+    let Ok(spliced) = splice_event(text, &trial) else {
+        return section.clone();
+    };
+    let (rewritten, _) = rewrite(text, &spliced);
+    match read_back(&rewritten, &trial.id) {
+        Some(mut written) => {
+            written.id = section.id.clone();
+            written
+        }
+        None => section.clone(),
     }
+}
+
+/// The one section of `text` with `id`, or `None` when there is not exactly one.
+fn read_back(text: &str, id: &str) -> Option<EventText> {
+    let mut found = parse_event_sections(text)
+        .into_iter()
+        .filter(|s| s.id == id);
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
 }
 
 /// Whether the section the text holds is the one `section` would write: the payload (text and
@@ -276,7 +337,80 @@ mod tests {
         observations: &[&OldObservation],
         notes: &[&OldEvent],
     ) -> (String, Vec<Item>) {
-        export_events(REL, text, events, observations, notes, &form_of)
+        export_events(REL, text, events, observations, notes, &form_of, &keep)
+    }
+
+    /// A rewrite that changes nothing and finds nothing.
+    fn keep(_before: &str, after: &str) -> (String, Vec<Item>) {
+        (after.to_owned(), Vec::new())
+    }
+
+    /// A rewrite of `old-form` to `[[new]]` in the added text, with one citation item per form.
+    fn new_forms(before: &str, after: &str) -> (String, Vec<Item>) {
+        let found = after.matches("old-form").count() - before.matches("old-form").count();
+        let cite = || item(REL, Class::Citation, Status::Moved, "rewritten", None);
+        (
+            after.replace("old-form", "[[new]]"),
+            (0..found).map(|_| cite()).collect(),
+        )
+    }
+
+    fn run_rewriting(
+        text: &str,
+        events: &[&OldEvent],
+        observations: &[&OldObservation],
+    ) -> (String, Vec<Item>) {
+        export_events(
+            REL,
+            text,
+            events,
+            observations,
+            events,
+            &form_of,
+            &new_forms,
+        )
+    }
+
+    #[test]
+    fn a_new_section_is_written_rewritten_with_its_citation_items_after_its_own() {
+        let e = note("ev-1", "see old-form");
+        let o = observation(7, "also old-form");
+        let (out, items) = run_rewriting(FLAGGED, &[&e], &[&o]);
+        let texts: Vec<Value> = parse_event_sections(&out)
+            .into_iter()
+            .map(|s| s.payload)
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                json!({"text": "see [[new]]"}),
+                json!({"text": "also [[new]]"})
+            ]
+        );
+        let classes: Vec<(Class, Status)> = items.iter().map(|i| (i.class, i.status)).collect();
+        assert_eq!(
+            classes,
+            [
+                (Class::Event, Status::Moved),
+                (Class::Citation, Status::Moved),
+                (Class::Observation, Status::Moved),
+                (Class::Citation, Status::Moved),
+            ]
+        );
+        // A rerun over the written text: every section is held, and nothing is found again.
+        let (again, items) = run_rewriting(&out, &[&e], &[&o]);
+        assert_eq!(again, out);
+        let statuses: Vec<Status> = items.iter().map(|i| i.status).collect();
+        assert_eq!(statuses, [Status::AlreadyExported, Status::AlreadyExported]);
+    }
+
+    #[test]
+    fn a_held_observation_written_before_the_rewrite_is_still_this_row() {
+        let o = observation(7, "also old-form");
+        let (raw, _) = run(FLAGGED, &[], &[&o], &[]);
+        let (out, items) = run_rewriting(&raw, &[], &[&o]);
+        assert_eq!(out, raw, "the held section is not written again");
+        assert_eq!(only(&items).status, Status::AlreadyExported);
     }
 
     fn ids(text: &str) -> Vec<String> {

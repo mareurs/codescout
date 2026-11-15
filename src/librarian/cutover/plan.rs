@@ -22,8 +22,8 @@ use crate::librarian::cutover::rename::{
     applied_item, in_head_item, plan_renames_against, renames_already_in_head, RenameSet,
 };
 use crate::librarian::cutover::rewrite::{
-    join_path, rewrite_document, Finding, Form, IdSource, IdTarget, Outcome, Resolver,
-    REASON_UNKNOWN_ID,
+    join_path, rewrite_added, rewrite_document, Finding, Form, IdSource, IdTarget, Outcome,
+    Resolver, REASON_UNKNOWN_ID,
 };
 use crate::librarian::cutover::sidecars::{
     compare_declared, declared_sidecar, plan_shape, sidecar_rel, ShapeExport,
@@ -228,7 +228,9 @@ impl Head {
 ///
 /// The params, the sidecars, the events, the observations and the manual links of a document go into
 /// its text in that order ([`plan_augmentations`], then [`plan_events_and_links`]), each step from
-/// the text the one before left.
+/// the text the one before left. One set of [`CitationTables`] serves every step: the citation
+/// rewrite of the committed text, and of each section a later step adds (D-R9), so the plan of the
+/// commit that holds the export writes nothing.
 pub fn plan_export(
     repo: &git2::Repository,
     commit: &git2::Commit,
@@ -248,9 +250,10 @@ pub fn plan_export(
     let renames = plan_file_renames(&head, old, &code, &mut plan);
     plan_skipped_events(old, &renames.paths(), &mut plan);
     plan_write_cites(old, &mut plan);
-    plan_citations(repo, commit, old, &head, &code, &renames, &mut plan)?;
-    plan_augmentations(repo, commit, old, &head, &code, &renames, &mut plan)?;
-    plan_events_and_links(old, &head, &code, &renames, &mut plan);
+    let tables = CitationTables::build(repo, commit, old, &head, &renames, plan.shallow)?;
+    plan_citations(&head, &code, &tables, &mut plan);
+    plan_augmentations(repo, commit, old, &head, &code, &tables, &mut plan)?;
+    plan_events_and_links(old, &head, &code, &tables, &mut plan);
     plan_outside_links(repo, commit, &head, &renames, &mut plan)?;
     Ok(plan)
 }
@@ -295,42 +298,13 @@ fn plan_file_renames(
 /// a dot directory or an mdBook reads by path is frozen (D-R26): its text stays, and each
 /// rewrite it would have had is an `unrecoverable` item.
 ///
-/// The index, the stem table and the id targets all use the final paths (after `renames`), so a
+/// The index, the stem table and the id targets all use the final paths (after the renames), so a
 /// form is rendered with the key the file has once the plan is applied. A renamed file is one
 /// entry of the plan, under its new path.
-fn plan_citations(
-    repo: &git2::Repository,
-    commit: &git2::Commit,
-    old: &OldRows,
-    head: &Head,
-    code: &CodeRefs,
-    renames: &RenameSet,
-    plan: &mut ExportPlan,
-) -> anyhow::Result<()> {
-    let moved = renames.paths();
-    let index = KeyIndex::build(
-        head.repo_name.clone(),
-        head.files.iter().map(|(path, text)| DocInput {
-            rel_path: final_path(&moved, path).to_owned(),
-            text: text.clone(),
-        }),
-    );
-    let stems = stems_of(head, renames);
-    let (ids, id_hints) = recover_ids(repo, commit, old, head, &moved, plan.shallow)?;
-    let renamed_keys = renames.keys();
-    let ambiguous_keys = renames.ambiguous_keys(head.files.keys());
-    let resolver = Resolver {
-        index: &index,
-        this_repo: &head.repo_name,
-        renamed_keys: &renamed_keys,
-        renamed_paths: &moved,
-        ambiguous_keys: &ambiguous_keys,
-        stems: &stems,
-        ids: &ids,
-        id_hints: &id_hints,
-    };
+fn plan_citations(head: &Head, code: &CodeRefs, tables: &CitationTables, plan: &mut ExportPlan) {
+    let resolver = tables.resolver(&head.repo_name);
     for (path, text) in &head.files {
-        let now = final_path(&moved, path);
+        let now = final_path(&tables.moved, path);
         let frozen = code.frozen(path);
         let (new_text, findings) = rewrite_document(now, text, &resolver);
         for finding in &findings {
@@ -350,7 +324,83 @@ fn plan_citations(
             );
         }
     }
-    Ok(())
+}
+
+/// What the citation rewrite resolves against (D-R5, D-R28), built once per plan: the index of the
+/// final paths, the renamed keys and paths, the stems, and the ids of the catalog and of history.
+struct CitationTables {
+    index: KeyIndex,
+    /// Old path to final path ([`RenameSet::paths`]).
+    moved: BTreeMap<String, String>,
+    renamed_keys: BTreeMap<String, Key>,
+    ambiguous_keys: BTreeMap<String, Vec<String>>,
+    stems: BTreeMap<String, Vec<String>>,
+    ids: BTreeMap<String, IdTarget>,
+    id_hints: BTreeMap<String, String>,
+}
+
+impl CitationTables {
+    fn build(
+        repo: &git2::Repository,
+        commit: &git2::Commit,
+        old: &OldRows,
+        head: &Head,
+        renames: &RenameSet,
+        shallow: bool,
+    ) -> anyhow::Result<CitationTables> {
+        let moved = renames.paths();
+        let index = KeyIndex::build(
+            head.repo_name.clone(),
+            head.files.iter().map(|(path, text)| DocInput {
+                rel_path: final_path(&moved, path).to_owned(),
+                text: text.clone(),
+            }),
+        );
+        let (ids, id_hints) = recover_ids(repo, commit, old, head, &moved, shallow)?;
+        Ok(CitationTables {
+            index,
+            renamed_keys: renames.keys(),
+            ambiguous_keys: renames.ambiguous_keys(head.files.keys()),
+            stems: stems_of(head, renames),
+            ids,
+            id_hints,
+            moved,
+        })
+    }
+
+    fn resolver<'a>(&'a self, this_repo: &'a RepoName) -> Resolver<'a> {
+        Resolver {
+            index: &self.index,
+            this_repo,
+            renamed_keys: &self.renamed_keys,
+            renamed_paths: &self.moved,
+            ambiguous_keys: &self.ambiguous_keys,
+            stems: &self.stems,
+            ids: &self.ids,
+            id_hints: &self.id_hints,
+        }
+    }
+}
+
+/// How an export step has the lines it adds to a document rewritten: `(before, after)` to the
+/// rewritten `after` and one citation item per form found in the added lines.
+pub type RewriteAdded<'a> = dyn Fn(&str, &str) -> (String, Vec<Item>) + 'a;
+
+/// The [`RewriteAdded`] of the document at `now` ([`rewrite_added`]). The document is not frozen:
+/// a step edits only a document [`open_document`] opened.
+fn added_text_rewrite<'a>(
+    resolver: &'a Resolver<'a>,
+    now: &'a str,
+    shallow: bool,
+) -> impl Fn(&str, &str) -> (String, Vec<Item>) + 'a {
+    move |before, after| {
+        let (text, findings) = rewrite_added(now, before, after, resolver);
+        let items = findings
+            .iter()
+            .map(|finding| citation_item(now, finding, None, shallow))
+            .collect();
+        (text, items)
+    }
 }
 
 /// What `HEAD` holds at a path that may carry a sidecar.
@@ -386,7 +436,8 @@ const REASON_NOT_IN_SPACE: &str = "document is outside the key space or has no t
 
 /// Params entries, other params and the shape of every augmentation (D-R13, D-R23, D-R24), per
 /// document path after the renames. A document's text goes through the citation rewrite first
-/// ([`plan_citations`]), then the entries, then the declaration stamp; a sidecar is a new file.
+/// ([`plan_citations`]), then the entries (a recovered section is rewritten like committed text,
+/// D-R9), then the declaration stamp; a sidecar is a new file.
 ///
 /// Two live rows may name one path (the same file under two spellings of the root). The rows are
 /// taken in id order against one running text: an entry the first row recovered is `already_exported`
@@ -411,16 +462,17 @@ fn plan_augmentations(
     old: &OldRows,
     head: &Head,
     code: &CodeRefs,
-    renames: &RenameSet,
+    tables: &CitationTables,
     plan: &mut ExportPlan,
 ) -> anyhow::Result<()> {
-    let moved = renames.paths();
+    let moved = &tables.moved;
+    let resolver = tables.resolver(&head.repo_name);
     let mut by_path: BTreeMap<String, Vec<&AugmentationRow>> = BTreeMap::new();
     for row in &old.augmentations {
         let Some(document) = old.documents.get(&row.artifact_id) else {
             continue;
         };
-        let now = final_path(&moved, &document.rel_path).to_owned();
+        let now = final_path(moved, &document.rel_path).to_owned();
         by_path.entry(now).or_default().push(row);
     }
     for rows in by_path.values_mut() {
@@ -441,7 +493,7 @@ fn plan_augmentations(
     }
     for (path, text) in &head.files {
         if let Some(declared) = declared_sidecar(text) {
-            let now = final_path(&moved, path).to_owned();
+            let now = final_path(moved, path).to_owned();
             claims.entry(declared).or_default().insert(now);
         }
     }
@@ -480,8 +532,9 @@ fn plan_augmentations(
             Committed::Text(text) => Some(text.clone()),
             _ => None,
         };
+        let rewrite = added_text_rewrite(&resolver, &now, plan.shallow);
         for row in rows {
-            let (next, items) = recover_params_entries(&now, &text, row);
+            let (next, items) = recover_params_entries(&now, &text, row, &rewrite);
             text = next;
             plan.items.extend(items);
             plan.items.extend(other_params(&now, row));
@@ -700,7 +753,10 @@ struct DocumentRows<'a> {
 
 /// Events, observations and manual links (D-R6, D-R12, D-R19), per document path after the renames,
 /// into the text the steps before this one left (the citation rewrite, the params entries, the
-/// declaration stamp). A document's events and observations go first, then its relation lines.
+/// declaration stamp). A document's events and observations go first, then its relation lines. A
+/// new event or observation section goes through the citation rewrite like committed text (D-R9),
+/// and its citation items follow its own. A relation line holds a label and a `[[key]]` form only,
+/// so it has no old form to rewrite.
 ///
 /// A path `HEAD` does not hold, one outside the key space and a frozen document (D-R26) are never
 /// edited: each of their rows is an `unrecoverable` item with that reason. The events of a kind
@@ -713,20 +769,15 @@ fn plan_events_and_links(
     old: &OldRows,
     head: &Head,
     code: &CodeRefs,
-    renames: &RenameSet,
+    tables: &CitationTables,
     plan: &mut ExportPlan,
 ) {
-    let moved = renames.paths();
-    let index = KeyIndex::build(
-        head.repo_name.clone(),
-        head.files.iter().map(|(path, text)| DocInput {
-            rel_path: final_path(&moved, path).to_owned(),
-            text: text.clone(),
-        }),
-    );
+    let moved = &tables.moved;
+    let index = &tables.index;
+    let resolver = tables.resolver(&head.repo_name);
     let form_of = |artifact_id: &str| -> Option<String> {
         let document = old.documents.get(artifact_id)?;
-        let key = index.key_at(final_path(&moved, &document.rel_path))?;
+        let key = index.key_at(final_path(moved, &document.rel_path))?;
         let reference = Reference::File {
             repo: None,
             key: key.clone(),
@@ -742,7 +793,7 @@ fn plan_events_and_links(
     let path_of = |artifact_id: &str| {
         old.documents
             .get(artifact_id)
-            .map(|document| final_path(&moved, &document.rel_path).to_owned())
+            .map(|document| final_path(moved, &document.rel_path).to_owned())
     };
     for event in &old.events {
         let Some(now) = path_of(&event.artifact_id) else {
@@ -785,6 +836,7 @@ fn plan_events_and_links(
                 continue;
             }
         };
+        let rewrite = added_text_rewrite(&resolver, &now, plan.shallow);
         let (text, items) = export_events(
             &now,
             &document.base,
@@ -792,6 +844,7 @@ fn plan_events_and_links(
             &rows.observations,
             &rows.notes,
             &form_of,
+            &rewrite,
         );
         plan.items.extend(items);
         let (text, items) = export_links(&now, &text, &rows.links);
@@ -1016,7 +1069,7 @@ fn recover_ids(
     }
     // An id with no target in `HEAD` is still open, whether or not the catalog knew its file:
     // git may show where the file went. The id binds to the path it hashes and to nothing else.
-    let open: BTreeSet<String> = cited_ids(head)
+    let open: BTreeSet<String> = cited_ids(head, old)
         .into_iter()
         .filter(|id| !ids.contains_key(id))
         .collect();
@@ -1051,14 +1104,45 @@ fn recover_ids(
     Ok((ids, hints))
 }
 
-/// The 16-hex ids that in-space documents cite outside code.
-fn cited_ids(head: &Head) -> BTreeSet<String> {
+/// The 16-hex ids cited outside code: by the in-space documents of `HEAD`, and by the text an
+/// export step may add to one ([`added_texts`]). The plan of the commit that holds the export reads
+/// that text in `HEAD`, so the first plan binds its ids through history as well (D-R28), and the
+/// two plans agree.
+fn cited_ids(head: &Head, old: &OldRows) -> BTreeSet<String> {
+    let added = added_texts(old);
     head.files
         .values()
+        .chain(&added)
         .flat_map(|text| citation_spans(text))
         .filter(|s| s.kind == CitationKind::ArtifactId && !s.in_code && s.range.is_some())
         .map(|s| s.raw)
         .collect()
+}
+
+/// The texts of the old rows that an export step may write as prose: the `text` of an event's
+/// payload, an observation's text, and the `title` and `summary` of a params entry (its heading).
+fn added_texts(old: &OldRows) -> Vec<String> {
+    let mut texts: Vec<String> = old
+        .events
+        .iter()
+        .filter_map(|event| event.payload.get("text")?.as_str().map(str::to_owned))
+        .collect();
+    texts.extend(old.observations.iter().map(|row| row.text.clone()));
+    for row in &old.augmentations {
+        let (Params::Object(params), Some(collection)) = (params_of(row), &row.entry_collection)
+        else {
+            continue;
+        };
+        let entries = params.get(collection).and_then(|v| v.as_array());
+        for entry in entries.into_iter().flatten() {
+            for key in ["title", "summary"] {
+                if let Some(text) = entry.get(key).and_then(|v| v.as_str()) {
+                    texts.push(text.to_owned());
+                }
+            }
+        }
+    }
+    texts
 }
 
 /// Why an event of `kind` has no home in a text, or `None` when it has one.
@@ -2674,6 +2758,260 @@ mod tests {
         assert!(second.files.is_empty(), "{:?}", second.files.keys());
         let events = &second.tally()[&Class::Event];
         assert_eq!((events.moved, events.already_exported), (0, 1));
+    }
+
+    /// The plan's texts committed as the next `HEAD` (a renamed file moves), planned again with the
+    /// same old catalog: `(first plan, second plan)`. The manual's sequence (export, commit, a plan
+    /// that writes nothing, build) needs the second plan to be a fixed point.
+    fn plan_commit_and_replan(
+        files: &[(&str, &[u8])],
+        fill: impl Fn(&crate::librarian::catalog::Catalog, &Path),
+    ) -> (ExportPlan, ExportPlan) {
+        let first = plan_of_files(files, &fill);
+        let mut next: BTreeMap<String, Vec<u8>> = files
+            .iter()
+            .map(|&(path, bytes)| (path.to_owned(), bytes.to_vec()))
+            .collect();
+        for change in first.files.values() {
+            if let Some(from) = &change.renamed_from {
+                next.remove(from);
+            }
+            next.insert(change.path.clone(), change.new_text.clone().into_bytes());
+        }
+        let next: Vec<(&str, &[u8])> = next
+            .iter()
+            .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+            .collect();
+        let second = plan_of_files(&next, &fill);
+        (first, second)
+    }
+
+    /// The second plan writes no file and moves nothing, in any class.
+    fn assert_fixed_point(second: &ExportPlan) {
+        let changed: Vec<&String> = second.files.keys().collect();
+        assert!(
+            changed.is_empty(),
+            "the second plan writes {changed:?}: {:#?}",
+            second.files
+        );
+        assert_eq!(second.writes(), 0);
+        for (class, tally) in second.tally() {
+            assert_eq!(tally.moved, 0, "{class:?} moves again: {:#?}", second.items);
+        }
+    }
+
+    const OTHER_MD: &str = "# Other\n\n## R-1 \u{2014} one\n\nx\n";
+    const OTHER_ID: &str = "0123456789abcdef";
+
+    /// `docs/n.md` (single-writer) with an optional note event and an optional observation, and
+    /// `docs/other.md`, which defines `R-1` and has the catalog id [`OTHER_ID`].
+    fn note_and_observation_plans(
+        note: Option<&str>,
+        observation: Option<&str>,
+    ) -> (ExportPlan, ExportPlan) {
+        plan_commit_and_replan(
+            &[
+                ("docs/n.md", SINGLE_WRITER_MD.as_bytes()),
+                ("docs/other.md", OTHER_MD.as_bytes()),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "n", "docs/n.md");
+                add_doc(cat, root, OTHER_ID, "docs/other.md");
+                if let Some(text) = note {
+                    let payload = serde_json::json!({ "text": text }).to_string();
+                    add_event(cat, "e1", "n", "note", &payload);
+                }
+                if let Some(text) = observation {
+                    add_observation(cat, "n", text);
+                }
+            },
+        )
+    }
+
+    fn moved_citations_in<'a>(plan: &'a ExportPlan, path: &str) -> Vec<&'a Item> {
+        citation_items(plan)
+            .into_iter()
+            .filter(|i| i.path.as_deref() == Some(path) && i.status == Status::Moved)
+            .collect()
+    }
+
+    /// C1: text an export step adds is rewritten like committed text (D-R9), and the first plan
+    /// counts the rewrites, so the plan after the commit writes nothing.
+    #[test]
+    fn a_note_that_cites_old_forms_is_written_rewritten_and_the_commit_is_a_fixed_point() {
+        let cited = "see other:R-1 and 0123456789abcdef";
+        // The observation a live note recorded repeats the note's text: it stays carried.
+        let (first, second) = note_and_observation_plans(Some(cited), Some(cited));
+        let text = &first.files["docs/n.md"].new_text;
+        assert!(
+            text.contains("> see [[other:R-1]] and [[other]]\n"),
+            "{text}"
+        );
+        assert_eq!(
+            moved_citations_in(&first, "docs/n.md").len(),
+            2,
+            "{:#?}",
+            first.items
+        );
+        assert_fixed_point(&second);
+        assert_eq!(
+            statuses_of(&second, Class::Event),
+            [Status::AlreadyExported]
+        );
+        for plan in [&first, &second] {
+            let observation = items_of(plan, Class::Observation);
+            assert_eq!(observation.len(), 1);
+            assert_eq!(observation[0].reason, "carried by its note event");
+        }
+    }
+
+    #[test]
+    fn an_observation_that_cites_old_forms_stays_this_machines_fact_after_the_commit() {
+        let (first, second) =
+            note_and_observation_plans(None, Some("see other:R-1 and 0123456789abcdef"));
+        let text = &first.files["docs/n.md"].new_text;
+        assert!(
+            text.contains("> see [[other:R-1]] and [[other]]\n"),
+            "{text}"
+        );
+        assert_eq!(
+            moved_citations_in(&first, "docs/n.md").len(),
+            2,
+            "{:#?}",
+            first.items
+        );
+        assert_fixed_point(&second);
+        let observation = items_of(&second, Class::Observation);
+        assert_eq!(observation.len(), 1);
+        assert_eq!(
+            (&observation[0].status, observation[0].reason.as_str()),
+            (&Status::AlreadyExported, "the text already holds it"),
+            "the committed section is this row, rewritten"
+        );
+    }
+
+    #[test]
+    fn an_observation_with_an_old_path_link_is_rewritten_and_the_commit_is_a_fixed_point() {
+        let (first, second) = note_and_observation_plans(None, Some("see [O](other.md)"));
+        let text = &first.files["docs/n.md"].new_text;
+        assert!(text.contains("> see [[other|O]]\n"), "{text}");
+        assert_eq!(
+            moved_citations_in(&first, "docs/n.md").len(),
+            1,
+            "{:#?}",
+            first.items
+        );
+        assert_fixed_point(&second);
+        assert_eq!(
+            statuses_of(&second, Class::Observation),
+            [Status::AlreadyExported]
+        );
+    }
+
+    /// D-R28 binds an id that history knows. The text a note adds is searched for ids like the
+    /// committed text, so the first plan binds it as the plan after the commit would.
+    #[test]
+    fn a_note_that_cites_an_id_only_history_knows_is_rewritten_once() {
+        use crate::librarian::derived::testkit::commit_files;
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        const BODY: &[u8] =
+            b"# Notes\n\nSome text that makes the file big enough to match.\n\nMore.\n";
+        let repo = repo_with(
+            &root,
+            &[
+                ("docs/old.md", FILE, BODY),
+                ("docs/n.md", FILE, SINGLE_WRITER_MD.as_bytes()),
+            ],
+        );
+        let first_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/old.md"));
+        let tip = commit_files(
+            &repo,
+            &[
+                ("docs/new.md", BODY),
+                ("docs/n.md", SINGLE_WRITER_MD.as_bytes()),
+            ],
+            &[&first_commit],
+            "move",
+        );
+        let plan_at = |commit: git2::Oid| {
+            let old = old_catalog_with(|cat| {
+                add_doc(cat, &root, "n", "docs/n.md");
+                let payload = serde_json::json!({ "text": format!("see {id}") }).to_string();
+                add_event(cat, "e1", "n", "note", &payload);
+            });
+            let rows = load(&old, &RootMap::new(root.clone())).unwrap();
+            plan_export(&repo, &repo.find_commit(commit).unwrap(), &rows).unwrap()
+        };
+        let first = plan_at(tip);
+        let text = first.files["docs/n.md"].new_text.clone();
+        assert!(text.contains("> see [[new]]\n"), "{text}");
+        let tip_commit = repo.find_commit(tip).unwrap();
+        let exported = commit_files(
+            &repo,
+            &[("docs/new.md", BODY), ("docs/n.md", text.as_bytes())],
+            &[&tip_commit],
+            "export",
+        );
+        assert_fixed_point(&plan_at(exported));
+    }
+
+    /// m7: an entry title goes into a heading, where no form is rewritten. The first plan reports
+    /// the form as the plan after the commit does.
+    #[test]
+    fn an_entry_title_with_an_old_form_is_reported_by_the_first_plan() {
+        let (first, second) = plan_commit_and_replan(
+            &[
+                ("docs/ledger.md", LEDGER_MD.as_bytes()),
+                ("docs/other.md", OTHER_MD.as_bytes()),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "led", "docs/ledger.md");
+                add_doc(cat, root, OTHER_ID, "docs/other.md");
+                add_augmentation(
+                    cat,
+                    "led",
+                    r#"{"entries":[{"id":"F-2","title":"follows other:R-1"}]}"#,
+                    Some("entries"),
+                );
+            },
+        );
+        let in_heading = |plan: &ExportPlan| -> Vec<(Status, String)> {
+            citation_items(plan)
+                .into_iter()
+                .filter(|i| i.path.as_deref() == Some("docs/ledger.md"))
+                .map(|i| (i.status, i.reason.clone()))
+                .collect()
+        };
+        let want = [(Status::Unrecoverable, "inside a heading".to_owned())];
+        assert_eq!(in_heading(&first), want);
+        assert_fixed_point(&second);
+        assert_eq!(in_heading(&second), want);
+    }
+
+    /// I2: a ledger whose text ends inside an unclosed code fence swallows a recovered section. The
+    /// entry is reported and the text is not touched, so a rerun does not add it again.
+    #[test]
+    fn an_entry_that_would_land_in_an_unclosed_fence_is_unrecoverable_and_not_written() {
+        let head = format!("{LEDGER_MD}\n```\nunclosed\n");
+        let (first, second) =
+            plan_commit_and_replan(&[("docs/ledger.md", head.as_bytes())], |cat, root| {
+                add_doc(cat, root, "led", "docs/ledger.md");
+                add_augmentation(
+                    cat,
+                    "led",
+                    r#"{"entries":[{"id":"F-2","title":"two"}]}"#,
+                    Some("entries"),
+                );
+            });
+        let entries = items_of(&first, Class::ParamsEntry);
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(entries[0].status, Status::Unrecoverable, "{entries:?}");
+        if let Some(file) = first.files.get("docs/ledger.md") {
+            assert!(!file.new_text.contains("F-2"), "{}", file.new_text);
+        }
+        assert_fixed_point(&second);
     }
 
     #[test]
