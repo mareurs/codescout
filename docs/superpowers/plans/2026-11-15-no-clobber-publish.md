@@ -1,7 +1,7 @@
 ---
 id: db78f37db84ba413
 kind: plan
-status: draft
+status: active
 title: No-clobber publish for create_file, doc create, doc move and the two onboarding creates
 tags:
 - atomic-write-door
@@ -10,7 +10,8 @@ tags:
 
 # No-clobber publish — implementation plan
 
-**Bugs closed (the no-clobber half):** beae053db1c0a3f6 (`create_file`), 07ebee9fd570c738 (`doc(create)`), 3ca37d8db3572e4e (`doc(move)`), and the two create-if-absent writes of the onboarding bug (catalog id af3e4091f67e2f67; the `id:` in its own frontmatter is stale after a worktree merge).
+**Status (2026-11-15):** Tasks 1, 2, 3 and 5 are on `experiments` (tip `1c6ec18e3`, branch `fix/no-clobber-publish-20261115`, gate green on the same source tree, Wine run of the `util::fs` tests green). Task 4 is NOT built: it waits for the base decision in Finding 5. The `doc(create)` bug stays open.
+**Bugs closed (the no-clobber half):** a2baa3ad8e32cff9 (`create_file`, open only for the `overwrite: true` window), 4b345c816297115b (`doc(move)`, fixed), and the two create-if-absent writes of the onboarding bug (af3e4091f67e2f67, fixed). **Not closed:** 5f7254ff59295050 (`doc(create)`, Task 4).
 **Builds on:** `atomic_write` and `refuse_unwritable_existing` (`src/util/fs.rs`). The door landed as `0f26f04fd` (bug a806db1ec4ea162b); the `patch_project_table` half of the onboarding bug landed as `9fb8984bf`..`fb482d04f`.
 **Review:** an Opus plan review (2026-11-15) found one Critical and eight Important defects in the first draft; this text is the corrected draft.
 
