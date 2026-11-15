@@ -48,6 +48,8 @@ The fix commits are listed under `## Fix provenance`. Found by the Plan C1 whole
 - **patch-id:** `57304338dec8643a781ae1a22c071217fb7a498c`
 - **SHA:** `346fd5e0b` (`feat/atomic-write-door-20261114`; the partial-write stopgap is removed)
 - **patch-id:** `598b5f38063ce40b20979de1495973f03455898d`
+- **SHA:** `0f26f04fd` (`feat/atomic-write-door-20261114`; final-review fixes: the probe opens with `O_NOCTTY` and its doc states the lease and device limits, an `EACCES` from the replace says the directory must be writable and a protected-files refusal does not, the planted-link docs state the three real outcomes)
+- **patch-id:** `fab563f6c87727cfee93eb73e56542fce121f43a`
 
 ## Tests added
 
@@ -58,8 +60,20 @@ In `src/librarian/util.rs` (module `tests`):
 - `a_read_only_document_is_still_refused_and_unchanged`
 - `the_document_keeps_its_exec_bit_and_a_private_mode`
 - `a_protected_file_refusal_does_not_carry_the_directory_hint`
+- `a_symlink_at_the_target_is_refused_before_any_write`
+- `a_path_outside_the_roots_is_refused_before_any_write`
+- `a_directory_at_the_path_is_an_error_and_nothing_is_replaced`
 
-In `src/util/fs.rs`: the module `refuse_unwritable_existing_tests`, and `atomic_write_removes_its_tmp_file_when_the_write_itself_fails` (a write that fails after the staging file exists).
+In `src/util/fs.rs` (module `refuse_unwritable_existing_tests`, Unix only):
+- `a_writable_regular_file_is_admitted_and_left_untouched`
+- `an_unwritable_existing_file_is_refused_with_its_own_error`
+- `a_missing_path_is_fine_and_is_not_created_by_the_check`
+- `a_fifo_at_the_path_is_refused_without_blocking`
+- `a_fifo_with_a_reader_is_refused_by_its_type_and_the_error_has_no_path`
+- `a_directory_at_the_path_is_refused`
+- `a_symlink_at_the_path_is_not_followed_by_the_check`
+
+Not added by this fix: `atomic_write_removes_its_tmp_file_when_the_write_itself_fails` in `src/util/fs.rs`. It exists before `4bae72783`. It covers a write that fails after the staging file exists, and the `unverified` note above relies on it.
 
 ## Resume
 

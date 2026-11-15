@@ -8,7 +8,7 @@ tags:
 opened: 2026-10-31
 owner: marius
 severity: low
-unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check for a missing env detects six of the seven attribution tests. For the many-dirty-files test I measured a different mutant: a 1 ms scan timeout makes the hardened test fail 2 of 2. I did not run the missing-env mutant against it, and the old test was not run against the timeout mutant. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The scan floor rests on the assumption that history files are append-only; it was checked on one machine only, by the last 200 lines of each file. The history cache and the policy-loop change were shown equal to the old code on this machine''s corpus only, in one frozen run each (the harness sorts gaps, so it cannot see a change in gap order); the 374-gap difference between separate runs was attributed to drift but not traced. The timings were measured on a shared machine under load, one to a few runs each: the policy loop''s 22% is two runs per version. The Rust caller was run end to end once (18.5 s, one sample under load), not as a distribution. The new attribution columns have no data yet, and why hints stopped on 2026-10-20 is unknown. The whole gate was not rerun after rustfmt changed three files; the format check, usage:: and run_command::attribution were. normalize now compares path case exactly, which Windows Path.relative_to did not; Windows support of this engine is unproven. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand.'
+unverified: 'The migrate fix and the seven attribution test fixes are measured. The mutation check for a missing env detects six of the seven attribution tests. For the many-dirty-files test I measured a different mutant: a 1 ms scan timeout makes the hardened test fail 2 of 2. I did not run the missing-env mutant against it, and the old test was not run against the timeout mutant. The LSP test: 1 failure in 3 loaded runs before the change, 0 in 28 after, but the before sample is three runs, the cause of the slow request is unknown, and it is not shown that the new timeout branch ever ran. The scan floor rests on the assumption that history files are append-only; it was checked on one machine only, by the last 200 lines of each file. The history cache and the policy-loop change were shown equal to the old code on this machine''s corpus only, in one frozen run each (the harness sorts gaps, so it cannot see a change in gap order); the 374-gap difference between separate runs was attributed to drift but not traced. The timings were measured on a shared machine under load, one to a few runs each: the policy loop''s 22% is two runs per version. The Rust caller was run end to end once (18.5 s, one sample under load), not as a distribution. The new attribution columns have no data yet, and why hints stopped on 2026-10-20 is unknown. The whole gate was not rerun after rustfmt changed three files; the format check, usage:: and run_command::attribution were. normalize now compares path case exactly, which Windows Path.relative_to did not; Windows support of this engine is unproven. The peer''s sighting of four tests failing once at normal load was not re-checked. Commit 421b0f896 used --no-verify on the user''s approval after a hook flagged output.rs; its checks were run by hand. Join of 2026-11-14 (538 rows, 558 background jobs, 2026-11-07 to 2026-11-14): the slow and timed-out scans cluster where three or more heavy background jobs overlapped (76% of 25 rows above 15 s, against 15% of 344 rows with none and 18% of 169 with one or two), but that is a correlation on one machine and one project; foreground load leaves no record, a job counts as one however heavy, the job records carry a server pid and I did not map pids to sessions (so some counted jobs may belong to the scanning session itself), no scan was run without load, and six stale unfinished job records were left out.'
 ---
 
 # BUG: eight lib tests fail when the suite runs on cores oversubscribed 16 to 1, each through a wall-clock window or a subprocess deadline
@@ -211,6 +211,43 @@ Not checked: whether the scans of `e4a747a2` in those windows would have finishe
 The `timed_out` row at 09:28:17 UTC (`usage.db` times are UTC: the newest row, 12:41:23, matched `date -u` at 12:41:28) lies inside the `burn.py` window above, 09:26:03 to 09:32:43. It also lies inside a run of mine: a loop of eight full lean test suites, `run-2.log` of that loop finished at 09:30:39 UTC (11:30:39 +0200, by file mtime) and `run-1.log` at 09:26:32. So two sessions loaded the host in that window, not one. My suites ran under no busy processes, so their load is smaller than `burn.py`'s; I did not measure either. The same loop's four earlier rename-test runs under 64 busy loops finished between 09:02 and 09:23 UTC and match no `timed_out` row.
 
 This changes nothing in the section above. It adds that at least one of the six `timed_out` rows coincides with load that was not the author's of the read, so the rows say even less about the ceiling under normal use. The same limit holds: coincidence is not cause, and I did not re-run the scans without load.
+
+
+## Join of usage.db rows with background-job records, 2026-11-14 (session `5f715d8f`)
+
+This is the join that the section "Read of usage.db by session and hour" said did not exist. I ran it on 2026-11-14 and the script is not kept in the repository (it lives in this session's scratchpad), so the method is stated here.
+
+**Method.** Rows: `usage.db` rows with `attribution_outcome` `hinted` or `timed_out` from 2026-11-07 15:47 UTC, the first background-job record, to 2026-11-14 17:27 UTC. That is 538 rows. A row's window is `[called_at - latency_ms, called_at]`. Jobs: the records in `~/.cache/cc-tmp/codescout-bg/` that have a `command`, a `started_at` and a `finished_at`, whose command matches `gate.sh|nextest|cargo (test|build|clippy|check|rb)|rb.sh|burn.py|yes|docker|stress` and does not start with `tail --pid` or `sleep`. That is 558 jobs. A job overlaps a row when the two windows intersect. The database stamps are UTC: the newest row, 17:27:11.7, was written while `date -u` read 17:27:13.
+
+**Result.** By the number of heavy jobs that overlapped the row's window:
+
+| heavy jobs overlapping | rows | median ms | p90 ms | max ms | `timed_out` | rows above 15 s |
+|---|---:|---:|---:|---:|---:|---:|
+| 0 | 344 | 9,435 | 20,102 | 29,075 | 0 | 53 (15%) |
+| 1 to 2 | 169 | 10,081 | 21,298 | 30,030 | 2 | 30 (18%) |
+| 3 or more | 25 | 19,278 | 30,002 | 30,204 | 4 | 19 (76%) |
+
+All six `timed_out` rows in the range overlapped at least one recorded heavy job, and all six belong to session `e4a747a2`:
+
+- 317090 (2026-11-11 22:08:19), 2 jobs: a `gate.sh` and a `rustfmt` chain.
+- 317132 (22:12:05), 4 jobs: three `gate.sh` runs and a `docker build`.
+- 321884 (2026-11-12 08:18:21), 5 jobs, and 321933 (08:21:38), 3 jobs: both overlap my `burn.py` window 08:17:11 to 08:24:11, a `gate.sh` and an `nextest` run.
+- 323238 (09:28:17), 4 jobs: a `gate.sh`, my `burn.py` window 09:26:03 to 09:32:43 and an `nextest` run.
+- 325690 (14:03:09, 30,030 ms), 1 job: my discarded confirmation run of F-238, `cargo nextest run --workspace --no-fail-fast --stress-count 20`, 14:01:48 to 14:27:30. This row is new: it was written after the 12:30 read above, so the table now holds seven `timed_out` rows in all (the earliest, 2026-11-04, is before the first job record and cannot be joined).
+
+**What it shows.** The share of slow scans is about the same with no recorded heavy job (15%) and with one or two (18%), and jumps to 76% with three or more. Four of the six `timed_out` rows fall in the three-or-more class, two in the one-to-two class, none in the zero class. This agrees with the earlier readings: the slow and timed-out scans cluster where the host ran several heavy jobs at once. The job records carry a server pid, not a session id, and I did not map pids to sessions, so I cannot say which session ran the gate runs in those windows. I know only that the `burn.py` windows and the stress run were mine, and that all six rows belong to session `e4a747a2`.
+
+**What it does not show.**
+
+- Cause. The three-or-more class has 25 rows. Some of the jobs counted may belong to the scanning session, `e4a747a2`, itself, because I did not map the server pids to sessions. I ran no scan with the load removed.
+- A quiet host in the zero class. A foreground command leaves no record, so 53 slow rows with no recorded job say only that no background job was recorded, not that the host was idle. The median there, 9.4 s, matches the quiet floor of 8 to 14 s that the section above measured.
+- Load in proportion. A job counts as one, whether it is a single `cargo test` or a `gate.sh` that starts four lanes.
+- Anything before 2026-11-07, because the job records start then. It also does not cover the 11-04 `timed_out` row.
+- Whether row 325690's binary held the 60 s ceiling (`31d138b1a`). The row says 30,030 ms, which suggests it did not, but I did not check when that session's server was rebuilt.
+
+**Records left out.** Six heavy job records have no `finished_at` (state `running`). I checked: their job and server processes are all dead, so they are stale records, and I did not count them as load. Five date from 2026-11-08 and 2026-11-09. The sixth is my own stress run of 2026-11-14 10:32 to 10:58, which I know ended at 10:58:35, so rows in that span are undercounted.
+
+**A mistake of mine in the first run, caught before it was written here.** My first version computed the window start with `datetime.timestamp()` on a naive UTC value, which assumes local time (UTC+2 here), so each window began two hours too early. It reported 29 to 44 overlapping jobs for the `timed_out` rows, and the jobs it listed began 90 minutes before the row. The wrong table (0 heavy: 24 rows; 3 or more: 421 rows) was not recorded anywhere. I found it by reading the listed jobs against the row's time. Bug-fix-session-log F-240 holds the entry.
 
 ## References
 - `docs/issues/2026-10-31-a-timed-out-filter-test-fails-in-the-loaded-gate-and-passes-alone.md`

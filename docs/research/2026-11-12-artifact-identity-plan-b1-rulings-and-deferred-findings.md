@@ -109,7 +109,7 @@ Every row of § Open findings was read against the code that day by four read-on
 - Task 2: `render` of `InvalidKey(NotMarkdown)` has no remedy text (probably not worth fixing, the case is unreachable). The partial-exclusion warning for two readmes is accepted.
 - Task 4: the hook is dormant until a binary is built, by design.
 - Task 5: linked worktrees outside `.worktrees` are still entered; the Depth bound wording. (The "a repo counts once" assertion is closed: `two_projects_in_one_repo_are_judged_once` in `fb765398b` reads the vector before the final dedup, and failed red with the `judged` check removed.)
-- Task 6: no test drives the live dialog with a peer present (an in-process duplex harness exists at `src/server/native_context_tests.rs`).
+- Task 6: the dialog wiring is closed for the answer and decline paths: `a_name_typed_in_the_dialog_is_written_to_the_repo_file` and `a_declined_dialog_is_remembered_and_not_asked_again` (`a8ec6106e`) drive it over a duplex wire, and failed red with `dialog_wanted` forced to `false`. Still untested: the `peer.is_some()` condition that gates the scan.
 - Final: whether `ScanLimits::default()` needs a `RESULT_CAP` row. That is a decision, not a fix.
 
 The reviewers read the code; they did not run it. The fixes above were run: see the commit messages for the gate.

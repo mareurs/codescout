@@ -7,9 +7,13 @@
 //! could therefore raise its own privileges from the next call: a prompt-injected model writes
 //! `profile = "root"` and every write gate is off.
 //!
-//! The guard sits in [`crate::util::fs::atomic_write`], the one function `create_file`,
-//! `edit_file` (every grammar) and `edit_code` write through, so a write tool added later is
-//! covered on the day it is added. It is **content-aware**, not a blanket path deny, because
+//! The guard sits in [`crate::util::fs::atomic_write`] (the write `create_file` with
+//! `overwrite`, `edit_file` (every grammar) and `edit_code` go through), in
+//! [`crate::util::fs::write_new_utf8`] (the create-if-absent write), and in direct calls from
+//! `doc(create)` (`src/librarian/tools/create.rs`) and `doc(move)`
+//! (`src/librarian/tools/mv.rs`), which write or carry bytes to a path without either write. A
+//! write path added later has to call it the day it is added. It is
+//! **content-aware**, not a blanket path deny, because
 //! the rest of the file is legitimately edited through those tools: the onboarding prompt's
 //! embedding-model step tells the model to `edit_file` `.codescout/project.toml` and change
 //! `[embeddings].model`. A write is refused for exactly four causes:
@@ -32,9 +36,10 @@
 //!
 //! **Scope, stated so it is not read as wider.** This is a property of the file-writing
 //! tools. It does not stop `run_command` (a shell can write any file the user can, and is
-//! gated by `shell_command_mode`), a human editing the file, or codescout's own `onboarding`
-//! tool, which writes `project.toml` directly with `std::fs::write` and not through this
-//! function. A `profile = "root"` profile is also unaffected: it already allows every write.
+//! gated by `shell_command_mode`) or a human editing the file. Codescout's own `onboarding` tool
+//! is covered: its create-if-absent write of `project.toml` goes through `write_new_utf8`, which
+//! runs this guard, and its `patch_project_table` goes through `atomic_write`. A
+//! `profile = "root"` profile is also unaffected: it already allows every write.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -45,9 +50,9 @@ const PROTECTED_TABLE: &str = "security";
 
 /// Every project root whose config has been loaded in this process.
 ///
-/// **Why a process-wide set and not agent state.** The guard sits in `util::fs::atomic_write`,
-/// a free function every write tool shares and which holds no `Agent`; threading one through
-/// would change the signature of the funnel the guard exists to sit in. The set only ever
+/// **Why a process-wide set and not agent state.** The guard sits in `util::fs::atomic_write` and
+/// `util::fs::write_new_utf8`, free functions every write tool shares and which hold no `Agent`;
+/// threading one through would change the signature of the funnels the guard exists to sit in. The set only ever
 /// GROWS and only widens what is protected, so sharing it between concurrent servers (and
 /// between tests) cannot loosen anything: at worst a directory that was once loaded keeps its
 /// `project.toml` guarded after the project is gone. Filled by

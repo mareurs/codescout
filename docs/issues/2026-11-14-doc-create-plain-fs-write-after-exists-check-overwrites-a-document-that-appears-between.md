@@ -35,10 +35,25 @@ Branch feat/atomic-write-door-20261114 at 346fd5e0b. Read during Task 3 of the a
 `create.rs:569` is a plain `std::fs::write`. It opens the path with truncate and without `create_new`. The exists check at `create.rs:412` is a separate call, so the two steps are not one operation. `create.rs:423` and `create.rs:432` refuse links and paths outside the repository, but they do not close the race.
 
 ## Fix
-Publish the new document with a no-clobber, atomic step. Stage the bytes in a temp file in the same directory, as `atomic_write` does. Then publish with a call that fails when the target exists (for example `hard_link` then `remove_file` of the staging file, or `OpenOptions::create_new` as the minimum). On `AlreadyExists`, take the catalog row back and return the same "path exists" refusal. Keep `undo_failed_create`, but make it remove only a file this call made. Tests: a file that appears between the check and the write stays unchanged; a failed write leaves no partial file.
+
+Publish the new document with a no-clobber, atomic step, and publish it **inside the open catalog transaction**, before `tx.commit()`.
+
+The first version of this section said: on `AlreadyExists`, take the catalog row back. That is wrong. The artifact id is `sha256(abs_path)` (`ids::artifact_id_from_abs`) and `artifact::upsert` is `ON CONFLICT(id) DO UPDATE`. The loser of a race commits the same row id, which overwrites the winner's row and augmentation. A later `artifact::delete(id)` by the loser would then remove the row the winner relies on. The disk write comes after the commit today, so the catalog is already shared by the time the race is lost.
+
+The corrected design:
+- Move `create_dir_all` and `crate::util::fs::write_new_utf8` (a hard-link publish that fails with `AlreadyExists`, and leaves no partial file) inside the transaction, after the catalog writes and before `tx.commit()`. Nothing inside the transaction reads the target file, opens a second connection or takes the catalog lock again (checked by an Opus plan review, 2026-11-15); the catalog is WAL with `busy_timeout = 5000`.
+- On `AlreadyExists` (and `symlink_metadata(full).is_ok()`), return the `path exists:` refusal and let the dropped transaction roll back. The winner's row is untouched.
+- Any other write error rolls back too. The error text at `create.rs` ("cleanup was attempted, but the catalog row or a partial file may remain") becomes false and must change: nothing was catalogued, and only directories this call created may remain.
+- If `tx.commit()` fails after a successful publish, remove the file this call made with the held catalog guard (never `ctx.catalog.lock()` again; the lock is not re-entrant), then return the commit error.
+- Delete `undo_failed_create` and its test: it has no caller left, and its unconditional `remove_file(full)` removes a concurrent writer's file.
+- Update `failed_disk_write_reports_best_effort_cleanup_without_promising_rollback`: its `delete_fails = true` arm expects one row and gets none.
+- Tests: a file planted through the seam (`util::fs::set_before_publish`) stays unchanged and the winner's row, compared field by field (title, `file_sha256`, augmentation prompt), is unchanged; a commit failure removes the published file, built with the deferred foreign-key tripwire in `dual_write.rs:852-863` (a statement-time trigger would fire before the publish and prove nothing); a failed write leaves no row, no file and no staging file.
+
+The helper this needs exists: `write_new_utf8` and `rename_no_clobber` landed on `experiments` (see the `create_file` and `doc(move)` sibling bugs, and the plan `docs/superpowers/plans/2026-11-15-no-clobber-publish.md`, Task 4).
 
 ## Resume
-Open. Not started.
+
+Blocked on a base decision, not on design. Task 4 of `docs/superpowers/plans/2026-11-15-no-clobber-publish.md` is written and reviewed, and was left out of that branch on purpose: `integration/identity-lifecycle-20261114` rewrites `src/librarian/tools/create.rs` (+832/−139). On that branch `create::call` delegates to `write_new(…, WriteMode::{Plain, Exclusive})`. `Plain` keeps the old order (commit, `std::fs::write`, `undo_failed_create`). `Exclusive` uses `insert_new`, then `OpenOptions::create_new` and `write_all`, and takes the row back on failure without removing a file, so a partial file can remain. Two ways forward, the operator's choice: (a) land Task 4 after that branch merges into `experiments`, applying the new order inside `write_new`'s `Plain` arm and switching `Exclusive` from `create_new` + `write_all` to `write_new_utf8`; or (b) build it on the integration branch through that line's own landing protocol.
 
 ## References
 - `src/librarian/tools/create.rs:412`, `src/librarian/tools/create.rs:569`, `src/librarian/tools/create.rs:330`
