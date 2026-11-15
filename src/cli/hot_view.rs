@@ -423,6 +423,8 @@ mod tests {
     /// hook can read the whole reason from the first line. Neither a `Broken` text nor any other
     /// loader error can span lines (`tree::tests` pins that for `TreeProblem`), so only a path in
     /// the text can break the line.
+    // A directory name with a newline is valid on Unix only; the flattening is still covered there.
+    #[cfg(unix)]
     #[test]
     fn a_reason_that_spans_lines_is_flattened_to_one_line() {
         let dir = tempfile::tempdir().unwrap();
