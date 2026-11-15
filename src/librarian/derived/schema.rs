@@ -127,8 +127,9 @@ const DUMP_EXCLUDED_COLUMNS: [(&str, &str); 2] = [("checkout", "root"), ("checko
 const DUMP_EXCLUDED_TABLE: &str = "parse_cache";
 
 /// Open (creating the file and its parent directories) the derived index at `path`, with WAL, a
-/// busy timeout and foreign keys on, its schema applied when the file is new and refused when the
-/// file carries a newer `user_version`.
+/// busy timeout and foreign keys on, its schema applied when the file is new, refused when the
+/// file carries a newer `user_version`, and refused when it is another program's database
+/// (`user_version` 0 with a table in it).
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| {

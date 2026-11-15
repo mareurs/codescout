@@ -18,7 +18,8 @@
 //! - `problem`: `invalid_key` (`key` is the key the path gave, when it gave one, and `rel_paths`
 //!   the one path) and `duplicate_key` (`rel_paths` every holder, sorted).
 //! - `skipped`: one row per `(rel_path, reason)`; a repeated pair is stored once.
-//! - `checkout`: one row; `rules_source` is always `committed+builtin`.
+//! - `checkout`: one row; `rules_source` is always `committed+builtin`, because
+//!   `BuildInput::from_commit` is the only way to build an input.
 
 use std::path::Path;
 
@@ -73,13 +74,67 @@ const DERIVED_TABLES: [&str; 7] = [
 ];
 
 /// What one build reads: a commit of a repository, the rules, and the key space.
+///
+/// [`BuildInput::from_commit`] is the only way to make one. The rules and the key space are read
+/// from the commit itself, so no caller can pair a commit with rules or a key space of another
+/// source. A struct literal from outside the `derived` module does not compile:
+///
+/// ```compile_fail,E0451
+/// use codescout::librarian::derived::build::BuildInput;
+///
+/// fn make(repo: &git2::Repository, commit: &git2::Commit, root: &std::path::Path) {
+///     let _input = BuildInput { repo, commit, root, rules: Vec::new(), space: todo!() };
+/// }
+/// ```
+///
+/// The same set-up through the constructor compiles:
+///
+/// ```no_run
+/// use codescout::librarian::derived::build::BuildInput;
+///
+/// fn make(
+///     repo: &git2::Repository,
+///     commit: &git2::Commit,
+///     root: &std::path::Path,
+/// ) -> anyhow::Result<()> {
+///     let input = BuildInput::from_commit(repo, commit, root)?;
+///     let _rules = input.rules();
+///     Ok(())
+/// }
+/// ```
 pub struct BuildInput<'a> {
-    pub repo: &'a git2::Repository,
-    pub commit: &'a git2::Commit<'a>,
+    pub(super) repo: &'a git2::Repository,
+    pub(super) commit: &'a git2::Commit<'a>,
     /// Recorded in the `checkout` row and read from nowhere: the build never opens a path.
-    pub root: &'a Path,
-    pub rules: &'a [CompiledRule],
-    pub space: &'a KeySpace,
+    pub(super) root: &'a Path,
+    pub(super) rules: Vec<CompiledRule>,
+    pub(super) space: KeySpace,
+}
+
+impl<'a> BuildInput<'a> {
+    /// The input of `commit`: its rules ([`rules_from_commit`]) and its key space
+    /// ([`key_space_from_commit`]). `root` is recorded in the `checkout` row and never opened.
+    /// An error from either read passes through unchanged.
+    pub fn from_commit(
+        repo: &'a git2::Repository,
+        commit: &'a git2::Commit<'a>,
+        root: &'a Path,
+    ) -> anyhow::Result<Self> {
+        let rules = rules_from_commit(repo, commit)?;
+        let space = key_space_from_commit(repo, commit)?;
+        Ok(Self {
+            repo,
+            commit,
+            root,
+            rules,
+            space,
+        })
+    }
+
+    /// The classification rules the build uses: the commit's own, then the built-in defaults.
+    pub fn rules(&self) -> &[CompiledRule] {
+        &self.rules
+    }
 }
 
 /// What one build stored: the rows of each table.
@@ -190,7 +245,7 @@ pub(super) fn rebuild(
     changes: Option<ChangeCounts>,
 ) -> anyhow::Result<BuildReport> {
     rebuild_from(conn, input, parser, reuse_cache, changes, &|| {
-        scan_commit(input.repo, input.commit, input.space)
+        scan_commit(input.repo, input.commit, &input.space)
     })
 }
 
@@ -233,7 +288,7 @@ pub(super) fn rebuild_from(
 
     // Every parse, and every cache read, happens here and not inside the write transaction: the
     // write lock is held for the deletes and inserts alone.
-    let rules_hash = incremental::rules_hash(input.rules);
+    let rules_hash = incremental::rules_hash(&input.rules);
     let mut parsed: Vec<Parsed> = Vec::with_capacity(documents.len());
     for doc in &documents {
         let key = CacheKey {
@@ -251,7 +306,7 @@ pub(super) fn rebuild_from(
         parsed.push(match cached {
             Some(products) => Parsed::cached(key, products),
             None => {
-                let products = (parser.parse)(&doc.rel_path, &doc.text, input.rules);
+                let products = (parser.parse)(&doc.rel_path, &doc.text, &input.rules);
                 Parsed::fresh(key, products)
                     .with_context(|| format!("encoding the parse cache row of {}", doc.rel_path))?
             }
@@ -705,17 +760,9 @@ mod tests {
     /// file is read from the commit, so a failure of any of the three comes out of here.
     fn build_commit(conn: &mut Connection, repo: &git2::Repository) -> anyhow::Result<BuildReport> {
         let commit = open_commit(repo, "HEAD")?;
-        let rules = rules_from_commit(repo, &commit)?;
-        let space = key_space_from_commit(repo, &commit)?;
         build_full(
             conn,
-            &BuildInput {
-                repo,
-                commit: &commit,
-                root: Path::new(ROOT),
-                rules: &rules,
-                space: &space,
-            },
+            &BuildInput::from_commit(repo, &commit, Path::new(ROOT))?,
         )
     }
 
@@ -1762,18 +1809,10 @@ mod tests {
     fn build_clone(clone: &Path, sha: &str, index_file: &Path) -> (Connection, BuildReport) {
         let repo = git2::Repository::open(clone).unwrap();
         let commit = open_commit(&repo, sha).unwrap();
-        let rules = rules_from_commit(&repo, &commit).unwrap();
-        let space = key_space_from_commit(&repo, &commit).unwrap();
         let mut conn = open_index(index_file).unwrap();
         let report = build_full(
             &mut conn,
-            &BuildInput {
-                repo: &repo,
-                commit: &commit,
-                root: clone,
-                rules: &rules,
-                space: &space,
-            },
+            &BuildInput::from_commit(&repo, &commit, clone).unwrap(),
         )
         .unwrap();
         (conn, report)
@@ -1973,16 +2012,8 @@ mod tests {
         let entries = corpus();
         let repo = repo_with(dir.path(), &borrowed(&entries));
         let commit = open_commit(&repo, "HEAD").unwrap();
-        let rules = rules_from_commit(&repo, &commit).unwrap();
-        let space = key_space_from_commit(&repo, &commit).unwrap();
-        let input = BuildInput {
-            repo: &repo,
-            commit: &commit,
-            root: Path::new(ROOT),
-            rules: &rules,
-            space: &space,
-        };
-        let natural_order: Vec<String> = scan_commit(&repo, &commit, &space)
+        let input = BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap();
+        let natural_order: Vec<String> = scan_commit(&repo, &commit, &input.space)
             .unwrap()
             .into_iter()
             .map(|f| f.rel_path)
@@ -2003,7 +2034,7 @@ mod tests {
             let order = std::cell::RefCell::new(Vec::new());
             let mut conn = open_in_memory().unwrap();
             let report = rebuild_from(&mut conn, &input, &Parser::PRODUCTION, false, None, &|| {
-                let mut files = scan_commit(&repo, &commit, &space)?;
+                let mut files = scan_commit(&repo, &commit, &input.space)?;
                 permute(&mut files);
                 *order.borrow_mut() = files.iter().map(|f| f.rel_path.clone()).collect();
                 Ok(files)
@@ -2172,17 +2203,9 @@ mod tests {
         );
         let mut conn = open_index(&scratch.path().join("derived.db")).unwrap();
         let commit = open_commit(&repo, "HEAD").unwrap();
-        let rules = rules_from_commit(&repo, &commit).unwrap();
-        let space = key_space_from_commit(&repo, &commit).unwrap();
         let report = build_full(
             &mut conn,
-            &BuildInput {
-                repo: &repo,
-                commit: &commit,
-                root: &root,
-                rules: &rules,
-                space: &space,
-            },
+            &BuildInput::from_commit(&repo, &commit, &root).unwrap(),
         )
         .unwrap();
         assert_report_matches_tables(&conn, &report);

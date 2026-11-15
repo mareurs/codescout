@@ -1082,9 +1082,7 @@ fn compare_edges(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::derived::build::{
-        build_full, key_space_from_commit, rules_from_commit, BuildInput,
-    };
+    use crate::librarian::derived::build::{build_full, BuildInput};
     use crate::librarian::derived::scan::open_commit;
     use crate::librarian::derived::schema::open_in_memory;
     use crate::librarian::derived::testkit::{
@@ -1117,24 +1115,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let repo = repo_with(dir.path(), entries);
         let commit = open_commit(&repo, "HEAD").unwrap();
-        let rules = rules_from_commit(&repo, &commit).unwrap();
-        let space = key_space_from_commit(&repo, &commit).unwrap();
+        let input = BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap();
         let mut conn = open_in_memory().unwrap();
-        build_full(
-            &mut conn,
-            &BuildInput {
-                repo: &repo,
-                commit: &commit,
-                root: Path::new(ROOT),
-                rules: &rules,
-                space: &space,
-            },
-        )
-        .unwrap();
+        build_full(&mut conn, &input).unwrap();
         Built {
             _dir: dir,
             conn,
-            rules,
+            rules: input.rules,
         }
     }
 

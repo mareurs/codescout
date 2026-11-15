@@ -39,9 +39,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::librarian::current_project::lookup_git_root;
-use crate::librarian::derived::build::{
-    build_full, key_space_from_commit, rules_from_commit, BuildInput,
-};
+use crate::librarian::derived::build::{build_full, BuildInput};
 use crate::librarian::derived::diff::{
     diff_with_rules, open_old_immutable, open_old_read_only, DiffCause, DiffRow, OldCatalog,
     RootMap, ShadowDiff, Subject,
@@ -204,8 +202,7 @@ fn compare(
     let repo = git2::Repository::open(&root)
         .with_context(|| format!("opening the git repository at {}", root.display()))?;
     let commit = open_commit(&repo, &args.rev)?;
-    let rules = rules_from_commit(&repo, &commit)?;
-    let space = key_space_from_commit(&repo, &commit)?;
+    let input = BuildInput::from_commit(&repo, &commit, &root)?;
 
     // The scratch index lives in a temporary directory outside the repository and goes with it.
     // Where it may go is judged BEFORE anything is created there.
@@ -223,18 +220,9 @@ fn compare(
         .with_context(|| format!("creating a scratch directory in {}", parent.display()))?;
     let mut conn = schema::open(&scratch.path().join("derived.db"))
         .context("creating the scratch derived index")?;
-    build_full(
-        &mut conn,
-        &BuildInput {
-            repo: &repo,
-            commit: &commit,
-            root: &root,
-            rules: &rules,
-            space: &space,
-        },
-    )
-    .with_context(|| format!("building the derived index of {}", args.rev))?;
-    let shadow = diff_with_rules(&old, &conn, &roots, &rules)?;
+    build_full(&mut conn, &input)
+        .with_context(|| format!("building the derived index of {}", args.rev))?;
+    let shadow = diff_with_rules(&old, &conn, &roots, input.rules())?;
     drop(conn);
 
     let compared = Compared {

@@ -464,7 +464,7 @@ mod tests {
     use super::*;
     use crate::librarian::classify::load_rules;
     use crate::librarian::derived::build::{
-        build_full, key_space_from_commit, parse_document, rules_from_commit, PARSER_VERSION,
+        build_full, parse_document, rules_from_commit, PARSER_VERSION,
     };
     use crate::librarian::derived::schema::{dump_all, open, open_in_memory};
     use crate::librarian::derived::testkit::{commit_files, repo_with, FILE};
@@ -532,15 +532,8 @@ mod tests {
         commit: &git2::Commit,
         f: impl FnOnce(&BuildInput) -> R,
     ) -> R {
-        let rules = rules_from_commit(repo, commit).unwrap();
-        let space = key_space_from_commit(repo, commit).unwrap();
-        f(&BuildInput {
-            repo,
-            commit,
-            root: Path::new(ROOT),
-            rules: &rules,
-            space: &space,
-        })
+        let input = BuildInput::from_commit(repo, commit, Path::new(ROOT)).unwrap();
+        f(&input)
     }
 
     fn build_at(conn: &mut Connection, h: &History, i: usize) -> BuildReport {

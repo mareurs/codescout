@@ -28,9 +28,7 @@ use crate::librarian::cutover::plan::{plan_export, ExportPlan};
 use crate::librarian::cutover::report::{
     render_apply_markdown, render_json, render_markdown, ReportHeader,
 };
-use crate::librarian::derived::build::{
-    build_full, key_space_from_commit, rules_from_commit, BuildInput,
-};
+use crate::librarian::derived::build::{build_full, BuildInput};
 use crate::librarian::derived::diff::{
     file_stamp, open_old_immutable, side_files_present, NoOldRowsUnderRoot, RootMap,
 };
@@ -515,8 +513,7 @@ fn build_run(
     if commit.id().to_string() != loaded.plan.commit {
         bail!("HEAD changed while the plan was made; run this again");
     }
-    let rules = rules_from_commit(&repo, &commit)?;
-    let space = key_space_from_commit(&repo, &commit)?;
+    let input = BuildInput::from_commit(&repo, &commit, &loaded.git_root)?;
     // The old catalog of a machine holds every repository, and the new catalog beside it holds
     // one: a build replaces every row, so it never builds over another repository's catalog. Two
     // repositories with no committed `repo.toml` are both called `repo`, so the name alone does
@@ -537,17 +534,8 @@ fn build_run(
         }
     }
     let mut conn = schema::open(&new_catalog).map_err(|e| open_refusal(&e))?;
-    let built = build_full(
-        &mut conn,
-        &BuildInput {
-            repo: &repo,
-            commit: &commit,
-            root: &loaded.git_root,
-            rules: &rules,
-            space: &space,
-        },
-    )
-    .map_err(|e| anyhow!("building the new catalog failed: {}", one_line(&e)))?;
+    let built = build_full(&mut conn, &input)
+        .map_err(|e| anyhow!("building the new catalog failed: {}", one_line(&e)))?;
     drop(conn);
 
     let commit12: String = loaded.plan.commit.chars().take(12).collect();
