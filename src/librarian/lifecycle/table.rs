@@ -24,6 +24,8 @@ pub struct EntryRow {
     pub entry_kind: String,
     pub title: String,
     pub status: String,
+    /// The day the entry took its current `status`.
+    pub status_since: NaiveDate,
     /// The class the collection's schema gives `status`; `None` when the schema names no class
     /// for the word.
     pub class: Option<StatusClass>,
@@ -64,6 +66,7 @@ pub fn rows(
                     entry_kind: e.meta.entry_kind.clone(),
                     title: e.meta.title.clone(),
                     status: e.meta.status.clone(),
+                    status_since: e.meta.status_since,
                     class: class_of(&c.schema, &e.meta),
                     created: e.meta.created,
                     closed: e.meta.closed,
@@ -220,6 +223,24 @@ mod tests {
         assert!(md.contains("[[2026-10-01-old]] t"));
         let cites = grammar::extract(&md);
         assert_eq!(cites.len(), 1);
+    }
+
+    #[test]
+    fn a_row_carries_status_since_apart_from_created() {
+        let d = crate::librarian::lifecycle::testkit::d;
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-a.md",
+                "---\nentry_kind: f\ntitle: t\nstatus: open\nstatus_since: 2026-10-20\ncreated: 2026-10-01\n---\n",
+            ),
+        ]);
+        let r = rows(&tree, &k("l"), false).unwrap();
+        let row = &r[0];
+        assert_eq!(row.status_since, d("2026-10-20"));
+        assert_eq!(row.created, d("2026-10-01"));
+        let json = serde_json::to_value(row).unwrap();
+        assert_eq!(json["status_since"], "2026-10-20");
     }
 
     #[test]
@@ -467,6 +488,7 @@ mod tests {
             entry_kind: "k|[[x]]".into(),
             title: "t".into(),
             status: "s|[[y]]\n".into(),
+            status_since: crate::librarian::lifecycle::testkit::d("2026-10-01"),
             class: None,
             created: crate::librarian::lifecycle::testkit::d("2026-10-01"),
             closed: None,

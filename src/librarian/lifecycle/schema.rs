@@ -123,6 +123,7 @@ pub const TABLE_COLUMNS: &[&str] = &[
     "entry_kind",
     "title",
     "status",
+    "status_since",
     "class",
     "created",
     "closed",

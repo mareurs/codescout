@@ -165,6 +165,24 @@ async fn entry_filter_filters_on_status_and_on_a_declared_field() {
     assert!(out.get("filter_warnings").is_none(), "{out}");
 }
 
+#[tokio::test]
+async fn entry_filter_filters_on_status_since() {
+    let tmp = two_entry_project();
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), README, "collection");
+
+    let out = get(
+        &ctx,
+        json!({"id": id, "entry_filter": {"status_since": {"gte": "2026-11-02"}}}),
+    )
+    .await
+    .unwrap();
+    let entries = out["entries"].as_array().unwrap();
+    let keys: Vec<&Value> = entries.iter().map(|e| &e["key"]).collect();
+    assert_eq!(keys, [&json!("2026-11-02-b")], "{out}");
+    assert_eq!(entries[0]["status_since"], json!("2026-11-02"));
+}
+
 const GLOSSARY: &str = "docs/trackers/ledgers/g/readme.md";
 
 /// A glossary `g`: named keys, one entry kind, and a declared list field `aliases`.
