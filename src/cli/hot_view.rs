@@ -6,8 +6,16 @@
 //! no catalog and no git object, and writes nothing.
 //!
 //! Exit codes: `0` the view was printed, `2` it could not be (no repository, a bad, unknown or
-//! ambiguous key, a broken readme, an archived collection). A `2` prints `NOT SHOWN — <reason>` on
-//! stdout, so a session-start hook can degrade open and say why. The command never exits `1`.
+//! ambiguous key, a broken readme, an archived collection). The command itself never exits `1`.
+//! A `2` that this code produced prints `NOT SHOWN — <reason>` on stdout, so a session-start hook
+//! can degrade open and say why.
+//!
+//! A `2` with EMPTY stdout is an argument error from the parser, not from this code: a binary
+//! that lacks this command (version skew: a hook ships separately) says `unrecognized
+//! subcommand` on stderr, and any usage error of this binary (a missing positional, an unknown
+//! flag) does the same. A panic exits `101`. So a consumer must treat any non-zero exit as "not
+//! shown" and read a reason only when stdout starts with `NOT SHOWN — ` (text mode) or parses as
+//! an object with `"shown": false` (`--json`).
 
 use std::path::{Path, PathBuf};
 
@@ -18,16 +26,14 @@ use serde_json::{json, Value};
 
 use crate::librarian::current_project::lookup_git_root;
 use crate::librarian::lifecycle::collection::load_collection;
-use crate::librarian::lifecycle::hot_view::{hot_view, render_markdown};
-
-/// The scope the JSON output names, as the markdown header's `Scope:` clause does.
-const SCOPE: &str = "this collection only; revisit and stale flags; no doctor check ran";
+use crate::librarian::lifecycle::hot_view::{hot_view, render_markdown, SCOPE};
 
 #[derive(Debug, Args)]
 pub struct HotViewArgs {
     /// The collection key, such as `frictions`.
     pub collection: String,
-    /// Project root override (defaults to cwd). The git root at or above it is read.
+    /// Project root override (defaults to cwd). The git root at or above it is read. A relative
+    /// path is taken from the current directory.
     #[arg(long)]
     pub project: Option<PathBuf>,
     /// Emit one JSON object on stdout instead of text.
@@ -43,7 +49,7 @@ pub struct Outcome {
     pub stdout: String,
 }
 
-/// The reason on one line: a tree problem text may span several.
+/// The reason on one line: a path in the text may hold a newline.
 fn one_line(e: &anyhow::Error) -> String {
     format!("{e:#}")
         .lines()
@@ -70,7 +76,7 @@ pub fn evaluate(args: &HotViewArgs, cwd: &Path, today: NaiveDate) -> Outcome {
 }
 
 fn show(args: &HotViewArgs, cwd: &Path, today: NaiveDate) -> Result<Outcome> {
-    let start = args.project.clone().unwrap_or_else(|| cwd.to_path_buf());
+    let start = cwd.join(args.project.as_deref().unwrap_or(Path::new(".")));
     let start = std::fs::canonicalize(&start)
         .with_context(|| format!("cannot resolve {}", start.display()))?;
     let root = lookup_git_root(&start)
@@ -234,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn an_archived_collection_exits_2_not_shown() {
+    fn an_archived_collection_is_not_found_by_key_and_exits_2_not_shown() {
         let r = Repo::new();
         r.write(
             "docs/trackers/ledgers/archive/l/readme.md",
@@ -243,6 +249,12 @@ mod tests {
         let out = r.run("l", false);
         assert_eq!(out.code, 2, "{out:?}");
         assert!(out.stdout.starts_with("NOT SHOWN — "), "{out:?}");
+        // `load_collection` never looks in `archive/`, so the NotFound guard answers here; the
+        // `ArchivedCollection` guard is covered by `hot_view::tests::an_archived_collection_has_no_hot_view`.
+        assert!(
+            out.stdout.contains("no collection \"l\" has a readme"),
+            "the not-found guard answers: {out:?}"
+        );
     }
 
     #[test]
@@ -371,5 +383,115 @@ mod tests {
         let out = r.run("l", true);
         assert_eq!(out.code, 0, "{out:?}");
         assert_eq!(parse(&out)["problems"], 1, "{out:?}");
+    }
+
+    #[test]
+    fn a_nonexistent_project_exits_2_not_shown() {
+        // The parent repository holds a good ledger `l`: without the `canonicalize` that refuses a
+        // path that does not exist, `lookup_git_root` would walk up from `typo` and show it.
+        let r = Repo::new();
+        r.ledger("l");
+        let args = HotViewArgs {
+            collection: "l".to_string(),
+            project: Some(r.path().join("typo")),
+            json: false,
+        };
+        let out = evaluate(&args, r.path(), today());
+        assert_eq!(out.code, 2, "{out:?}");
+        assert!(out.stdout.starts_with("NOT SHOWN — "), "{out:?}");
+        assert!(out.stdout.contains("cannot resolve"), "{out:?}");
+    }
+
+    #[test]
+    fn a_broken_readme_exits_2_with_a_one_line_reason() {
+        let r = Repo::new();
+        r.write(
+            "docs/trackers/ledgers/l/readme.md",
+            "---\ntitle: [unclosed\n---\n",
+        );
+        let out = r.run("l", false);
+        assert_eq!(out.code, 2, "{out:?}");
+        assert!(out.stdout.starts_with("NOT SHOWN — "), "{out:?}");
+        assert!(
+            out.stdout.contains("the collection cannot be loaded"),
+            "the Broken guard answers: {out:?}"
+        );
+        assert_eq!(out.stdout.trim_end().lines().count(), 1, "{out:?}");
+    }
+
+    /// A reason that spans lines (here a path with a newline in its name) is flattened to one, so a
+    /// hook can read the whole reason from the first line. Neither a `Broken` text nor any other
+    /// loader error can span lines (`tree::tests` pins that for `TreeProblem`), so only a path in
+    /// the text can break the line.
+    #[test]
+    fn a_reason_that_spans_lines_is_flattened_to_one_line() {
+        let dir = tempfile::tempdir().unwrap();
+        if lookup_git_root(dir.path()).is_some() {
+            eprintln!(
+                "skipped: the temp dir {} lies inside a git work tree, so it is not a non-repo",
+                dir.path().display()
+            );
+            return;
+        }
+        let odd = dir.path().join("two\nlines");
+        std::fs::create_dir(&odd).unwrap();
+        let args = HotViewArgs {
+            collection: "l".to_string(),
+            project: Some(odd),
+            json: false,
+        };
+        let out = evaluate(&args, dir.path(), today());
+        assert_eq!(out.code, 2, "{out:?}");
+        assert!(out.stdout.starts_with("NOT SHOWN — "), "{out:?}");
+        assert!(out.stdout.contains("two lines"), "{out:?}");
+        assert_eq!(out.stdout.trim_end().lines().count(), 1, "{out:?}");
+    }
+
+    const GOOD_HEADER: &str = "hot view: l (docs/trackers/ledgers/l): 1 of 1 hot, 1 live.";
+
+    /// A repo with a ledger `l` holding one entry, and a plain `docs/` folder around it.
+    fn repo_with_one_entry() -> Repo {
+        let r = Repo::new();
+        r.ledger("l");
+        r.entry("l", "new", "open", "2026-11-10", "");
+        r
+    }
+
+    #[test]
+    fn a_project_that_is_a_subdirectory_shows_the_view_of_the_repository() {
+        let r = repo_with_one_entry();
+        // Not the git root and not a collection folder: the root is found above it.
+        let docs = r.path().join("docs");
+        let args = HotViewArgs {
+            collection: "l".to_string(),
+            project: Some(docs.clone()),
+            json: false,
+        };
+        let out = evaluate(&args, r.path(), today());
+        assert_eq!(out.code, 0, "{out:?}");
+        assert!(out.stdout.starts_with(GOOD_HEADER), "{out:?}");
+
+        // No `--project`: the same view from a current directory below the root.
+        let args = HotViewArgs {
+            collection: "l".to_string(),
+            project: None,
+            json: false,
+        };
+        let out = evaluate(&args, &docs, today());
+        assert_eq!(out.code, 0, "{out:?}");
+        assert!(out.stdout.starts_with(GOOD_HEADER), "{out:?}");
+    }
+
+    #[test]
+    fn a_relative_project_is_taken_from_cwd_not_from_the_process_directory() {
+        let r = repo_with_one_entry();
+        let args = HotViewArgs {
+            collection: "l".to_string(),
+            project: Some(PathBuf::from("docs")),
+            json: false,
+        };
+        let out = evaluate(&args, r.path(), today());
+        assert_eq!(out.code, 0, "{out:?}");
+        assert!(out.stdout.starts_with(GOOD_HEADER), "{out:?}");
     }
 }

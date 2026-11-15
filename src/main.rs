@@ -207,7 +207,10 @@ enum Commands {
 
     /// Read-only: print the live hot entries of one lifecycle collection (the open ones, and the
     /// blocked or deferred ones whose revisit date has passed). Exits 0 when it printed the view;
-    /// exits 2 and prints `NOT SHOWN — <reason>` when it could not. Used by session-start hooks.
+    /// exits 2 and prints `NOT SHOWN — <reason>` when it could not. Exit 2 with EMPTY stdout is
+    /// an argument error (for example a binary that lacks this command): treat any non-zero exit
+    /// as "not shown", and read a reason only when stdout starts with `NOT SHOWN — ` (text) or
+    /// parses as an object with `"shown": false` (`--json`). Used by session-start hooks.
     HotView(codescout::cli::hot_view::HotViewArgs),
 
     /// Scan the librarian catalog for invariant violations — path form, ADS

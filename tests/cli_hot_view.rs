@@ -89,6 +89,12 @@ fn a_good_collection_exits_0_and_prints_the_header() {
         "{text}"
     );
     assert!(text.contains("[[new]]"), "{text}");
+    // A hook can rely on stdout alone: nothing is written to stderr on the success path.
+    assert!(
+        out.stderr.is_empty(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
