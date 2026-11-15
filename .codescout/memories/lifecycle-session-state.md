@@ -20,7 +20,7 @@ Identity session: SID `e4a747a2-e0af-4747-9fc1-a5de0891945a`, name `codescout-5f
 
 ## Open, in order
 1. Wait for the identity session's Plan D tasks and announcements; when it asks to land, check integration is where it expects.
-2. Tracker entry for the hot view work in `tracker-organization-session-log` (`ecee2aab906f9df7`): second occurrence of "per-task reviews run no suite" (F-entry) and the value of the plan review (W-entry). Check whether it is done before redoing it.
+2. DONE 2026-11-15 (commit `7404a2051` on `experiments`): `tracker-organization-session-log` F-6 (second gate-only test missed by the per-task reviews) and W-6 (an Opus plan review found six Important defects before dispatch).
 3. When the operator says all work is done: the final merge route above, then remove integration and its worktrees on the operator's word.
 4. The Claude Code hook that calls `codescout hot-view` (`../claude-plugins/codescout-companion/hooks/session-start.mjs`, separate repository) is not built; who builds it is the operator's call. The hygiene cadence line `next-sweep-due` (lines 233-242 of that hook) must follow its move into the hygiene collection's readme.
 5. Plan L-B2 part 2 (tools that address a collection by key, `doc(move)` as a key rename) waits for identity Plan E, not planned. Plan L-E (migration) not written.
