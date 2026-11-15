@@ -56,8 +56,40 @@ A pinned test breaks under the pair. `patch_project_table_still_patches_a_regula
 
 Tests: a failing write into the staging file leaves the old `project.toml` bytes; a read-only `project.toml` stays unchanged and the call fails; each of the four callers still writes its key.
 
+## Fix provenance
+
+For `patch_project_table` only.
+
+- **SHA:** `9fb8984bf` (`fix/patch-project-table-atomic-20261115`; resolve a link, `refuse_unwritable_existing`, then `atomic_write`; the five tests)
+- **patch-id:** `adcccfe574448a19bc342af397960995ee58406b`
+- **SHA:** `5f6cef6cb` (review fixes: only a link is resolved, the mode test uses 0640, the read-only-directory test asserts EACCES, docs narrowed)
+- **patch-id:** `89d3651fe7c01d0ef6fd6cad1cac55718df49d31`
+- **SHA:** `fb482d04f` (the doc names the staging leftover `project.toml.<hex>.tmp`)
+- **patch-id:** `f37a2f0e1ab35c3b4bb549ad62675943e9f0f6d0`
+
+## Tests added
+
+In `src/tools/onboarding.rs` (module `atomic_patch_tests`, Unix only):
+- `a_patch_in_a_read_only_directory_is_refused_and_leaves_the_old_bytes` (failed on the old write)
+- `a_read_only_project_toml_is_refused_and_unchanged` (fails if the probe is removed)
+- `a_link_to_the_config_is_patched_through_and_stays_a_link` (fails if the link is not resolved)
+- `a_patch_keeps_the_file_mode`
+- `a_patch_of_the_protected_project_toml_passes_the_guard_and_keeps_security`
+
+The two named mutants were run by hand: each was caught by the test named for it. They are not a standing probe.
+
 ## Resume
-Open. Not started.
+
+Partly done. `patch_project_table`, the medium part, replaces the file atomically since `fb482d04f` on `experiments` (see `## Fix provenance`).
+
+Not started: the two create-if-absent writes, now at `src/tools/onboarding.rs:1629` (`workspace.toml`) and `:1842` (`project.toml`). Both still use `std::fs::write` after an `exists` check. They need a no-clobber step, and `atomic_write` alone does not give one. The `doc(create)`, `doc(move)` and `create_file` sibling bugs need the same helper, so build it once for all of them. This bug stays open until those two writes are fixed.
+
+Behaviour the fix changed, for whoever reads a failure later:
+- The replace needs write permission on the directory of `project.toml`. `record_refresh_request` now fails with a read-only `.codescout/` and a writable `project.toml`, where it succeeded before.
+- `atomic_write` calls `observe_write` on Linux, so the onboarding stamps now emit `dispatch-observed` facts where `std::fs::write` emitted none.
+- A link to the config is resolved first: the target is patched and the link stays a link. A link swapped in after the resolve is not closed.
+
+Parked review note: under root, the two permission tests pass without asserting anything, the same idiom as the tests of `refuse_unwritable_existing`.
 
 ## References
 - `src/tools/onboarding.rs:140`, `:161`, `:205`, `:1045`, `:1058`, `:1600`, `:1813`
