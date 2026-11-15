@@ -1,14 +1,15 @@
 ---
 id: '28c8a999b2f3132b'
 kind: bug
-status: open
+status: mitigated
 title: 'BUG: cutover plan builds its citation index before entry recovery, so the second plan differs from the first'
 owners:
 - marius
 tags:
 - cluster/unclassified
+closed: 2026-11-15
 opened: 2026-11-15
-unverified: no regression test yet; the finding is from the Plan D final re-review (Opus), and the controller verified only the stage order at plan.rs:257-259, not the three failing inputs
+unverified: F1 and F2 (a seven-hash heading and a frontmatter comment shaped like an entry heading) still break the fixed point and have no test; C1-a, C1-b and C1-d are fixed and re-reviewed
 ---
 
 # BUG: cutover plan builds its citation index before entry recovery, so the second plan differs from the first
@@ -51,18 +52,15 @@ N/A
 
 ## Fix
 
-Proposed by the reviewer: run entry recovery first with a rewrite that changes nothing, build the index from the recovered texts, then run the real plan. Add the three inputs above as tests.
+Done (commits in `## Fix provenance`): the citation index is built from the `HEAD` texts with the params-entry sections recovered by a rewrite that changes nothing (`texts_with_entries`, `plan.rs`). The first plan now rewrites the three inputs, so the plan after export and commit writes nothing.
 
-Parked minors from the same review (report-only or test gap, no file written):
+Also fixed: C1-b (`insert_section` at the end of a text strips only line ends) and C1-d (an observation probe test).
 
-- C1-b: one base citation is reported twice because `insert_section` trims trailing spaces of the last base line (`entries.rs:296`), so `added_lines` (`rewrite.rs:176`) counts it as added.
-- C1-c: a note holding `[O]: other.md` turns `[O]` in the base text into a reference link, so the second plan reports a new item.
-- C1-d: a mutant that drops observation texts from `added_texts` survives the suite. Add a probe test (an observation citing an id only history knows).
-- I1-a: the `.json` and `.txt` code-ref exclusions also skip configuration that a program reads by path (`CMakeLists.txt`, `package.json`). No instance on this repository.
+Still parked: C1-c (a note holding `[O]: other.md` turns `[O]` in the base text into a reference link, so the second plan reports a new item) and I1-a (the `.json` and `.txt` code-ref exclusions also skip configuration that a program reads by path, such as `CMakeLists.txt` and `package.json`; no instance on this repository). F1, F2 and the CRLF case are listed under `## Resume`.
 
 ## Tests added
 
-None yet.
+Added by the fix on the feature branch: nine tests (the three C1-a fixed-point inputs, the D-R20 checks for a self-defining source, two definers and a frozen ledger, the C1-b trailing-line case, and the C1-d observation probe). Four mutations each went red.
 
 ## Workarounds
 
@@ -70,8 +68,23 @@ Run `export`, commit, run `export` again, commit, then `build`.
 
 ## Resume
 
-Fix on a branch from integration; the plan text (D-R9) already names this gap.
+C1-a, C1-b and C1-d are fixed (see `## Fix provenance`). Still open, all rare and settling on a second export and commit:
+
+- F1: a ledger line `####### F-2 — fake` (seven `#`): the pre-pass recovery reads F-2 as defined, the rewrite changes the line, the real pass then recovers an entry. Input: `LEDGER_MD + "\n####### F-2 — fake\n"` with params entry F-2, `docs/b.md` with `## F-2 — b`, `docs/src.md` with `see ledger:F-2 here.`
+- F2: a frontmatter YAML comment shaped like an entry heading (`## F-2 — two`) makes recovery report the entry Skipped while the index sees no definer.
+- CRLF ledger: the rewritten frontmatter and the added section use LF, so the file ends with mixed line endings (older than this wave).
+
+Fix proposed by the reviewer: make `recover_params_entries` decide "already defined" and read back with `defined_tokens`, the index's own reader. Add F1 and F2 as fixed-point tests.
 
 ## References
 
-Plan: `docs/superpowers/plans/2026-11-14-artifact-identity-plan-d-cutover-tool.md`.
+Plan: `docs/superpowers/plans/2026-11-14-artifact-identity-plan-d-cutover-tool.md`. Execution state: `docs/research/2026-11-15-artifact-identity-plan-d-execution-state.md`.
+
+## Fix provenance
+
+- **SHA:** `51f0d971a` (feature branch `feat/cutover-tool-20261114`, fast-forwarded onto `integration/identity-lifecycle-20261114`)
+- **patch-id:** `e4c02e175ebd5b83f6bb1d04d0637cced48f8624`
+- **SHA:** `052140615` (same branch)
+- **patch-id:** `aa20d437c4202c1d8789286482311727a7f61cfb`
+- **SHA:** `308f9f5df` (same branch)
+- **patch-id:** `9a86d11bfca031b03bffd0f867c064534fba5629`

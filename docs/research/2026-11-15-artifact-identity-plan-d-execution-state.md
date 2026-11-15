@@ -18,9 +18,9 @@ Written 2026-11-15. The SDD ledger lives in the git-ignored directory `.superpow
 
 ## Where the work is
 
-- **Landed on integration, not on `experiments`.** `integration/identity-lifecycle-20261114` was fast-forwarded from `5d655bfef` to `ead2f7b31` on 2026-11-15 (the operator chose the integration branch as the landing route). The peer `codescout-e4` (lifecycle session) was told before and after. Nothing is pushed. `experiments` gets one merge from integration only when the operator says all work is done.
-- The branch `feat/cutover-tool-20261114`, its worktree and the SDD workspace are kept: the final re-review is not clean (C1-a). Delete the workspace only when C1-a is fixed or the operator rules it out. Remove the worktree only on the operator's answer.
-- Gate on the merged tree (integration `5d655bfef` merged into the branch, HEAD `ead2f7b31`, no conflicts): python 1836 passed, fmt 0, clippy 0, lean 0, default 0 (470 s).
+- **Landed on integration, not on `experiments`.** `integration/identity-lifecycle-20261114` was fast-forwarded twice on 2026-11-15: `5d655bfef` to `ead2f7b31` (Plan D), then `ead2f7b31` to `308f9f5df` (C1 fix wave 2). The operator chose the integration branch as the landing route. The peer `codescout-e4` (lifecycle session) was told before and after each fast-forward. Nothing is pushed. `experiments` gets one merge from integration only when the operator says all work is done.
+- The branch `feat/cutover-tool-20261114`, its worktree and the SDD workspace are kept. Delete the workspace after the operator agrees that the F1/F2 residue (below) may stay; remove the worktree only on the operator's answer.
+- Gate on the first merged tree (HEAD `ead2f7b31`): python 1836 passed, fmt 0, clippy 0, lean 0, default 0 (470 s). Gate on the second tree (HEAD `308f9f5df`): all lanes 0 (445 s).
 
 ## What was built
 
@@ -48,8 +48,9 @@ Method: subagent-driven. Implementers on sonnet. Reviewers on Opus with the reco
 
 ## Open and parked findings
 
-- **C1-a (Important)**, bug `28c8a999b2f3132b`: the citation index is built before entry recovery (`plan.rs:257-259`). After the first export and commit, `build` refuses once; a second export and commit converge.
-- Parked minors: C1-b, C1-c, C1-d (test gap), I1-a, a manual-page nit (`book.toml` in an excluded subtree still freezes its book). All are listed in the bug file.
+- C1-a (the citation index built before entry recovery), C1-b and C1-d are FIXED and re-reviewed (`51f0d971a`, `052140615`, `308f9f5df`); bug `28c8a999b2f3132b` is `mitigated`.
+- Still open, rare, lose no data, settle on a second export and commit: F1 (a seven-hash heading in a ledger), F2 (a frontmatter comment shaped like an entry heading), CRLF mixed line endings. The reviewer's fix: make `recover_params_entries` decide "already defined" with `defined_tokens`, the index's own reader, and add F1 and F2 as fixed-point tests.
+- Parked minors: C1-c, I1-a, a manual-page nit (`book.toml` in an excluded subtree still freezes its book).
 - Task 8 deferred: a rename can replace a target that appears in the check window (M56); a report name is claimed by check-then-atomic-replace, so two worktrees can collide (M57); post-apply failures exit 2 (M58); the lock test cannot tell `lock_root_for` from the git root (M59); case-insensitive filesystems untested (M60).
 - Other parked items: cross-document observation id collision (M54); the tool timing owed by codescout-37 for entry documents; exported ledger entries lack `status_since` (Plan L-E input).
 
@@ -61,6 +62,6 @@ Method: subagent-driven. Implementers on sonnet. Reviewers on Opus with the reco
 
 ## Next steps, in order
 
-1. Operator answers: fix C1-a before Plan E? Take I1 fix (b)? Multi-repository layout?
-2. Plan E (read/write flip, deletion tail).
+1. Plan E (read/write flip, deletion tail). The operator said "you choose" on 2026-11-15 and I made three choices: C1-a fixed now (done); I1 fix (b) NOT taken (D-R26 stays; 738 bug files stay frozen, reported and edited by hand; reversible later); the multi-repository `derived.db` layout goes to Plan E, direction: storage scoped by checkout.
+2. Optional: fix F1 and F2 with the `defined_tokens` change above.
 3. C3 follow-ups: seeding, eviction, per-run cache handle, embed URL in the key.
