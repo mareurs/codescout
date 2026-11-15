@@ -412,6 +412,40 @@ mod tests {
         assert_eq!(keys(&one), ["old-due"]);
         assert_eq!((one.hot, one.hidden, one.hidden_flagged), (4, 3, 1));
     }
+    #[test]
+    fn a_hidden_revisit_due_entry_counts_as_flagged() {
+        // Two due entries and one fresh open entry under `hot_cap: 1`: the due entry with the later
+        // `status_since` is shown; the older due entry and the open one are hidden. No stale entry
+        // is hidden (the open one is idle 1 day against 30), so only the due half of the
+        // `hidden_flagged` rule can make the count 1.
+        let v = view(
+            &readme("stale_after: 30d\nhot_cap: 1\n"),
+            &[
+                (
+                    "due-newer",
+                    entry(
+                        "waiting",
+                        "2026-09-01",
+                        "2026-09-20",
+                        "revisit_by: 2026-11-01\n",
+                    ),
+                ),
+                (
+                    "due-older",
+                    entry(
+                        "waiting",
+                        "2026-09-01",
+                        "2026-09-10",
+                        "revisit_by: 2026-11-02\n",
+                    ),
+                ),
+                ("fresh", entry("open", "2026-11-10", "2026-11-10", "")),
+            ],
+        );
+        assert_eq!(keys(&v), ["due-newer"]);
+        assert_eq!((v.hot, v.hidden, v.hidden_flagged), (3, 2, 1));
+        assert!(v.entries.iter().all(|e| !e.stale));
+    }
 
     #[test]
     fn stale_flags_only_an_open_entry_past_stale_after() {
