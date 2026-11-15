@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 239
+entry_high_water_F: 240
 entry_high_water_W: 159
 ---
 
@@ -90,6 +90,7 @@ entry_high_water_W: 159
 | F-209 | 2026-11-01 | low | claim-vs-state | mitigated | **"Leaving these two directories costs nothing" was said before the directory counts were read** — I counted symlinks, the watcher counts directories; one remaining directory holds 1,808. |
 | F-208 | 2026-11-01 | low | plan-drift | fixed-verified | **A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again** — `581b05bbe41134f3`: the remedy's reset then add makes the row `retained`, and a named add clears a `retained` row and runs the file-level write lookup again on an unchanged record; fixed in `300cb29ea`. |
 |----|------|---------:|----------|--------|-------|
+| F-240 | 2026-11-14 | med | measurement | fixed-verified | **A join script's windows began two hours early because datetime.timestamp() on a naive UTC value assumes local time** — the listed overlapping jobs began 90 minutes before the row; fixed with timedelta and checked against date -u; result in bug 20927ccfe293c34e. |
 | F-238 | 2026-11-12 | med | process | open | **A confirmation run executed my mutant binary because a scratch build shared the slot with the real tree** — 16 tests failed in all 20 iterations; the baked-in manifest path and the test count gave it away; with-slot evicts by checkout, not by --manifest-path. |
 | F-237 | 2026-11-12 | med | measurement | promoted-to-bug-tracker | **A load job I ran on the shared host overlapped the timeouts that a later decision counted** — all three timed_out rows of 2026-11-12 fall in my burn.py windows, two more beside other sessions' gates; coincidence, not shown as cause; bug 20927ccfe293c34e. |
 | F-239 | 2026-11-14 | low | plan-prose | mitigated | **The atomic-write-door plan names no refusal from `atomic_write`'s protected-config check, states a door signature the code does not have, and counts references as call sites** — recon before Task 1; none blocks the plan; ruling R1 in the SDD ledger. |
@@ -18462,6 +18463,21 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Handled:** ruling R1 in the SDD ledger (`.superpowers/sdd/2026-11-14-atomic-catalogued-write-door/progress.md`) accepts item 1 as the same guard the edit tools already have. The Task 1 brief carries all three.
 
 **What this does not establish:** I read the guard's scope from `is_project_toml` and `check_write_with`. I did not run a write through the door against a protected path. Whether any catalogued document can resolve to a protected config path is not shown.
+
+## F-240 — A join script's windows began two hours early because datetime.timestamp() on a naive UTC value assumes local time
+
+**Observed:** I joined `usage.db` attribution rows with background-job records. My first version computed each row's window start with `end.timestamp() - latency` on a naive datetime read from the database, then `utcfromtimestamp`. `timestamp()` treats a naive value as local time (UTC+2 here), so every window began two hours too early. The first table had 24 rows with no heavy job and 421 with three or more, and it listed jobs that began 90 minutes before a `timed_out` row of 30 s. A 30 s window cannot overlap them.
+
+**Caught by:** reading the first five jobs listed for one row against that row's time, not by the totals, which looked plausible and pointed the same way as the earlier readings. I fixed the window with `end - timedelta(milliseconds=latency)` and checked the clock: `date -u` read 17:27:13 while the newest row read 17:27:11.7. The corrected table moved the 3-or-more class from 421 rows to 25. The wrong table was not recorded in any bug file.
+
+**Cost:** one rerun. Had I written the first table, the bug would have said that nearly every slow scan overlapped heavy load, which is a different claim from the corrected one (76% of 25 rows, against 15% and 18%).
+
+**Fix:** none in the repository; the script is in the scratchpad. Rule for any interval arithmetic on timestamps read from SQLite text: keep every value as a naive datetime in one stated zone and subtract with `timedelta`; never call `.timestamp()` on a naive value; print the first overlap of one row before trusting a total.
+
+**Valid:** dated 2026-11-14
+
+
+**Status:** fixed-verified — the corrected window was checked against the clock and against the listed jobs of one row; the first table was never recorded.
 
 ## Template for new entries
 
