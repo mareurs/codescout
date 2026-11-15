@@ -117,7 +117,7 @@ pub(crate) fn system_prompt_stale(
 /// directory, then a rename (`atomic_write`), after a probe that keeps a read-only file refused
 /// (`refuse_unwritable_existing`). A write that returns an error leaves the old bytes and no
 /// staging file. A process killed between the staging file and the rename also leaves the old
-/// bytes, but may leave a `project.<hex>.tmp` beside the file (see `atomic_write`, "Leftovers").
+/// bytes, but may leave a `project.toml.<hex>.tmp` beside the file (see `atomic_write`, "Leftovers").
 /// A link to the config is followed first, so the target is patched and the link stays a link.
 /// The replace needs write permission on the file's directory, and it breaks a hard link to the
 /// file; no `fsync` is called, so this closes a full disk and a killed process, not power loss.
