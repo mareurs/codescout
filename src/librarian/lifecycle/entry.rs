@@ -234,6 +234,20 @@ pub fn class_of(schema: &CollectionSchema, meta: &EntryMeta) -> Option<StatusCla
     schema.statuses.get(&meta.status).copied()
 }
 
+/// The date a `blocked` or `deferred` entry is overdue to be revisited, if it is: `revisit_by`
+/// strictly before `today`. A date of today is not yet overdue; an `open` or `terminal` entry
+/// is never due, and neither is one with no `revisit_by`.
+pub fn revisit_due(
+    class: StatusClass,
+    revisit_by: Option<NaiveDate>,
+    today: NaiveDate,
+) -> Option<NaiveDate> {
+    if !class.needs_revisit() {
+        return None;
+    }
+    revisit_by.filter(|by| *by < today)
+}
+
 /// Whether `v` has the shape `ty` declares.
 fn fits(ty: &FieldType, v: &Value) -> bool {
     let is_scalar = |v: &Value| matches!(v, Value::String(_) | Value::Number(_) | Value::Bool(_));
@@ -339,6 +353,25 @@ mod tests {
             }]
         );
         assert_eq!(class_of(&s, &reopened), Some(StatusClass::Open));
+    }
+
+    #[test]
+    fn revisit_due_is_strictly_before_today_and_only_for_blocked_and_deferred() {
+        let today = d("2026-11-11");
+        let due = |class, by: Option<&str>| revisit_due(class, by.map(d), today);
+        assert_eq!(
+            due(StatusClass::Blocked, Some("2026-11-10")),
+            Some(d("2026-11-10"))
+        );
+        // The boundary: a revisit date of today is not yet overdue.
+        assert_eq!(due(StatusClass::Blocked, Some("2026-11-11")), None);
+        assert_eq!(
+            due(StatusClass::Deferred, Some("2026-11-01")),
+            Some(d("2026-11-01"))
+        );
+        assert_eq!(due(StatusClass::Open, Some("2026-11-01")), None);
+        assert_eq!(due(StatusClass::Terminal, Some("2026-11-01")), None);
+        assert_eq!(due(StatusClass::Blocked, None), None);
     }
 
     #[test]
