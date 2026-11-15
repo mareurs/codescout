@@ -872,6 +872,7 @@ fn every_problem_text_names_its_remedy() {
         },
         WriteProblem::ClosedMismatch { terminal: true },
         WriteProblem::ClosedMismatch { terminal: false },
+        WriteProblem::FixedStem("Not A Key".into()),
         WriteProblem::Invalid(vec![entry_problem("waiting")]),
         // Several inner problems must not add a second separator.
         WriteProblem::Invalid(vec![entry_problem("waiting"), entry_problem("parked")]),
@@ -898,6 +899,7 @@ fn every_problem_text_names_its_remedy() {
         | WriteProblem::DateOrder { .. }
         | WriteProblem::DateInFuture { .. }
         | WriteProblem::ClosedMismatch { .. }
+        | WriteProblem::FixedStem(_)
         | WriteProblem::Invalid(_) => (),
     };
     const OPENERS: [&str; 7] = ["pass", "use", "remove", "declare", "fix", "give", "name"];
@@ -1265,17 +1267,44 @@ fn render_entry_uses_a_fixed_stem() {
     .unwrap();
     assert_eq!(file.rel_path, format!("{DIR}/ic-16-declared-not-wired.md"));
     assert_eq!(file.key.as_str(), "ic-16-declared-not-wired");
-    // A stem that is not a key is refused.
-    let problems = render(
-        &i,
-        &dates("2026-08-01", "2026-08-01", None),
-        &rules(true, Some("Not A Key")),
+    // A stem that is not a key, and the reserved stem, get their own refusal.
+    for bad in ["Not A Key", "readme"] {
+        let problems = render(
+            &i,
+            &dates("2026-08-01", "2026-08-01", None),
+            &rules(true, Some(bad)),
+        )
+        .unwrap_err();
+        assert_eq!(problems, vec![WriteProblem::FixedStem(bad.to_string())]);
+    }
+}
+
+#[test]
+fn render_entry_with_a_fixed_stem_needs_no_slug_in_the_title() {
+    let when = dates("2026-08-01", "2026-08-01", None);
+    let file = render(
+        &input("friction", "日本語"),
+        &when,
+        &rules(true, Some("ic-16-x")),
     )
-    .unwrap_err();
-    assert!(
-        problems.iter().any(|p| matches!(p, WriteProblem::Stem(_))),
-        "{problems:?}"
-    );
+    .unwrap();
+    assert_eq!(file.rel_path, format!("{DIR}/ic-16-x.md"));
+    // An empty title or one with a line break is still refused, with or without a fixed stem.
+    for title in ["", "two\nlines"] {
+        let problems = render(
+            &input("friction", title),
+            &when,
+            &rules(true, Some("ic-16-x")),
+        )
+        .unwrap_err();
+        assert!(
+            problems.contains(&WriteProblem::Title(title.to_string())),
+            "{problems:?}"
+        );
+    }
+    // Without a fixed stem the unsluggable title is a Title problem.
+    let problems = render(&input("friction", "日本語"), &when, &rules(true, None)).unwrap_err();
+    assert_eq!(problems, vec![WriteProblem::Title("日本語".to_string())]);
 }
 
 #[test]

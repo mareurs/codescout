@@ -24,6 +24,8 @@ pub enum WriteProblem {
     StatusUndeclared(String),
     #[error("title {0:?} is not a one-line title with a slug; give a one-line title with at least one letter or digit from a-z, A-Z or 0-9")]
     Title(String),
+    #[error("the fixed stem {0:?} is not a valid file stem; pass a stem of lowercase letters and digits joined by single hyphens, and not readme")]
+    FixedStem(String),
     #[error("no entry stem can be built: {0}")]
     Stem(StemError),
     #[error("frontmatter is not valid YAML: {0}; fix the YAML between the leading --- lines")]
@@ -465,12 +467,10 @@ pub struct RenderRules {
 
 /// The key of a fixed stem: the key rules `key_of` applies to a file name, and the reserved stem
 /// is refused.
-fn fixed_key(stem: &str) -> Result<Key, StemError> {
-    let key = Key::parse(stem).map_err(StemError::BadKey)?;
-    if key.as_str() == RESERVED_STEM {
-        return Err(StemError::ReservedName(key.as_str().to_string()));
-    }
-    Ok(key)
+fn fixed_key(stem: &str) -> Option<Key> {
+    Key::parse(stem)
+        .ok()
+        .filter(|key| key.as_str() != RESERVED_STEM)
 }
 
 /// Render a new entry file with the dates the caller gives. Every problem the pre-checks find is
@@ -528,14 +528,27 @@ pub fn render_entry(
             problems.push(WriteProblem::DateInFuture { field, date });
         }
     }
-    let title_slug = slug(input.title).filter(|_| !input.title.contains(['\n', '\r']));
-    let stem = match (&title_slug, &rules.fixed_stem) {
-        (None, _) => {
+    let one_line = !input.title.contains(['\n', '\r']);
+    let title_slug = slug(input.title).filter(|_| one_line);
+    let stem = match (&rules.fixed_stem, &title_slug) {
+        // A fixed stem needs no slug: the title is only the document title.
+        (Some(fixed), _) => {
+            if input.title.trim().is_empty() || !one_line {
+                problems.push(WriteProblem::Title(input.title.to_string()));
+            }
+            match fixed_key(fixed) {
+                Some(key) => Some(Ok(key)),
+                None => {
+                    problems.push(WriteProblem::FixedStem(fixed.clone()));
+                    None
+                }
+            }
+        }
+        (None, None) => {
             problems.push(WriteProblem::Title(input.title.to_string()));
             None
         }
-        (Some(_), Some(fixed)) => Some(fixed_key(fixed)),
-        (Some(s), None) => Some(entry_stem(schema.key_style, dates.created, s)),
+        (None, Some(s)) => Some(entry_stem(schema.key_style, dates.created, s)),
     };
     let key = match stem {
         None => None,
@@ -550,7 +563,7 @@ pub fn render_entry(
             problems.push(WriteProblem::FieldUndeclared(name.clone()));
         }
     }
-    let (Some(key), Some(class), true) = (key, class, problems.is_empty()) else {
+    let (Some(key), Some(_), true) = (key, class, problems.is_empty()) else {
         return Err(problems);
     };
 
