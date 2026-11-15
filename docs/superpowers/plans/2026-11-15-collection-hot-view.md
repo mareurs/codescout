@@ -1,7 +1,7 @@
 ---
 id: '4e9a786add22cde7'
 kind: plan
-status: draft
+status: done
 title: Collection Hot View Implementation Plan
 ---
 
@@ -205,7 +205,7 @@ hot view: <key> (<dir>): <shown> of <hot> hot, <live> live. Scope: this collecti
 (<unclassified> live entries cannot be judged: an undeclared status, or no revisit_by on a blocked or deferred entry)
 ```
 
-The last two lines appear only when their counts are above zero. Titles go through `table::cell` (a pipe, a backslash and a newline stay on one line).
+The last two lines appear only when their counts are above zero. Titles go through `table::cell` (a pipe and a newline stay on one line; the backslash case is pinned for `cell` itself in `table.rs`).
 
 **Fixtures.** Write a local helper `entry(status, created, status_since, extra)` that sets both dates independently. Do not use the shared entry helpers: every one of them writes `status_since` equal to `created`, and with such a fixture `table::rows` already returns the R3 order, so a wrong sort would pass. Build a `LoadedCollection` with a helper `loaded(readme, entries)` that writes a temp directory and calls `load_collection_dir`, as `collection/tests.rs` does. The readme declares statuses `{open: open, waiting: blocked, later: deferred, fixed: terminal}`. `today` is `2026-11-11`.
 
@@ -252,14 +252,14 @@ pub async fn run(args: HotViewArgs) -> anyhow::Result<()>   // evaluate with the
 
 Behaviour. Every failure is code 2: a root that cannot be resolved (no such directory, not inside a git repository), a `load_collection` error (bad key, not found, ambiguous, broken readme), and `ArchivedCollection`. The reason goes through a local `one_line` helper (as `key_gate::one_line`), because a tree problem text may span lines.
 - Failure, text: stdout is `NOT SHOWN — <reason>`. Failure, `--json`: stdout is the object `{"shown": false, "not_shown": "<reason>"}`.
-- Success: code 0. Text: `render_markdown(view)`, then, when `tree.problems` is not empty, one line `(<n> problems found while reading this folder; an entry file with a problem is not listed. Run the doctor for detail.)`. `--json`: one object with exactly the keys `shown` (`true`), `collection`, `dir`, `entries`, `hot`, `hidden`, `hidden_flagged`, `live`, `unclassified`, `cap`, `stale_after_days`, `problems` (a number) and `scope` (the string `this collection only; revisit and stale flags; no doctor check ran`). An element of `entries` has exactly the keys `row`, `reason`, `stale`, `idle_days`; `row` has the keys of the serialised `EntryRow` (`key`, `entry_kind`, `title`, `status`, `class`, `status_since`, `created`, `closed`, `revisit_by`, `archived`, `fields`); `reason` is `"open"` or `"revisit_due"`.
+- Success: code 0. Text: `render_markdown(view)`, then, when `tree.problems` is not empty, one line `(<n> problems found while reading this folder; an entry file with a problem is not listed. Run the doctor for detail.)`. `--json`: one object with exactly the keys `shown` (`true`), `collection`, `dir`, `entries`, `hot`, `hidden`, `hidden_flagged`, `live`, `unclassified`, `cap`, `stale_after_days`, `problems` (a number) and `scope` (the string `this collection only; revisit and stale flags; no doctor check ran`). An element of `entries` has exactly the keys `row`, `reason`, `stale`, `idle_days`; `row` has the keys of the serialised `EntryRow` (`key`, `entry_kind`, `title`, `status`, `status_since`, `class`, `created`, `closed`, `revisit_by`, `archived`, `fields`; the order is not part of the contract); `reason` is `"open"` or `"revisit_due"`.
 
 - [ ] **Step 1: Write the in-source tests** in `src/cli/hot_view.rs`, calling `evaluate` on a temp git repository holding `docs/trackers/ledgers/<key>/readme.md` and entry files:
   - `it_shows_the_hot_entries_and_the_scope_line`: code 0, the header and a `[[key]]` line.
   - `an_empty_collection_prints_zero_hot_and_exits_0`: code 0, the header says `0 of 0 hot`.
   - `an_unknown_collection_exits_2_not_shown` (Review Focus 5): code 2, stdout starts with `NOT SHOWN — `.
   - `a_badly_spelt_key_exits_2_not_shown`: key `Bad Key`.
-  - `an_archived_collection_exits_2_not_shown`: the readme sits under `docs/trackers/ledgers/archive/<key>/` (`load_collection` does not look there).
+  - `an_archived_collection_is_not_found_by_key_and_exits_2_not_shown`: the readme sits under `docs/trackers/ledgers/archive/<key>/` (`load_collection` does not look there, so `NotFound` answers; the `ArchivedCollection` refusal is covered by `hot_view::tests::an_archived_collection_has_no_hot_view`).
   - `a_project_that_is_not_a_git_repository_exits_2_not_shown`: skip when the temp directory lies inside a git work tree, as `key_gate`'s own test does.
   - `an_entry_file_with_a_problem_is_named_in_the_problems_line` (Review Focus 4): one entry with broken frontmatter; code 0; the problems line is present with `1`; the good entry is still listed.
   - `json_failure_is_a_json_object`: an unknown key under `--json` parses as an object with `shown == false` and a `not_shown` string.
@@ -288,7 +288,16 @@ Behaviour. Every failure is code 2: a root that cannot be resolved (no such dire
 
 ## Contract for the hook (not built here)
 
-The change belongs to `../claude-plugins/codescout-companion/hooks/session-start.mjs`, shipped separately. It runs `codescout hot-view <key> --project <root>`, uses stdout only when the exit code is 0, and adds nothing otherwise (the hook must degrade open). It makes no MCP call. Which collections to show is the hook change's decision. The hygiene cadence line (`next-sweep-due`, lines 233-242 of the hook) moves into the hygiene collection's readme under the lifecycle spec and must follow that move whatever this plan does.
+The change belongs to `../claude-plugins/codescout-companion/hooks/session-start.mjs`, shipped separately. It runs `codescout hot-view <key> --project <root>` and makes no MCP call. Which collections to show is the hook change's decision. The hygiene cadence line (`next-sweep-due`, lines 233-242 of the hook) moves into the hygiene collection's readme under the lifecycle spec and must follow that move whatever this plan does.
+
+What the hook (and any other consumer) must rely on, as built:
+
+- **Exit codes.** `0`: the view was printed, and stdout holds it. `2`: not shown. Any other non-zero code, and exit `2` with EMPTY stdout, mean the command could not run as asked: exit `2` with empty stdout is a clap argument error (the first failure a hook meets under version skew: an older binary says `unrecognized subcommand 'hot-view'` on stderr); a panic exits `101`. Treat every non-zero exit as "not shown" and add nothing to the session; read a reason only when stdout starts with `NOT SHOWN — ` (text mode) or parses as an object with `"shown": false` (`--json`). The hook degrades open.
+- **Streams.** On success, stdout holds the view and stderr is empty (the binary test asserts it). Logs go to stderr only.
+- **Size.** Without `hot_cap` in the collection readme, the view lists every hot entry. A hook should show only collections that declare `hot_cap`, or cut the text itself.
+- **JSON.** `--json` prints one object (keys in Task 6). The `row` inside each entry nests `fields`, whereas `doc(get, entry_filter)` returns flat rows (`get_table::flat_row`): a consumer that reads both handles both shapes.
+- **Text.** Titles pass through `table::cell`, so a `|` or a `[` shows with a backslash in front.
+- **Scope.** The view reads one collection folder and runs no doctor check; its header says so. An entry file that failed to parse is not an entry: the last line of the text, and `problems` in JSON, count such problems.
 
 ## Self-review notes
 
@@ -296,3 +305,9 @@ The change belongs to `../claude-plugins/codescout-companion/hooks/session-start
 - Spec coverage: Decision 1 → Task 4; Decision 2 → Task 1; Decision 3 → `--json` in Task 6; Decision 4 → Task 6 and § Contract for the hook; R1 → Tasks 4 and 5; the one-definition-of-due proposal → Task 3; scope naming → Tasks 5 and 6.
 - Types: `hot_cap: Option<u32>` and `stale_after_days: Option<u32>` (Task 4) are read as such in Task 5; `EntryRow.status_since` (Task 2) is read in Task 5; `revisit_due` (Task 3) is called in Task 5.
 - Not verified when this plan was written: that `doc(create)` on a collection with the new keys round-trips through the tool layer (Task 4 Step 2 proves it), and the exact wording of the Task 6 `NOT SHOWN` error texts (they come from `CollectionLoadError`'s own `Display`, which the tests assert only by prefix).
+
+## Outcome (2026-11-15)
+
+- Built in tasks 1-6 as specified; every task had an independent Opus review (spec and quality); Task 5 needed one fix round (a surviving `hidden_flagged` mutant). The whole-branch Opus review returned "ready with fixes" (0 Critical, 1 Important: the exit-2 contract text was false for version skew and usage errors). One fix wave addressed it with the red gate test (a `cap-class` annotation on `KEY_HOT_CAP`), the CLI tests and docs; its re-review found one new Important (a test that creates a directory with a newline in its name panics on Windows) and one attribute (`#[cfg(unix)]`) fixed it by a ruling, without a second re-review round.
+- Gate: green on `436cafd19` (lean 10322, default 10417, python 1836). The first gate run was red on `result_caps::every_cap_constant_is_classified`: a gate-only test that no per-task review runs (second occurrence after F-4 of the tracker-organization log).
+- Deferred on purpose: moving `problems` into `HotView` (dashboard work); a shared `cli::resolve_root` with `key_gate`; a `pinned` field (R5); whether `doc(update)` with an unchanged status reaches `apply_status` (R1's "re-confirming clears the flag" premise is read from `write.rs`, not traced end to end).
