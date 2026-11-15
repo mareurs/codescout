@@ -24,7 +24,14 @@ Atomic write door: executed by peer session codescout-eb (SID 6f2f7046) from my 
 
 Plan C3 LANDED 2026-11-14 (subagent-driven; operator said "do c1 and then c3 in subagents", then chose "merge locally"): `experiments` fast-forwarded `8f4696f7f` to `a54988e05`; worktree and branch removed. Gate on the gated tree: lean 10129, default 10224, python 1836, fmt and clippy clean. Record, rulings R1-R8, deferred findings, follow-ups (seeding, eviction, per-run handle, embed URL in the key, cache location vs the cutover): `docs/research/2026-11-14-artifact-identity-plan-c3-execution-state.md` (id `512e01311fe5d7bb`). Honest limit: on ship day the cache is EMPTY for the existing corpus (queueing is per artifact); the cutover rebuild needs `reembed=true` per project or seeding first. Next: the Plan D plan (open: who commits; file-only variant vs scratch copy; C3 cache location), then E.
 
+## Status 2026-11-15 (Plan D landed on integration, not on experiments)
+
+Plan D (`codescout cutover plan|export|build`) was built subagent-driven on `feat/cutover-tool-20261114`, merged with `integration/identity-lifecycle-20261114`, gated, and fast-forwarded onto integration twice: `5d655bfef` to `ead2f7b31` (Plan D), then to `308f9f5df` (C1-a, C1-b, C1-d fixed and re-reviewed; gate green again). Peer `codescout-e4` (lifecycle session) was told before and after each. `experiments` gets ONE merge from integration only when the user says all work is done. The feature branch, worktree `.worktrees/cutover-tool-20261114` and the SDD workspace still exist; delete the workspace only after the operator accepts the F1/F2 residue.
+
+The operator said "you choose" on 2026-11-15; choices: C1-a fixed now; I1 fix (b) NOT taken (D-R26 stays; 738 bug files stay frozen); multi-repo `derived.db` layout goes to Plan E (direction: storage scoped by checkout). Still open, rare, settle on a second export and commit: F1 (seven-hash heading in a ledger), F2 (frontmatter comment shaped like an entry heading), CRLF mixed line endings; parked minors C1-c, I1-a. Bug `28c8a999b2f3132b` (mitigated) and execution-state doc `bb10d700b9552d01` hold the detail. Plan text D-R8, D-R9, D-R20 corrected on `experiments` (`57eb13a88`).
+
 ## Rules that bite when resuming
+
 
 - A full gate runs only on an UNTOUCHED tree (no implementer holds an open round); see session-log F-16.
 - `TOOL_SURFACE_CHAR_BUDGET` is exactly 57_664 with zero headroom: any advertised description or schema edit is character-neutral or smaller, or re-measured with a log entry.

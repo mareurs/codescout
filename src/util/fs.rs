@@ -439,6 +439,7 @@ pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
         content,
         &mut || staging_path(path, &fresh_staging_nonce()),
         &mut |file, bytes| std::io::Write::write_all(file, bytes),
+        &mut rename_over,
     );
     #[cfg(target_os = "linux")]
     crate::observations::server::observe_write(
@@ -453,8 +454,11 @@ pub fn atomic_write(path: &Path, content: &str) -> std::io::Result<()> {
     result
 }
 
-/// The body of [`atomic_write`], with the two things a test cannot otherwise steer as
-/// parameters: the sequence of staging names offered, and the write into the staging file.
+/// The body of [`atomic_write`], with the three things a caller or test cannot otherwise steer
+/// as parameters: the sequence of staging names offered, the write into the staging file, and
+/// `publish`, the step that makes the finished staging file the target. `atomic_write` passes
+/// [`rename_over`] (replaces whatever is there); [`write_new_with`] passes a step that refuses
+/// an occupied target. A failed `publish` removes the staging file, whatever the reason.
 ///
 /// The names let a test make the FIRST candidate a planted link, so the exclusive create is
 /// what refuses it — with random names a planted `x.txt.tmp` is simply never opened and a
@@ -468,6 +472,7 @@ fn atomic_write_with(
     content: &str,
     next_name: &mut dyn FnMut() -> Option<PathBuf>,
     write: &mut dyn FnMut(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    publish: &mut dyn FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     // The mode to preserve, if the target already exists (`metadata` follows a symlink target,
     // so a replaced link takes the mode of what it pointed at), WITHOUT setuid and setgid: a
@@ -506,9 +511,250 @@ fn atomic_write_with(
 
     // Closed before the rename: Windows will not rename an open file.
     drop(file);
-    std::fs::rename(&tmp, path).inspect_err(|_| {
+    publish(&tmp, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
+}
+/// The publish step of [`atomic_write`]: `rename`, which replaces whatever is at `to`.
+fn rename_over(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+#[cfg(test)]
+type BeforePublishHook = std::rc::Rc<dyn Fn(&Path)>;
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_PUBLISH: std::cell::RefCell<Option<BeforePublishHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Test seam: a closure called with the target path just before [`rename_no_clobber`] links,
+/// so a test can plant a file in the window between a caller's own checks and the publish.
+///
+/// **Scope.** The hook is thread-local: it runs on the thread that calls
+/// `rename_no_clobber` / [`write_new_utf8`], which is the test's own thread for a plain
+/// `#[test]` and for a `#[tokio::test]` (current-thread runtime, the repository's default).
+/// It does NOT reach a call made on another thread (`spawn_blocking`, a multi-thread
+/// runtime). The guard returned clears it on drop, so a test cannot leak it into the next test
+/// that runs on the same thread; installing a second hook replaces the first.
+///
+/// **A hook must not touch a lock the caller holds.** It runs inside the call, under whatever
+/// the caller holds (a catalog transaction, say), so a hook that reaches for the same lock
+/// deadlocks the test.
+#[cfg(test)]
+pub(crate) fn set_before_publish(hook: impl Fn(&Path) + 'static) -> BeforePublishGuard {
+    BEFORE_PUBLISH.with(|slot| *slot.borrow_mut() = Some(std::rc::Rc::new(hook)));
+    BeforePublishGuard(())
+}
+
+/// Clears the [`set_before_publish`] hook on drop.
+#[cfg(test)]
+pub(crate) struct BeforePublishGuard(());
+
+#[cfg(test)]
+impl Drop for BeforePublishGuard {
+    fn drop(&mut self) {
+        BEFORE_PUBLISH.with(|slot| *slot.borrow_mut() = None);
+    }
+}
+
+/// Run the seam hook, if any. The hook is cloned out first so that no borrow of the slot is
+/// held while it runs (a hook may itself call a function that reads the slot).
+#[cfg(test)]
+fn run_before_publish(to: &Path) {
+    let hook = BEFORE_PUBLISH.with(|slot| slot.borrow().clone());
+    if let Some(hook) = hook {
+        hook(to);
+    }
+}
+
+/// Move the existing file `from` to `to` **without replacing anything at `to`**.
+///
+/// `std::fs::rename` replaces on every platform, so it cannot be the no-clobber step. This
+/// links instead: `hard_link(from, to)` fails with `AlreadyExists` when ANYTHING is at `to` (a
+/// file, a directory, a symlink, even a dangling one) and never replaces, and `remove_file(from)`
+/// then drops the old name. No `unsafe` and no per-OS code. On Linux and macOS std calls `linkat`
+/// with no flags, so a symlink at `from` is linked, not followed.
+///
+/// - `AlreadyExists` means exactly one thing: `to` is occupied. It is returned unchanged and
+///   `from` stays where it was.
+/// - Both names exist for a moment between the link and the removal. A crash there leaves the
+///   file at both paths.
+/// - When the link succeeds and the removal of `from` fails, `to` is removed again so that the
+///   file is at one path, and the removal error is returned. If that rollback fails too, the
+///   error names both paths and says the file is at both. So the file is at one path unless the
+///   rollback also fails (the error then says so) or the process dies between the link and the
+///   remove.
+/// - **Fallback.** When the link fails for any other reason (a file system without hard links,
+///   such as FAT; a `protected_hardlinks` `EPERM`), this falls back to [`rename_refusing_occupied`]:
+///   check-then-rename, the old race, so no file system gets worse. It logs one
+///   `tracing::warn!` only when that fallback published (returned `Ok`); every other error
+///   (read-only directory, `ENOSPC`, `EXDEV`, `EMLINK`) then reaches `rename`, which fails or
+///   succeeds as it always did, and logs nothing.
+///
+/// **Callers' contract.** A caller maps `AlreadyExists` to its own "path exists" refusal only
+/// when `std::fs::symlink_metadata(path).is_ok()` still holds; every other error is the write's
+/// own error.
+pub fn rename_no_clobber(from: &Path, to: &Path) -> std::io::Result<()> {
+    rename_no_clobber_with(from, to, &mut |from, to| std::fs::hard_link(from, to))
+}
+
+/// The body of [`rename_no_clobber`], with the link step as a parameter so a test can make
+/// the file system "lack hard links" without a different file system.
+fn rename_no_clobber_with(
+    from: &Path,
+    to: &Path,
+    link: &mut dyn FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    #[cfg(test)]
+    run_before_publish(to);
+    match link(from, to) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(e),
+        Err(e) => {
+            let published = rename_refusing_occupied(from, to);
+            if published.is_ok() {
+                tracing::warn!(
+                    error = %e,
+                    to = %to.display(),
+                    "hard_link failed; the no-clobber publish fell back to check-then-rename, \
+                     which a concurrent creator can race"
+                );
+            }
+            return published;
+        }
+    }
+    let Err(remove_err) = std::fs::remove_file(from) else {
+        return Ok(());
+    };
+    match std::fs::remove_file(to) {
+        Ok(()) => Err(remove_err),
+        Err(rollback_err) => Err(std::io::Error::new(
+            remove_err.kind(),
+            format!(
+                "linked {} to {} but could not remove {} ({remove_err}), and could not take \
+                 the new link back ({rollback_err}): the file is now at both paths",
+                from.display(),
+                to.display(),
+                from.display()
+            ),
+        )),
+    }
+}
+
+/// The fallback of [`rename_no_clobber`]: refuse with `AlreadyExists` if anything is at `to`
+/// (`symlink_metadata` sees a dangling link; `exists` would not), else `rename`. The check and
+/// the rename are two steps, so a creator that wins between them is replaced.
+fn rename_refusing_occupied(from: &Path, to: &Path) -> std::io::Result<()> {
+    if to.symlink_metadata().is_ok() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{} already exists", to.display()),
+        ));
+    }
+    std::fs::rename(from, to)
+}
+
+/// Create `path` with `content`, atomically and **only if nothing is there**.
+///
+/// The bytes are staged the way [`atomic_write`] stages them (an exclusive, uniquely named
+/// sibling, removed on every failure path) and published with [`rename_no_clobber`], so a
+/// failure mid-write never leaves a partial file at `path`, and a creator that wins the race is
+/// never replaced. Missing parent directories are created.
+///
+/// **`AlreadyExists` means exactly one thing: `path` is occupied** (a file, a directory, a
+/// symlink, even a dangling one). Any other `AlreadyExists` is re-kinded to
+/// `ErrorKind::Other` with context: an ancestor that is a regular file (`create_dir_all`), and
+/// every staging name taken (`create_staging_file`). A caller maps `AlreadyExists` to its own
+/// "path exists" refusal only when `std::fs::symlink_metadata(path).is_ok()` still holds; every
+/// other error is the write's own error.
+///
+/// **Order.** (1) If `symlink_metadata(path)` succeeds, `AlreadyExists`, before anything else:
+/// a create can never replace, so its "before" is "absent", and `check_write` would otherwise
+/// refuse a racer's `project.toml` that holds a `[security]` table with `PermissionDenied` and
+/// the caller would never learn the path was taken. (2) `config::protected_files::check_write`
+/// (`PermissionDenied`). (3) `create_dir_all(parent)`. (4) stage and publish.
+///
+/// **Observations** (Linux, as in [`atomic_write`]): steps (1) to (3) record nothing, so a
+/// refusal there reads as `refused`. From step (4) an `Attempted` write is recorded, then
+/// `Committed` on success or `Uncertain` on any failure, a raced `AlreadyExists` included, which
+/// `observe_call` turns into `error-possible-effects`.
+pub fn write_new_utf8(path: &Path, content: &str) -> std::io::Result<()> {
+    write_new_with(
+        path,
+        content,
+        &mut || staging_path(path, &fresh_staging_nonce()),
+        &mut |file, bytes| std::io::Write::write_all(file, bytes),
+        &mut rename_no_clobber,
+    )
+}
+
+/// The body of [`write_new_utf8`], parametrised like [`atomic_write_with`]: the staging names
+/// offered, the write into the staging file, and the publish step.
+fn write_new_with(
+    path: &Path,
+    content: &str,
+    next_name: &mut dyn FnMut() -> Option<PathBuf>,
+    write: &mut dyn FnMut(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    publish: &mut dyn FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    if path.symlink_metadata().is_ok() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("{} already exists", path.display()),
+        ));
+    }
+    crate::config::protected_files::check_write(path, content)
+        .map_err(|msg| std::io::Error::new(std::io::ErrorKind::PermissionDenied, msg))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            not_an_occupied_target(e, &format!("could not create {}", parent.display()))
+        })?;
+    }
+    #[cfg(target_os = "linux")]
+    crate::observations::server::observe_write(
+        path,
+        content.as_bytes(),
+        crate::observations::server::WritePhase::Attempted,
+    );
+    // Only a refusal by `publish` is "the target is occupied"; record whether it was one.
+    let mut refused_by_publish = false;
+    let result = atomic_write_with(path, content, next_name, write, &mut |from, to| {
+        let published = publish(from, to);
+        refused_by_publish = matches!(
+            &published,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists
+        );
+        published
+    });
+    let result = match result {
+        Err(e) if !refused_by_publish => Err(not_an_occupied_target(
+            e,
+            &format!("could not stage a new file for {}", path.display()),
+        )),
+        other => other,
+    };
+    #[cfg(target_os = "linux")]
+    crate::observations::server::observe_write(
+        path,
+        content.as_bytes(),
+        if result.is_ok() {
+            crate::observations::server::WritePhase::Committed
+        } else {
+            crate::observations::server::WritePhase::Uncertain
+        },
+    );
+    result
+}
+
+/// Re-kind an `AlreadyExists` that is not "the target is occupied" to `Other`, keeping its text.
+fn not_an_occupied_target(e: std::io::Error, context: &str) -> std::io::Error {
+    if e.kind() == std::io::ErrorKind::AlreadyExists {
+        std::io::Error::other(format!("{context}: {e}"))
+    } else {
+        e
+    }
 }
 
 /// Ask whether an EXISTING target can be written, without writing it. Run it before
@@ -1377,6 +1623,7 @@ mod tests {
                 seen_during_write = Some(f.metadata()?.permissions().mode() & 0o777);
                 std::io::Write::write_all(f, bytes)
             },
+            &mut rename_over,
         )
         .unwrap();
 
@@ -1633,6 +1880,7 @@ mod tests {
             "WRITTEN",
             &mut || queue.pop_front(),
             &mut |f, b| std::io::Write::write_all(f, b),
+            &mut rename_over,
         )
         .unwrap();
 
@@ -1674,6 +1922,7 @@ mod tests {
                 Some(planted.clone())
             },
             &mut |f, b| std::io::Write::write_all(f, b),
+            &mut rename_over,
         )
         .expect_err("a staging name that always collides must be an error");
 
@@ -1886,16 +2135,22 @@ mod tests {
             move || staging_path(&target, &fresh_staging_nonce())
         };
         let dir_path = dir.path().to_path_buf();
-        let err = atomic_write_with(&target, "new content", &mut names, &mut |_staged, bytes| {
-            let on_disk = entry_names_any(&dir_path);
-            staging_seen_by_writer = on_disk
-                .into_iter()
-                .find(|n| n.ends_with(".tmp"))
-                .map(PathBuf::from);
-            // The real ENOSPC, from the kernel.
-            let mut full = std::fs::OpenOptions::new().write(true).open("/dev/full")?;
-            std::io::Write::write_all(&mut full, bytes)
-        })
+        let err = atomic_write_with(
+            &target,
+            "new content",
+            &mut names,
+            &mut |_staged, bytes| {
+                let on_disk = entry_names_any(&dir_path);
+                staging_seen_by_writer = on_disk
+                    .into_iter()
+                    .find(|n| n.ends_with(".tmp"))
+                    .map(PathBuf::from);
+                // The real ENOSPC, from the kernel.
+                let mut full = std::fs::OpenOptions::new().write(true).open("/dev/full")?;
+                std::io::Write::write_all(&mut full, bytes)
+            },
+            &mut rename_over,
+        )
         // (1) It must FAIL. A version that swallowed the error and returned Ok would
         // satisfy the cleanup assertion below while breaking the function's purpose.
         .expect_err("atomic_write must propagate the write failure, not swallow it");
@@ -1994,6 +2249,491 @@ mod tests {
     fn state_dir_is_none_when_xdg_relative_and_home_absent() {
         let got = state_dir_from(Some(std::ffi::OsString::from("relative/state")), None);
         assert_eq!(got, None);
+    }
+}
+
+/// `rename_no_clobber` and `write_new_utf8`: a file is published at a path only if nothing is
+/// there, and a refusal changes nothing. A refusal that a test expects is reached through the
+/// `before_publish` seam wherever it can be, because a path that is occupied before the call is
+/// also refused by the pre-check and so passes on an implementation whose link step replaces.
+#[cfg(test)]
+mod no_clobber_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn write(path: &Path, text: &str) {
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    /// Restores a directory's permissions on drop, so a failed assertion cannot leave a
+    /// read-only directory behind for the tempdir cleanup to trip over.
+    #[cfg(unix)]
+    struct RestoreMode(PathBuf);
+    #[cfg(unix)]
+    impl Drop for RestoreMode {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    /// Make `dir` read-only. `None` when the restriction does not bite (a privileged user
+    /// ignores directory modes): the caller SKIPS, saying so, because a test that cannot fail
+    /// proves nothing.
+    #[cfg(unix)]
+    fn read_only_dir(dir: &Path, test: &str) -> Option<RestoreMode> {
+        use std::os::unix::fs::PermissionsExt;
+        let restore = RestoreMode(dir.to_path_buf());
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::File::create(dir.join("probe")).is_ok() {
+            eprintln!("SKIPPED {test}: a read-only directory still accepts a create (root?)");
+            return None;
+        }
+        Some(restore)
+    }
+
+    // ---- rename_no_clobber -------------------------------------------------------------
+
+    #[test]
+    fn rename_no_clobber_moves_the_file_and_leaves_nothing_behind() {
+        let dir = tempdir().unwrap();
+        let (from, to) = (dir.path().join("from.txt"), dir.path().join("to.txt"));
+        write(&from, "BYTES");
+
+        rename_no_clobber(&from, &to).unwrap();
+
+        assert!(from.symlink_metadata().is_err(), "the source must be gone");
+        assert_eq!(read(&to), "BYTES");
+        assert_eq!(names(dir.path()), vec!["to.txt"]);
+    }
+
+    #[test]
+    fn rename_no_clobber_refuses_an_occupied_target_and_changes_nothing() {
+        let dir = tempdir().unwrap();
+        let (from, to) = (dir.path().join("from.txt"), dir.path().join("to.txt"));
+        write(&from, "NEW");
+        write(&to, "OLD");
+
+        let err = rename_no_clobber(&from, &to).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(read(&to), "OLD", "the occupant must be untouched");
+        assert_eq!(
+            read(&from),
+            "NEW",
+            "a refused publish leaves the source in place"
+        );
+        assert_eq!(names(dir.path()), vec!["from.txt", "to.txt"]);
+    }
+
+    /// The fallback is what runs when the file system cannot hard-link. Called directly: the
+    /// occupied path is refused with `AlreadyExists`, a free one is published.
+    #[test]
+    fn the_fallback_refuses_an_occupied_path_and_publishes_a_free_one() {
+        let dir = tempdir().unwrap();
+        let (from, to) = (dir.path().join("from.txt"), dir.path().join("to.txt"));
+        write(&from, "NEW");
+        write(&to, "OLD");
+
+        let err = rename_refusing_occupied(&from, &to).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(read(&to), "OLD");
+        assert_eq!(read(&from), "NEW");
+
+        std::fs::remove_file(&to).unwrap();
+        rename_refusing_occupied(&from, &to).unwrap();
+        assert_eq!(read(&to), "NEW");
+        assert!(from.symlink_metadata().is_err());
+    }
+
+    /// The fallback's reason for `symlink_metadata` is the dangling link: `exists()` follows it
+    /// and says the path is free, and the `rename` would then replace the link.
+    #[cfg(unix)]
+    #[test]
+    fn the_fallback_refuses_a_dangling_symlink_and_leaves_it_a_link() {
+        let dir = tempdir().unwrap();
+        let (from, to) = (dir.path().join("from.txt"), dir.path().join("to.txt"));
+        let missing = dir.path().join("missing-target");
+        write(&from, "NEW");
+        std::os::unix::fs::symlink(&missing, &to).unwrap();
+
+        let err = rename_refusing_occupied(&from, &to).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert_eq!(std::fs::read_link(&to).unwrap(), missing);
+        assert_eq!(read(&from), "NEW");
+        assert!(missing.symlink_metadata().is_err());
+    }
+
+    /// The dispatch: any link error but `AlreadyExists` reaches the fallback, which still
+    /// refuses an occupied path. The link step is injected, so the real file system is not
+    /// asked to lack hard links. A dispatch that returned the link error would give
+    /// `PermissionDenied` here and publish nothing.
+    #[test]
+    fn a_link_error_other_than_already_exists_falls_back_and_still_refuses_an_occupant() {
+        let dir = tempdir().unwrap();
+        let (from, to) = (dir.path().join("from.txt"), dir.path().join("to.txt"));
+        write(&from, "NEW");
+        let mut cannot_link =
+            |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+
+        rename_no_clobber_with(&from, &to, &mut cannot_link).unwrap();
+        assert_eq!(read(&to), "NEW");
+        assert!(from.symlink_metadata().is_err());
+
+        write(&from, "NEWER");
+        let err = rename_no_clobber_with(&from, &to, &mut cannot_link).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(read(&to), "NEW");
+        assert_eq!(read(&from), "NEWER");
+    }
+
+    /// A target directory the caller cannot write to is the OS's own refusal, and the source
+    /// stays where it was. (Not `AlreadyExists`: that kind means the target is occupied.)
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_target_directory_gives_permission_denied_and_keeps_the_source() {
+        let dir = tempdir().unwrap();
+        let sealed = dir.path().join("sealed");
+        std::fs::create_dir(&sealed).unwrap();
+        let from = dir.path().join("from.txt");
+        write(&from, "NEW");
+        let Some(_restore) = read_only_dir(
+            &sealed,
+            "a_read_only_target_directory_gives_permission_denied_and_keeps_the_source",
+        ) else {
+            return;
+        };
+
+        let err = rename_no_clobber(&from, &sealed.join("to.txt")).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{err:?}");
+        assert_eq!(read(&from), "NEW");
+        assert!(names(&sealed).is_empty());
+    }
+
+    /// The link succeeds and the removal of the source fails (its directory is read-only): the
+    /// new name is taken back, so the file is at ONE path, the source's, and the caller gets the
+    /// removal error.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_source_removal_takes_the_new_link_back() {
+        let dir = tempdir().unwrap();
+        let sealed = dir.path().join("sealed");
+        std::fs::create_dir(&sealed).unwrap();
+        let from = sealed.join("from.txt");
+        write(&from, "NEW");
+        let to = dir.path().join("to.txt");
+        let Some(_restore) =
+            read_only_dir(&sealed, "a_failed_source_removal_takes_the_new_link_back")
+        else {
+            return;
+        };
+
+        let err = rename_no_clobber(&from, &to).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{err:?}");
+        assert!(
+            to.symlink_metadata().is_err(),
+            "the rolled-back link must not remain at the target"
+        );
+        assert_eq!(read(&from), "NEW");
+    }
+
+    // ---- write_new_utf8 ----------------------------------------------------------------
+
+    #[test]
+    fn write_new_utf8_publishes_a_free_path_and_leaves_no_staging_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+
+        write_new_utf8(&path, "CONTENT").unwrap();
+
+        assert_eq!(read(&path), "CONTENT");
+        assert_eq!(names(dir.path()), vec!["x.txt"]);
+    }
+
+    #[test]
+    fn write_new_utf8_creates_missing_parent_directories() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("a").join("b").join("x.txt");
+
+        write_new_utf8(&path, "CONTENT").unwrap();
+
+        assert_eq!(read(&path), "CONTENT");
+        assert_eq!(names(&dir.path().join("a").join("b")), vec!["x.txt"]);
+    }
+
+    #[test]
+    fn write_new_utf8_refuses_an_occupied_path_byte_for_byte_and_leaves_no_staging_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        std::fs::write(&path, b"OLD \xff bytes").unwrap();
+
+        let err = write_new_utf8(&path, "NEW").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&path).unwrap(), b"OLD \xff bytes");
+        assert_eq!(names(dir.path()), vec!["x.txt"]);
+    }
+
+    #[test]
+    fn the_precheck_refuses_a_directory_at_the_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("sub");
+        std::fs::create_dir(&path).unwrap();
+
+        let err = write_new_utf8(&path, "NEW").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(path.is_dir());
+        assert_eq!(names(dir.path()), vec!["sub"]);
+    }
+
+    /// A dangling link is something at the path: `exists()` follows it and says no, so a check
+    /// built on it would let the publish create the link's target's name... and a rename would
+    /// replace the link. Either way the link must survive.
+    #[cfg(unix)]
+    #[test]
+    fn the_precheck_counts_a_dangling_symlink_as_occupied_and_leaves_it_a_link() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        let missing = dir.path().join("missing-target");
+        std::os::unix::fs::symlink(&missing, &path).unwrap();
+
+        let err = write_new_utf8(&path, "NEW").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_link(&path).unwrap(), missing);
+        assert!(missing.symlink_metadata().is_err());
+        assert_eq!(names(dir.path()), vec!["x.txt"]);
+    }
+
+    /// The window between the pre-check and the publish, held open by the seam: the racer's file
+    /// must survive and the caller must see `AlreadyExists`. This is the test that fails when
+    /// the link step replaces (`rename`) instead of refusing: the racer's bytes would be gone.
+    #[test]
+    fn a_file_planted_in_the_window_is_not_replaced() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<PathBuf>::new()));
+        let _seam = {
+            let seen = seen.clone();
+            set_before_publish(move |target| {
+                seen.borrow_mut().push(target.to_path_buf());
+                std::fs::write(target, "RACER").unwrap();
+            })
+        };
+
+        let err = write_new_utf8(&path, "NEW").unwrap_err();
+
+        assert_eq!(
+            *seen.borrow(),
+            vec![path.clone()],
+            "the seam must run once, with the target path, or the window was never opened"
+        );
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(read(&path), "RACER");
+        assert_eq!(names(dir.path()), vec!["x.txt"], "the staging file leaked");
+    }
+
+    /// The same window for `rename_no_clobber` itself, the call `doc(move)` makes.
+    #[test]
+    fn a_file_planted_in_the_window_is_not_replaced_by_a_rename() {
+        let dir = tempdir().unwrap();
+        let (from, to) = (dir.path().join("from.txt"), dir.path().join("to.txt"));
+        write(&from, "NEW");
+        let _seam = set_before_publish(|target| std::fs::write(target, "RACER").unwrap());
+
+        let err = rename_no_clobber(&from, &to).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(read(&to), "RACER");
+        assert_eq!(read(&from), "NEW");
+    }
+
+    /// A dangling link that appears in the window. `exists()` follows it and says no, so a link
+    /// step built on it, or a `rename`, would replace the link. The pre-check cannot see it (it
+    /// ran before), so only the link step can refuse: this holds the link step itself.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_planted_in_the_window_is_not_replaced() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        let missing = dir.path().join("missing-target");
+        let _seam = {
+            let missing = missing.clone();
+            set_before_publish(move |target| std::os::unix::fs::symlink(&missing, target).unwrap())
+        };
+
+        let err = write_new_utf8(&path, "NEW").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert_eq!(
+            std::fs::read_link(&path).unwrap(),
+            missing,
+            "the planted link must survive as a link"
+        );
+        assert!(missing.symlink_metadata().is_err());
+        assert_eq!(names(dir.path()), vec!["x.txt"], "the staging file leaked");
+    }
+
+    /// A directory that appears in the window. A `rename` onto it fails with `EISDIR`, not
+    /// `AlreadyExists`, so only a link step that refuses gives the caller the right answer.
+    #[test]
+    fn a_directory_planted_in_the_window_is_not_replaced() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        let _seam = set_before_publish(|target| std::fs::create_dir(target).unwrap());
+
+        let err = write_new_utf8(&path, "NEW").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert!(path.is_dir());
+        assert_eq!(names(dir.path()), vec!["x.txt"], "the staging file leaked");
+    }
+
+    /// The seam is scoped to its guard: after the guard drops, the next write on this thread
+    /// runs with no hook, so one test cannot leak a racer into another.
+    #[test]
+    fn the_seam_is_cleared_when_its_guard_drops() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        drop(set_before_publish(|target| {
+            std::fs::write(target, "RACER").unwrap()
+        }));
+
+        write_new_utf8(&path, "NEW").unwrap();
+
+        assert_eq!(read(&path), "NEW");
+    }
+
+    /// A racer's `project.toml` that holds a `[security]` table, at a protected path. Without
+    /// the occupied pre-check ahead of `check_write` this is `PermissionDenied` ("would change
+    /// its [security] section") and the caller never learns the path was taken.
+    #[test]
+    fn an_occupied_protected_path_gives_already_exists_not_permission_denied() {
+        let dir = tempdir().unwrap();
+        let codescout = dir.path().join(".codescout");
+        std::fs::create_dir(&codescout).unwrap();
+        let path = codescout.join("project.toml");
+        write(&path, "[security]\nshell_enabled = true\n");
+
+        let err = write_new_utf8(&path, "name = \"mine\"\n").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert_eq!(read(&path), "[security]\nshell_enabled = true\n");
+    }
+
+    /// The same protected path with a DANGLING link at it. `exists()` follows the link and says
+    /// the path is free, so a pre-check built on it lets `check_write` run, and the new content's
+    /// `[security]` table then differs from the (unreadable) "before": `PermissionDenied`.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_at_a_protected_path_gives_already_exists_not_permission_denied() {
+        let dir = tempdir().unwrap();
+        let codescout = dir.path().join(".codescout");
+        std::fs::create_dir(&codescout).unwrap();
+        let path = codescout.join("project.toml");
+        let missing = dir.path().join("missing-target");
+        std::os::unix::fs::symlink(&missing, &path).unwrap();
+
+        let err = write_new_utf8(&path, "[security]\nshell_enabled = true\n").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists, "{err:?}");
+        assert_eq!(std::fs::read_link(&path).unwrap(), missing);
+        assert_eq!(names(&codescout), vec!["project.toml"]);
+    }
+
+    /// `AlreadyExists` means the target is occupied and nothing else. An ancestor that is a
+    /// regular file makes `create_dir_all` fail with `AlreadyExists`; that is re-kinded.
+    #[test]
+    fn an_ancestor_that_is_a_regular_file_gives_other_not_already_exists() {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("file");
+        write(&file, "I am a file");
+
+        let err = write_new_utf8(&file.join("x.txt"), "NEW").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::Other, "{err:?}");
+        assert_eq!(read(&file), "I am a file");
+        assert_eq!(names(dir.path()), vec!["file"]);
+    }
+
+    /// The other non-publish `AlreadyExists`: every staging name offered is taken. Same rule.
+    #[test]
+    fn an_exhausted_staging_name_gives_other_not_already_exists() {
+        let dir = tempdir().unwrap();
+        let planted = dir.path().join("always.tmp");
+        write(&planted, "PLANTED");
+        let path = dir.path().join("x.txt");
+        let mut offered = 0u32;
+
+        let err = write_new_with(
+            &path,
+            "NEW",
+            &mut || {
+                offered += 1;
+                Some(planted.clone())
+            },
+            &mut |f, b| std::io::Write::write_all(f, b),
+            &mut rename_no_clobber,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            offered, STAGING_ATTEMPTS,
+            "the staging budget must be spent"
+        );
+        assert_eq!(err.kind(), std::io::ErrorKind::Other, "{err:?}");
+        assert!(err.to_string().contains("staging"), "{err}");
+        assert_eq!(read(&planted), "PLANTED");
+        assert_eq!(names(dir.path()), vec!["always.tmp"]);
+    }
+
+    /// A write that fails after the staging file exists (ENOSPC) leaves nothing: no partial
+    /// file at the path, no staging file. The positive control proves the create really
+    /// happened before the failure, so the empty directory is a cleanup and not a no-op.
+    #[test]
+    fn a_failed_write_leaves_no_partial_file_and_no_staging_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("x.txt");
+        let mut staged_during_write = Vec::new();
+        let dir_path = dir.path().to_path_buf();
+
+        let err = write_new_with(
+            &path,
+            "NEW CONTENT",
+            &mut || staging_path(&path, &fresh_staging_nonce()),
+            &mut |f, bytes| {
+                std::io::Write::write_all(f, &bytes[..3])?;
+                staged_during_write = names(&dir_path);
+                Err(std::io::Error::from_raw_os_error(28))
+            },
+            &mut rename_no_clobber,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.raw_os_error(), Some(28));
+        assert_eq!(
+            staged_during_write.len(),
+            1,
+            "the staging file must exist while the write runs: {staged_during_write:?}"
+        );
+        assert!(names(dir.path()).is_empty(), "{:?}", names(dir.path()));
     }
 }
 
