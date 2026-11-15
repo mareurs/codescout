@@ -52,6 +52,8 @@ Check one side effect before the change. `atomic_write` runs the protected-files
 
 For the two create-if-absent writes, `atomic_write` alone still replaces a file that appears in the window. Publish them with a no-clobber step (stage the bytes, then `hard_link` and `remove_file`, or `OpenOptions::create_new` as the minimum), and treat `AlreadyExists` as "a file is there, leave it".
 
+A pinned test breaks under the pair. `patch_project_table_still_patches_a_regular_file_and_reports_a_missing_one_as_before` (`src/tools/onboarding.rs:3598`) patches `link.toml`, a symbolic link to `real.toml`, and asserts that `real.toml` carries the new key. The probe opens with `O_NOFOLLOW`, so it refuses the link with `ELOOP` (`a_symlink_at_the_path_is_not_followed_by_the_check`, `src/util/fs.rs`). Without the probe, the `rename` in `atomic_write` would replace the link itself and leave `real.toml` unchanged. Either way the test fails. The fix must choose: resolve the link to its target before the pair and keep the test, or refuse a link and change the test. This bug does not choose.
+
 Tests: a failing write into the staging file leaves the old `project.toml` bytes; a read-only `project.toml` stays unchanged and the call fails; each of the four callers still writes its key.
 
 ## Resume
