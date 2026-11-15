@@ -112,6 +112,13 @@ pub(crate) fn system_prompt_stale(
 /// **It does not preserve the file's formatting.** The file is parsed and re-serialised with the
 /// `toml` crate (not `toml_edit`, which is not a dependency): comments are dropped, tables are
 /// re-sorted and inline tables are rewritten. What survives is the data, not the layout.
+///
+/// **The file is replaced atomically**, not truncated in place: a staging file in the same
+/// directory, then a rename (`atomic_write`), after a probe that keeps a read-only file refused
+/// (`refuse_unwritable_existing`). A write that fails leaves the old bytes and no staging file.
+/// A link to the config is followed first, so the target is patched and the link stays a link.
+/// The replace needs write permission on the file's directory, and it breaks a hard link to the
+/// file; no `fsync` is called, so this closes a full disk and a killed process, not power loss.
 fn patch_project_table(
     config_path: &std::path::Path,
     set: impl FnOnce(&mut toml::Table),
@@ -137,7 +144,18 @@ fn patch_project_table(
         .as_table_mut()
         .ok_or_else(|| anyhow::anyhow!("[project] in project.toml is not a table"))?;
     set(project);
-    std::fs::write(config_path, toml::to_string_pretty(&doc)?)?;
+    let text = toml::to_string_pretty(&doc)?;
+    // Follow a link to the config first, as the in-place write did: the probe below opens with
+    // `O_NOFOLLOW` (it would refuse the link with `ELOOP`) and `atomic_write` renames over the
+    // directory entry (it would replace the link and leave the target unpatched). The read above
+    // already succeeded, so the path exists. A link swapped in after this line is outside what
+    // this closes (docs/issues/2026-11-14-onboarding-rewrites-project-toml-with-a-truncating-fs-write-so-a-failed-write-empties-it.md).
+    let target = std::fs::canonicalize(config_path)?;
+    // A rename needs no permission on the file, only on its directory, so a read-only
+    // `project.toml` is asked first and stays refused. A failed write then leaves the old bytes
+    // and no staging file, where the truncating `std::fs::write` left an empty file.
+    crate::util::fs::refuse_unwritable_existing(&target)?;
+    crate::util::fs::atomic_write(&target, &text)?;
     Ok(())
 }
 
@@ -3685,5 +3703,152 @@ mod bounded_read_tests {
             crate::memory::hash::hash_file(&file).unwrap(),
             "the same bytes hash the same through both"
         );
+    }
+}
+/// `patch_project_table` replaces `project.toml` atomically: a staging file in the same directory,
+/// then a rename. A write that fails leaves the old bytes and no staging file, where the old
+/// in-place `std::fs::write` truncated first (docs/issues/2026-11-14-onboarding-rewrites-project-toml-with-a-truncating-fs-write-so-a-failed-write-empties-it.md).
+#[cfg(all(test, unix))]
+mod atomic_patch_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    const OLD: &str = "[project]\nname = \"keep\"\n";
+
+    fn add_key(t: &mut toml::Table) {
+        t.insert("added".into(), toml::Value::Integer(7));
+    }
+
+    fn names(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// A replace needs write permission on the DIRECTORY. The old in-place write needed only the
+    /// file's own permission, so this pins the new behaviour: refused, old bytes stay, no staging
+    /// file. Mutation named: the old `std::fs::write` succeeds here and fails this test.
+    #[test]
+    fn a_patch_in_a_read_only_directory_is_refused_and_leaves_the_old_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("cfg");
+        std::fs::create_dir(&sub).unwrap();
+        let p = sub.join("project.toml");
+        std::fs::write(&p, OLD).unwrap();
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::File::create(sub.join("probe")).is_ok() {
+            // A process that ignores directory modes (root) cannot show the refusal.
+            std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let result = patch_project_table(&p, add_key);
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let e = result.expect_err("a replace in a read-only directory must be refused");
+        assert!(
+            e.downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied),
+            "{e:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), OLD);
+        assert_eq!(names(&sub), vec!["project.toml"], "no staging file left");
+    }
+
+    /// A rename replaces a mode-0444 file without asking it, so the probe asks first.
+    /// Mutation named: a bare `atomic_write` without `refuse_unwritable_existing` replaces the
+    /// file and fails this test.
+    #[test]
+    fn a_read_only_project_toml_is_refused_and_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("project.toml");
+        std::fs::write(&p, OLD).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if std::fs::OpenOptions::new().write(true).open(&p).is_ok() {
+            // A process that ignores file modes (root) cannot show the refusal.
+            return;
+        }
+
+        let e = patch_project_table(&p, add_key).expect_err("a read-only file must stay refused");
+
+        assert!(
+            e.downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied),
+            "{e:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), OLD);
+        assert_eq!(names(dir.path()), vec!["project.toml"]);
+    }
+
+    /// A link to the config is patched THROUGH, as `std::fs::write` did, and stays a link. The
+    /// pair follows the link first: the probe opens with `O_NOFOLLOW` (it would refuse the link
+    /// with `ELOOP`) and `atomic_write` renames over the directory entry (it would replace the
+    /// link and leave the target alone). Mutation named: either of those, without the resolve,
+    /// fails this test.
+    #[test]
+    fn a_link_to_the_config_is_patched_through_and_stays_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.toml");
+        std::fs::write(&real, OLD).unwrap();
+        let link = dir.path().join("link.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        patch_project_table(&link, add_key).unwrap();
+
+        let doc: toml::Table = toml::from_str(&std::fs::read_to_string(&real).unwrap()).unwrap();
+        assert_eq!(
+            doc["project"]["added"].as_integer(),
+            Some(7),
+            "target patched"
+        );
+        assert_eq!(doc["project"]["name"].as_str(), Some("keep"));
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link is still a link"
+        );
+        assert_eq!(names(dir.path()), vec!["link.toml", "real.toml"]);
+    }
+
+    /// The replaced file keeps its permission bits (a private config stays private).
+    #[test]
+    fn a_patch_keeps_the_file_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("project.toml");
+        std::fs::write(&p, OLD).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        patch_project_table(&p, add_key).unwrap();
+
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert!(std::fs::read_to_string(&p).unwrap().contains("added"));
+    }
+
+    /// `atomic_write` runs the protected-files guard on `.codescout/project.toml`. This patch
+    /// carries `[security]` over as read, so the guard must pass, and the table must survive.
+    /// Mutation named: a patch that drops or changes `[security]` is refused by the guard.
+    #[test]
+    fn a_patch_of_the_protected_project_toml_passes_the_guard_and_keeps_security() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join(".codescout");
+        std::fs::create_dir(&cfg).unwrap();
+        let p = cfg.join("project.toml");
+        std::fs::write(
+            &p,
+            "[project]\nname = \"keep\"\n\n[security]\nshell_enabled = false\n",
+        )
+        .unwrap();
+
+        patch_project_table(&p, add_key).unwrap();
+
+        let doc: toml::Table = toml::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(doc["project"]["added"].as_integer(), Some(7));
+        assert_eq!(doc["security"]["shell_enabled"].as_bool(), Some(false));
     }
 }
