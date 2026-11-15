@@ -233,8 +233,9 @@ impl Head {
 /// The params, the sidecars, the events, the observations and the manual links of a document go into
 /// its text in that order ([`plan_augmentations`], then [`plan_events_and_links`]), each step from
 /// the text the one before left. One set of [`CitationTables`] serves every step: the citation
-/// rewrite of the committed text, and of each section a later step adds (D-R9), so the plan of the
-/// commit that holds the export writes nothing.
+/// rewrite of the committed text, and of each section a later step adds (D-R9). Its index reads
+/// the texts with the sections of the recovered params entries ([`texts_with_entries`]), as the
+/// plan of the commit that holds the export reads them, so that plan writes nothing.
 pub fn plan_export(
     repo: &git2::Repository,
     commit: &git2::Commit,
@@ -254,7 +255,7 @@ pub fn plan_export(
     let renames = plan_file_renames(&head, old, &code, &mut plan);
     plan_skipped_events(old, &renames.paths(), &mut plan);
     plan_write_cites(old, &mut plan);
-    let tables = CitationTables::build(repo, commit, old, &head, &renames, plan.shallow)?;
+    let tables = CitationTables::build(repo, commit, old, &head, &code, &renames, plan.shallow)?;
     plan_citations(&head, &code, &tables, &mut plan);
     plan_augmentations(repo, commit, old, &head, &code, &tables, &mut plan)?;
     plan_events_and_links(old, &head, &code, &tables, &mut plan);
@@ -344,21 +345,26 @@ struct CitationTables {
 }
 
 impl CitationTables {
+    /// The index is built from the texts of `HEAD` with the sections of the recovered params
+    /// entries ([`texts_with_entries`]), so a token such a section defines resolves in the first plan.
     fn build(
         repo: &git2::Repository,
         commit: &git2::Commit,
         old: &OldRows,
         head: &Head,
+        code: &CodeRefs,
         renames: &RenameSet,
         shallow: bool,
     ) -> anyhow::Result<CitationTables> {
         let moved = renames.paths();
         let index = KeyIndex::build(
             head.repo_name.clone(),
-            head.files.iter().map(|(path, text)| DocInput {
-                rel_path: final_path(&moved, path).to_owned(),
-                text: text.clone(),
-            }),
+            texts_with_entries(old, head, code, &moved)
+                .into_iter()
+                .map(|(path, text)| DocInput {
+                    rel_path: final_path(&moved, &path).to_owned(),
+                    text,
+                }),
         );
         let (ids, id_hints) = recover_ids(repo, commit, old, head, &moved, shallow)?;
         Ok(CitationTables {
@@ -438,6 +444,59 @@ fn committed_at(
 const REASON_NOT_IN_HEAD: &str = "document not in HEAD";
 const REASON_NOT_IN_SPACE: &str = "document is outside the key space or has no text";
 
+/// The augmentation rows of each document, by its path after the renames, in id order.
+fn augmentations_by_path<'a>(
+    old: &'a OldRows,
+    moved: &BTreeMap<String, String>,
+) -> BTreeMap<String, Vec<&'a AugmentationRow>> {
+    let mut by_path: BTreeMap<String, Vec<&AugmentationRow>> = BTreeMap::new();
+    for row in &old.augmentations {
+        let Some(document) = old.documents.get(&row.artifact_id) else {
+            continue;
+        };
+        let now = final_path(moved, &document.rel_path).to_owned();
+        by_path.entry(now).or_default().push(row);
+    }
+    for rows in by_path.values_mut() {
+        rows.sort_by(|a, b| a.artifact_id.cmp(&b.artifact_id));
+    }
+    by_path
+}
+
+/// The text of every in-space document of `HEAD`, keyed by its path in `HEAD`, with the sections
+/// [`plan_augmentations`] adds for its params entries (D-R13); a frozen document keeps its text
+/// (D-R26). The commit that holds the export defines each recovered token, so the citation index
+/// is built from these texts and the first plan resolves a token as the plan after the commit does
+/// (D-R20, D-R9).
+///
+/// The sections are found with a rewrite that changes nothing. The citation rewrite changes no
+/// heading and no code fence, so it does not change which sections a document defines or which
+/// read back.
+fn texts_with_entries(
+    old: &OldRows,
+    head: &Head,
+    code: &CodeRefs,
+    moved: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let by_path = augmentations_by_path(old, moved);
+    let unchanged = |_: &str, after: &str| (after.to_owned(), Vec::<Item>::new());
+    head.files
+        .iter()
+        .map(|(path, text)| {
+            let now = final_path(moved, path);
+            let rows = by_path
+                .get(now)
+                .filter(|_| code.frozen(path).is_none())
+                .into_iter()
+                .flatten();
+            let text = rows.fold(text.clone(), |text, row| {
+                recover_params_entries(now, &text, row, &unchanged).0
+            });
+            (path.clone(), text)
+        })
+        .collect()
+}
+
 /// Params entries, other params and the shape of every augmentation (D-R13, D-R23, D-R24), per
 /// document path after the renames. A document's text goes through the citation rewrite first
 /// ([`plan_citations`]), then the entries (a recovered section is rewritten like committed text,
@@ -471,17 +530,7 @@ fn plan_augmentations(
 ) -> anyhow::Result<()> {
     let moved = &tables.moved;
     let resolver = tables.resolver(&head.repo_name);
-    let mut by_path: BTreeMap<String, Vec<&AugmentationRow>> = BTreeMap::new();
-    for row in &old.augmentations {
-        let Some(document) = old.documents.get(&row.artifact_id) else {
-            continue;
-        };
-        let now = final_path(moved, &document.rel_path).to_owned();
-        by_path.entry(now).or_default().push(row);
-    }
-    for rows in by_path.values_mut() {
-        rows.sort_by(|a, b| a.artifact_id.cmp(&b.artifact_id));
-    }
+    let by_path = augmentations_by_path(old, moved);
     let refusal_of = |plan: &ExportPlan, now: &str| document_refusal(head, code, plan, now);
 
     // Who names each sidecar path: a document with a shape to plan, by its name, and a document of
@@ -2992,6 +3041,143 @@ mod tests {
         assert_eq!(in_heading(&first), want);
         assert_fixed_point(&second);
         assert_eq!(in_heading(&second), want);
+    }
+    /// C1-a: `docs/ledger.md` ([`LEDGER_MD`], which defines `F-1`) with the params entry `F-2`,
+    /// which only the export writes, beside `files`, and a note event on `docs/n.md` when `note`
+    /// is given. `(first plan, plan after the commit)`.
+    fn recovered_entry_plans(
+        files: &[(&str, &str)],
+        note: Option<&str>,
+    ) -> (ExportPlan, ExportPlan) {
+        let mut all: Vec<(&str, &[u8])> = vec![("docs/ledger.md", LEDGER_MD.as_bytes())];
+        all.extend(files.iter().map(|&(path, text)| (path, text.as_bytes())));
+        plan_commit_and_replan(&all, |cat, root| {
+            add_doc(cat, root, "led", "docs/ledger.md");
+            add_augmentation(
+                cat,
+                "led",
+                r#"{"entries":[{"id":"F-2","title":"two"}]}"#,
+                Some("entries"),
+            );
+            if let Some(text) = note {
+                add_doc(cat, root, "n", "docs/n.md");
+                let payload = serde_json::json!({ "text": text }).to_string();
+                add_event(cat, "e1", "n", "note", &payload);
+            }
+        })
+    }
+
+    fn citation_reasons_in<'a>(plan: &'a ExportPlan, path: &str) -> Vec<(Status, &'a str)> {
+        citation_items(plan)
+            .into_iter()
+            .filter(|i| i.path.as_deref() == Some(path))
+            .map(|i| (i.status, i.reason.as_str()))
+            .collect()
+    }
+
+    /// C1-a: the export writes the section of the params entry `F-2`, so the first plan reads a
+    /// bare `F-2` against it, as the plan of the commit that holds the export does (D-R20).
+    #[test]
+    fn a_bare_token_only_a_recovered_entry_defines_is_rewritten_by_the_first_plan() {
+        let (first, second) =
+            recovered_entry_plans(&[("docs/src.md", "# Src\n\nsee F-2 here.\n")], None);
+        let text = first.files.get("docs/src.md").map(|f| f.new_text.as_str());
+        assert_eq!(text, Some("# Src\n\nsee [[ledger:F-2]] here.\n"));
+        assert_eq!(
+            citation_reasons_in(&first, "docs/src.md"),
+            [(Status::Moved, "rewritten: bare token")]
+        );
+        assert_fixed_point(&second);
+    }
+
+    #[test]
+    fn a_stem_token_only_a_recovered_entry_defines_is_rewritten_by_the_first_plan() {
+        let (first, second) =
+            recovered_entry_plans(&[("docs/src.md", "# Src\n\nsee ledger:F-2 here.\n")], None);
+        let text = first.files.get("docs/src.md").map(|f| f.new_text.as_str());
+        assert_eq!(text, Some("# Src\n\nsee [[ledger:F-2]] here.\n"));
+        assert_eq!(
+            citation_reasons_in(&first, "docs/src.md"),
+            [(Status::Moved, "rewritten: stem token")]
+        );
+        assert_fixed_point(&second);
+    }
+
+    #[test]
+    fn a_note_that_cites_a_recovered_entry_is_written_rewritten() {
+        let (first, second) =
+            recovered_entry_plans(&[("docs/n.md", SINGLE_WRITER_MD)], Some("see ledger:F-2"));
+        let text = &first.files["docs/n.md"].new_text;
+        assert!(text.contains("> see [[ledger:F-2]]\n"), "{text}");
+        assert_eq!(
+            citation_reasons_in(&first, "docs/n.md"),
+            [(Status::Moved, "rewritten: stem token")]
+        );
+        assert_fixed_point(&second);
+    }
+
+    /// D-R20 with a recovered definer: the ledger that defines `F-2` once the export writes it
+    /// keeps its own bare `F-2`.
+    #[test]
+    fn the_ledger_that_recovers_an_entry_keeps_its_own_bare_token() {
+        let head = format!("{LEDGER_MD}\nsee F-2 here.\n");
+        let (first, second) =
+            plan_commit_and_replan(&[("docs/ledger.md", head.as_bytes())], |cat, root| {
+                add_doc(cat, root, "led", "docs/ledger.md");
+                add_augmentation(
+                    cat,
+                    "led",
+                    r#"{"entries":[{"id":"F-2","title":"two"}]}"#,
+                    Some("entries"),
+                );
+            });
+        let text = &first.files["docs/ledger.md"].new_text;
+        assert!(text.contains("\nsee F-2 here.\n"), "{text}");
+        assert!(text.contains("\n## F-2 — two\n"), "{text}");
+        assert_eq!(citation_reasons_in(&first, "docs/ledger.md"), []);
+        assert_fixed_point(&second);
+        assert_eq!(citation_reasons_in(&second, "docs/ledger.md"), []);
+    }
+
+    /// D-R20 counts every definer: a committed `F-2` elsewhere and the recovered one make two.
+    #[test]
+    fn a_token_a_recovered_entry_and_another_document_define_is_ambiguous() {
+        const OTHER_LEDGER: &str =
+            "---\nkind: tracker\nentry_prefix: F\n---\n\n# B\n\n## F-2 — b\n\ny\n";
+        let (first, second) = recovered_entry_plans(
+            &[
+                ("docs/b.md", OTHER_LEDGER),
+                ("docs/src.md", "# Src\n\nsee F-2 here.\n"),
+            ],
+            None,
+        );
+        assert!(
+            !first.files.contains_key("docs/src.md"),
+            "{}",
+            first.files["docs/src.md"].new_text
+        );
+        let ambiguous = [(
+            Status::Unrecoverable,
+            "ambiguous: several documents qualify",
+        )];
+        assert_eq!(citation_reasons_in(&first, "docs/src.md"), ambiguous);
+        assert_fixed_point(&second);
+        assert_eq!(citation_reasons_in(&second, "docs/src.md"), ambiguous);
+    }
+
+    /// A frozen ledger gets no section (D-R26), so its params entry defines nothing.
+    #[test]
+    fn the_entry_of_a_frozen_ledger_defines_no_token() {
+        let (first, second) = recovered_entry_plans(
+            &[
+                ("docs/src.md", "# Src\n\nsee F-2 here.\n"),
+                ("src/x.rs", "const P: &str = \"../docs/ledger.md\";\n"),
+            ],
+            None,
+        );
+        assert!(first.files.is_empty(), "{:?}", first.files.keys());
+        assert_eq!(citation_reasons_in(&first, "docs/src.md"), []);
+        assert_fixed_point(&second);
     }
 
     /// I2: a ledger whose text ends inside an unclosed code fence swallows a recovered section. The
