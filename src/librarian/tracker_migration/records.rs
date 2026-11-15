@@ -786,14 +786,20 @@ after\n";
 
     #[test]
     fn a_heading_in_frontmatter_is_not_a_record() {
+        // YAML comments shaped like headings: `headings::parse` is not
+        // frontmatter-aware, so the split must drop them itself.
         let text = "---\n\
 title: t\n\
+## F-9 — in yaml\n\
+# note\n\
 ---\n\
 ## F-1 — a\n\
 body\n";
         let split = split_source(text, &SourceKind::File, &[]);
-        assert_eq!(split.frontmatter, Some(1..=3));
-        assert_eq!(record_shape(&split), vec![(Some("F-1"), 4, 4..=5)]);
+        assert_eq!(split.frontmatter, Some(1..=5));
+        assert_eq!(record_shape(&split), vec![(Some("F-1"), 6, 6..=7)]);
+        assert!(split.possibles.is_empty(), "{:?}", split.possibles);
+        assert!(split.repeats.is_empty());
         assert!(split.sections.is_empty());
         assert_tiles(&split);
     }
@@ -867,22 +873,26 @@ c\n";
 
     #[test]
     fn whole_kind_is_one_record() {
+        // The frontmatter holds heading-shaped YAML comments; the record's heading
+        // comes from the first heading AFTER the frontmatter.
         let text = "---\n\
 title: h\n\
+# Draft\n\
+## F-9 — in yaml\n\
 ---\n\
 # Handoff\n\
 text\n\
 ## F-1 — x\n";
         let split = split_source(text, &SourceKind::Whole, &[]);
-        assert_eq!(split.frontmatter, Some(1..=3));
+        assert_eq!(split.frontmatter, Some(1..=5));
         assert_eq!(
             split.records,
             vec![Record {
                 token: None,
-                heading_line: 4,
+                heading_line: 6,
                 level: 1,
                 title: "Handoff".into(),
-                lines: 4..=6,
+                lines: 6..=8,
             }]
         );
         assert!(split.sections.is_empty());
@@ -890,7 +900,7 @@ text\n\
         assert_eq!(
             split.possibles,
             vec![Possible {
-                line: 6,
+                line: 8,
                 token: "F-1".into(),
                 enclosing: None,
             }]
