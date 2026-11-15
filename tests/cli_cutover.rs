@@ -258,7 +258,9 @@ fn run(root: &Path, db: &Path, action: &str, code: i32) -> serde_json::Value {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        !text.contains(root.to_str().unwrap()) && !text.contains(OLD_ROOT),
+        !text.contains(root.to_str().unwrap())
+            && !text.contains(OLD_ROOT)
+            && !text.contains(db.parent().unwrap().to_str().unwrap()),
         "an absolute path in the output of {action}:\n{text}"
     );
     serde_json::from_str(text.trim()).unwrap_or_else(|e| panic!("{action}: {e}\n{text}"))
@@ -484,8 +486,38 @@ fn the_cutover_exports_every_class_and_leaves_the_old_catalog_unchanged() {
         db_sha,
         "build leaves the old catalog unchanged"
     );
+    // Beside the old catalog: what it began with, the reports of the two exports, and the new
+    // catalog. A build that left a side file would show here, and the sha256 would not.
+    let mut with_new = dir_before.clone();
+    for report in [&exported, &again] {
+        with_new.push(report["report"]["markdown"].as_str().unwrap().to_owned());
+        with_new.push(report["report"]["json"].as_str().unwrap().to_owned());
+    }
+    with_new.push("derived.db".to_owned());
+    with_new.sort();
+    assert_eq!(listing(&catalog_dir), with_new);
+    assert_eq!(
+        built["built"]["problems"], 1,
+        "the one problem is the frozen file's key: {built}"
+    );
 
     let conn = rusqlite::Connection::open(catalog_dir.join("derived.db")).unwrap();
+    let problems: Vec<(String, Option<String>, String)> = conn
+        .prepare("SELECT kind, \"key\", rel_paths FROM problem ORDER BY rowid")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(
+        problems,
+        [(
+            "invalid_key".to_owned(),
+            Some("render_prompt".to_owned()),
+            r#"["src/render_prompt.md"]"#.to_owned()
+        )],
+        "the frozen file keeps its invalid key, and nothing else is a problem"
+    );
     let one = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
     assert_eq!(
         one("SELECT count(*) FROM entry WHERE rel_path='docs/ledger.md' AND token='F-2'"),

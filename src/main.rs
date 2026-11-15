@@ -256,8 +256,7 @@ enum Commands {
     /// catalog (`derived.db`, in the directory of the old catalog) from `HEAD`, and refuses while
     /// a plan of `HEAD` would still change a file, so run it after the commit. A second `build`
     /// rebuilds the same file. The tool never commits, stages or moves anything in git: commit the
-    /// exported
-    /// files yourself. The old catalog is `--old-db`, else `LIBRARIAN_DB`, else
+    /// exported files yourself. The old catalog is `--old-db`, else `LIBRARIAN_DB`, else
     /// `librarian/catalog.db` in the local data directory. It is opened read-only and never
     /// changed. Give `--old-root <path>` (repeatable, absolute) for each other spelling of this
     /// repository's root that old rows carry. The plan reads `HEAD`, not the working tree:
@@ -269,7 +268,11 @@ enum Commands {
     /// codescout process and checkpoint it), a catalog that changed while it was read, no git
     /// repository, a `HEAD` whose `.codescout/repo.toml` or `key-space.toml` does not parse, or,
     /// for `export`, a new catalog that already exists or a project write lock that is held (or
-    /// whose file cannot be opened), or, for `build`, an export that is not committed yet.
+    /// whose file cannot be opened); or, for `build`, an export that is not committed yet, a
+    /// `HEAD` that moved after the plan, a `-wal`, `-shm` or non-empty `-journal` file beside
+    /// `derived.db`, a `derived.db` that is not a new catalog, or a `derived.db` built for
+    /// another repository (move it aside, or delete it: it is derivable from git). `export` says
+    /// the same about an existing `derived.db`.
     Cutover(codescout::cli::cutover::CutoverArgs),
 
     /// Read-only query: which active constitution rules apply to a given

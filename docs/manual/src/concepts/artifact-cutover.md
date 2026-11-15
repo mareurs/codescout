@@ -33,7 +33,8 @@ The usual sequence is:
 ```bash
 codescout cutover plan                # read the report
 codescout cutover export              # write the files, read the report again
-git add -A && git commit              # you commit; the tool never does
+git status --short                    # the files the report lists, no .codescout/write.lock*
+git add <the files>; git commit       # you commit; the tool never does
 codescout cutover plan                # the plan writes nothing
 codescout cutover build               # derived.db appears beside catalog.db
 ```
@@ -52,14 +53,18 @@ tree. Uncommitted edits are invisible to it, so commit or stash first.
 
 ## Before the first run: extend the key space
 
-Some subtrees hold files whose names another tool dictates: `AGENTS.md` for an
-agent, `.github` templates, a book source, recorded evidence. The cutover cannot
-rename these files. Their names give no valid key, and a rename is refused when a
-name is not canonical.
+Some subtrees hold files whose names another tool dictates: `AGENTS.md` and `SKILL.md`
+for agents, `.github` templates, a book source, recorded evidence. The cutover renames
+a file when its name gives no valid key, such as `My_Notes.md`. It must not rename a
+file that another tool reads by name.
 
-The report then tells you to extend `.codescout/key-space.toml`. Do it before the
-run. List the subtree under `exclude`, commit the file, and run `cutover plan`
-again. The plan reads `HEAD`, so an uncommitted change to the key space has no
+The report refuses such a rename, or it freezes the file (see below). Other names
+cause trouble without a rename: `AGENTS.md` gives the valid key `agents`, and several
+folders that hold one make the key collide.
+
+In these cases the report tells you to extend `.codescout/key-space.toml`. Do it
+before the run. List the subtree under `exclude`, commit the file, and run `cutover
+plan` again. The plan reads `HEAD`, so an uncommitted change to the key space has no
 effect.
 
 ```toml
@@ -73,8 +78,8 @@ A document in an excluded subtree has no key. The cutover leaves it alone.
 
 ## The migration window
 
-The tool needs the old catalog to sit still. Stop every codescout process first:
-every MCP server, every hook, every other CLI run.
+The tool needs the old catalog to stay unchanged while it runs. Stop every codescout
+process first: every MCP server, every hook, every other CLI run.
 
 The tool refuses when a `-wal` or `-shm` file lies beside the old catalog. It also
 refuses when a `-journal` file that is not empty lies there. One of these files
@@ -88,8 +93,9 @@ sqlite3 <old catalog file> 'PRAGMA wal_checkpoint(TRUNCATE)'
 The tool checks three times:
 
 - when it opens the old catalog;
-- after it reads the rows: it checks again for side files, and it checks that the
-  size and the modification time of the file did not change;
+- after it reads the rows, for side files;
+- after it reads the rows, for a change in the size or the modification time of the
+  file;
 - for `export`, once more before the first write.
 
 A change in the second or third check gives the refusal `the old catalog changed
@@ -98,15 +104,18 @@ while it was read`. Stop the process that wrote and run the command again.
 `export` also refuses in these cases:
 
 - `derived.db` already exists beside the old catalog. `export` runs before the new
-  catalog exists.
+  catalog exists. Move `derived.db` aside, or delete it (git can rebuild it), then run
+  `export` again.
 - The project write lock is not free. Another codescout process writes to the
   project. The lock file is `.codescout/write.lock`, in the nearest directory (from
   the project up to the git root) that holds `.codescout/project.toml`. `export`
-  creates this file when it is not there. Keep it out of git.
+  creates this file and `.codescout/write.lock.holder` when they are not there. Both
+  hold runtime state. Keep both out of git: add `.codescout/write.lock*` to
+  `.gitignore`, and check `git status --short` before you commit.
 - The lock file cannot be opened. A link or a directory at that path does this.
 
-`export` tries the lock for a quarter of a second. It does not wait for it. A refusal
-exits with code 2 and writes nothing.
+`export` tries the lock for one budget of 250 milliseconds. When the lock is not
+free in that time, `export` refuses. It exits with code 2 and writes nothing.
 
 ## What the tool never does
 
@@ -125,12 +134,13 @@ exits with code 2 and writes nothing.
 ## Reading the report
 
 The report has one line per class of old fact. Each class ends in one of four
-statuses:
+statuses. The markdown report prints `already exported`. The JSON report spells it
+`already_exported`.
 
 | Status | Meaning |
 |---|---|
 | `moved` | A committed file changes for this fact. `export` writes the change. |
-| `already_exported` | The committed text already holds the fact. Nothing to do. |
+| `already exported` | The committed text already holds the fact. Nothing to do. |
 | `skipped` | The fact stays in the old catalog on purpose. The reason says why. |
 | `unrecoverable` | The tool cannot move the fact. The reason says why. You decide. |
 
@@ -148,9 +158,16 @@ The classes are:
 | `rename` | A file whose name gives no valid key. |
 | `citation` | An old citation form in prose. `moved` rewrites it into the grammar. |
 
-A `skipped` event has the reason `no committed home yet: not a single-writer
-document`. The row stays in the old catalog. The section `## Rows with no committed
-home` lists such rows by file.
+A `skipped` event has a reason that begins with `no committed home yet:`. Two
+reasons follow it:
+
+- `no committed home yet: not a single-writer document`
+- `no committed home yet: ledger or entry document`
+
+A `skipped` event of another kind has one of these reasons: `git history of the file
+holds it`, `the frontmatter holds it`, or `the worktree overlay is removed`. The row
+stays in the old catalog. The section `## Rows with no committed home` lists such rows
+by file.
 
 Read these sections before you run `export`:
 
@@ -237,9 +254,19 @@ old catalog. It builds from the committed files of `HEAD`, not from the working
 tree. It prints the number of documents, entries, edges, chunks, skipped files, and
 problems it stored.
 
-A second `build` rebuilds the same file. `build` refuses with code 2 when `HEAD`
-moved after the plan, and when `derived.db` is not a derived index (a file of
-another program). The old catalog is not written.
+A second `build` rebuilds the same file in place. `build` refuses with code 2 in these
+cases:
+
+- `HEAD` moved after the plan.
+- A `-wal`, `-shm` or non-empty `-journal` file lies beside the old catalog, or beside
+  `derived.db`.
+- `derived.db` is not a new catalog. It is a file of another program.
+- `derived.db` was built for another repository. One old catalog can hold the rows
+  of several repositories, but the new catalog beside it serves one. Move `derived.db`
+  aside, or delete it (git can rebuild it), then run `build` again. A `derived.db`
+  with no build in it, as a failed first build leaves, is built over.
+
+The old catalog is never written.
 
 `derived.db` and `catalog.db` share one directory, so they share one
 `vector-cache.db`. An old codescout binary never opens `derived.db`.
@@ -253,5 +280,12 @@ another program). The old catalog is not written.
 | `2` | The run did not run. The output gives the reason on one line. |
 
 `plan` and `build` use `0` and `2`. A refusal before the first write always gives
-`2`: no old catalog, a side file, a changed catalog, a held lock, an existing
-`derived.db`, a `key-space.toml` that does not parse, or no git repository.
+`2`. These cases refuse:
+
+- no old catalog;
+- a side file beside the old catalog;
+- a changed old catalog;
+- a held project write lock (`export`);
+- an existing `derived.db` (`export`);
+- a `key-space.toml` that does not parse;
+- no git repository.
