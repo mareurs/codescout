@@ -33,6 +33,7 @@ use crate::librarian::derived::scan::{scan_commit, Skip};
 use crate::librarian::identity::grammar::Reference;
 use crate::librarian::identity::index::{DocInput, KeyIndex, Resolution};
 use crate::librarian::identity::key::{folder_of, key_of, markdown_stem, Key};
+use crate::librarian::identity::key_space::KeySpace;
 use crate::librarian::identity::repo_name::RepoName;
 use crate::librarian::tools::link_scan::extract::{citation_spans, CitationKind};
 
@@ -187,6 +188,8 @@ struct Head {
     /// with no text (not UTF-8, a symlink). A rename never lands on one of them.
     outside: BTreeSet<String>,
     repo_name: RepoName,
+    /// The key space of `HEAD`: code in a subtree it excludes is no evidence ([`CodeRefs::load`]).
+    space: KeySpace,
 }
 
 impl Head {
@@ -215,6 +218,7 @@ impl Head {
             files,
             outside,
             repo_name,
+            space,
         })
     }
 }
@@ -237,7 +241,7 @@ pub fn plan_export(
     old: &OldRows,
 ) -> anyhow::Result<ExportPlan> {
     let head = Head::load(repo, commit)?;
-    let code = CodeRefs::load(repo, commit)?;
+    let code = CodeRefs::load(repo, commit, &head.space)?;
     let mut plan = ExportPlan {
         repo_name: head.repo_name.to_string(),
         commit: commit.id().to_string(),

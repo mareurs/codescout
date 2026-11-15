@@ -3,11 +3,14 @@
 //! The cutover never edits or renames such a file: code that reads `docs/x.md` by path would
 //! break, and a prompt surface edited by the tool would change what a model is told. A file is
 //! frozen when code of `HEAD` names it, when it lies under a dot directory, or when it is a page
-//! of an mdBook.
+//! of an mdBook. Code means a source or configuration blob ([`is_code_evidence`]): data and log
+//! files, the audit trail and the subtrees the key space excludes name documents as data, so they
+//! freeze nothing.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::librarian::identity::key::{components, folder_of};
+use crate::librarian::identity::key_space::KeySpace;
 /// `HEAD`'s non-markdown text blobs, reduced to the markdown paths they name, and the mdBook
 /// source trees of `HEAD`.
 pub struct CodeRefs {
@@ -19,8 +22,14 @@ pub struct CodeRefs {
 
 impl CodeRefs {
     /// Read the non-markdown blobs of `commit`: those that are UTF-8 with no NUL byte. A symlink
-    /// and a submodule are not blobs of text and are skipped.
-    pub fn load(repo: &git2::Repository, commit: &git2::Commit) -> anyhow::Result<CodeRefs> {
+    /// and a submodule are not blobs of text and are skipped. Only a blob that
+    /// [`is_code_evidence`] accepts is searched for the paths it names; every `book.toml` names an
+    /// mdBook source tree.
+    pub fn load(
+        repo: &git2::Repository,
+        commit: &git2::Commit,
+        space: &KeySpace,
+    ) -> anyhow::Result<CodeRefs> {
         let tree = commit.tree()?;
         let mut named: HashMap<String, Vec<(String, u32)>> = HashMap::new();
         let mut book_srcs = Vec::new();
@@ -36,6 +45,10 @@ impl CodeRefs {
             if is_markdown(&path) {
                 return git2::TreeWalkResult::Ok;
             }
+            let evidence = is_code_evidence(&path, space);
+            if !evidence && name != "book.toml" {
+                return git2::TreeWalkResult::Ok;
+            }
             let Ok(blob) = repo.find_blob(entry.id()) else {
                 return git2::TreeWalkResult::Ok;
             };
@@ -49,7 +62,9 @@ impl CodeRefs {
             if name == "book.toml" {
                 book_srcs.push((book_src_dir(&path, text), path.clone()));
             }
-            note_markdown_paths(&mut named, &path, text);
+            if evidence {
+                note_markdown_paths(&mut named, &path, text);
+            }
             git2::TreeWalkResult::Ok
         })?;
         Ok(CodeRefs { named, book_srcs })
@@ -114,6 +129,28 @@ pub(crate) const LINK_MODE: i32 = 0o120000;
 
 fn is_markdown(path: &str) -> bool {
     path.len() >= 3 && path.as_bytes()[path.len() - 3..].eq_ignore_ascii_case(b".md")
+}
+
+/// The extensions (ASCII case ignored) of blobs that hold data or logs: eval manifests, evidence
+/// records, lists and tables name documents as values, and no program reads the document at the
+/// path they hold.
+const DATA_EXTENSIONS: [&str; 5] = ["jsonl", "txt", "json", "csv", "log"];
+
+/// The audit trail of the catalog: tracked records of past calls, each naming the document a call
+/// touched.
+const AUDIT_DIR: &str = ".codescout/audit/";
+
+/// Whether the blob at `path` counts as code for D-R26: a source or configuration file (`.rs`,
+/// `.py`, `.sh`, `.toml`, `.yaml` and every other extension), which a program reads or runs, so a
+/// path it names may be opened at run time. A data or log file ([`DATA_EXTENSIONS`]), a record of
+/// the audit trail ([`AUDIT_DIR`]) and a blob under a subtree the key space excludes are not code:
+/// each names documents as data, and on this repository they named most of `docs/` (I1).
+fn is_code_evidence(path: &str, space: &KeySpace) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let data = name
+        .rsplit_once('.')
+        .is_some_and(|(_, ext)| DATA_EXTENSIONS.iter().any(|d| ext.eq_ignore_ascii_case(d)));
+    !data && !path.starts_with(AUDIT_DIR) && !space.is_outside(path)
 }
 
 /// The normalised source directory of the book that `book_toml` (a path) configures: `[book]
@@ -216,7 +253,9 @@ mod tests {
         let entries: Vec<(&str, u32, &[u8])> = files.iter().map(|&(p, b)| (p, FILE, b)).collect();
         let repo = repo_with(&root, &entries);
         let commit = open_commit(&repo, "HEAD").unwrap();
-        CodeRefs::load(&repo, &commit).unwrap()
+        let space =
+            crate::librarian::derived::build::key_space_from_commit(&repo, &commit).unwrap();
+        CodeRefs::load(&repo, &commit, &space).unwrap()
     }
 
     #[test]
@@ -326,5 +365,44 @@ mod tests {
         assert_eq!(refs.frozen("docs/x.md"), None, "a markdown blob is no code");
         assert_eq!(refs.frozen("docs/y.md"), None, "a NUL byte marks a binary");
         assert_eq!(refs.frozen("docs/z.md"), None, "invalid UTF-8 is no text");
+    }
+
+    /// I1: data, logs and the audit trail name documents without reading them by path. Only
+    /// source files are evidence, so none of these freezes `docs/a.md`.
+    #[test]
+    fn data_logs_and_the_audit_trail_do_not_freeze_a_file() {
+        for blob in [
+            "evals/seed-manifest.jsonl",
+            "evidence/run.json",
+            "notes/list.txt",
+            "evals/table.csv",
+            "logs/run.log",
+            ".codescout/audit/ripper-202611.yaml",
+            "contrib/tool.rs",
+        ] {
+            let refs = refs_of(&[
+                (".codescout/key-space.toml", b"exclude = [\"contrib\"]\n"),
+                (blob, b"{\"path\": \"docs/a.md\"}\n"),
+                ("docs/a.md", b"# A\n"),
+            ]);
+            assert_eq!(refs.frozen("docs/a.md"), None, "{blob} is no code evidence");
+            assert!(refs.mentions("docs/a.md").is_empty(), "{blob}");
+        }
+    }
+
+    #[test]
+    fn a_source_file_still_freezes_a_file_it_names() {
+        for blob in ["src/x.rs", "scripts/run.py", "tools/check.sh", "Cargo.toml"] {
+            let refs = refs_of(&[
+                (".codescout/key-space.toml", b"exclude = [\"contrib\"]\n"),
+                (blob, b"P = \"docs/a.md\"\n"),
+                ("docs/a.md", b"# A\n"),
+            ]);
+            let why = refs.frozen("docs/a.md").unwrap_or_else(|| panic!("{blob}"));
+            assert!(why.contains(&format!("{blob}:1")), "{why}");
+        }
+        // The extension is read without case, so `RUN.JSONL` is data as well.
+        let refs = refs_of(&[("RUN.JSONL", b"docs/a.md\n"), ("docs/a.md", b"# A\n")]);
+        assert_eq!(refs.frozen("docs/a.md"), None);
     }
 }

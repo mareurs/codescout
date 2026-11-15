@@ -70,8 +70,10 @@ impl RenameSet {
     }
 
     /// Old key to every document of `HEAD` it could have named, for each old key that a document
-    /// other than the renamed file also has: the same lowercase stem, its rename not applied (it was
-    /// refused, or it has no rename). A link written with such a key is not followed to the renamed
+    /// other than the renamed file also gives: [`key_of`] of that document's path gives the old key
+    /// as its non-canonical key, in ASCII lowercase (a folder index gives its folder's name), and
+    /// its rename is not applied (it was refused, or it has no rename). A link written with such a
+    /// key is not followed to the renamed
     /// file. The renamed file is named by the path `HEAD` holds: the old one while this run renames
     /// it, the new one after the commit.
     pub fn ambiguous_keys<'a>(
@@ -449,7 +451,9 @@ mod tests {
             .collect();
         let repo = repo_with(&root, &entries);
         let commit = open_commit(&repo, "HEAD").unwrap();
-        let refs = CodeRefs::load(&repo, &commit).unwrap();
+        let space =
+            crate::librarian::derived::build::key_space_from_commit(&repo, &commit).unwrap();
+        let refs = CodeRefs::load(&repo, &commit, &space).unwrap();
         let docs: Vec<DocInput> = files
             .iter()
             .filter(|(p, _)| p.ends_with(".md"))
