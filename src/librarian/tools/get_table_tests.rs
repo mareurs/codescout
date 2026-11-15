@@ -165,6 +165,76 @@ async fn entry_filter_filters_on_status_and_on_a_declared_field() {
     assert!(out.get("filter_warnings").is_none(), "{out}");
 }
 
+const GLOSSARY: &str = "docs/trackers/ledgers/g/readme.md";
+
+/// A glossary `g`: named keys, one entry kind, and a declared list field `aliases`.
+const GLOSSARY_README: &str = "---\ntitle: Glossary\nentry_kinds: [term]\n\
+    statuses: {open: open, gone: terminal}\n\
+    initial_status: open\nkey_style: name\nfields:\n  aliases: {type: list}\n---\n\n\
+    # Glossary\n\nWhat we call things.\n";
+
+/// An open entry document of kind `term`, created 2026-11-01, plus `more` frontmatter lines.
+fn term(title: &str, more: &str) -> String {
+    format!(
+        "---\nentry_kind: term\ntitle: {title}\nstatus: open\nstatus_since: 2026-11-01\n\
+         created: 2026-11-01\n{more}---\n\n## Meaning\n\nText.\n"
+    )
+}
+
+/// A list field is filterable by membership: `contains` and `in` reach the array branch of the
+/// filter on a collection's flat rows, and an entry without the field matches neither.
+#[tokio::test]
+async fn a_list_field_is_filterable_by_membership() {
+    let tmp = project(&[
+        (GLOSSARY, GLOSSARY_README),
+        (
+            "docs/trackers/ledgers/g/weekly-status.md",
+            &term("Weekly status", "aliases: [wsr, status-report]\n"),
+        ),
+        (
+            "docs/trackers/ledgers/g/risk-log.md",
+            &term("Risk log", "aliases: [rl]\n"),
+        ),
+        (
+            "docs/trackers/ledgers/g/glossary-intro.md",
+            &term("Glossary intro", ""),
+        ),
+    ]);
+    let ctx = mk_ctx(tmp.path());
+    let id = seed(&ctx, tmp.path(), GLOSSARY, "collection");
+
+    let keys_for = |filter: Value| {
+        let ctx = &ctx;
+        let id = &id;
+        async move {
+            let out = get(ctx, json!({"id": id, "entry_filter": filter}))
+                .await
+                .unwrap();
+            let keys: Vec<String> = out["entries"]
+                .as_array()
+                .unwrap_or_else(|| panic!("no entries in {out}"))
+                .iter()
+                .map(|e| e["key"].as_str().unwrap().to_string())
+                .collect();
+            (keys, out["entry_total"].clone())
+        }
+    };
+
+    let (keys, _) = keys_for(json!({"aliases": {"contains": "wsr"}})).await;
+    assert_eq!(keys, ["weekly-status"]);
+
+    let (keys, total) = keys_for(json!({"aliases": {"contains": "nope"}})).await;
+    assert!(keys.is_empty(), "{keys:?}");
+    assert_eq!(total, json!(3), "the filter ran over all three entries");
+
+    let (keys, _) = keys_for(json!({"aliases": {"in": ["rl", "wsr"]}})).await;
+    assert_eq!(keys, ["risk-log", "weekly-status"]);
+    assert!(
+        !keys.contains(&"glossary-intro".to_string()),
+        "an entry with no aliases line matches neither operator"
+    );
+}
+
 /// A stray key named like a column cannot shadow the column in a flat row.
 #[tokio::test]
 async fn a_rows_own_column_wins_over_a_stray_key_of_the_same_name() {
