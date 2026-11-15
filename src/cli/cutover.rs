@@ -249,7 +249,7 @@ const NEXT_STEP: &str = "Commit the changed files, then run: codescout cutover b
 /// How long `export` tries for the project write lock before it refuses. D-R30 names timeout 0,
 /// but `write_guard::acquire` treats a zero budget as already spent and refuses even a free lock
 /// (measured: "timed out before checking cross-process write lock"), so this is the smallest
-/// budget that tries the lock. `acquire` retries every 50 ms until the budget is spent (about five
+/// budget that tries the lock. `acquire` retries every 50 ms until the budget is spent (six
 /// tries), so a held lock is a refusal after a quarter of a second, not a wait.
 const LOCK_ATTEMPT: Duration = Duration::from_millis(250);
 
@@ -270,7 +270,7 @@ fn lock_refusal(e: &anyhow::Error) -> anyhow::Error {
 /// Run `cutover export`: plan `HEAD`, refuse when the new catalog exists or the project write
 /// lock is held, re-check the old catalog, write the plan into the working tree, and keep the
 /// report beside the old catalog. It returns no error: whatever stops the run becomes an outcome
-/// with code 2, and a run that refused some files has code 1.
+/// with code 2, and a run that refused some files, or could not keep a report file, has code 1.
 ///
 /// The order is D-R8 and D-R30. The side-file refusal is the primary guard (an idle server holds
 /// no lock); the lock keeps another CLI writer out, with a budget of [`LOCK_ATTEMPT`] so a held
@@ -461,8 +461,8 @@ fn existing_checkout(path: &Path) -> Result<Option<(String, String)>> {
         bail!(
             "a -wal, -shm or non-empty -journal file lies beside {DERIVED_CATALOG_FILE}. If a \
              codescout process holds it, stop that process. Otherwise move {DERIVED_CATALOG_FILE} \
-             and its -wal and -shm files aside, or delete them (git can rebuild them), then run \
-             this again"
+             and its -wal, -shm and -journal files aside, or delete them (git can rebuild them), \
+             then run this again"
         );
     }
     let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -521,7 +521,7 @@ fn build_run(
     // one: a build replaces every row, so it never builds over another repository's catalog. Two
     // repositories with no committed `repo.toml` are both called `repo`, so the name alone does
     // not tell them apart: the commit of the `checkout` row must also be a commit of this
-    // repository. A worktree or a clone shares the history and has it. The checkout root is not
+    // repository. A worktree, or a clone that has that commit, passes. The checkout root is not
     // compared: it differs per worktree of one repository.
     let new_catalog = derived_catalog_beside(&loaded.old_db);
     if let Some((name, sha)) = existing_checkout(&new_catalog)? {
@@ -1022,7 +1022,7 @@ mod tests {
         .expect("export refuses a held lock; it does not wait for it");
         assert_eq!(out.code, 2, "{}", out.stdout);
         assert!(
-            out.stdout.contains("write lock"),
+            out.stdout.contains("the project write lock is not free"),
             "the refusal names the lock: {}",
             out.stdout
         );
@@ -1752,9 +1752,8 @@ mod tests {
         );
     }
 
-    // mutation: refuse a new catalog whose commit is not in the repository's own object store
-    // without asking whether the commit is in its history (a clone has the commit, a worktree
-    // shares the store).
+    // mutation: also compare the checkout root (a clone lies at another root), or refuse any
+    // existing row.
     #[tokio::test]
     async fn build_over_the_new_catalog_of_a_clone_of_the_same_repository_rebuilds() {
         let a = fixture();
@@ -1809,7 +1808,7 @@ mod tests {
             out.stdout.contains("lies beside derived.db")
                 && out
                     .stdout
-                    .contains("move derived.db and its -wal and -shm files aside"),
+                    .contains("move derived.db and its -wal, -shm and -journal files aside"),
             "{}",
             out.stdout
         );

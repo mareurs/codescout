@@ -104,7 +104,8 @@ pub fn render_markdown(plan: &ExportPlan, h: &ReportHeader) -> String {
     }
     for item in &blocked {
         let _ = write!(out, "- {}", item_line(item));
-        if let Some(detail) = &item.detail {
+        // `item_line` already prints a rename's detail (its blockers).
+        if let (false, Some(detail)) = (item.class == Class::Rename, &item.detail) {
             let _ = write!(out, " — blockers: {detail}");
         }
         out.push('\n');
@@ -603,8 +604,18 @@ mod tests {
         plan.items.push(blocked);
         let text = render_markdown(&plan, &header());
         let line = "- docs/My_Notes.md — named by code — scripts/run.sh:4 and 2 more; \
-                    would be docs/my-notes.md — use docs/docs-my-notes.md";
-        assert!(text.contains(line), "{text}");
+                    would be docs/my-notes.md — use docs/docs-my-notes.md\n";
+        let section = text
+            .split("## Frozen files and blocked renames\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .unwrap();
+        assert!(section.contains(line), "{section}");
+        assert_eq!(
+            section.matches("scripts/run.sh:4 and 2 more").count(),
+            1,
+            "the detail is printed once: {section}"
+        );
     }
 
     #[test]

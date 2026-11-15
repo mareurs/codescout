@@ -168,7 +168,16 @@ A `skipped` event has one of these reasons:
 - `the frontmatter holds it`
 - `the worktree overlay is removed`
 
-An observation that has no home gets one of the first three reasons.
+A `skipped` observation has one of these reasons:
+
+- `carried by its note event`: the note event holds the same text, so its section
+  holds the fact.
+- `no committed home yet: not a single-writer document`
+- `no committed home yet: ledger or entry document`
+
+An observation is `unrecoverable` with `another section holds id observation-<n>`
+when the text holds a section with its id and other content. Another machine wrote
+that section for its own observation.
 
 A skipped row stays in the old catalog. The section `## Rows with no committed home`
 lists these rows by file.
@@ -207,7 +216,7 @@ The tool refuses a rename and reports it with one of these reasons:
 | `hex-shaped name` | The new name is 16 hex digits. It would read as an artifact id. |
 | `target exists` | The new name is already a file, or the old catalog holds a live row for it. |
 | `key collision` | Another document holds the new key. The report suggests `<parent folder>-<stem>`. |
-| `named by code` | A file that is not markdown holds the old name or the old path. The detail lists `path:line`. |
+| `named by code` | A code file holds the old name or the old path (see [Frozen files](#frozen-files)). The detail lists `path:line`. |
 | `frozen: <why>` | A tool reads the file by path. See below. |
 
 ## Frozen files
@@ -229,21 +238,29 @@ A file is frozen in these cases:
 To read a `frozen:` reason, open the `path:line` it names. That line holds the name
 of the markdown file.
 
-**The code scan is wide.** The scan reads every text file of `HEAD` that is not
-markdown. This includes data and evidence trees: `.jsonl` files, `.txt` files,
-recorded transcripts. It cannot tell code from data. A line in a data file that
-holds `notes.md` freezes `notes.md`. A repository with such trees can report many
-`frozen:` reasons. Most of them are not real.
+**What counts as code.** The code scan reads the text files of `HEAD` that are not
+markdown. It skips these files, because they name documents as data:
+
+- data and log files: `.jsonl`, `.json`, `.txt`, `.csv` and `.log`;
+- the audit trail under `.codescout/audit/`;
+- every subtree that the key space excludes.
+
+Every other text file counts as code: source files, scripts and configuration, such
+as `.rs`, `.py`, `.sh`, `.toml` and `.yaml`. A comment counts too. A doc comment that
+holds `docs/issues/x.md` freezes that file. A repository whose code cites documents
+in comments can report many `frozen:` reasons.
 
 For each `frozen:` reason, decide:
 
 1. Open the line that the reason names.
 2. If code reads the file at that line, leave the file as it is. The tool is right.
-3. If the line is only data, nothing reads the file by path. Change the file by
-   hand, commit, and run `cutover plan` again. The plan reads the new `HEAD`.
+3. If the line only mentions the file, nothing reads the file by path. A comment is
+   an example. Change the file by hand, commit, and run `cutover plan` again. The
+   plan reads the new `HEAD`.
 
-The key space does not help here. It controls which markdown files have keys. It
-does not hide a data tree from the code scan.
+A data tree with another extension can freeze files too. Exclude that tree in
+`.codescout/key-space.toml`, commit, and run `cutover plan` again. The markdown
+files of an excluded tree have no key.
 
 ## Build
 
@@ -266,16 +283,21 @@ cases:
   codescout process, then use the `sqlite3` command above.
 - A `-wal`, `-shm` or non-empty `-journal` file lies beside `derived.db`. A killed
   build or a killed reader leaves these files. If a codescout process holds the
-  file, stop that process. Otherwise move `derived.db` and its `-wal` and `-shm` files
-  aside, or delete them (git can rebuild them). Then run `build` again.
+  file, stop that process. Otherwise move `derived.db` and its `-wal`, `-shm` and
+  `-journal` files aside, or delete them (git can rebuild them). Then run `build`
+  again.
 - `derived.db` is not a new catalog. It is a file of another program.
-- `derived.db` was made by a newer codescout than this one.
+- A newer codescout made `derived.db`.
 - `derived.db` was built for another repository. One old catalog can hold the rows
   of several repositories, but the new catalog beside it serves one. The name in its
   `checkout` row differs from this repository's name, or the commit in that row is not
-  in this repository's history. A worktree or a clone of the same repository has that
-  commit, so it rebuilds the file. Move `derived.db` aside, or delete it (git can
-  rebuild it), then run `build` again.
+  in this repository's history. A worktree, or a clone that has that commit, rebuilds
+  the file. Move `derived.db` aside, or delete it (git can rebuild it), then run
+  `build` again.
+
+Do not cut over a second repository before Plan E decides where the new catalog of
+each repository lives. One `derived.db` can sit beside the shared old catalog at a
+time.
 
 A `derived.db` that holds no build is not another repository's file. A failed first
 build leaves such a file. `build` builds over it.
@@ -306,5 +328,5 @@ The old catalog is never written.
 - an export that is not committed (`build`);
 - a `HEAD` that moved after the plan (`build`);
 - a side file beside `derived.db` (`build`);
-- a `derived.db` that is not a new catalog, was made by a newer codescout, or was built
-  for another repository (`build`).
+- a `derived.db` that is not a new catalog, that a newer codescout made, or that
+  another repository built (`build`).
