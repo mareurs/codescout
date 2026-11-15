@@ -17,9 +17,9 @@ use crate::librarian::catalog::dual_write::frontmatter_mark;
 use crate::librarian::catalog::event_text::{fence_for, one_line, EVENTS_HEADING};
 use crate::librarian::catalog::link_text::RELATIONS_HEADING;
 use crate::librarian::cutover::plan::{Class, Item, RewriteAdded, Status};
-use crate::librarian::entry_token::entry_tokens_by_line;
 use crate::librarian::frontmatter;
 use crate::librarian::preview::headings;
+use crate::librarian::tools::link_scan::extract::entry_sections;
 
 /// The info string of the fenced block that holds an entry's params.
 const ENTRY_INFO: &str = "params-entry";
@@ -138,14 +138,27 @@ fn parse_token(id: &str) -> Option<(&str, u64)> {
     Some((prefix, digits.parse().ok()?))
 }
 
-/// The text each entry token owns: its heading and every line up to the next heading at or above
-/// its level (`entry_tokens_by_line`), by token. A token defined twice owns both regions.
+/// The text each entry token owns, by token: the sections the index reads ([`entry_sections`],
+/// the reader of [`defined_tokens`](crate::librarian::identity::index::defined_tokens)), so a
+/// token is a key exactly when the index reads the text as defining it. Frontmatter, a line inside
+/// a code fence and a line of seven or more `#` define nothing. A line inside a nested section is
+/// owned by the innermost one; a token defined twice owns both regions.
 fn section_texts(text: &str) -> BTreeMap<String, String> {
-    let owners = entry_tokens_by_line(text);
+    let lines: Vec<&str> = text.lines().collect();
+    // Sections come in document order, so a later section that covers a line is nested in the
+    // earlier ones that do: it overwrites them.
+    let mut owners: Vec<Option<String>> = vec![None; lines.len()];
+    for section in entry_sections(text) {
+        let first = section.heading_line as usize - 1;
+        let last = (section.end_line as usize).min(lines.len());
+        for owner in &mut owners[first..last] {
+            *owner = Some(section.id.clone());
+        }
+    }
     let mut sections: BTreeMap<String, String> = BTreeMap::new();
-    for (n, line) in text.lines().enumerate() {
-        if let Some(Some(token)) = owners.get(n + 1) {
-            let section = sections.entry(token.clone()).or_default();
+    for (line, owner) in lines.iter().zip(owners) {
+        if let Some(token) = owner {
+            let section = sections.entry(token).or_default();
             section.push_str(line);
             section.push('\n');
         }
@@ -485,7 +498,6 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::dual_write::frontmatter_mark;
     use crate::librarian::cutover::plan::{Class, Status};
-    use crate::librarian::entry_token::entry_tokens_by_line;
 
     fn row(params: &str, collection: Option<&str>) -> AugmentationRow {
         AugmentationRow {
@@ -567,10 +579,10 @@ mod tests {
         items.iter().map(|i| i.status).collect()
     }
 
-    /// The distinct entry tokens a text defines, in order.
+    /// The distinct entry tokens a text defines for the index, in order.
     fn defined(text: &str) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
-        for token in entry_tokens_by_line(text).into_iter().flatten() {
+        for token in crate::librarian::identity::index::defined_tokens(text) {
             if !out.contains(&token) {
                 out.push(token);
             }
@@ -601,6 +613,74 @@ mod tests {
         assert!(items.iter().all(|i| i.class == Class::ParamsEntry));
         assert!(items.iter().all(|i| i.path.as_deref() == Some("docs/l.md")));
         assert_eq!(items[1].detail.as_deref(), Some("F-2"));
+    }
+
+    /// F1: recovery reads "the text defines the token" with the index's reader
+    /// ([`defined_tokens`](crate::librarian::identity::index::defined_tokens)), and a seven-hash
+    /// line is no heading for it.
+    #[test]
+    fn a_seven_hash_line_is_not_the_section_of_its_token() {
+        let row = entries_row(r#"[{"id":"F-2","title":"two"}]"#);
+        let text = format!("{LEDGER}\n####### F-2 — fake\n");
+        let (out, items) = recover("l.md", &text, &row);
+        assert_eq!(statuses(&items), [Status::Moved], "{items:?}");
+        assert!(
+            out.contains("\n####### F-2 — fake\n\n## F-2 — two\n"),
+            "{out}"
+        );
+    }
+
+    /// F2: the index reads only the body, so a frontmatter comment shaped like an entry heading is
+    /// not the section of its token for recovery either.
+    #[test]
+    fn a_frontmatter_comment_is_not_the_section_of_its_token() {
+        let row = entries_row(r#"[{"id":"F-2","title":"two"}]"#);
+        let text = LEDGER.replace("entry_prefix: F\n", "entry_prefix: F\n## F-2 — two\n");
+        let (out, items) = recover("l.md", &text, &row);
+        assert_eq!(statuses(&items), [Status::Moved], "{items:?}");
+        let (_, body) = frontmatter::parse(&out).unwrap();
+        assert!(body.contains("\n## F-2 — two\n"), "{out}");
+    }
+
+    /// The other way round: a level-1 heading defines its token for the index, so recovery reads
+    /// the entry as defined and writes no second section.
+    #[test]
+    fn a_level_one_heading_is_the_section_of_its_token() {
+        let row = entries_row(r#"[{"id":"F-2"}]"#);
+        let text = format!("{LEDGER}\n# F-2 — top\n\nx\n");
+        let (out, items) = recover("l.md", &text, &row);
+        assert_eq!(statuses(&items), [Status::AlreadyExported], "{items:?}");
+        assert_eq!(out, text);
+    }
+
+    /// A nested entry owns its own lines: its heading defines it, and its parent's fields are not
+    /// read from them.
+    #[test]
+    fn a_nested_entry_owns_its_lines() {
+        let text = format!("{LEDGER}\n### F-2 — nested\n\nseverity: high\n");
+        let row = entries_row(r#"[{"id":"F-1","severity":"high"},{"id":"F-2","severity":"high"}]"#);
+        let (out, items) = recover("l.md", &text, &row);
+        assert_eq!(out, text);
+        assert_eq!(
+            statuses(&items),
+            [Status::Skipped, Status::AlreadyExported],
+            "{items:?}"
+        );
+    }
+
+    /// A heading with no line under it is the whole section of its token: the entry is defined, and
+    /// no second section is written.
+    #[test]
+    fn a_heading_alone_is_the_section_of_its_token() {
+        let row = entries_row(r#"[{"id":"F-2"},{"id":"F-3"}]"#);
+        let text = format!("{LEDGER}\n## F-2 — two\n## F-3 — three");
+        let (out, items) = recover("l.md", &text, &row);
+        assert_eq!(out, text);
+        assert_eq!(
+            statuses(&items),
+            [Status::AlreadyExported, Status::AlreadyExported],
+            "{items:?}"
+        );
     }
 
     #[test]

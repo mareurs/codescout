@@ -469,9 +469,11 @@ fn augmentations_by_path<'a>(
 /// is built from these texts and the first plan resolves a token as the plan after the commit does
 /// (D-R20, D-R9).
 ///
-/// The sections are found with a rewrite that changes nothing. The citation rewrite changes no
-/// heading and no code fence, so it does not change which sections a document defines or which
-/// read back.
+/// The sections are found with a rewrite that changes nothing. Recovery reads which tokens a text
+/// defines with the reader the index uses (`entry_sections`), and the citation rewrite changes no
+/// line that reader reads as a definer: no heading, nothing inside a code fence and nothing in the
+/// frontmatter. A line it does change, such as a seven-hash line, defines nothing before or after.
+/// So the rewrite does not change which sections a document defines or which read back.
 fn texts_with_entries(
     old: &OldRows,
     head: &Head,
@@ -3197,6 +3199,77 @@ mod tests {
         assert_eq!(citation_reasons_in(&first, "docs/src.md"), []);
         assert_fixed_point(&second);
     }
+
+    /// The ledger `head` with the params entry `F-2` beside `files`: `(first plan, plan after the
+    /// commit)`.
+    fn ledger_entry_plans(head: &str, files: &[(&str, &str)]) -> (ExportPlan, ExportPlan) {
+        let mut all: Vec<(&str, &[u8])> = vec![("docs/ledger.md", head.as_bytes())];
+        all.extend(files.iter().map(|&(path, text)| (path, text.as_bytes())));
+        plan_commit_and_replan(&all, |cat, root| {
+            add_doc(cat, root, "led", "docs/ledger.md");
+            add_augmentation(
+                cat,
+                "led",
+                r#"{"entries":[{"id":"F-2","title":"two"}]}"#,
+                Some("entries"),
+            );
+        })
+    }
+
+    /// F1: a seven-hash line is no heading for the index, so recovery does not read it as the
+    /// section of `F-2` either. The first plan recovers the section, and the line, a bare `F-2` its
+    /// own ledger defines, stays as it is (D-R20).
+    #[test]
+    fn a_seven_hash_line_defines_no_entry_for_recovery_either() {
+        let head = format!("{LEDGER_MD}\n####### F-2 — fake\n");
+        let (first, second) = ledger_entry_plans(
+            &head,
+            &[
+                ("docs/b.md", "# B\n\n## F-2 — b\n"),
+                ("docs/src.md", "# Src\n\nsee ledger:F-2 here.\n"),
+            ],
+        );
+        assert_eq!(
+            statuses_of(&first, Class::ParamsEntry),
+            [Status::Moved],
+            "{:#?}",
+            first.items
+        );
+        let ledger = &first.files["docs/ledger.md"].new_text;
+        assert!(ledger.contains("\n####### F-2 — fake\n"), "{ledger}");
+        assert!(ledger.contains("\n## F-2 — two\n"), "{ledger}");
+        let text = first.files.get("docs/src.md").map(|f| f.new_text.as_str());
+        assert_eq!(text, Some("# Src\n\nsee [[ledger:F-2]] here.\n"));
+        assert_eq!(
+            citation_reasons_in(&first, "docs/src.md"),
+            [(Status::Moved, "rewritten: stem token")]
+        );
+        assert_fixed_point(&second);
+    }
+
+    /// F2: a frontmatter comment shaped like an entry heading is not the section of `F-2`: the
+    /// index reads only the body, and so does recovery. The first plan recovers the section and
+    /// rewrites both citations.
+    #[test]
+    fn a_frontmatter_comment_defines_no_entry_for_recovery_either() {
+        let head =
+            "---\nkind: tracker\nentry_prefix: F\n## F-2 — two\n---\n\n# L\n\n## F-1 — one\n\nx\n";
+        let (first, second) =
+            ledger_entry_plans(head, &[("docs/src.md", "see F-2 here and ledger:F-2.\n")]);
+        assert_eq!(
+            statuses_of(&first, Class::ParamsEntry),
+            [Status::Moved],
+            "{:#?}",
+            first.items
+        );
+        let ledger = &first.files["docs/ledger.md"].new_text;
+        let (_, body) = crate::librarian::frontmatter::parse(ledger).unwrap();
+        assert!(body.contains("\n## F-2 — two\n"), "{ledger}");
+        let text = first.files.get("docs/src.md").map(|f| f.new_text.as_str());
+        assert_eq!(text, Some("see [[ledger:F-2]] here and [[ledger:F-2]].\n"));
+        assert_fixed_point(&second);
+    }
+
     /// C1-b: a recovered section after a last line with trailing spaces leaves that line as it is,
     /// so the first plan reports its citation once, as the plan after the commit does.
     #[test]
