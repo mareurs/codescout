@@ -9,8 +9,8 @@ topic: tracker organization
 entry_prefix:
 - F
 - W
-entry_high_water_F: 5
-entry_high_water_W: 5
+entry_high_water_F: 6
+entry_high_water_W: 6
 ---
 # Session Log — Tracker Organization
 
@@ -115,6 +115,7 @@ entry_high_water_W: 5
 | F-3 | 2026-11-14 | med | stale-claim | open | **"L-B2 is blocked until identity Plan C exists" named the wrong plan** — the key-addressed tools need the Plan E flip; every doc action still takes a 16-hex id |
 | F-4 | 2026-11-14 | med | process-gap | open | **Ten green task reviews, red gate** — the read-door scanner flags a write-only `OpenOptions` and runs only in the full gate |
 | F-5 | 2026-11-14 | med | stale-claim | mitigated | **The routing rule "place(rel_path) gives Role::Entry" held only for rows directly under a managed root** — a nested-worktree row skipped the lifecycle route silently; fixed for Unix, Windows parked |
+| F-6 | 2026-11-15 | med | process-gap | mitigated | **A second gate-only test missed by six green task reviews** — `result_caps` wants a `cap-class` line on `KEY_HOT_CAP`; per-task reviews run no suite (see F-4) |
 | F-<n> | YYYY-MM-DD | low/med/high | <category> | open | <one-line title> |
 
 ## Wins Index
@@ -126,6 +127,7 @@ entry_high_water_W: 5
 | W-3 | 2026-11-11 | med | measure the ledger before ruling on two spec ambiguities | a 14-day default grace would have made doctor report 69 stale terminal entries on day one against a ledger swept about monthly | validated |
 | W-4 | 2026-11-12 | med | an Opus plan review with the code open, before the first dispatch | a correct implementation would have failed the plan's own first check test, and a behaviour change of an existing check would have shipped unannounced | validated |
 | W-5 | 2026-11-14 | med | a whole-branch Opus review after ten task reviews, with the deferred Minors and the Review Focus in the brief | I-1 would have shipped as a silent skip of the lifecycle route for nested-worktree rows, and I-2 as a lost body edit on `extra:{}` | validated |
+| W-6 | 2026-11-15 | high | an Opus plan review with the code open before the first dispatch, and ranking fixtures whose two dates are set independently | the cap would have hidden the stale entries, three tests would have passed against a sort by `created`, and a huge `stale_after` would have panicked the hook's command | validated |
 | W-<n> | YYYY-MM-DD | low/med/high | <pattern> | <what-would-have-happened> | open |
 
 ---
@@ -479,6 +481,30 @@ be reshaped after the plan was written.
 **Rests on:** the final review report (I-1), the re-review report (F2 verdict and Minor 3), `src/librarian/tools/mod.rs` `root_and_rel_path` and `util.rs` `door_root`, read on 2026-11-14.
 
 **Fix:** done for the Unix case. The Windows case is parked in the parked-items memory `tracker-lifecycle-parked-items` (§ Parked from tools part 1).
+
+## F-6 — Six green task reviews, red gate again: a cap-class scanner flagged KEY_HOT_CAP, the second test that only the full gate runs
+
+**Valid:** dated 2026-11-15
+
+**Observed:** The collection hot view branch (plan `docs/superpowers/plans/2026-11-15-collection-hot-view.md`) ran six independent Opus task reviews, all green. The first full gate (`./scripts/gate.sh`) on head `8d9b3402b` was red in both Rust lanes: `tests/result_caps.rs every_cap_constant_is_classified` — `src/librarian/lifecycle/schema.rs:159 KEY_HOT_CAP — no cap-class annotation`. A scanner over every constant in the repository wants a `// cap-class: RESULT_CAP …` or `// cap-class: NOT_A_CAP — <reason>` line on a constant whose name looks like a cap. `KEY_HOT_CAP` is the name of a readme key, not a bound. Python (1836), fmt and clippy were green.
+
+**Cost:** One red gate run (7 minutes) and a place in the single fix wave. No wrong code shipped: the gate caught it before the landing. Same class as F-4 (the read-door scanner): a check that only the full gate runs, which no per-task review or per-task test command exercises.
+
+**Fix:** One annotation line (fix wave, `356803a85`). The structural gap stays: per-task reviews run no suite. A task that adds a constant, a file read or an `OpenOptions` should run `scripts/with-slot.sh cargo test --test result_caps` and the read-door test before its review.
+
+**Rests on:** gate output `@bg_00000032` of 2026-11-15 (lean and default lanes, one failure each); the green re-run `GATE EXITS FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0` on `436cafd19` and `5d655bfef`.
+
+## W-6 — An Opus plan review before the first dispatch found six Important defects, among them tests that could not fail
+
+**Valid:** dated 2026-11-15
+
+**Observed:** Before the first dispatch of the collection hot view plan, an independent Opus reviewer read the plan against the code at `fddfe01f2` with the codescout tools open. It found 0 Critical and 6 Important issues, all folded into the plan before any task started: (1) the rank rule (R3) made the cap hide the oldest entries first, which are exactly the stale and long-parked revisit-due ones; (2) three Task 5 tests could pass with wrong code, because `table::rows` already sorts by `created` and every entry helper in the tree writes `status_since` equal to `created`; (3) `hot_view(tree, key)` was ambiguous on a tree with two nodes of one key and rendered `0 of 0 hot` for an archived collection; (4) the stale rule `status_since + n days < today` panics on `stale_after: 4294967295d`, which the parser accepts; (5) the exit-code contract the hook relies on had no test of the built binary and left the root-resolution failure at exit 1; (6) the `--json` shape, `HotReason::RevisitDue` as a struct variant, and the JSON failure text were not pinned. It also corrected two code facts (`key_as_str` was already `pub(super)`; a second `EntryRow` literal in a test).
+
+**Pattern:** An Opus plan review with the code open before the first dispatch, plus a fixture rule it produced: set the two dates of a ranking test independently, so that the wrong order and the right order do not coincide.
+
+**Counterfactual:** The cap would have hidden the stale entries it exists to surface; the order, cap and stale tests would have gone green against a sort by `created`; a readme with a huge `stale_after` would have crashed the session-start command; the hook would have met exit 2 with empty stdout under version skew with a doc that promised a reason. The whole-branch review later found the last one anyway (the doc was still false), which shows the plan review did not replace it.
+
+**Rests on:** the review report of 2026-11-15 (read against `fddfe01f2`); the plan's § Self-review notes and § Outcome; the later whole-branch review (second occurrence of the pattern of W-5).
 
 ## Template for new entries
 
