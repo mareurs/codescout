@@ -29,9 +29,9 @@ Operator decisions, 2026-11-15:
 
 Rulings made in this plan (change them in the plan, not in the code, if you disagree):
 
-- **R1, the open-entry gap.** No check of the eight pinned names questions an `open` entry nobody touches. This plan adds a `stale` flag on the hot view, not a ninth check. The threshold is the readme key `stale_after` (`<n>d`, same grammar as `review_every`). Without the key nothing is flagged: staleness comes from a declared field, never from age alone (parent spec G3). `status_since` is the age source, so re-confirming an entry (rewriting the same status) clears the flag.
-- **R2, what is hot.** A live (not archived) entry is hot when its class is `open`, or when its class is `blocked` or `deferred` and its `revisit_by` is strictly before today. Terminal entries and entries whose status the readme does not declare are never hot.
-- **R3, order and cap.** Order by `status_since` descending, then key ascending. `hot_cap` (a positive whole number) keeps the first N; the view says how many it hid. No `hot_cap` means no cap.
+- **R1, the open-entry gap.** No check of the eight pinned names questions an `open` entry nobody touches. This plan adds a `stale` flag on the hot view, not a ninth check. The threshold is the readme key `stale_after` (`<n>d`, same grammar as `review_every`). Without the key nothing is flagged: staleness comes from declared fields (`status_since`, `stale_after`), never from git (parent spec G3). `status_since` is the age source, so re-confirming an entry (rewriting the same status) clears the flag.
+- **R2, what is hot.** A live (not archived) entry is hot when its class is `open`, or when its class is `blocked` or `deferred` and its `revisit_by` is strictly before today. Terminal entries are never hot. An entry the view cannot judge (a status the readme does not declare, or a blocked or deferred entry with no `revisit_by`) is never hot and is counted in `unclassified`, never silently dropped.
+- **R3, rank, order and cap.** Rank hot entries in three groups: revisit due first, then stale open entries, then the other open entries. Inside a group order by `status_since` descending, then key ascending. `hot_cap` (a positive whole number) keeps the first N, so the cap never hides a flagged entry while an unflagged one is shown. The view says how many it hid and how many of those were flagged. No `hot_cap` means no cap. (Opus review, 2026-11-15: ordering by `status_since` alone made the cap hide the oldest entries first, and the stale and long-parked due entries are the oldest.)
 - **R4, scope.** The view reads one collection folder (`load_collection`, never `load_docs`). It runs no doctor check and its header says so. `check` on a one-folder tree silently drops `cited_target_closed` (`checks.rs`, `tree.closed_dates` holds only that folder), so the view uses no `check` at all.
 - **R5, no pinning.** A `pinned` field is not built. A collection can declare one and filter on it with `doc(get, entry_filter)`.
 
@@ -42,10 +42,10 @@ Not in this plan (operator): a Codex adapter, a second manifest, an importer for
 - **Net-neutral advertised surface.** `TOOL_SURFACE_CHAR_BUDGET` stays `57_664` in `src/server.rs` (65 characters of headroom, measured 2026-11-14). No task edits a tool description or adds a tool argument. Tasks 4 and 6 run `scripts/with-slot.sh cargo test --lib tool_surface_under_budget`.
 - **Pinned contracts untouched.** The eight names in `CHECK_NAMES`, the `Finding` serialization and `identity::index::DocInput` do not change. Nothing under `src/librarian/identity/` changes.
 - `today` is a parameter of every library function. The CLI passes `chrono::Utc::now().date_naive()` (UTC, as `doc(create)` does).
-- "Due" means strictly before `today` (`revisit_by < today`), as `check_entry` has it. "Stale" uses the same strictness (`status_since + n days < today`).
-- The library code reads no file. The CLI reads through `load_collection` only, so `no_librarian_production_read_bypasses_the_read_door` stays green; run it in Task 5 anyway.
+- "Due" means strictly before `today` (`revisit_by < today`), as `check_entry` has it. "Stale" is `idle_days > n`, where `idle_days = (today - status_since).num_days()`. There is no date addition, so a huge `stale_after` cannot overflow, and a `status_since` after `today` (negative `idle_days`) is never stale.
+- The library module reads no file: `no_librarian_production_read_bypasses_the_read_door` guards `src/librarian/` only, and Task 5 runs it. The CLI reads only through `load_collection`; no test guards `src/cli/`, so the whole-branch review checks it.
 - Every new output names its scope. A zero is never printed alone (`docs/adrs/2026-08-27-negative-results-name-their-scope.md`).
-- Run `./scripts/fmt-mine.sh` before each commit (the hook runs `rustfmt --check`). A commit message cites no 16-hex artifact id. No push anywhere.
+- Run `./scripts/fmt-mine.sh` before each commit (the hook runs `rustfmt --check`). If it refuses a lifecycle file with an attribution message, run `rustfmt --edition 2021 <file>` instead (memory `tracker-lifecycle-parked-items` § Process lessons). A commit message cites no 16-hex artifact id. No push anywhere.
 - Tests run through `scripts/with-slot.sh cargo test --lib <name>`.
 
 ## Review Focus
@@ -56,7 +56,9 @@ Failure modes the decisions imply and no existing test covers, most likely first
 2. **Two entries with the same `status_since`.** Expect key order, identical on every run (Task 5).
 3. **A blocked entry whose `revisit_by` is today.** Expect not due and not hot (Tasks 3 and 5).
 4. **An entry file the tree cannot read.** Expect the view to say that problems were found, not to look like a clean empty view (Task 6).
-5. **An unknown, badly spelt or archived collection key.** Expect exit 2 and `NOT SHOWN — <reason>`, never an empty view that looks healthy (Task 6).
+5. **An unknown, badly spelt or archived collection key, or a root that is not a git repository.** Expect exit 2 and `NOT SHOWN — <reason>`, never an empty view that looks healthy (Task 6, in-source and binary tests).
+6. **A cap that binds while stale or due entries exist.** Expect the flagged entries kept, and the hidden line to count how many hidden entries were flagged (Task 5).
+7. **A very large `stale_after`, or a `status_since` after today.** Expect no panic and no stale flag (Task 5).
 
 ## File Structure
 
@@ -106,9 +108,9 @@ Failure modes the decisions imply and no existing test covers, most likely first
 - [ ] **Step 1: Write `a_row_carries_status_since_apart_from_created`** in the `table.rs` tests. Build one entry by hand with `created: 2026-10-01` and `status_since: 2026-10-20`. Assert `row.status_since == d("2026-10-20")`, `row.created == d("2026-10-01")` and `serde_json::to_value(row)["status_since"] == "2026-10-20"`. (A row that copied `created` into it would fail.)
 - [ ] **Step 2: Write `entry_filter_filters_on_status_since`** in `get_table_tests.rs` using `two_entry_project()` (its helper writes `status_since` equal to `created`). Assert `{"status_since": {"gte": "2026-11-02"}}` returns `["2026-11-02-b"]` and that entry's `status_since` is `"2026-11-02"`.
 - [ ] **Step 3: Run both.** Expected: compile error or FAIL (no such field).
-- [ ] **Step 4: Add the field.** `EntryRow.status_since: NaiveDate` from `e.meta.status_since` in `rows`; add `"status_since"` to `TABLE_COLUMNS` in the same position as the struct field.
+- [ ] **Step 4: Add the field.** `EntryRow.status_since: NaiveDate` from `e.meta.status_since` in `rows`; add `"status_since"` to `TABLE_COLUMNS` in the same position as the struct field. Add the field to the second `EntryRow` literal, in the test `the_other_text_cells_are_escaped_too` (`table.rs`), or the tree does not compile.
 - [ ] **Step 5: Run the guards.** `scripts/with-slot.sh cargo test --lib table::`, `... get_table_tests`, `... every_name_in_the_three_reserved_sets_is_refused`. Expected: PASS, including the existing `table_columns_match_the_serialised_row` (it fails if the struct and `TABLE_COLUMNS` disagree).
-- [ ] **Step 6: Commit.** `feat(librarian): status_since is a column of the entry table`.
+- [ ] **Step 6: Commit.** `feat(librarian): status_since is a column of the entry table` (it closes a drift: the tools part 1 spec already lists the column).
 
 ---
 
@@ -149,7 +151,7 @@ Failure modes the decisions imply and no existing test covers, most likely first
 - [ ] **Step 1: Write the schema tests** in `schema.rs`:
   - `hot_view_keys_parse`: `hot_cap: 5` and `stale_after: 45d` give `Some(5)` and `Some(45)`.
   - `absent_hot_view_keys_are_none`: the existing `LEDGER` text gives `None` and `None`.
-  - `a_bad_hot_cap_is_malformed_naming_the_key`: for `0`, `"5"`, `2.5`, `-1` and `true`, `parse_schema` returns an error list containing `Malformed { key: "hot_cap", .. }`.
+  - `a_bad_hot_cap_is_malformed_naming_the_key`: for `0`, `"5"`, `2.5`, `-1`, `true` and `5000000000` (above `u32::MAX`), `parse_schema` returns an error list containing `Malformed { key: "hot_cap", .. }`.
   - `a_bad_stale_after_is_malformed_naming_the_key`: the same for `45`, `"45"`, `"0d"`, `"d"`.
 - [ ] **Step 2: Write `a_collection_readme_with_the_hot_view_keys_renders_and_parses`** in `collection/tests.rs` (beside `a_full_ledger_readme_renders_and_parses`, reusing its `ledger_extra`): add `"hot_cap": 5` and `"stale_after": "45d"` to `extra`, render with `collection_readme`, assert `Ok`, re-parse, assert both fields. And in `create_lifecycle_tests.rs`, `a_collection_create_accepts_hot_cap`: a `doc(create)` collection call with `extra` holding `hot_cap: 3` succeeds and `load_collection(...).schema().hot_cap == Some(3)`.
 - [ ] **Step 3: Run them.** Expected: FAIL (unknown key refused, or no field).
@@ -163,29 +165,34 @@ Failure modes the decisions imply and no existing test covers, most likely first
 
 **Files:**
 - Create: `src/librarian/lifecycle/hot_view.rs`
-- Modify: `src/librarian/lifecycle/mod.rs` (add `pub mod hot_view;`), `src/librarian/lifecycle/table.rs` (`cell` and `key_as_str` become `pub(super)`)
+- Modify: `src/librarian/lifecycle/mod.rs` (add `pub mod hot_view;`), `src/librarian/lifecycle/table.rs` (`cell` becomes `pub(super)`; `key_as_str` already is)
 
 **Interfaces:**
-- Consumes: `table::rows(tree, key, false)`, `entry::revisit_due`, `EntryRow.status_since`, `CollectionSchema.{hot_cap, stale_after_days}`.
-- Produces (all `Serialize`; enums serialise as snake_case words). `Key` has no `Serialize` impl, so `HotView.collection` uses `#[serde(serialize_with = "super::table::key_as_str")]`, as `EntryRow.key` does:
+- Consumes: `table::rows(&loaded.tree, &loaded.key, false)`, `entry::revisit_due`, `EntryRow.status_since`, `LoadedCollection::{node, schema}` (`collection.rs`), `CollectionSchema.{hot_cap, stale_after_days}`.
+- Produces (all `Serialize`). `Key` has no `Serialize` impl, so `HotView.collection` uses `#[serde(serialize_with = "super::table::key_as_str")]`, as `EntryRow.key` does:
 
 ```rust
-pub enum HotReason { Open, RevisitDue { revisit_by: NaiveDate } }
+#[serde(rename_all = "snake_case")]
+pub enum HotReason { Open, RevisitDue }   // the words "open" and "revisit_due"; the due date is `row.revisit_by`
 pub struct HotEntry { pub row: EntryRow, pub reason: HotReason, pub stale: bool, pub idle_days: i64 }
 pub struct HotView {
     pub collection: Key, pub dir: String,
-    pub entries: Vec<HotEntry>,      // at most `hot_cap`
+    pub entries: Vec<HotEntry>,      // at most `hot_cap`, in rank order
     pub hot: usize,                  // hot entries before the cap
     pub hidden: usize,               // hot - entries.len()
-    pub live: usize,                 // live entries of the collection, hot or not
-    pub unclassified: usize,         // live entries whose status the readme does not declare
+    pub hidden_flagged: usize,       // hidden entries that are revisit due or stale
+    pub live: usize,                 // live (not archived) entries of the collection, hot or not
+    pub unclassified: usize,         // live entries the view cannot judge (R2)
     pub cap: Option<u32>, pub stale_after_days: Option<u32>,
 }
-pub fn hot_view(tree: &LifecycleTree, collection: &Key, today: NaiveDate) -> Option<HotView>
+pub struct ArchivedCollection { pub dir: String }   // an Error; Display: "the collection at <dir> is archived; an archived collection has no hot view"
+pub fn hot_view(loaded: &LoadedCollection, today: NaiveDate) -> Result<HotView, ArchivedCollection>
 pub fn render_markdown(view: &HotView) -> String
 ```
 
-`hot_view` returns `None` when the tree has no such collection. `idle_days` is `(today - status_since).num_days()`. `stale` is true only for `HotReason::Open`, only when `stale_after_days` is `Some(n)`, and only when `status_since + n days < today`.
+`hot_view` takes `&LoadedCollection`, not a tree and a key: the node (its `dir` and its schema) is then one node, not a guess among several nodes of one key, and an archived node is refused instead of rendering `0 of 0 hot`. `load_collection_dir` loads an archived collection by folder, so the refusal is reachable.
+
+Ranking (R2, R3): group 0 is `RevisitDue`, group 1 is `Open` and stale, group 2 is the other `Open`; inside a group `status_since` descending, then key ascending. `idle_days = (today - status_since).num_days()` (negative when `status_since` is after `today`). `stale` is true only for `HotReason::Open`, only when `stale_after_days` is `Some(n)`, and only when `idle_days > i64::from(n)`.
 
 Rendering contract (the hook and the tests rely on it; the header is one line):
 
@@ -194,67 +201,76 @@ hot view: <key> (<dir>): <shown> of <hot> hot, <live> live. Scope: this collecti
 - [[<entry key>]] <title>: open since <status_since>
 - [[<entry key>]] <title>: open since <status_since>, STALE <idle_days>d
 - [[<entry key>]] <title>: <status>, revisit was due <revisit_by>
-(<hidden> more hot entries hidden by hot_cap <cap>)
-(<unclassified> live entries have a status the readme does not declare)
+(<hidden> more hot entries hidden by hot_cap <cap>, <hidden_flagged> of them flagged)
+(<unclassified> live entries cannot be judged: an undeclared status, or no revisit_by on a blocked or deferred entry)
 ```
 
-The last two lines appear only when their count is above zero. Titles go through `table::cell` (a pipe, a backslash and a newline stay on one line).
+The last two lines appear only when their counts are above zero. Titles go through `table::cell` (a pipe, a backslash and a newline stay on one line).
 
-- [ ] **Step 1: Write the tests** in `hot_view.rs`, with `LifecycleTree::build` and the `testkit` helpers (`doc`, `k`, `d`). The readme has statuses `{open: open, waiting: blocked, later: deferred, fixed: terminal}`; today is `2026-11-11`:
-  - `open_and_due_entries_are_hot_and_the_rest_are_not`: an open entry, a blocked entry due (`revisit_by` 2026-11-01), a blocked entry not due (`2026-12-01`), a deferred entry due, a terminal entry. Hot keys are the open, the blocked-due and the deferred-due entries.
-  - `a_blocked_entry_due_today_is_not_hot` (Review Focus 3): `revisit_by: 2026-11-11`.
-  - `order_is_newest_status_since_first_then_key` (Review Focus 2): three open entries, two with the same `status_since`; the pair is in key order.
-  - `no_hot_cap_shows_every_hot_entry` (Review Focus 1): five hot entries, `cap` `None`, `hidden` 0.
-  - `hot_cap_limits_the_view_and_reports_hidden`: `hot_cap: 2`, three hot entries, `entries.len() == 2`, `hot == 3`, `hidden == 1`; the two kept are the two newest.
-  - `stale_flags_only_an_open_entry_past_stale_after`: `stale_after: 30d`; an open entry with `status_since: 2026-10-12` (30 days) is not stale; one with `2026-10-11` is stale with `idle_days == 31`; a blocked-due entry is never stale; with no `stale_after` nothing is stale.
-  - `an_archived_entry_is_neither_hot_nor_live`.
-  - `a_live_entry_with_an_undeclared_status_is_unclassified_and_not_hot`: counted in `live` and `unclassified`.
-  - `an_unknown_collection_is_none`.
-  - `render_markdown_follows_the_contract`: exact header line, one `[[key]]` line per shown entry, the `STALE` suffix, and the two optional lines present only when their counts are above zero.
+**Fixtures.** Write a local helper `entry(status, created, status_since, extra)` that sets both dates independently. Do not use the shared entry helpers: every one of them writes `status_since` equal to `created`, and with such a fixture `table::rows` already returns the R3 order, so a wrong sort would pass. Build a `LoadedCollection` with a helper `loaded(readme, entries)` that writes a temp directory and calls `load_collection_dir`, as `collection/tests.rs` does. The readme declares statuses `{open: open, waiting: blocked, later: deferred, fixed: terminal}`. `today` is `2026-11-11`.
+
+- [ ] **Step 1: Write the tests** in `hot_view.rs` (entries are `key: status, created, status_since, extra`):
+  - `open_and_due_entries_are_hot_and_the_rest_are_not`: `a-open: open, 10-20, 10-20`; `b-due: waiting, 09-01, 09-01, revisit_by 2026-11-01`; `c-wait: waiting, 09-01, 09-01, revisit_by 2026-12-01`; `d-later-due: later, 09-15, 09-15, revisit_by 2026-11-05`; `e-fixed: fixed, 10-01, 10-30, closed 2026-10-30` (dates are 2026). No `hot_cap`. Keys in rank order: `d-later-due`, `b-due`, `a-open`, with reasons `RevisitDue`, `RevisitDue`, `Open`; `live` is 5; `hidden` 0.
+  - `a_blocked_entry_due_today_is_not_hot` (Review Focus 3): `revisit_by: 2026-11-11` gives no hot entry.
+  - `order_follows_status_since_not_created_and_ties_break_by_key` (Review Focus 2): all open, no `stale_after`. `p: created 2026-10-01, status_since 2026-10-25`; `m: created 2026-10-05, status_since 2026-10-20`; `n: created 2026-10-06, status_since 2026-10-20`. Expected order `p`, `m`, `n`. (`table::rows` gives `n`, `m`, `p`, so a sort by `created`, and a sort with no key tiebreak, both fail.)
+  - `no_hot_cap_shows_every_hot_entry` (Review Focus 1): 30 open entries, `cap` `None`, `entries.len() == 30`, `hidden == 0`.
+  - `a_cap_keeps_the_flagged_entries_and_counts_the_flagged_it_hides` (Review Focus 6): `stale_after: 30d`; `old-stale: open, 09-01, 09-01`; `old-due: waiting, 09-10, 09-10, revisit_by 2026-11-01`; `new-a: open, 11-09, 11-09`; `new-b: open, 11-10, 11-10`. With `hot_cap: 2`: entries `old-due`, `old-stale`; `hot` 4, `hidden` 2, `hidden_flagged` 0. With `hot_cap: 1`: entries `old-due`; `hidden` 3, `hidden_flagged` 1.
+  - `stale_flags_only_an_open_entry_past_stale_after`: `stale_after: 30d`; `edge-open: open, 10-12, 10-12` (idle 30, not stale); `over-open: open, 10-11, 10-11` (idle 31, stale, `idle_days == 31`); `old-due: waiting, 10-01, 10-01, revisit_by 2026-11-01` (idle 41, still not stale: only an open entry is). The same entries under a readme with no `stale_after`: `over-open` is not stale.
+  - `a_huge_stale_after_does_not_panic_and_flags_nothing` (Review Focus 7): `stale_after: 4294967295d`.
+  - `a_status_since_after_today_is_not_stale_and_has_negative_idle_days` (Review Focus 7).
+  - `an_archived_entry_is_neither_hot_nor_live`: an `open` entry under `archive/` (a non-terminal archived entry; a terminal one would be excluded anyway).
+  - `an_archived_collection_has_no_hot_view`: `load_collection_dir` of a folder under `docs/trackers/ledgers/archive/`; `hot_view` returns `Err(ArchivedCollection)`.
+  - `a_live_entry_with_an_undeclared_status_is_unclassified_and_not_hot`, and `a_blocked_entry_without_revisit_by_is_unclassified_and_not_hot`: each counts in `live` and `unclassified`.
+  - `render_markdown_follows_the_contract`: the exact header line, one `[[key]]` line per shown entry, the `STALE` suffix, and the two optional lines present only when their counts are above zero.
   - `a_title_with_a_pipe_and_a_newline_stays_on_one_line`.
 - [ ] **Step 2: Run them.** Expected: compile error (module not found).
-- [ ] **Step 3: Implement `hot_view` and `render_markdown`** to the contract above. Membership, order and cap are rulings R2 and R3. One pass over `rows(tree, collection, false)`; sort with `status_since` descending then key ascending.
+- [ ] **Step 3: Implement `hot_view`, `ArchivedCollection` and `render_markdown`** to the contract above. One pass over `rows(&loaded.tree, &loaded.key, false)`; classify each row with `class` and `revisit_due`.
 - [ ] **Step 4: Run.** `... hot_view`, then `... no_librarian_production_read_bypasses_the_read_door`. Expected: PASS.
-- [ ] **Step 5: Prove the cap test can fail.** Change `hot_cap` application to keep `n + 1`, run `hot_cap_limits_the_view_and_reports_hidden`, see it FAIL, restore.
+- [ ] **Step 5: Prove the tests can fail.** Sort by `created` descending instead of the ranking: the order test and the cap test FAIL. Drop the key tiebreak: the order test FAILS. Keep `n + 1` instead of `n`: the cap test FAILS. Restore each change.
 - [ ] **Step 6: Commit.** `feat(librarian): the hot view of a collection`.
+
+---
 
 ---
 
 ### Task 6: The `hot-view` command
 
 **Files:**
-- Create: `src/cli/hot_view.rs`
+- Create: `src/cli/hot_view.rs`, `tests/cli_hot_view.rs`
 - Modify: `src/cli/mod.rs` (`pub mod hot_view;`), `src/main.rs` (`Commands::HotView(codescout::cli::hot_view::HotViewArgs)` and its dispatch arm)
 
 **Interfaces:**
-- Consumes: `lifecycle::collection::load_collection(root, key)`, `hot_view::{hot_view, render_markdown}`, `LoadedCollection.tree.problems`. Resolve the repository root as `src/cli/key_gate.rs` does (canonicalize `--project` or the current directory, then `lookup_git_root`).
+- Consumes: `lifecycle::collection::load_collection(root, key)`, `hot_view::{hot_view, ArchivedCollection, render_markdown}`, `LoadedCollection.tree.problems`. Resolve the repository root as `src/cli/key_gate.rs` does (canonicalize `--project` or the current directory, then `lookup_git_root`). The pattern to copy is `key_gate::{evaluate, run}`: `evaluate` returns no error, and whatever stops it from asking becomes a `NOT SHOWN` outcome with code 2.
 - Produces:
 
 ```rust
 pub struct HotViewArgs { pub collection: String /* positional: the collection key */, pub project: Option<PathBuf>, pub json: bool }
 pub struct Outcome { pub code: i32, pub stdout: String }
-pub fn execute(root: &Path, collection: &str, today: NaiveDate, json: bool) -> Outcome
-pub async fn run(args: HotViewArgs) -> anyhow::Result<()>   // prints stdout, exits with code when not 0
+pub fn evaluate(args: &HotViewArgs, cwd: &Path, today: NaiveDate) -> Outcome
+pub async fn run(args: HotViewArgs) -> anyhow::Result<()>   // evaluate with the current directory and `Utc::now().date_naive()`; print stdout; exit with the code when not 0
 ```
 
-Behaviour:
-- `load_collection` fails (bad key, not found, ambiguous, broken readme): code 2, stdout `NOT SHOWN — <the error>`. No other output.
-- It loads: code 0, stdout is `render_markdown(view)`, then one more line when `tree.problems` is not empty: `(<n> problems found while reading this folder; an entry with a problem is left out. Run the doctor for detail.)`.
-- `--json`: one object with the keys `collection`, `dir`, `entries`, `hot`, `hidden`, `live`, `unclassified`, `cap`, `stale_after_days`, `problems` (a number) and `scope` (the string `this collection only; revisit and stale flags; no doctor check ran`). Each element of `entries` is the serialised `HotEntry`.
+Behaviour. Every failure is code 2: a root that cannot be resolved (no such directory, not inside a git repository), a `load_collection` error (bad key, not found, ambiguous, broken readme), and `ArchivedCollection`. The reason goes through a local `one_line` helper (as `key_gate::one_line`), because a tree problem text may span lines.
+- Failure, text: stdout is `NOT SHOWN — <reason>`. Failure, `--json`: stdout is the object `{"shown": false, "not_shown": "<reason>"}`.
+- Success: code 0. Text: `render_markdown(view)`, then, when `tree.problems` is not empty, one line `(<n> problems found while reading this folder; an entry file with a problem is not listed. Run the doctor for detail.)`. `--json`: one object with exactly the keys `shown` (`true`), `collection`, `dir`, `entries`, `hot`, `hidden`, `hidden_flagged`, `live`, `unclassified`, `cap`, `stale_after_days`, `problems` (a number) and `scope` (the string `this collection only; revisit and stale flags; no doctor check ran`). An element of `entries` has exactly the keys `row`, `reason`, `stale`, `idle_days`; `row` has the keys of the serialised `EntryRow` (`key`, `entry_kind`, `title`, `status`, `class`, `status_since`, `created`, `closed`, `revisit_by`, `archived`, `fields`); `reason` is `"open"` or `"revisit_due"`.
 
-- [ ] **Step 1: Write the tests** in `src/cli/hot_view.rs`, using a temp directory with `docs/trackers/ledgers/<key>/readme.md` and entry files (no git needed for `execute`):
+- [ ] **Step 1: Write the in-source tests** in `src/cli/hot_view.rs`, calling `evaluate` on a temp git repository holding `docs/trackers/ledgers/<key>/readme.md` and entry files:
   - `it_shows_the_hot_entries_and_the_scope_line`: code 0, the header and a `[[key]]` line.
-  - `an_empty_collection_prints_zero_hot_and_exits_0`: code 0, header says `0 of 0 hot`.
+  - `an_empty_collection_prints_zero_hot_and_exits_0`: code 0, the header says `0 of 0 hot`.
   - `an_unknown_collection_exits_2_not_shown` (Review Focus 5): code 2, stdout starts with `NOT SHOWN — `.
   - `a_badly_spelt_key_exits_2_not_shown`: key `Bad Key`.
   - `an_archived_collection_exits_2_not_shown`: the readme sits under `docs/trackers/ledgers/archive/<key>/` (`load_collection` does not look there).
-  - `an_entry_with_a_problem_is_named_in_the_problems_line` (Review Focus 4): one entry file with broken frontmatter; code 0; the problems line is present with `1`; the good entry is still listed.
-  - `json_has_exactly_the_documented_keys`: the key set of the parsed object equals the list above.
-- [ ] **Step 2: Run them.** Expected: compile error.
-- [ ] **Step 3: Implement `execute`, `run`, the clap args and the `main.rs` wiring.** The variant's doc comment says: read-only; prints the live hot entries of one lifecycle collection; exit 0 shown, exit 2 prints `NOT SHOWN — <reason>`; used by session-start hooks.
-- [ ] **Step 4: Run.** `... cli::hot_view`, then `scripts/with-slot.sh cargo test --lib tool_surface_under_budget`. Expected: PASS.
-- [ ] **Step 5: Smoke the binary.** `scripts/with-slot.sh cargo run -- hot-view nonesuch --project <a temp git repository>`. Expected: stdout starts `NOT SHOWN — `, exit code 2.
+  - `a_project_that_is_not_a_git_repository_exits_2_not_shown`: skip when the temp directory lies inside a git work tree, as `key_gate`'s own test does.
+  - `an_entry_file_with_a_problem_is_named_in_the_problems_line` (Review Focus 4): one entry with broken frontmatter; code 0; the problems line is present with `1`; the good entry is still listed.
+  - `json_failure_is_a_json_object`: an unknown key under `--json` parses as an object with `shown == false` and a `not_shown` string.
+  - `json_success_has_exactly_the_documented_keys`: the top-level key set equals the list above; one `entries` element has exactly `row`, `reason`, `stale`, `idle_days`, and its `reason` is `"open"` for an open entry and `"revisit_due"` for a due one.
+- [ ] **Step 2: Write `tests/cli_hot_view.rs`**, modelled on `tests/cli_key_gate.rs` (copy its `git` helper and its binary runner; `CARGO_BIN_EXE_codescout` builds the binary first). Three cases against the built binary: an unknown key gives exit code 2 and stdout starting `NOT SHOWN — `; a good collection gives exit code 0 and the header; a `--project` that is not a git repository gives exit code 2 and `NOT SHOWN — ` (same skip as above). This is the only test that the subcommand is wired into `main` and that `run` turns code 2 into the process exit status.
+- [ ] **Step 3: Run them.** Expected: compile error.
+- [ ] **Step 4: Implement `evaluate`, `run`, the clap args and the `main.rs` wiring.** The variant's doc comment says: read-only; prints the live hot entries of one lifecycle collection; exit 0 shown, exit 2 prints `NOT SHOWN — <reason>`; used by session-start hooks.
+- [ ] **Step 5: Run.** `scripts/with-slot.sh cargo test --lib hot_view`, `scripts/with-slot.sh cargo test --test cli_hot_view`, then `scripts/with-slot.sh cargo test --lib tool_surface_under_budget`. Expected: PASS.
 - [ ] **Step 6: Commit.** `feat(cli): codescout hot-view prints the hot entries of a collection`.
+
+---
 
 ---
 
@@ -276,6 +292,7 @@ The change belongs to `../claude-plugins/codescout-companion/hooks/session-start
 
 ## Self-review notes
 
+- Reviewed by an independent Opus reviewer on 2026-11-15 (code at `fddfe01f2`): 0 Critical, 6 Important, 12 Minor findings, all folded in above (rank order and cap, test fixtures that can fail, `&LoadedCollection` as the input, `idle_days > n`, the binary test and one exit-code path, the JSON shape; and the Minor wording, literal and fallback fixes).
 - Spec coverage: Decision 1 → Task 4; Decision 2 → Task 1; Decision 3 → `--json` in Task 6; Decision 4 → Task 6 and § Contract for the hook; R1 → Tasks 4 and 5; the one-definition-of-due proposal → Task 3; scope naming → Tasks 5 and 6.
 - Types: `hot_cap: Option<u32>` and `stale_after_days: Option<u32>` (Task 4) are read as such in Task 5; `EntryRow.status_since` (Task 2) is read in Task 5; `revisit_due` (Task 3) is called in Task 5.
 - Not verified when this plan was written: that `doc(create)` on a collection with the new keys round-trips through the tool layer (Task 4 Step 2 proves it), and the exact wording of the Task 6 `NOT SHOWN` error texts (they come from `CollectionLoadError`'s own `Display`, which the tests assert only by prefix).
