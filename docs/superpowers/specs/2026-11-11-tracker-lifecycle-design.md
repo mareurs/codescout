@@ -13,8 +13,9 @@ tags:
 # Tracker lifecycle: entries as files, collections as folders, three lifecycle folders (design)
 
 **Status:** active since 2026-11-12. Plans L-A (core) and L-B (core completion) are merged into
-`experiments`; Plan L-B2 (tools) waits for identity Plan C, and Plan L-E (migration) is not
-written. Drafted 2026-11-11. Approach and decisions D1–D5 approved by the operator in the
+`experiments`; Plan L-B2 (tools) waits for identity Plan C, and Plan L-E (migration) is designed in
+`docs/superpowers/specs/2026-11-15-tracker-migration-design.md` (approved 2026-11-15), which
+amends G8 and § Repo scope: an agent-run skill with three CLI commands, not one server command. Drafted 2026-11-11. Approach and decisions D1–D5 approved by the operator in the
 brainstorm; leaf archives and three lifecycle folders approved after the builder check;
 repo scope (§ Repo scope) taken as option a, the recommended one. Work-stream log:
 `docs/trackers/tracker-organization-session-log.md`. Measurements:
@@ -62,7 +63,10 @@ rewritten from scratch. What must survive is listed in § Consumers that read tr
 - **G6.** `get_guide` teaches the model repo-neutrally, and passes the guide gates in
   `src/prompts/mod.rs`.
 - **G7.** Every consumer listed below keeps working, on a contract that names the new layout.
-- **G8.** Every repo can migrate with one server command; none is forced to by a breaking
+- **G8.** Every repo can migrate with one skill that drives three CLI commands, one tracker at a
+  time, with the user's approval per tracker (amended 2026-11-15 by
+  `docs/superpowers/specs/2026-11-15-tracker-migration-design.md`; it was "one server command");
+  none is forced to by a breaking
   release before it has.
 
 ## Non-goals
