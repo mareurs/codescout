@@ -19,6 +19,10 @@ use super::schema::StatusClass;
 use super::table::{self, cell, EntryRow};
 use crate::librarian::identity::key::Key;
 
+/// The scope of the view, in the header line of [`render_markdown`] and as the `scope` of the JSON
+/// the `hot-view` command prints: what the view covers and what it did not check.
+pub const SCOPE: &str = "this collection only; revisit and stale flags; no doctor check ran";
+
 /// Why an entry is hot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,7 +37,9 @@ pub enum HotReason {
 /// One hot entry, with the flags the view adds to its row.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct HotEntry {
+    /// The entry's table row.
     pub row: EntryRow,
+    /// Why the entry is hot.
     pub reason: HotReason,
     /// An `open` entry idle for longer than the collection's `stale_after`.
     pub stale: bool,
@@ -44,8 +50,10 @@ pub struct HotEntry {
 /// The hot view of one collection.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct HotView {
+    /// The key of the collection.
     #[serde(serialize_with = "super::table::key_as_str")]
     pub collection: Key,
+    /// Repo-relative folder of the collection.
     pub dir: String,
     /// At most `cap` entries, in rank order.
     pub entries: Vec<HotEntry>,
@@ -55,18 +63,23 @@ pub struct HotView {
     pub hidden: usize,
     /// Hidden entries that are revisit due or stale.
     pub hidden_flagged: usize,
-    /// Live (not archived) entries of the collection, hot or not.
+    /// Live (not archived) entries of the collection, hot or not. An entry file the tree could not
+    /// parse is not an entry of the tree, so it is counted in neither `live` nor `unclassified`
+    /// (the CLI reports `problems` for it).
     pub live: usize,
     /// Live entries the view cannot judge: an undeclared status, or no `revisit_by` on a blocked
     /// or deferred entry.
     pub unclassified: usize,
+    /// The collection's `hot_cap`; `None` means no cap.
     pub cap: Option<u32>,
+    /// The collection's `stale_after` in days; `None` means no stale flag.
     pub stale_after_days: Option<u32>,
 }
 
 /// An archived collection has no hot view.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArchivedCollection {
+    /// Repo-relative folder of the archived collection.
     pub dir: String,
 }
 
@@ -99,7 +112,8 @@ pub fn hot_view(
     }
     let cap = node.schema.hot_cap;
     let stale_after_days = node.schema.stale_after_days;
-    let rows = table::rows(&loaded.tree, &loaded.key, false).unwrap_or_default();
+    let rows = table::rows(&loaded.tree, &loaded.key, false)
+        .expect("a LoadedCollection is only built from a tree that holds its collection");
     let live = rows.len();
 
     let mut unclassified = 0;
@@ -178,7 +192,7 @@ pub fn render_markdown(view: &HotView) -> String {
     // `write!` to a `String` cannot fail.
     let _ = writeln!(
         out,
-        "hot view: {} ({}): {} of {} hot, {} live. Scope: this collection only; revisit and stale flags; no doctor check ran.",
+        "hot view: {} ({}): {} of {} hot, {} live. Scope: {SCOPE}.",
         view.collection,
         view.dir,
         view.entries.len(),
@@ -412,6 +426,7 @@ mod tests {
         assert_eq!(keys(&one), ["old-due"]);
         assert_eq!((one.hot, one.hidden, one.hidden_flagged), (4, 3, 1));
     }
+
     #[test]
     fn a_hidden_revisit_due_entry_counts_as_flagged() {
         // Two due entries and one fresh open entry under `hot_cap: 1`: the due entry with the later

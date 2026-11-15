@@ -234,9 +234,10 @@ pub fn class_of(schema: &CollectionSchema, meta: &EntryMeta) -> Option<StatusCla
     schema.statuses.get(&meta.status).copied()
 }
 
-/// The date a `blocked` or `deferred` entry is overdue to be revisited, if it is: `revisit_by`
-/// strictly before `today`. A date of today is not yet overdue; an `open` or `terminal` entry
-/// is never due, and neither is one with no `revisit_by`.
+/// The date an entry whose class `needs_revisit()` ([`StatusClass::needs_revisit`] is the single
+/// source of which classes) is overdue to be revisited, if it is: `revisit_by` strictly before
+/// `today`. A date of today is not yet overdue; an entry of any other class is never due, and
+/// neither is one with no `revisit_by`.
 pub fn revisit_due(
     class: StatusClass,
     revisit_by: Option<NaiveDate>,
@@ -372,6 +373,8 @@ mod tests {
         assert_eq!(due(StatusClass::Open, Some("2026-11-01")), None);
         assert_eq!(due(StatusClass::Terminal, Some("2026-11-01")), None);
         assert_eq!(due(StatusClass::Blocked, None), None);
+        // A deferred entry is subject to the same strict boundary.
+        assert_eq!(due(StatusClass::Deferred, Some("2026-11-11")), None);
     }
 
     #[test]

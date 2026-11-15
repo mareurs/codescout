@@ -181,6 +181,8 @@ async fn entry_filter_filters_on_status_since() {
     let keys: Vec<&Value> = entries.iter().map(|e| &e["key"]).collect();
     assert_eq!(keys, [&json!("2026-11-02-b")], "{out}");
     assert_eq!(entries[0]["status_since"], json!("2026-11-02"));
+    assert_eq!(out["entry_total"], json!(2), "{out}");
+    assert!(out.get("filter_warnings").is_none(), "{out}");
 }
 
 const GLOSSARY: &str = "docs/trackers/ledgers/g/readme.md";
@@ -228,6 +230,7 @@ async fn a_list_field_is_filterable_by_membership() {
             let out = get(ctx, json!({"id": id, "entry_filter": filter}))
                 .await
                 .unwrap();
+            assert!(out.get("filter_warnings").is_none(), "{out}");
             let keys: Vec<String> = out["entries"]
                 .as_array()
                 .unwrap_or_else(|| panic!("no entries in {out}"))
@@ -241,6 +244,13 @@ async fn a_list_field_is_filterable_by_membership() {
     let (keys, _) = keys_for(json!({"aliases": {"contains": "wsr"}})).await;
     assert_eq!(keys, ["weekly-status"]);
 
+    // A non-first element of the list matches too.
+    let (keys, _) = keys_for(json!({"aliases": {"contains": "status-report"}})).await;
+    assert_eq!(keys, ["weekly-status"]);
+
+    // A strict substring of an element is not a member.
+    let (keys, _) = keys_for(json!({"aliases": {"contains": "status"}})).await;
+    assert!(keys.is_empty(), "{keys:?}");
     let (keys, total) = keys_for(json!({"aliases": {"contains": "nope"}})).await;
     assert!(keys.is_empty(), "{keys:?}");
     assert_eq!(total, json!(3), "the filter ran over all three entries");

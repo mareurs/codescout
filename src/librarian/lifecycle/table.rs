@@ -24,7 +24,8 @@ pub struct EntryRow {
     pub entry_kind: String,
     pub title: String,
     pub status: String,
-    /// The day the entry took its current `status`.
+    /// The day the entry last took or reconfirmed its current `status`: writing the same status
+    /// again advances it to that day.
     pub status_since: NaiveDate,
     /// The class the collection's schema gives `status`; `None` when the schema names no class
     /// for the word.

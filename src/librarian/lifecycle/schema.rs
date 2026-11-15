@@ -91,7 +91,9 @@ pub struct CollectionSchema {
     pub review_every_days: Option<u32>,
     /// The most entries the hot view lists, when the collection sets one.
     pub hot_cap: Option<u32>,
-    /// The age in days after which an open entry is stale in the hot view, when set.
+    /// The number of days after which an open entry is stale in the hot view: it is stale when MORE
+    /// than this many days have passed since its `status_since` (not since `created`). `None`
+    /// means no stale flag.
     pub stale_after_days: Option<u32>,
 }
 
@@ -156,6 +158,8 @@ pub const KEY_OWNER: &str = "owner";
 pub const KEY_EXIT_WHEN: &str = "exit_when";
 pub const KEY_WRITER: &str = "writer";
 pub const KEY_REVIEW_EVERY: &str = "review_every";
+/// The readme key that sets the most entries the hot view lists.
+// cap-class: NOT_A_CAP — the name of a collection readme key, not a bound; the per-collection cap value is applied by the hot view, which reports how many entries it hid (`hidden`, `hidden_flagged`), so a capped result is never presented as complete
 pub const KEY_HOT_CAP: &str = "hot_cap";
 pub const KEY_STALE_AFTER: &str = "stale_after";
 
@@ -365,7 +369,7 @@ fn parse_hot_cap(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u32> {
     if cap.is_none() {
         errs.push(malformed(
             KEY_HOT_CAP,
-            "must be a positive whole number, for example `5`",
+            "must be a whole number from 1 to 4294967295, for example `5`",
         ));
     }
     cap
@@ -492,6 +496,15 @@ mod tests {
         let s = parse_schema(Lifecycle::Ledger, &fm(&text)).unwrap();
         assert_eq!(s.hot_cap, Some(5));
         assert_eq!(s.stale_after_days, Some(45));
+    }
+    #[test]
+    fn hot_cap_accepts_both_ends_of_its_range() {
+        for (raw, want) in [("1", 1), ("4294967295", u32::MAX)] {
+            let text = format!("{LEDGER}hot_cap: {raw}\n");
+            let s = parse_schema(Lifecycle::Ledger, &fm(&text))
+                .unwrap_or_else(|e| panic!("{raw} is accepted: {e:?}"));
+            assert_eq!(s.hot_cap, Some(want), "{raw}");
+        }
     }
 
     #[test]
