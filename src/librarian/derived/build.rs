@@ -19,7 +19,7 @@
 //!   the one path) and `duplicate_key` (`rel_paths` every holder, sorted).
 //! - `skipped`: one row per `(rel_path, reason)`; a repeated pair is stored once.
 //! - `checkout`: one row; `rules_source` is always `committed+builtin`, because
-//!   `BuildInput::from_commit` is the only way to build an input.
+//!   `BuildInput::from_commit` is the only way outside `derived` to build an input.
 
 use std::path::Path;
 
@@ -82,12 +82,15 @@ const DERIVED_TABLES: [&str; 7] = [
 /// ```compile_fail,E0451
 /// use codescout::librarian::derived::build::BuildInput;
 ///
-/// fn make(repo: &git2::Repository, commit: &git2::Commit, root: &std::path::Path) {
-///     let _input = BuildInput { repo, commit, root, rules: Vec::new(), space: todo!() };
+/// fn make() {
+///     let _input: BuildInput<'_> = BuildInput { ..todo!() };
 /// }
 /// ```
 ///
-/// The same set-up through the constructor compiles:
+/// The block names no field, so a renamed, added or retyped field cannot change the reason it
+/// fails: struct-update syntax is refused whenever any field is private.
+///
+/// The constructor compiles from outside the module:
 ///
 /// ```no_run
 /// use codescout::librarian::derived::build::BuildInput;
@@ -113,8 +116,7 @@ pub struct BuildInput<'a> {
 
 impl<'a> BuildInput<'a> {
     /// The input of `commit`: its rules ([`rules_from_commit`]) and its key space
-    /// ([`key_space_from_commit`]). `root` is recorded in the `checkout` row and never opened.
-    /// An error from either read passes through unchanged.
+    /// ([`key_space_from_commit`]). An error from either read passes through unchanged.
     pub fn from_commit(
         repo: &'a git2::Repository,
         commit: &'a git2::Commit<'a>,
