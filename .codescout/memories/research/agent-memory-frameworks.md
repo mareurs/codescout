@@ -42,6 +42,9 @@ The ONLY real gap is **Axis 3 — control policy**: every write is hand-authored
 ## Side effect
 Surfaced the `HIDDEN_STATUSES` split-brain bug (find.rs had "retired", context.rs didn't) → docs/issues/archive/2026-05-25-hidden-statuses-context-missing-retired.md. Since fixed: `HIDDEN_STATUSES` is one shared const (`["archived", "superseded", "retired"]`, src/librarian/tools/mod.rs). Verified 2026-10-19: Approach C's three pieces are still unbuilt (no `memory consolidate` action, no buffer spill, `ArtifactRow` has no `valid_until`/`superseded_by`), and there is still no generative client in `src/` or `Cargo.toml`.
 
+## See also
+- `research/managed-agents-interfaces-20261115`: Anthropic's brain/hands/session split (2026-04-08), mapped onto codescout. It supports Approach C: the server guarantees durability and querying, the host shapes context.
+
 ## Sources
 - github.com/Tencent/TencentDB-Agent-Memory
 - arXiv 2603.07670 (survey)
