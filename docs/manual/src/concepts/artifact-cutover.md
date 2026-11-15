@@ -90,22 +90,23 @@ Run this command, then run the cutover again:
 sqlite3 <old catalog file> 'PRAGMA wal_checkpoint(TRUNCATE)'
 ```
 
-The tool checks three times:
+The tool checks four times:
 
-- when it opens the old catalog;
-- after it reads the rows, for side files;
-- after it reads the rows, for a change in the size or the modification time of the
-  file;
-- for `export`, once more before the first write.
+1. when it opens the old catalog, for side files;
+2. after it reads the rows, for side files;
+3. after it reads the rows, for a change in the size or the modification time of the
+   file;
+4. for `export`, once more before the first write, for both.
 
-A change in the second or third check gives the refusal `the old catalog changed
-while it was read`. Stop the process that wrote and run the command again.
+A change that check 2, 3 or 4 finds gives the refusal `the old catalog changed while
+it was read`. Stop the process that wrote and run the command again.
 
 `export` also refuses in these cases:
 
 - `derived.db` already exists beside the old catalog. `export` runs before the new
-  catalog exists. Move `derived.db` aside, or delete it (git can rebuild it), then run
-  `export` again.
+  catalog exists. The file can belong to another repository that shares the old
+  catalog. Move `derived.db` aside. Delete it only when you know it is for this
+  repository (git can rebuild it). Then run `export` again.
 - The project write lock is not free. Another codescout process writes to the
   project. The lock file is `.codescout/write.lock`, in the nearest directory (from
   the project up to the git root) that holds `.codescout/project.toml`. `export`
@@ -114,8 +115,8 @@ while it was read`. Stop the process that wrote and run the command again.
   `.gitignore`, and check `git status --short` before you commit.
 - The lock file cannot be opened. A link or a directory at that path does this.
 
-`export` tries the lock for one budget of 250 milliseconds. When the lock is not
-free in that time, `export` refuses. It exits with code 2 and writes nothing.
+`export` tries the lock for 250 milliseconds. When the lock is not free in that time,
+`export` refuses. It exits with code 2 and writes nothing.
 
 ## What the tool never does
 
@@ -158,16 +159,19 @@ The classes are:
 | `rename` | A file whose name gives no valid key. |
 | `citation` | An old citation form in prose. `moved` rewrites it into the grammar. |
 
-A `skipped` event has a reason that begins with `no committed home yet:`. Two
-reasons follow it:
+A `skipped` event has one of these reasons:
 
+- `no committed home yet: kind has no text twin`
 - `no committed home yet: not a single-writer document`
 - `no committed home yet: ledger or entry document`
+- `git history of the file holds it`
+- `the frontmatter holds it`
+- `the worktree overlay is removed`
 
-A `skipped` event of another kind has one of these reasons: `git history of the file
-holds it`, `the frontmatter holds it`, or `the worktree overlay is removed`. The row
-stays in the old catalog. The section `## Rows with no committed home` lists such rows
-by file.
+An observation that has no home gets one of the first three reasons.
+
+A skipped row stays in the old catalog. The section `## Rows with no committed home`
+lists these rows by file.
 
 Read these sections before you run `export`:
 
@@ -258,13 +262,23 @@ A second `build` rebuilds the same file in place. `build` refuses with code 2 in
 cases:
 
 - `HEAD` moved after the plan.
-- A `-wal`, `-shm` or non-empty `-journal` file lies beside the old catalog, or beside
-  `derived.db`.
+- A `-wal`, `-shm` or non-empty `-journal` file lies beside the old catalog. Stop every
+  codescout process, then use the `sqlite3` command above.
+- A `-wal`, `-shm` or non-empty `-journal` file lies beside `derived.db`. A killed
+  build or a killed reader leaves these files. If a codescout process holds the
+  file, stop that process. Otherwise move `derived.db` and its `-wal` and `-shm` files
+  aside, or delete them (git can rebuild them). Then run `build` again.
 - `derived.db` is not a new catalog. It is a file of another program.
+- `derived.db` was made by a newer codescout than this one.
 - `derived.db` was built for another repository. One old catalog can hold the rows
-  of several repositories, but the new catalog beside it serves one. Move `derived.db`
-  aside, or delete it (git can rebuild it), then run `build` again. A `derived.db`
-  with no build in it, as a failed first build leaves, is built over.
+  of several repositories, but the new catalog beside it serves one. The name in its
+  `checkout` row differs from this repository's name, or the commit in that row is not
+  in this repository's history. A worktree or a clone of the same repository has that
+  commit, so it rebuilds the file. Move `derived.db` aside, or delete it (git can
+  rebuild it), then run `build` again.
+
+A `derived.db` that holds no build is not another repository's file. A failed first
+build leaves such a file. `build` builds over it.
 
 The old catalog is never written.
 
@@ -285,7 +299,12 @@ The old catalog is never written.
 - no old catalog;
 - a side file beside the old catalog;
 - a changed old catalog;
+- a `repo.toml` or a `key-space.toml` in `HEAD` that does not parse;
+- no git repository;
 - a held project write lock (`export`);
 - an existing `derived.db` (`export`);
-- a `key-space.toml` that does not parse;
-- no git repository.
+- an export that is not committed (`build`);
+- a `HEAD` that moved after the plan (`build`);
+- a side file beside `derived.db` (`build`);
+- a `derived.db` that is not a new catalog, was made by a newer codescout, or was built
+  for another repository (`build`).

@@ -270,9 +270,10 @@ enum Commands {
     /// for `export`, a new catalog that already exists or a project write lock that is held (or
     /// whose file cannot be opened); or, for `build`, an export that is not committed yet, a
     /// `HEAD` that moved after the plan, a `-wal`, `-shm` or non-empty `-journal` file beside
-    /// `derived.db`, a `derived.db` that is not a new catalog, or a `derived.db` built for
-    /// another repository (move it aside, or delete it: it is derivable from git). `export` says
-    /// the same about an existing `derived.db`.
+    /// `derived.db` (stop the process that holds it, or move `derived.db` and its side files
+    /// aside), a `derived.db` that is not a new catalog or was made by a newer codescout, or a
+    /// `derived.db` built from another repository's history (move it aside). `export` refuses an
+    /// existing `derived.db` the same way: it can belong to another repository.
     Cutover(codescout::cli::cutover::CutoverArgs),
 
     /// Read-only query: which active constitution rules apply to a given

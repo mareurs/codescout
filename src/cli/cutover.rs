@@ -316,8 +316,9 @@ async fn export_run(
     if std::fs::symlink_metadata(derived_catalog_beside(&loaded.old_db)).is_ok() {
         bail!(
             "the new catalog ({DERIVED_CATALOG_FILE}) already exists beside the old one, and \
-             export runs before it is built. Move {DERIVED_CATALOG_FILE} aside (or delete it: it \
-             is derivable from git), then run export again"
+             export runs before it is built. It can belong to another repository that shares the \
+             old catalog. Move {DERIVED_CATALOG_FILE} aside; delete it only when you know it is \
+             for this repository (git can rebuild it). Then run export again"
         );
     }
     let lock_root = lock_root_for(&loaded.start, &loaded.git_root);
@@ -443,23 +444,25 @@ fn open_refusal(e: &rusqlite::Error) -> anyhow::Error {
     }
 }
 
-/// The repository name of the `checkout` row of an existing new catalog at `path`, `None` when
-/// there is no file, no row (a schema with no build in it, as a failed first build leaves) or
-/// nothing this function can read (the open that follows gives its own refusal for a file that is
-/// not a new catalog).
+/// The repository name and the commit of the `checkout` row of an existing new catalog at `path`,
+/// `None` when there is no file, no row (a schema with no build in it, as a failed first build
+/// leaves) or nothing this function can read (the open that follows gives its own refusal for a
+/// file that is not a new catalog).
 ///
 /// The read cannot write or migrate: the file is opened read-only and immutable, so SQLite takes no
 /// lock and creates no side file. An immutable open ignores a `-wal`, so a side file beside the
 /// catalog is a refusal here: a process holds it, or one stopped without closing it.
-fn existing_checkout_name(path: &Path) -> Result<Option<String>> {
+fn existing_checkout(path: &Path) -> Result<Option<(String, String)>> {
     use rusqlite::{Connection, OpenFlags, OptionalExtension};
     if std::fs::symlink_metadata(path).is_err() {
         return Ok(None);
     }
     if side_files_present(path) {
         bail!(
-            "a -wal, -shm or -journal file lies beside {DERIVED_CATALOG_FILE}. Stop every codescout \
-             process, then run this again"
+            "a -wal, -shm or non-empty -journal file lies beside {DERIVED_CATALOG_FILE}. If a \
+             codescout process holds it, stop that process. Otherwise move {DERIVED_CATALOG_FILE} \
+             and its -wal and -shm files aside, or delete them (git can rebuild them), then run \
+             this again"
         );
     }
     let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -475,9 +478,11 @@ fn existing_checkout_name(path: &Path) -> Result<Option<String>> {
         return Ok(None);
     };
     Ok(conn
-        .query_row("SELECT repo_name FROM checkout LIMIT 1", [], |r| {
-            r.get::<_, String>(0)
-        })
+        .query_row(
+            "SELECT repo_name, commit_sha FROM checkout LIMIT 1",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
         .optional()
         .ok()
         .flatten())
@@ -513,11 +518,17 @@ fn build_run(
     let rules = rules_from_commit(&repo, &commit)?;
     let space = key_space_from_commit(&repo, &commit)?;
     // The old catalog of a machine holds every repository, and the new catalog beside it holds
-    // one: a build replaces every row, so it never builds over another repository's catalog. The
-    // checkout root is not compared: it differs per worktree of one repository.
+    // one: a build replaces every row, so it never builds over another repository's catalog. Two
+    // repositories with no committed `repo.toml` are both called `repo`, so the name alone does
+    // not tell them apart: the commit of the `checkout` row must also be a commit of this
+    // repository. A worktree or a clone shares the history and has it. The checkout root is not
+    // compared: it differs per worktree of one repository.
     let new_catalog = derived_catalog_beside(&loaded.old_db);
-    if let Some(name) = existing_checkout_name(&new_catalog)? {
-        if name != loaded.plan.repo_name {
+    if let Some((name, sha)) = existing_checkout(&new_catalog)? {
+        let known_commit = git2::Oid::from_str(&sha)
+            .ok()
+            .is_some_and(|oid| repo.find_commit(oid).is_ok());
+        if name != loaded.plan.repo_name || !known_commit {
             bail!(
                 "{DERIVED_CATALOG_FILE} in the directory of the old catalog was built for another \
                  repository. Move it aside (or delete it: it is derivable from git), then run \
@@ -680,6 +691,13 @@ mod tests {
     /// [`fixture`] with a committed `.codescout/repo.toml` that names the repository, so that two
     /// fixtures can be two repositories (without it every repository is called `repo`).
     fn fixture_named(name: Option<&str>) -> Fixture {
+        fixture_with(name, None)
+    }
+
+    /// [`fixture_named`] with one more committed file, so that the repository has a history of its
+    /// own: two fixtures with the same files share commit ids (the signature and the time are
+    /// fixed), and a repository that shares them is not another repository.
+    fn fixture_with(name: Option<&str>, extra: Option<(&str, &[u8])>) -> Fixture {
         let repo_dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(repo_dir.path()).unwrap();
         let repo_toml = format!("name = \"{}\"\n", name.unwrap_or("repo"));
@@ -692,6 +710,9 @@ mod tests {
         ];
         if name.is_some() {
             entries.push((".codescout/repo.toml", FILE, repo_toml.as_bytes()));
+        }
+        if let Some((path, bytes)) = extra {
+            entries.push((path, FILE, bytes));
         }
         let repo = repo_with(&root, &entries);
         // The working tree equals HEAD, the state `export` is run from.
@@ -967,8 +988,10 @@ mod tests {
             out.stdout
         );
         assert!(
-            out.stdout
-                .contains("Move derived.db aside (or delete it: it is derivable from git)"),
+            out.stdout.contains(
+                "It can belong to another repository that shares the old catalog. Move derived.db \
+                 aside; delete it only when you know it is for this repository"
+            ),
             "the refusal says what to do: {}",
             out.stdout
         );
@@ -1689,6 +1712,77 @@ mod tests {
         assert_eq!(checkout_name(&b), planned_name);
     }
 
+    // mutation: drop the check that the commit of the `checkout` row is a commit of this repository.
+    #[tokio::test]
+    async fn build_refuses_an_unrelated_repositorys_new_catalog_though_both_are_named_repo() {
+        // Neither repository commits a `.codescout/repo.toml`, so both are called `repo`.
+        let a = fixture();
+        exported_and_committed(&a).await;
+        let first = evaluate_build(&args(&a), &a.root, None, None).await;
+        assert_eq!(first.code, 0, "{}", first.stdout);
+        let b = fixture_with(
+            None,
+            Some(("unrelated.txt", b"only repository B has this\n")),
+        );
+        exported_and_committed(&b).await;
+        let planted = b.catalog_dir.join("derived.db");
+        std::fs::copy(a.catalog_dir.join("derived.db"), &planted).unwrap();
+        assert_eq!(
+            load_and_plan(&args(&b), &b.root, None, None)
+                .unwrap()
+                .plan
+                .repo_name,
+            checkout_name(&b),
+            "the two repositories have one name"
+        );
+        let before = snapshot(&b.catalog_dir);
+
+        let out = evaluate_build(&args(&b), &b.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout.contains("was built for another repository"),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&b, &out.stdout);
+        assert_eq!(
+            snapshot(&b.catalog_dir),
+            before,
+            "the other repository's catalog is byte for byte as it was"
+        );
+    }
+
+    // mutation: refuse a new catalog whose commit is not in the repository's own object store
+    // without asking whether the commit is in its history (a clone has the commit, a worktree
+    // shares the store).
+    #[tokio::test]
+    async fn build_over_the_new_catalog_of_a_clone_of_the_same_repository_rebuilds() {
+        let a = fixture();
+        exported_and_committed(&a).await;
+        let first = evaluate_build(&args(&a), &a.root, None, None).await;
+        assert_eq!(first.code, 0, "{}", first.stdout);
+        let dest = tempfile::tempdir().unwrap();
+        let dest_root = std::fs::canonicalize(dest.path()).unwrap();
+        git2::Repository::clone(a.root.to_str().unwrap(), &dest_root).unwrap();
+        // The old rows lie under A's root; the clone lies elsewhere.
+        let clone_args = CommonArgs {
+            project: Some(dest_root.clone()),
+            old_db: Some(a.db.clone()),
+            old_root: vec![a.root.clone()],
+            json: false,
+        };
+        let out = evaluate_build(&clone_args, &dest_root, None, None).await;
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        let root: String = derived(&a)
+            .query_row("SELECT root FROM checkout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            root,
+            dest_root.to_str().unwrap(),
+            "the catalog was rebuilt from the clone"
+        );
+    }
+
     // mutation: refuse a new catalog that has no `checkout` row.
     #[tokio::test]
     async fn build_over_a_new_catalog_with_no_build_in_it_builds() {
@@ -1712,7 +1806,10 @@ mod tests {
         let out = evaluate_build(&args(&f), &f.root, None, None).await;
         assert_eq!(out.code, 2, "{}", out.stdout);
         assert!(
-            out.stdout.contains("lies beside derived.db"),
+            out.stdout.contains("lies beside derived.db")
+                && out
+                    .stdout
+                    .contains("move derived.db and its -wal and -shm files aside"),
             "{}",
             out.stdout
         );
@@ -1751,7 +1848,7 @@ mod tests {
 
     // mutation: forward the error chain of `schema::open` (it names the path).
     #[tokio::test]
-    async fn build_refuses_a_file_that_is_not_a_derived_index_and_names_no_path() {
+    async fn build_refuses_a_file_that_is_not_a_new_catalog_and_names_no_path() {
         let f = fixture();
         exported_and_committed(&f).await;
         let foreign = f.catalog_dir.join("derived.db");
