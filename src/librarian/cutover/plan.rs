@@ -11,6 +11,9 @@ use serde::Serialize;
 
 use crate::librarian::catalog::augmentation::AugmentationRow;
 use crate::librarian::cutover::code_refs::{paths_named_in, CodeRefs, LINK_MODE};
+use crate::librarian::cutover::entries::{
+    other_params, params_of, recover_params_entries, refuse_entries, Params,
+};
 use crate::librarian::cutover::history::HistoryIds;
 use crate::librarian::cutover::old_rows::{OldRows, OutOfScope};
 use crate::librarian::cutover::rename::{
@@ -20,6 +23,7 @@ use crate::librarian::cutover::rewrite::{
     join_path, rewrite_document, Finding, Form, IdSource, IdTarget, Outcome, Resolver,
     REASON_UNKNOWN_ID,
 };
+use crate::librarian::cutover::sidecars::{plan_shape, sidecar_rel, ShapeExport};
 use crate::librarian::derived::build::{key_space_from_commit, repo_name_of};
 use crate::librarian::derived::scan::{scan_commit, Skip};
 use crate::librarian::identity::index::{DocInput, KeyIndex};
@@ -43,6 +47,19 @@ pub enum Class {
 }
 
 impl Class {
+    /// Every class, in the order of the enum.
+    const ALL: [Class; 9] = [
+        Class::ParamsEntry,
+        Class::ParamsOther,
+        Class::AugmentationShape,
+        Class::Event,
+        Class::Observation,
+        Class::ManualLink,
+        Class::WriteCite,
+        Class::Rename,
+        Class::Citation,
+    ];
+
     /// The name the report and the JSON use.
     pub const fn label(self) -> &'static str {
         match self {
@@ -56,6 +73,12 @@ impl Class {
             Class::Rename => "rename",
             Class::Citation => "citation",
         }
+    }
+
+    /// The class a key of `ExportPlan::population` counts rows of: the label, or `event:<kind>`.
+    fn of_population_key(key: &str) -> Option<Class> {
+        let name = key.split(':').next()?;
+        Class::ALL.into_iter().find(|class| class.label() == name)
     }
 }
 
@@ -120,9 +143,15 @@ pub struct ExportPlan {
 }
 
 impl ExportPlan {
-    /// The items of each class that has one, counted by status and reason.
+    /// The items of each class counted by status and reason, and a zero row for every class that has
+    /// old rows in scope and no item: a class with rows always has a line of its own.
     pub fn tally(&self) -> BTreeMap<Class, ClassTally> {
         let mut tally: BTreeMap<Class, ClassTally> = BTreeMap::new();
+        for key in self.population.keys() {
+            if let Some(class) = Class::of_population_key(key) {
+                tally.entry(class).or_default();
+            }
+        }
         for item in &self.items {
             let cell = tally.entry(item.class).or_default();
             match item.status {
@@ -211,6 +240,7 @@ pub fn plan_export(
     plan_skipped_events(old, &renames.paths(), &mut plan);
     plan_write_cites(old, &mut plan);
     plan_citations(repo, commit, old, &head, &code, &renames, &mut plan)?;
+    plan_augmentations(repo, commit, old, &head, &code, &renames, &mut plan)?;
     plan_outside_links(repo, commit, &head, &renames, &mut plan)?;
     Ok(plan)
 }
@@ -311,6 +341,202 @@ fn plan_citations(
         }
     }
     Ok(())
+}
+
+/// What `HEAD` holds at a path that may carry a sidecar.
+enum Committed {
+    Absent,
+    Text(String),
+    /// A link, or bytes that are not UTF-8: it exists and cannot be compared.
+    Unreadable,
+}
+
+/// The blob of `commit` at `path`, as text.
+fn committed_at(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    path: &str,
+) -> anyhow::Result<Committed> {
+    let tree = commit.tree()?;
+    let Ok(entry) = tree.get_path(Path::new(path)) else {
+        return Ok(Committed::Absent);
+    };
+    if entry.kind() != Some(git2::ObjectType::Blob) || entry.filemode() == LINK_MODE {
+        return Ok(Committed::Unreadable);
+    }
+    let blob = repo.find_blob(entry.id())?;
+    Ok(match std::str::from_utf8(blob.content()) {
+        Ok(text) => Committed::Text(text.to_owned()),
+        Err(_) => Committed::Unreadable,
+    })
+}
+
+const REASON_NOT_IN_HEAD: &str = "document not in HEAD";
+const REASON_NOT_IN_SPACE: &str = "document is outside the key space or has no text";
+
+/// Params entries, other params and the shape of every augmentation (D-R13, D-R23, D-R24), per
+/// document path after the renames. A document's text goes through the citation rewrite first
+/// ([`plan_citations`]), then the entries, then the declaration stamp; a sidecar is a new file.
+///
+/// Two live rows may name one path (the same file under two spellings of the root). The rows are
+/// taken in id order against one running text: an entry the first row recovered is `already_exported`
+/// or `skipped` for the second, the second row's shape is compared with the sidecar the first one
+/// planned (so it is `already_exported` or drift, never a second export), and every row reports its
+/// own other params. No params are lost and nothing is exported twice.
+///
+/// A path that `HEAD` does not hold, one outside the key space, and a frozen document (D-R26) get
+/// `unrecoverable` items for their entries and their shape; their other params are reported as
+/// everywhere else.
+fn plan_augmentations(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    old: &OldRows,
+    head: &Head,
+    code: &CodeRefs,
+    renames: &RenameSet,
+    plan: &mut ExportPlan,
+) -> anyhow::Result<()> {
+    let moved = renames.paths();
+    let mut by_path: BTreeMap<String, Vec<&AugmentationRow>> = BTreeMap::new();
+    for row in &old.augmentations {
+        let Some(document) = old.documents.get(&row.artifact_id) else {
+            continue;
+        };
+        let now = final_path(&moved, &document.rel_path).to_owned();
+        by_path.entry(now).or_default().push(row);
+    }
+    for (now, rows) in by_path {
+        let renamed_from = plan.files.get(&now).and_then(|f| f.renamed_from.clone());
+        let head_path = renamed_from.unwrap_or_else(|| now.clone());
+        let refusal = match (head.files.get(&head_path), code.frozen(&head_path)) {
+            (None, _) if head.outside.contains(&head_path) => Some(REASON_NOT_IN_SPACE.to_owned()),
+            (None, _) => Some(REASON_NOT_IN_HEAD.to_owned()),
+            (Some(_), Some(why)) => Some(format!("frozen: {why}")),
+            (Some(_), None) => None,
+        };
+        if let Some(reason) = refusal {
+            for row in rows {
+                plan.items.extend(refuse_entries(&now, row, &reason));
+                plan.items.extend(other_params(&now, row));
+                plan.items
+                    .push(shape_item(&now, Status::Unrecoverable, &reason, None));
+            }
+            continue;
+        }
+        let head_text = &head.files[&head_path];
+        let base = plan
+            .files
+            .get(&now)
+            .map_or_else(|| head_text.clone(), |f| f.new_text.clone());
+        let mut text = base.clone();
+
+        let sidecar_path = sidecar_rel(&now);
+        let committed = committed_at(repo, commit, &sidecar_path)?;
+        // The text of the sidecar this path will have: the committed one, or the one the first row
+        // planned.
+        let mut sidecar: Option<String> = match &committed {
+            Committed::Text(text) => Some(text.clone()),
+            _ => None,
+        };
+        for row in rows {
+            let (next, items) = recover_params_entries(&now, &text, row);
+            text = next;
+            plan.items.extend(items);
+            plan.items.extend(other_params(&now, row));
+
+            if matches!(committed, Committed::Unreadable) {
+                let reason = "the committed sidecar cannot be read as text";
+                plan.items.push(shape_item(
+                    &now,
+                    Status::Unrecoverable,
+                    reason,
+                    Some(sidecar_path.clone()),
+                ));
+                continue;
+            }
+            let item = match plan_shape(&now, &text, row, sidecar.as_deref()) {
+                ShapeExport::Export {
+                    sidecar_rel,
+                    sidecar_text,
+                    stamped_doc,
+                } => {
+                    plan.files.insert(
+                        sidecar_rel.clone(),
+                        FileChange {
+                            path: sidecar_rel.clone(),
+                            renamed_from: None,
+                            head_text: None,
+                            new_text: sidecar_text.clone(),
+                        },
+                    );
+                    sidecar = Some(sidecar_text);
+                    text = stamped_doc;
+                    shape_item(
+                        &now,
+                        Status::Moved,
+                        "sidecar written and declaration stamped",
+                        Some(sidecar_rel),
+                    )
+                }
+                ShapeExport::AlreadyExported { stamped_doc: None } => shape_item(
+                    &now,
+                    Status::AlreadyExported,
+                    "the sidecar equals the catalog's shape",
+                    Some(sidecar_path.clone()),
+                ),
+                ShapeExport::AlreadyExported {
+                    stamped_doc: Some(stamped_doc),
+                } => {
+                    text = stamped_doc;
+                    shape_item(
+                        &now,
+                        Status::Moved,
+                        "declaration stamped; the sidecar equals the catalog's shape",
+                        Some(sidecar_path.clone()),
+                    )
+                }
+                ShapeExport::Drift { fields } => shape_item(
+                    &now,
+                    Status::Unrecoverable,
+                    &format!("shape drift: {}", fields.join(", ")),
+                    Some(sidecar_path.clone()),
+                ),
+                ShapeExport::Refused(why) => shape_item(&now, Status::Unrecoverable, &why, None),
+            };
+            plan.items.push(item);
+        }
+
+        if text != base {
+            match plan.files.get_mut(&now) {
+                Some(file) => file.new_text = text,
+                None => {
+                    plan.files.insert(
+                        now.clone(),
+                        FileChange {
+                            path: now.clone(),
+                            renamed_from: None,
+                            head_text: Some(head_text.clone()),
+                            new_text: text,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The item of one augmentation's shape; `detail` is the sidecar's path.
+fn shape_item(path: &str, status: Status, reason: &str, detail: Option<String>) -> Item {
+    Item {
+        class: Class::AugmentationShape,
+        status,
+        reason: reason.to_owned(),
+        path: Some(path.to_owned()),
+        line: None,
+        detail,
+        suggestion: None,
+    }
 }
 
 /// Markdown outside the key space (and so outside the rewrite, D-R15) that links to a file this run
@@ -593,20 +819,20 @@ fn plan_skipped_events(old: &OldRows, moved: &BTreeMap<String, String>, plan: &m
     }
 }
 
-/// One `skipped` item for all write-origin entry citations: they are report-only.
+/// One `skipped` item per write-origin entry citation: they are report-only, and the tally counts
+/// rows, so a class with `n` rows has `n` items.
 fn plan_write_cites(old: &OldRows, plan: &mut ExportPlan) {
-    if old.write_cites == 0 {
-        return;
+    for _ in 0..old.write_cites {
+        plan.items.push(Item {
+            class: Class::WriteCite,
+            status: Status::Skipped,
+            reason: "an entry citation written by a tool call stays a catalog row".to_owned(),
+            path: None,
+            line: None,
+            detail: None,
+            suggestion: None,
+        });
     }
-    plan.items.push(Item {
-        class: Class::WriteCite,
-        status: Status::Skipped,
-        reason: "an entry citation written by a tool call stays a catalog row".to_owned(),
-        path: None,
-        line: None,
-        detail: Some(format!("{} rows", old.write_cites)),
-        suggestion: None,
-    });
 }
 
 /// The old rows in scope by class. A class with no row is absent.
@@ -634,10 +860,13 @@ fn population_of(old: &OldRows) -> BTreeMap<String, usize> {
 
 /// `(entry rows, other keys)` of one augmentation's params: the elements of the entry collection,
 /// and every key outside it (every key when the augmentation has no entry collection). Params
-/// that are not a JSON object count as nothing.
+/// that are not JSON, or not an object, count as one other row, the one `other_params` reports;
+/// empty params count as nothing.
 fn params_counts(aug: &AugmentationRow) -> (usize, usize) {
-    let Ok(serde_json::Value::Object(params)) = serde_json::from_str(&aug.params) else {
-        return (0, 0);
+    let params = match params_of(aug) {
+        Params::Empty => return (0, 0),
+        Params::NotJson | Params::NotObject => return (0, 1),
+        Params::Object(params) => params,
     };
     let collection = aug.entry_collection.as_deref();
     let entries = collection
@@ -857,9 +1086,17 @@ mod tests {
             .iter()
             .filter(|i| i.class == Class::WriteCite)
             .collect();
-        assert_eq!(cites.len(), 1, "one line stands for the rows");
-        assert_eq!(cites[0].status, Status::Skipped);
-        assert_eq!(cites[0].detail.as_deref(), Some("3 rows"));
+        assert_eq!(cites.len(), 3, "one item per row, so the tally counts rows");
+        assert!(cites.iter().all(|c| c.status == Status::Skipped));
+        assert!(cites.iter().all(|c| c.detail.is_none()));
+        assert_eq!(plan.tally()[&Class::WriteCite].skipped, 3);
+        assert_eq!(
+            plan.tally()[&Class::WriteCite]
+                .reasons
+                .values()
+                .sum::<usize>(),
+            3
+        );
         assert!(plan.files.is_empty());
         assert_eq!(plan.writes(), 0);
         assert_eq!(plan.population["write_cite"], 3);
@@ -1639,5 +1876,475 @@ mod tests {
             3,
             "edited, new and renamed; not the unchanged one"
         );
+    }
+
+    const LEDGER_MD: &str =
+        "---\nkind: tracker\nentry_prefix: F\n---\n\n# L\n\n## F-1 — one\n\nx\n";
+
+    fn items_of(plan: &ExportPlan, class: Class) -> Vec<&Item> {
+        plan.items.iter().filter(|i| i.class == class).collect()
+    }
+
+    fn statuses_of(plan: &ExportPlan, class: Class) -> Vec<Status> {
+        items_of(plan, class).iter().map(|i| i.status).collect()
+    }
+
+    /// The declaration of a document text, as `expects_augmentation` reads in its frontmatter.
+    fn declared_in(text: &str) -> Option<String> {
+        let (fm, _) = crate::librarian::frontmatter::parse(text).ok()?;
+        fm?.extra
+            .get("expects_augmentation")
+            .and_then(|v| v.as_str().map(str::to_owned))
+    }
+
+    #[test]
+    fn a_ledger_with_an_entry_and_a_shape_changes_once_and_gains_one_sidecar() {
+        let plan = plan_of_files(&[("docs/ledger.md", LEDGER_MD.as_bytes())], |cat, root| {
+            add_doc(cat, root, "led", "docs/ledger.md");
+            add_augmentation(
+                cat,
+                "led",
+                r#"{"entries":[{"id":"F-1"},{"id":"F-2","title":"two"}],"gather":"x"}"#,
+                Some("entries"),
+            );
+        });
+        let files: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(
+            files,
+            ["docs/augmentations/docs-ledger.yaml", "docs/ledger.md"]
+        );
+        assert_eq!(plan.writes(), 2);
+
+        let ledger = &plan.files["docs/ledger.md"];
+        assert_eq!(ledger.head_text.as_deref(), Some(LEDGER_MD));
+        assert_eq!(ledger.renamed_from, None);
+        assert!(
+            ledger.new_text.contains("\n## F-2 — two\n"),
+            "{}",
+            ledger.new_text
+        );
+        assert!(
+            ledger.new_text.contains("entry_high_water_F: 2"),
+            "{}",
+            ledger.new_text
+        );
+        assert_eq!(
+            declared_in(&ledger.new_text).as_deref(),
+            Some("docs/augmentations/docs-ledger.yaml")
+        );
+
+        let sidecar = &plan.files["docs/augmentations/docs-ledger.yaml"];
+        assert_eq!(sidecar.head_text, None);
+        assert_eq!(sidecar.renamed_from, None);
+        let shape: crate::librarian::augmentation_sidecar::AugmentationSidecar =
+            serde_yml::from_str(&sidecar.new_text).unwrap();
+        assert_eq!(shape.prompt, "keep it current");
+        assert_eq!(shape.entry_collection.as_deref(), Some("entries"));
+
+        assert_eq!(
+            statuses_of(&plan, Class::ParamsEntry),
+            [Status::AlreadyExported, Status::Moved]
+        );
+        assert_eq!(
+            statuses_of(&plan, Class::AugmentationShape),
+            [Status::Moved]
+        );
+        let other = items_of(&plan, Class::ParamsOther);
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].status, Status::Unrecoverable);
+        assert_eq!(other[0].detail.as_deref(), Some("gather"));
+        assert!(items_of(&plan, Class::ParamsEntry)
+            .iter()
+            .all(|i| i.path.as_deref() == Some("docs/ledger.md")));
+        // Every entry of the population has an outcome.
+        let tally = plan.tally();
+        let outcomes = |class: Class| {
+            let t = &tally[&class];
+            t.moved + t.already_exported + t.skipped + t.unrecoverable
+        };
+        assert_eq!(
+            outcomes(Class::ParamsEntry),
+            plan.population["params_entry"]
+        );
+        assert_eq!(
+            outcomes(Class::AugmentationShape),
+            plan.population["augmentation_shape"]
+        );
+    }
+
+    #[test]
+    fn a_renamed_ledger_gets_its_entries_and_sidecar_under_the_new_path() {
+        // The text goes through the citation rewrite first, then the entries, then the stamp; the
+        // rows land on the path the document has after the rename, and so does the sidecar's name.
+        let text = "---\nkind: tracker\nentry_prefix: F\n---\n\n# L\n\nsee [[my_notes]]\n\n## F-1 — one\n\nx\n";
+        let plan = plan_of_files(&[("docs/my_notes.md", text.as_bytes())], |cat, root| {
+            add_doc(cat, root, "led", "docs/my_notes.md");
+            add_augmentation(
+                cat,
+                "led",
+                r#"{"entries":[{"id":"F-2","title":"two"}]}"#,
+                Some("entries"),
+            );
+        });
+        let files: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(
+            files,
+            ["docs/augmentations/docs-my-notes.yaml", "docs/my-notes.md"]
+        );
+        let ledger = &plan.files["docs/my-notes.md"];
+        assert_eq!(ledger.renamed_from.as_deref(), Some("docs/my_notes.md"));
+        assert_eq!(ledger.head_text.as_deref(), Some(text));
+        assert!(
+            ledger.new_text.contains("see [[my-notes]]"),
+            "{}",
+            ledger.new_text
+        );
+        assert!(
+            ledger.new_text.contains("\n## F-2 — two\n"),
+            "{}",
+            ledger.new_text
+        );
+        assert_eq!(
+            declared_in(&ledger.new_text).as_deref(),
+            Some("docs/augmentations/docs-my-notes.yaml")
+        );
+        for item in items_of(&plan, Class::ParamsEntry)
+            .into_iter()
+            .chain(items_of(&plan, Class::AugmentationShape))
+        {
+            assert_eq!(item.path.as_deref(), Some("docs/my-notes.md"), "{item:?}");
+        }
+    }
+
+    #[test]
+    fn an_augmentation_whose_document_is_not_in_head_is_unrecoverable() {
+        let plan = plan_of_files(&[("docs/ledger.md", LEDGER_MD.as_bytes())], |cat, root| {
+            add_doc(cat, root, "gone", "docs/gone.md");
+            add_augmentation(
+                cat,
+                "gone",
+                r#"{"entries":[{"id":"F-2"},{"id":"F-3"}],"extra":1}"#,
+                Some("entries"),
+            );
+        });
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let entries = items_of(&plan, Class::ParamsEntry);
+        assert_eq!(entries.len(), 2);
+        for item in entries
+            .into_iter()
+            .chain(items_of(&plan, Class::AugmentationShape))
+        {
+            assert_eq!(item.status, Status::Unrecoverable, "{item:?}");
+            assert_eq!(item.reason, "document not in HEAD");
+            assert_eq!(item.path.as_deref(), Some("docs/gone.md"));
+        }
+        assert_eq!(items_of(&plan, Class::AugmentationShape).len(), 1);
+        assert_eq!(
+            statuses_of(&plan, Class::ParamsOther),
+            [Status::Unrecoverable]
+        );
+    }
+
+    #[test]
+    fn a_frozen_document_gets_frozen_items_and_keeps_its_text() {
+        let plan = plan_of_files(
+            &[
+                ("docs/ledger.md", LEDGER_MD.as_bytes()),
+                ("src/x.rs", b"const P: &str = \"../docs/ledger.md\";\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "led", "docs/ledger.md");
+                add_augmentation(
+                    cat,
+                    "led",
+                    r#"{"entries":[{"id":"F-2"}],"extra":1}"#,
+                    Some("entries"),
+                );
+            },
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        for class in [Class::ParamsEntry, Class::AugmentationShape] {
+            let items = items_of(&plan, class);
+            assert_eq!(items.len(), 1, "{class:?}");
+            assert_eq!(items[0].status, Status::Unrecoverable);
+            assert!(
+                items[0].reason.starts_with("frozen: "),
+                "{}",
+                items[0].reason
+            );
+            assert_eq!(items[0].path.as_deref(), Some("docs/ledger.md"));
+        }
+        assert_eq!(
+            statuses_of(&plan, Class::ParamsOther),
+            [Status::Unrecoverable]
+        );
+    }
+
+    #[test]
+    fn a_committed_sidecar_is_compared_never_overwritten() {
+        let sidecar_path = "docs/augmentations/docs-ledger.yaml";
+        let with_head_sidecar = |yaml: &'static str| {
+            plan_of_files(
+                &[
+                    ("docs/ledger.md", LEDGER_MD.as_bytes()),
+                    (sidecar_path, yaml.as_bytes()),
+                ],
+                |cat, root| {
+                    add_doc(cat, root, "led", "docs/ledger.md");
+                    add_augmentation(cat, "led", "{}", Some("entries"));
+                },
+            )
+        };
+        // Equal shape, no declaration: the sidecar is untouched and the document gets the stamp.
+        let plan = with_head_sidecar("prompt: keep it current\nentry_collection: entries\n");
+        let files: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(files, ["docs/ledger.md"]);
+        assert_eq!(
+            declared_in(&plan.files["docs/ledger.md"].new_text).as_deref(),
+            Some(sidecar_path)
+        );
+        assert_eq!(
+            statuses_of(&plan, Class::AugmentationShape),
+            [Status::Moved]
+        );
+        // A different shape: nothing is written, the drift is named.
+        let plan = with_head_sidecar("prompt: an older prompt\nentry_collection: entries\n");
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let shape = items_of(&plan, Class::AugmentationShape);
+        assert_eq!(shape.len(), 1);
+        assert_eq!(shape[0].status, Status::Unrecoverable);
+        assert_eq!(shape[0].reason, "shape drift: prompt");
+        assert_eq!(shape[0].path.as_deref(), Some("docs/ledger.md"));
+    }
+
+    #[test]
+    fn a_declared_equal_sidecar_in_head_is_already_exported() {
+        let sidecar_path = "docs/augmentations/docs-ledger.yaml";
+        let declared = format!(
+            "---\nkind: tracker\nentry_prefix: F\nexpects_augmentation: {sidecar_path}\n---\n\n# L\n\n## F-1 — one\n\nx\n"
+        );
+        let plan = plan_of_files(
+            &[
+                ("docs/ledger.md", declared.as_bytes()),
+                (sidecar_path, b"prompt: keep it current\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "led", "docs/ledger.md");
+                add_augmentation(cat, "led", "{}", None);
+            },
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        assert_eq!(plan.writes(), 0);
+        assert_eq!(
+            statuses_of(&plan, Class::AugmentationShape),
+            [Status::AlreadyExported]
+        );
+    }
+
+    #[test]
+    fn a_document_without_frontmatter_refuses_its_shape_and_still_gets_its_entries() {
+        let plan = plan_of_files(
+            &[("docs/plain.md", b"# P\n\n## F-1 \xe2\x80\x94 one\n\nx\n")],
+            |cat, root| {
+                add_doc(cat, root, "p", "docs/plain.md");
+                add_augmentation(cat, "p", r#"{"entries":[{"id":"F-2"}]}"#, Some("entries"));
+            },
+        );
+        let shape = items_of(&plan, Class::AugmentationShape);
+        assert_eq!(shape.len(), 1);
+        assert_eq!(shape[0].status, Status::Unrecoverable);
+        assert!(
+            shape[0].reason.contains("no frontmatter block"),
+            "{}",
+            shape[0].reason
+        );
+        let files: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(files, ["docs/plain.md"], "no sidecar without a declaration");
+        assert!(plan.files["docs/plain.md"]
+            .new_text
+            .contains("\n## F-2 — F-2\n"));
+        assert!(!plan.files["docs/plain.md"]
+            .new_text
+            .contains("entry_high_water"));
+    }
+
+    #[test]
+    fn params_that_are_not_json_are_one_item_and_one_row() {
+        let plan = plan_of_files(&[("docs/ledger.md", LEDGER_MD.as_bytes())], |cat, root| {
+            add_doc(cat, root, "led", "docs/ledger.md");
+            add_augmentation(cat, "led", "{broken", Some("entries"));
+        });
+        let other = items_of(&plan, Class::ParamsOther);
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].reason, "params is not JSON");
+        assert_eq!(plan.population["params_other"], 1);
+        assert!(items_of(&plan, Class::ParamsEntry).is_empty());
+    }
+
+    /// Two live rows may name one path (the same file under two spellings of the root). Both rows'
+    /// params are reported under that path, the path's text and sidecar are planned once, and no
+    /// entry is lost: an entry the first row recovered is already exported for the second.
+    fn two_rows_plan(second_prompt: Option<&'static str>) -> ExportPlan {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let repo = repo_with(&root, &[("docs/ledger.md", FILE, LEDGER_MD.as_bytes())]);
+        let old = old_catalog_with(|cat| {
+            add_doc(cat, &root, "d1", "docs/ledger.md");
+            add_doc_at(cat, "d2", "/old/spelling/docs/ledger.md");
+            add_augmentation(
+                cat,
+                "d1",
+                r#"{"entries":[{"id":"F-2","title":"two"}],"from_first":1}"#,
+                Some("entries"),
+            );
+            add_augmentation(
+                cat,
+                "d2",
+                r#"{"entries":[{"id":"F-2","title":"two"},{"id":"F-3","title":"three"}],"from_second":2}"#,
+                Some("entries"),
+            );
+            if let Some(prompt) = second_prompt {
+                let mut row = crate::librarian::catalog::augmentation::get(cat, "d2")
+                    .unwrap()
+                    .unwrap();
+                row.prompt = prompt.into();
+                crate::librarian::catalog::augmentation::upsert(cat, &row).unwrap();
+            }
+        });
+        let map =
+            RootMap::with_old_roots(root.clone(), vec![PathBuf::from("/old/spelling")]).unwrap();
+        let rows = load(&old, &map).unwrap();
+        assert_eq!(rows.documents.len(), 2);
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        plan_export(&repo, &commit, &rows).unwrap()
+    }
+
+    #[test]
+    fn two_rows_naming_one_path_are_exported_once_and_both_reported() {
+        let plan = two_rows_plan(None);
+        let files: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(
+            files,
+            ["docs/augmentations/docs-ledger.yaml", "docs/ledger.md"]
+        );
+        let text = &plan.files["docs/ledger.md"].new_text;
+        assert_eq!(text.matches("\n## F-2 — two\n").count(), 1, "{text}");
+        assert_eq!(text.matches("\n## F-3 — three\n").count(), 1, "{text}");
+        assert!(text.contains("entry_high_water_F: 3"), "{text}");
+        assert_eq!(
+            statuses_of(&plan, Class::ParamsEntry),
+            [Status::Moved, Status::AlreadyExported, Status::Moved]
+        );
+        // The second row's shape equals the sidecar the first planned: nothing exported twice.
+        assert_eq!(
+            statuses_of(&plan, Class::AugmentationShape),
+            [Status::Moved, Status::AlreadyExported]
+        );
+        // Both rows' other params are named under the one path.
+        let other = items_of(&plan, Class::ParamsOther);
+        let details: Vec<Option<&str>> = other.iter().map(|i| i.detail.as_deref()).collect();
+        assert_eq!(details, [Some("from_first"), Some("from_second")]);
+        assert!(other
+            .iter()
+            .all(|i| i.path.as_deref() == Some("docs/ledger.md")));
+    }
+
+    #[test]
+    fn two_rows_naming_one_path_with_two_shapes_report_the_second_as_drift() {
+        let plan = two_rows_plan(Some("another prompt"));
+        let sidecars = plan
+            .files
+            .keys()
+            .filter(|p| p.starts_with("docs/augmentations/"))
+            .count();
+        assert_eq!(sidecars, 1, "the second shape never overwrites the first");
+        let shape = items_of(&plan, Class::AugmentationShape);
+        assert_eq!(shape.len(), 2);
+        assert_eq!(shape[0].status, Status::Moved);
+        assert_eq!(shape[1].status, Status::Unrecoverable);
+        assert_eq!(shape[1].reason, "shape drift: prompt");
+        assert_eq!(items_of(&plan, Class::ParamsOther).len(), 2);
+    }
+
+    #[test]
+    fn a_class_with_a_population_and_no_item_has_a_zero_row() {
+        // `note` events have no item yet: the class has a population and no outcome, and the
+        // tally says so with zeros rather than leaving the class out.
+        let plan = plan_for(|cat, root| {
+            let _ = with_docs_slug(cat, root);
+            add_event(cat, "e1", "a", "note", r#"{"text":"t"}"#);
+        });
+        assert_eq!(plan.population["event:note"], 1);
+        let tally = plan.tally();
+        let event = &tally[&Class::Event];
+        assert_eq!(
+            (
+                event.moved,
+                event.already_exported,
+                event.skipped,
+                event.unrecoverable
+            ),
+            (0, 0, 0, 0)
+        );
+        assert!(
+            !tally.contains_key(&Class::Rename),
+            "a class with no population stays out"
+        );
+    }
+
+    #[test]
+    fn a_committed_sidecar_that_is_a_link_is_never_replaced() {
+        use crate::librarian::derived::testkit::LINK;
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let repo = repo_with(
+            &root,
+            &[
+                ("docs/ledger.md", FILE, LEDGER_MD.as_bytes()),
+                (
+                    "docs/augmentations/docs-ledger.yaml",
+                    LINK,
+                    b"../../elsewhere.yaml",
+                ),
+            ],
+        );
+        let old = old_catalog_with(|cat| {
+            add_doc(cat, &root, "led", "docs/ledger.md");
+            add_augmentation(cat, "led", "{}", None);
+        });
+        let rows = load(&old, &RootMap::new(root.clone())).unwrap();
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let plan = plan_export(&repo, &commit, &rows).unwrap();
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let shape = items_of(&plan, Class::AugmentationShape);
+        assert_eq!(shape.len(), 1);
+        assert_eq!(shape[0].status, Status::Unrecoverable);
+        assert_eq!(
+            shape[0].reason,
+            "the committed sidecar cannot be read as text"
+        );
+    }
+
+    #[test]
+    fn a_document_outside_the_key_space_gets_its_own_reason() {
+        let plan = plan_of_files(
+            &[
+                (".codescout/key-space.toml", b"exclude = [\"contrib/**\"]\n"),
+                ("contrib/c.md", LEDGER_MD.as_bytes()),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "c", "contrib/c.md");
+                add_augmentation(cat, "c", r#"{"entries":[{"id":"F-2"}]}"#, Some("entries"));
+            },
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        for class in [Class::ParamsEntry, Class::AugmentationShape] {
+            let items = items_of(&plan, class);
+            assert_eq!(items.len(), 1, "{class:?}");
+            assert_eq!(
+                items[0].reason,
+                "document is outside the key space or has no text"
+            );
+        }
     }
 }

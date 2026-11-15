@@ -1,0 +1,720 @@
+//! Params entries and the other params of an augmentation (D-R13, D-R23).
+//!
+//! A params entry is an element of the augmentation's entry collection. When the document's body
+//! defines no heading for its token, [`recover_params_entries`] gives it a section; when it does,
+//! the entry is already exported, or skipped when its params fields are not in the section's text.
+//! Everything else in params has no committed home: [`other_params`] names it.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde_json::{Map, Value};
+
+use crate::librarian::catalog::augmentation::{
+    body_entry_heading_level, entry_high_water_key, render_pending_section, AugmentationRow,
+    PendingSection,
+};
+use crate::librarian::catalog::dual_write::frontmatter_mark;
+use crate::librarian::catalog::event_text::{fence_for, one_line, EVENTS_HEADING};
+use crate::librarian::catalog::link_text::RELATIONS_HEADING;
+use crate::librarian::cutover::plan::{Class, Item, Status};
+use crate::librarian::entry_token::entry_tokens_by_line;
+use crate::librarian::frontmatter;
+use crate::librarian::preview::headings;
+
+/// The info string of the fenced block that holds an entry's params.
+const ENTRY_INFO: &str = "params-entry";
+
+pub const REASON_ENTRY_RECOVERED: &str = "section recovered from params";
+pub const REASON_ENTRY_DEFINED: &str = "entry is defined in the text";
+pub const REASON_NOT_A_TOKEN: &str = "entry id is not a token";
+pub const REASON_NOT_AN_OBJECT: &str = "params entry is not an object";
+pub const REASON_NOT_AN_ARRAY: &str = "the entry collection is not an array";
+pub const REASON_PARAMS_NOT_JSON: &str = "params is not JSON";
+pub const REASON_PARAMS_NOT_AN_OBJECT: &str = "params is not a JSON object";
+/// The reason of a params key outside the entry collection: neither a sidecar nor a text holds it.
+pub const REASON_PARAMS_OTHER: &str = "params outside the entry collection have no committed home";
+
+/// What an augmentation's `params` text holds.
+pub(crate) enum Params {
+    /// No text, or JSON `null`.
+    Empty,
+    Object(Map<String, Value>),
+    NotJson,
+    /// JSON, but not an object.
+    NotObject,
+}
+
+/// Read `row.params`. The catalog default is `{}`; an empty text and `null` carry nothing.
+pub(crate) fn params_of(row: &AugmentationRow) -> Params {
+    let raw = row.params.trim();
+    if raw.is_empty() {
+        return Params::Empty;
+    }
+    match serde_json::from_str::<Value>(raw) {
+        Err(_) => Params::NotJson,
+        Ok(Value::Null) => Params::Empty,
+        Ok(Value::Object(map)) => Params::Object(map),
+        Ok(_) => Params::NotObject,
+    }
+}
+
+fn item(
+    rel_path: &str,
+    class: Class,
+    status: Status,
+    reason: &str,
+    detail: Option<String>,
+) -> Item {
+    Item {
+        class,
+        status,
+        reason: reason.to_owned(),
+        path: Some(rel_path.to_owned()),
+        line: None,
+        detail,
+        suggestion: None,
+    }
+}
+
+/// Every element of the entry collection as one `unrecoverable` item with `reason`: the document
+/// cannot take them (it is frozen, or not in `HEAD`). The detail is the entry's id when it has one.
+pub fn refuse_entries(rel_path: &str, row: &AugmentationRow, reason: &str) -> Vec<Item> {
+    let Params::Object(params) = params_of(row) else {
+        return Vec::new();
+    };
+    let Some(collection) = row.entry_collection.as_deref() else {
+        return Vec::new();
+    };
+    let Some(value) = params.get(collection) else {
+        return Vec::new();
+    };
+    let Some(entries) = value.as_array() else {
+        let reported = item(
+            rel_path,
+            Class::ParamsEntry,
+            Status::Unrecoverable,
+            REASON_NOT_AN_ARRAY,
+            None,
+        );
+        return vec![reported];
+    };
+    entries
+        .iter()
+        .map(|entry| {
+            let id = entry.get("id").map(id_text);
+            item(
+                rel_path,
+                Class::ParamsEntry,
+                Status::Unrecoverable,
+                reason,
+                id,
+            )
+        })
+        .collect()
+}
+
+/// The text of an `id` value for a report line: a string as it is, anything else as JSON.
+fn id_text(id: &Value) -> String {
+    match id {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// `(prefix, number)` of a token `[A-Z]{1,3}-<digits>`; `None` for any other text.
+fn parse_token(id: &str) -> Option<(&str, u64)> {
+    let (prefix, digits) = id.split_once('-')?;
+    let letters = (1..=3).contains(&prefix.len()) && prefix.bytes().all(|b| b.is_ascii_uppercase());
+    let number = !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+    if !(letters && number) {
+        return None;
+    }
+    Some((prefix, digits.parse().ok()?))
+}
+
+/// The text each entry token owns: its heading and every line up to the next heading at or above
+/// its level (`entry_tokens_by_line`), by token. A token defined twice owns both regions.
+fn section_texts(text: &str) -> BTreeMap<String, String> {
+    let owners = entry_tokens_by_line(text);
+    let mut sections: BTreeMap<String, String> = BTreeMap::new();
+    for (n, line) in text.lines().enumerate() {
+        if let Some(Some(token)) = owners.get(n + 1) {
+            let section = sections.entry(token.clone()).or_default();
+            section.push_str(line);
+            section.push('\n');
+        }
+    }
+    sections
+}
+
+/// Whether `section` holds `value`: the value as a string, or in the form a JSON string escapes
+/// it to (the params block the recovery writes holds the second).
+fn text_holds(section: &str, value: &Value) -> bool {
+    match value {
+        Value::String(s) => {
+            let escaped = serde_json::to_string(s).unwrap_or_default();
+            let inner = escaped
+                .strip_prefix('"')
+                .and_then(|e| e.strip_suffix('"'))
+                .unwrap_or(&escaped);
+            section.contains(s.as_str()) || section.contains(inner)
+        }
+        other => section.contains(&other.to_string()),
+    }
+}
+
+/// A value that says nothing: `null`, an empty string, array or object.
+fn says_nothing(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(s) => s.is_empty(),
+        Value::Array(a) => a.is_empty(),
+        Value::Object(o) => o.is_empty(),
+        _ => false,
+    }
+}
+
+/// The fields of `entry` (other than `id`) that `section` does not hold, sorted.
+fn missing_fields(entry: &Map<String, Value>, section: &str) -> Vec<String> {
+    let missing: BTreeSet<&String> = entry
+        .iter()
+        .filter(|(key, value)| key.as_str() != "id" && !says_nothing(value))
+        .filter(|(_, value)| !text_holds(section, value))
+        .map(|(key, _)| key)
+        .collect();
+    missing.into_iter().cloned().collect()
+}
+
+/// The heading an entry gets: its `title`, else its `summary`, else its id, on one line.
+fn title_of(entry: &Map<String, Value>, token: &str) -> String {
+    for key in ["title", "summary"] {
+        if let Some(text) = entry.get(key).and_then(Value::as_str) {
+            let line = one_line(text);
+            if !line.is_empty() {
+                return line;
+            }
+        }
+    }
+    token.to_owned()
+}
+
+/// The byte offset in `doc` of the first `## Events` or `## Relations` heading, outside code
+/// fences and outside the frontmatter block.
+fn home_offset(doc: &str) -> Option<usize> {
+    let body = frontmatter::parse(doc).map_or(doc, |(_, body)| body);
+    let body_start = doc.len() - body.len();
+    let heading = headings::parse(body).into_iter().find(|h| {
+        h.level == 2
+            && matches!(
+                format!("## {}", h.text).as_str(),
+                EVENTS_HEADING | RELATIONS_HEADING
+            )
+    })?;
+    let before: usize = body
+        .split_inclusive('\n')
+        .take(heading.line - 1)
+        .map(str::len)
+        .sum();
+    Some(body_start + before)
+}
+
+/// `doc` with `section` before the first `## Events` or `## Relations` heading, else at the end,
+/// with a blank line between it and the text before it.
+fn insert_section(doc: &str, section: &str) -> String {
+    match home_offset(doc) {
+        Some(at) => {
+            let (head, tail) = doc.split_at(at);
+            let lead = if head.is_empty() || head.ends_with("\n\n") {
+                ""
+            } else if head.ends_with('\n') {
+                "\n"
+            } else {
+                "\n\n"
+            };
+            format!("{head}{lead}{section}{tail}")
+        }
+        None => {
+            let head = doc.trim_end();
+            if head.is_empty() {
+                format!("{}\n", section.trim_end())
+            } else {
+                format!("{head}\n\n{}\n", section.trim_end())
+            }
+        }
+    }
+}
+
+/// Give every params entry of `row` whose token `text` does not define a section, and report each
+/// entry (D-R13). Returns the new text and one item per entry, in the order of the collection.
+///
+/// An entry whose token the text defines is `already_exported` when its fields are in the section
+/// (a field is in the text when its value, as a string, appears in the section of that token; a
+/// value that says nothing is always in), and `skipped` with the fields it lacks otherwise. The
+/// section of a recovered entry is a `params-entry` block holding the entry's JSON without `id`
+/// (keys sorted), under the heading and validity stamp of a live write. `entry_high_water_<P>`
+/// rises to the highest recovered number when the document has a frontmatter block, and never
+/// falls.
+pub fn recover_params_entries(
+    rel_path: &str,
+    text: &str,
+    row: &AugmentationRow,
+) -> (String, Vec<Item>) {
+    let unchanged = || (text.to_owned(), Vec::new());
+    let Some(collection) = row.entry_collection.as_deref() else {
+        return unchanged();
+    };
+    let Params::Object(params) = params_of(row) else {
+        return unchanged();
+    };
+    let Some(value) = params.get(collection) else {
+        return unchanged();
+    };
+    let Some(entries) = value.as_array() else {
+        let reported = item(
+            rel_path,
+            Class::ParamsEntry,
+            Status::Unrecoverable,
+            REASON_NOT_AN_ARRAY,
+            None,
+        );
+        return (text.to_owned(), vec![reported]);
+    };
+
+    let mut doc = text.to_owned();
+    let mut sections = section_texts(&doc);
+    let mut marks: BTreeMap<String, u64> = BTreeMap::new();
+    let mut items = Vec::with_capacity(entries.len());
+    let report = |status, reason: &str, detail: Option<String>| {
+        item(rel_path, Class::ParamsEntry, status, reason, detail)
+    };
+    for entry in entries {
+        let Some(entry) = entry.as_object() else {
+            items.push(report(Status::Unrecoverable, REASON_NOT_AN_OBJECT, None));
+            continue;
+        };
+        let id = entry.get("id");
+        let Some((token, (prefix, number))) = id
+            .and_then(Value::as_str)
+            .and_then(|s| parse_token(s).map(|parsed| (s, parsed)))
+        else {
+            items.push(report(
+                Status::Unrecoverable,
+                REASON_NOT_A_TOKEN,
+                id.map(id_text),
+            ));
+            continue;
+        };
+        let detail = Some(token.to_owned());
+
+        if let Some(section) = sections.get(token) {
+            let missing = missing_fields(entry, section);
+            items.push(if missing.is_empty() {
+                report(Status::AlreadyExported, REASON_ENTRY_DEFINED, detail)
+            } else {
+                let reason = format!("entry exists; fields not in text: {}", missing.join(", "));
+                report(Status::Skipped, &reason, detail)
+            });
+            continue;
+        }
+
+        let payload: BTreeMap<&String, &Value> = entry
+            .iter()
+            .filter(|(key, _)| key.as_str() != "id")
+            .collect();
+        let json = serde_json::to_string(&payload).expect("a JSON value always serializes");
+        let fence = fence_for(&json);
+        let pending = PendingSection {
+            title: title_of(entry, token),
+            body: format!("{fence}{ENTRY_INFO}\n{json}\n{fence}\n"),
+            anchor_heading: String::new(),
+            index_row: None,
+        };
+        let level = body_entry_heading_level(&doc, prefix).unwrap_or(2);
+        match render_pending_section(token, level, &pending) {
+            Ok(section) => {
+                doc = insert_section(&doc, &section);
+                sections = section_texts(&doc);
+                let mark = marks.entry(prefix.to_owned()).or_default();
+                *mark = (*mark).max(number);
+                items.push(report(Status::Moved, REASON_ENTRY_RECOVERED, detail));
+            }
+            Err(e) => {
+                let reason = format!("section cannot be rendered: {e}");
+                items.push(report(Status::Unrecoverable, &reason, detail));
+            }
+        }
+    }
+
+    for (prefix, number) in marks {
+        if number > frontmatter_mark(&doc, &prefix).unwrap_or(0) {
+            if let Some(raised) =
+                frontmatter::upsert_int_line(&doc, &entry_high_water_key(&prefix), number)
+            {
+                doc = raised;
+            }
+        }
+    }
+    (doc, items)
+}
+
+/// One `params_other` item for the params keys outside the entry collection (every key when the
+/// augmentation has no collection), with the key names, or `None` when there are none (D-R23).
+/// Params that are not JSON, or not an object, are one item as well. The item is `unrecoverable`:
+/// a sidecar has no params field and a text has no home for them.
+pub fn other_params(rel_path: &str, row: &AugmentationRow) -> Option<Item> {
+    let report = |reason: &str, detail: Option<String>| {
+        item(
+            rel_path,
+            Class::ParamsOther,
+            Status::Unrecoverable,
+            reason,
+            detail,
+        )
+    };
+    match params_of(row) {
+        Params::Empty => None,
+        Params::NotJson => Some(report(REASON_PARAMS_NOT_JSON, None)),
+        Params::NotObject => Some(report(REASON_PARAMS_NOT_AN_OBJECT, None)),
+        Params::Object(params) => {
+            let collection = row.entry_collection.as_deref();
+            let mut keys: Vec<&str> = params
+                .keys()
+                .map(String::as_str)
+                .filter(|key| Some(*key) != collection)
+                .collect();
+            if keys.is_empty() {
+                return None;
+            }
+            keys.sort_unstable();
+            Some(report(REASON_PARAMS_OTHER, Some(keys.join(", "))))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::librarian::catalog::dual_write::frontmatter_mark;
+    use crate::librarian::cutover::plan::{Class, Status};
+    use crate::librarian::entry_token::entry_tokens_by_line;
+
+    fn row(params: &str, collection: Option<&str>) -> AugmentationRow {
+        AugmentationRow {
+            artifact_id: "a".into(),
+            prompt: "keep it current".into(),
+            params: params.into(),
+            last_refreshed_at: None,
+            refresh_count: 0,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+            render_template: None,
+            params_schema: None,
+            append_mode: false,
+            history_cap: None,
+            entry_collection: collection.map(str::to_owned),
+            refreshed_at_commit: None,
+        }
+    }
+
+    /// A row whose entry collection `entries` holds the JSON array `entries`.
+    fn entries_row(entries: &str) -> AugmentationRow {
+        row(&format!(r#"{{"entries":{entries}}}"#), Some("entries"))
+    }
+
+    fn today() -> String {
+        chrono::Utc::now().format("%Y-%m-%d").to_string()
+    }
+
+    fn statuses(items: &[Item]) -> Vec<Status> {
+        items.iter().map(|i| i.status).collect()
+    }
+
+    /// The distinct entry tokens a text defines, in order.
+    fn defined(text: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for token in entry_tokens_by_line(text).into_iter().flatten() {
+            if !out.contains(&token) {
+                out.push(token);
+            }
+        }
+        out
+    }
+
+    const LEDGER: &str =
+        "---\nkind: tracker\nentry_prefix: F\n---\n\n# Ledger\n\n## F-1 — first\n\nbody one\n";
+
+    #[test]
+    fn an_entry_without_a_heading_gets_a_section_and_the_mark() {
+        let row = entries_row(r#"[{"id":"F-1"},{"id":"F-2","title":"second","status":"open"}]"#);
+        let (out, items) = recover_params_entries("docs/l.md", LEDGER, &row);
+        let stamp = format!("## F-2 — second\n\n**Valid:** dated {}\n\n", today());
+        assert!(out.contains(&stamp), "{out}");
+        assert!(
+            out.contains("```params-entry\n{\"status\":\"open\",\"title\":\"second\"}\n```\n"),
+            "{out}"
+        );
+        assert_eq!(frontmatter_mark(&out, "F"), Some(2), "{out}");
+        assert!(
+            out.contains("## F-1 — first\n\nbody one\n"),
+            "F-1 is left alone: {out}"
+        );
+        assert_eq!(defined(&out), ["F-1", "F-2"]);
+        assert_eq!(statuses(&items), [Status::AlreadyExported, Status::Moved]);
+        assert!(items.iter().all(|i| i.class == Class::ParamsEntry));
+        assert!(items.iter().all(|i| i.path.as_deref() == Some("docs/l.md")));
+        assert_eq!(items[1].detail.as_deref(), Some("F-2"));
+    }
+
+    #[test]
+    fn a_defined_entry_names_the_fields_its_text_lacks() {
+        let text = format!("{LEDGER}\n## F-2 — second\n\nsomething with high in it elsewhere\n");
+        // `severity: high`: F-1's section does not hold "high", F-2's does. Another entry's text
+        // does not count for F-1.
+        let row = entries_row(r#"[{"id":"F-1","severity":"high"}]"#);
+        let (out, items) = recover_params_entries("l.md", &text, &row);
+        assert_eq!(out, text);
+        assert_eq!(statuses(&items), [Status::Skipped]);
+        assert_eq!(
+            items[0].reason,
+            "entry exists; fields not in text: severity"
+        );
+        // The same field, now in the entry's own section, is exported.
+        let held = text.replace("body one", "severity: high");
+        let (out, items) = recover_params_entries("l.md", &held, &row);
+        assert_eq!(out, held);
+        assert_eq!(statuses(&items), [Status::AlreadyExported]);
+        // Every missing field is named, sorted; fields that carry nothing are not missing.
+        let row = entries_row(
+            r#"[{"id":"F-1","zeta":"z1","alpha":3,"empty":"","none":null,"list":[],"id2":"body one"}]"#,
+        );
+        let (_, items) = recover_params_entries("l.md", &text, &row);
+        assert_eq!(
+            items[0].reason,
+            "entry exists; fields not in text: alpha, zeta"
+        );
+    }
+
+    #[test]
+    fn a_value_with_backticks_gets_a_longer_fence() {
+        let row = entries_row(r#"[{"id":"F-2","note":"a ``` b"}]"#);
+        let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+        assert_eq!(statuses(&items), [Status::Moved]);
+        assert!(
+            out.contains("\n````params-entry\n{\"note\":\"a ``` b\"}\n````\n"),
+            "{out}"
+        );
+        assert!(!out.contains("\n```params-entry"), "{out}");
+        let (again, items) = recover_params_entries("l.md", &out, &row);
+        assert_eq!(again, out);
+        assert_eq!(statuses(&items), [Status::AlreadyExported]);
+    }
+
+    #[test]
+    fn the_section_goes_before_events_or_relations() {
+        let row = entries_row(r#"[{"id":"F-2","title":"t"}]"#);
+        let body = "---\nentry_prefix: F\n---\n\n# L\n\n## F-1 — a\n\nx\n\n";
+        let new = format!("## F-2 — t\n\n**Valid:** dated {}\n\n", today());
+        for (tail, anchor) in [
+            (
+                "## Relations\n\n- r\n\n## Events\n\n- e\n",
+                "## Relations\n",
+            ),
+            ("## Events\n\n- e\n\n## Relations\n\n- r\n", "## Events\n"),
+        ] {
+            let text = format!("{body}{tail}");
+            let (out, _) = recover_params_entries("l.md", &text, &row);
+            let at = out.find(&new).unwrap_or_else(|| panic!("{out}"));
+            let section_end = out[at..].find("```\n\n").unwrap() + at + 5;
+            assert!(out[section_end..].starts_with(anchor), "{out}");
+            assert!(out.find("## F-1 — a").unwrap() < at, "{out}");
+        }
+        // An anchor inside a code fence is not an anchor: the section goes at the end.
+        let lead = "# L\n\n## F-1 — a\n\nx\n\n```\n## Events\n```\n";
+        let fenced = format!("---\nentry_prefix: F\n---\n\n{lead}");
+        let (out, _) = recover_params_entries("l.md", &fenced, &row);
+        assert!(out.contains(&format!("{lead}\n## F-2 — t\n")), "{out}");
+        assert!(out.trim_end().ends_with("```"), "{out}");
+        assert!(
+            out.find(&new).unwrap() > out.find("## Events").unwrap(),
+            "{out}"
+        );
+        // A body with no anchor and no trailing newline still gets a blank line before it.
+        let bare = "# L\n\n## F-1 — a\n\nx";
+        let (out, _) = recover_params_entries("l.md", bare, &row);
+        assert!(
+            out.starts_with("# L\n\n## F-1 — a\n\nx\n\n## F-2 — t\n\n"),
+            "{out}"
+        );
+        assert!(out.ends_with("```\n"), "{out}");
+    }
+
+    #[test]
+    fn the_heading_level_follows_the_ledger() {
+        let row = entries_row(r#"[{"id":"F-3"}]"#);
+        let text = "---\nentry_prefix: F\n---\n\n# L\n\n### F-1 — a\n\nx\n\n### F-2 — b\n\ny\n";
+        let (out, _) = recover_params_entries("l.md", text, &row);
+        assert!(out.contains("\n### F-3 — F-3\n"), "{out}");
+        // A ledger with no heading for the prefix has no level to follow: `##`.
+        let (out, _) = recover_params_entries("l.md", "# L\n\n## G-1 — a\n\nx\n", &row);
+        assert!(out.contains("\n## F-3 — F-3\n"), "{out}");
+    }
+
+    #[test]
+    fn a_document_without_frontmatter_gets_the_section_and_no_mark() {
+        let row = entries_row(r#"[{"id":"F-2","title":"second"}]"#);
+        let text = "# L\n\n## F-1 — first\n\nx\n";
+        let (out, items) = recover_params_entries("l.md", text, &row);
+        assert!(out.starts_with(text), "{out}");
+        assert!(out.contains("\n## F-2 — second\n"), "{out}");
+        assert!(!out.contains("entry_high_water"), "{out}");
+        assert_eq!(statuses(&items), [Status::Moved]);
+    }
+
+    #[test]
+    fn the_mark_only_rises_and_is_kept_per_prefix() {
+        let text = "---\nentry_prefix: [F, W]\nentry_high_water_F: 9\n---\n\n# L\n";
+        let row = entries_row(r#"[{"id":"F-2"},{"id":"W-4"},{"id":"W-3"}]"#);
+        let (out, _) = recover_params_entries("l.md", text, &row);
+        assert_eq!(
+            frontmatter_mark(&out, "F"),
+            Some(9),
+            "a mark never drops: {out}"
+        );
+        assert_eq!(frontmatter_mark(&out, "W"), Some(4), "{out}");
+        // Entries of one prefix keep the highest number, whatever the order.
+        let row = entries_row(r#"[{"id":"W-7"},{"id":"W-3"}]"#);
+        let (out, _) = recover_params_entries("l.md", "---\nentry_prefix: W\n---\n", &row);
+        assert_eq!(frontmatter_mark(&out, "W"), Some(7), "{out}");
+    }
+
+    #[test]
+    fn an_entry_id_that_is_not_a_token_is_unrecoverable() {
+        let row = entries_row(
+            r#"[{"id":"nope"},{"id":7},{"title":"no id"},"a string",{"id":"f-1"},{"id":"ABCD-1"},{"id":"F-"},{"id":"F-1x"}]"#,
+        );
+        let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+        assert_eq!(out, LEDGER);
+        assert_eq!(items.len(), 8);
+        assert!(items.iter().all(|i| i.status == Status::Unrecoverable));
+        assert_eq!(items[0].reason, "entry id is not a token");
+        assert_eq!(items[0].detail.as_deref(), Some("nope"));
+        assert_eq!(items[1].detail.as_deref(), Some("7"));
+        assert_eq!(items[2].reason, "entry id is not a token");
+        assert_eq!(items[3].reason, "params entry is not an object");
+    }
+
+    #[test]
+    fn the_title_falls_back_to_summary_then_the_id_and_is_one_line() {
+        let row = entries_row(
+            r#"[{"id":"F-2","title":"line one\nline two  more"},{"id":"F-3","summary":"from summary"},{"id":"F-4"},{"id":"F-5","title":"  ","summary":""},{"id":"F-6","title":7,"summary":"s"}]"#,
+        );
+        let (out, _) = recover_params_entries("l.md", LEDGER, &row);
+        for heading in [
+            "## F-2 — line one line two  more\n",
+            "## F-3 — from summary\n",
+            "## F-4 — F-4\n",
+            "## F-5 — F-5\n",
+            "## F-6 — s\n",
+        ] {
+            assert!(out.contains(heading), "{heading:?} in {out}");
+        }
+        assert_eq!(defined(&out), ["F-1", "F-2", "F-3", "F-4", "F-5", "F-6"]);
+    }
+
+    #[test]
+    fn recovering_twice_adds_nothing() {
+        // Every value the JSON escapes must still be found in the text the first pass wrote.
+        let row = entries_row(
+            r#"[{"id":"F-2","title":"a \"quoted\" title\nsecond line","body":"back\\slash ``` fence","n":3,"obj":{"k":["v",1]}},{"id":"F-3"}]"#,
+        );
+        let (once, first) = recover_params_entries("l.md", LEDGER, &row);
+        assert_eq!(statuses(&first), [Status::Moved, Status::Moved]);
+        let (twice, second) = recover_params_entries("l.md", &once, &row);
+        assert_eq!(twice, once);
+        assert_eq!(
+            statuses(&second),
+            [Status::AlreadyExported, Status::AlreadyExported]
+        );
+    }
+
+    #[test]
+    fn an_entry_listed_twice_is_recovered_once() {
+        let row = entries_row(
+            r#"[{"id":"F-2","title":"t"},{"id":"F-2","title":"t"},{"id":"F-2","title":"other"}]"#,
+        );
+        let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+        assert_eq!(out.matches("\n## F-2 — ").count(), 1, "{out}");
+        assert_eq!(
+            statuses(&items),
+            [Status::Moved, Status::AlreadyExported, Status::Skipped]
+        );
+        assert_eq!(items[2].reason, "entry exists; fields not in text: title");
+    }
+
+    #[test]
+    fn no_entry_collection_or_no_entries_changes_nothing() {
+        for row in [
+            row(r#"{"entries":[{"id":"F-2"}]}"#, None),
+            row(r#"{"other":1}"#, Some("entries")),
+            row("{}", Some("entries")),
+            row("not json", Some("entries")),
+            row(r#"{"entries":[]}"#, Some("entries")),
+        ] {
+            let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+            assert_eq!(out, LEDGER);
+            assert!(items.is_empty(), "{items:?}");
+        }
+    }
+
+    #[test]
+    fn an_entry_collection_that_is_not_an_array_is_reported() {
+        let row = row(r#"{"entries":{"F-2":{}}}"#, Some("entries"));
+        let (out, items) = recover_params_entries("l.md", LEDGER, &row);
+        assert_eq!(out, LEDGER);
+        assert_eq!(statuses(&items), [Status::Unrecoverable]);
+        assert_eq!(items[0].class, Class::ParamsEntry);
+        assert_eq!(items[0].reason, "the entry collection is not an array");
+    }
+
+    #[test]
+    fn params_keys_outside_the_collection_are_reported_by_name() {
+        let row = row(
+            r#"{"entries":[{"id":"F-1"}],"gather_from":"x","notes":1}"#,
+            Some("entries"),
+        );
+        let item = other_params("docs/l.md", &row).expect("two keys have no home");
+        assert_eq!(item.class, Class::ParamsOther);
+        assert_eq!(item.status, Status::Unrecoverable);
+        assert_eq!(item.detail.as_deref(), Some("gather_from, notes"));
+        assert_eq!(item.path.as_deref(), Some("docs/l.md"));
+    }
+
+    #[test]
+    fn all_params_of_an_augmentation_without_a_collection_are_reported() {
+        let row = row(r#"{"zeta":1,"alpha":[1,2],"entries":[]}"#, None);
+        let item = other_params("l.md", &row).expect("every key has no home");
+        assert_eq!(item.detail.as_deref(), Some("alpha, entries, zeta"));
+    }
+
+    #[test]
+    fn empty_params_give_no_item() {
+        for params in ["{}", "", "  ", "null"] {
+            assert!(
+                other_params("l.md", &row(params, None)).is_none(),
+                "{params:?}"
+            );
+        }
+        // Only the collection: nothing outside it.
+        assert!(other_params("l.md", &entries_row("[{\"id\":\"F-1\"}]")).is_none());
+    }
+
+    #[test]
+    fn params_that_are_not_an_object_are_reported_once() {
+        let item = other_params("l.md", &row("{not json", None)).unwrap();
+        assert_eq!(item.class, Class::ParamsOther);
+        assert_eq!(item.status, Status::Unrecoverable);
+        assert_eq!(item.reason, "params is not JSON");
+        let item = other_params("l.md", &row("[1,2]", Some("entries"))).unwrap();
+        assert_eq!(item.reason, "params is not a JSON object");
+    }
+}

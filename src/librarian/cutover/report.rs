@@ -76,6 +76,9 @@ pub fn render_markdown(plan: &ExportPlan, h: &ReportHeader) -> String {
     }
     for (class, t) in &tally {
         let _ = writeln!(out, "### {}\n", class.label());
+        if t.reasons.is_empty() {
+            let _ = writeln!(out, "None.");
+        }
         for (reason, n) in &t.reasons {
             let _ = writeln!(out, "- {reason}: {n}");
         }
@@ -514,5 +517,29 @@ mod tests {
         assert_eq!(json["items"], serde_json::json!([]));
         assert_eq!(json["files"], serde_json::json!([]));
         assert_eq!(json["tally"], serde_json::json!({}));
+    }
+
+    /// A class with old rows in scope has a row in Outcomes and in the JSON tally even when no item
+    /// of the class exists, so a reader sees "rows, no outcome" instead of a missing class.
+    #[test]
+    fn a_class_with_rows_and_no_item_has_a_zero_row_in_both_forms() {
+        let plan = ExportPlan {
+            repo_name: "proj".into(),
+            commit: "0123456789abcdef0123456789abcdef01234567".into(),
+            shallow: false,
+            population: [("event:note".to_owned(), 2), ("write_cite".to_owned(), 1)]
+                .into_iter()
+                .collect(),
+            items: Vec::new(),
+            files: BTreeMap::new(),
+            out_of_scope: OutOfScope::default(),
+        };
+        let text = render_markdown(&plan, &header());
+        assert!(text.contains("| event | 0 | 0 | 0 | 0 |"), "{text}");
+        assert!(text.contains("| write_cite | 0 | 0 | 0 | 0 |"), "{text}");
+        assert!(!text.contains("Nothing is planned."), "{text}");
+        let json = render_json(&plan, &header());
+        assert_eq!(json["tally"]["event"]["moved"], 0);
+        assert_eq!(json["tally"]["write_cite"]["skipped"], 0);
     }
 }

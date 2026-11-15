@@ -30,15 +30,19 @@
 //! - [`rename`] renames the files whose names give no valid key, and reports each it cannot
 //!   (D-R14, D-R21).
 //! - [`rewrite`] rewrites the old citation forms of one document into the grammar (D-R15).
+//! - [`entries`] recovers the params entries a body does not define, and reports the other params.
+//! - [`sidecars`] plans the sidecar and the declaration of an augmentation's shape (D-R24).
 //! - [`report`] renders a plan as markdown or JSON. Neither form names an absolute path.
 
 pub mod code_refs;
+pub mod entries;
 pub mod history;
 pub mod old_rows;
 pub mod plan;
 pub mod rename;
 pub mod report;
 pub mod rewrite;
+pub mod sidecars;
 
 #[cfg(test)]
 pub(crate) mod testkit;
