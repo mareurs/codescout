@@ -9,7 +9,7 @@ tags:
 - cluster/unclassified
 closed: 2026-11-15
 opened: 2026-11-15
-unverified: F1 and F2 (a seven-hash heading and a frontmatter comment shaped like an entry heading) still break the fixed point and have no test; C1-a, C1-b and C1-d are fixed and re-reviewed
+unverified: 'Only C1-c (a note holding `[O]: other.md`) and I1-a (config read by path under the .json/.txt exclusions) remain open; two nits (a test for the line-end conversion order, a stale comment on texts_with_entries) are parked. F1, F2 and the CRLF case are fixed and re-reviewed.'
 ---
 
 # BUG: cutover plan builds its citation index before entry recovery, so the second plan differs from the first
@@ -68,13 +68,9 @@ Run `export`, commit, run `export` again, commit, then `build`.
 
 ## Resume
 
-C1-a, C1-b and C1-d are fixed (see `## Fix provenance`). Still open, all rare and settling on a second export and commit:
+F1, F2 and the CRLF case are fixed (`bd8d56a45`, `1d9a92428`; see `## Fix provenance`). `section_texts` in `entries.rs` now builds from `entry_sections`, the reader behind `defined_tokens`, so recovery and the index read definers the same way. A CRLF document keeps CRLF for the text the planner adds.
 
-- F1: a ledger line `####### F-2 — fake` (seven `#`): the pre-pass recovery reads F-2 as defined, the rewrite changes the line, the real pass then recovers an entry. Input: `LEDGER_MD + "\n####### F-2 — fake\n"` with params entry F-2, `docs/b.md` with `## F-2 — b`, `docs/src.md` with `see ledger:F-2 here.`
-- F2: a frontmatter YAML comment shaped like an entry heading (`## F-2 — two`) makes recovery report the entry Skipped while the index sees no definer.
-- CRLF ledger: the rewritten frontmatter and the added section use LF, so the file ends with mixed line endings (older than this wave).
-
-Fix proposed by the reviewer: make `recover_params_entries` decide "already defined" and read back with `defined_tokens`, the index's own reader. Add F1 and F2 as fixed-point tests.
+Still open and parked: C1-c, I1-a (see `## Fix`), plus two nits from the last re-review: mutation MC (the line-end conversion moved after the "unchanged" check) survives, and the doc comment on `texts_with_entries` (plan.rs, around L483) overstates its rule (say: it adds no line end or fence character, and never edits a line's leading definer token). Out of scope and also open: in a lone-CR ledger `insert_section` turns the final `\r` into `\n` (a fixed point, no content lost).
 
 ## References
 
@@ -88,3 +84,8 @@ Plan: `docs/superpowers/plans/2026-11-14-artifact-identity-plan-d-cutover-tool.m
 - **patch-id:** `aa20d437c4202c1d8789286482311727a7f61cfb`
 - **SHA:** `308f9f5df` (same branch)
 - **patch-id:** `9a86d11bfca031b03bffd0f867c064534fba5629`
+
+- **SHA:** `bd8d56a45` (same branch)
+- **patch-id:** `6fb6993b85939bed46c8e0676eacf5f240c9fad7`
+- **SHA:** `1d9a92428` (same branch; integration tip `19e87e370`)
+- **patch-id:** `d93009868529592ed25172b5e82863d01c18cda6`
