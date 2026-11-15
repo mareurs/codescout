@@ -1,6 +1,8 @@
 //! The report: an [`ExportPlan`] as markdown or JSON.
 //!
-//! Both forms are complete: every count, every item that is not moved, and every planned file.
+//! Both forms are complete: every count, every item that is not moved, every rewrite of the
+//! prose (`## Rewrites`, so the operator reads the changes before `export`), and every planned
+//! file. The JSON form also holds every moved item.
 //! Neither names an absolute path. Paths are repository-relative, and the old catalog is "the old
 //! catalog".
 
@@ -112,6 +114,17 @@ pub fn render_markdown(plan: &ExportPlan, h: &ReportHeader) -> String {
     }
     let _ = writeln!(out, "{KEY_SPACE_ADVICE}\n");
 
+    let _ = writeln!(out, "## Rewrites\n");
+    let mut rewrites: Vec<&Item> = plan.items.iter().filter(|i| is_rewrite(i)).collect();
+    rewrites.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
+    if rewrites.is_empty() {
+        let _ = writeln!(out, "None.");
+    }
+    for item in &rewrites {
+        let _ = writeln!(out, "- {}", rewrite_line(item));
+    }
+    out.push('\n');
+
     let _ = writeln!(out, "## Files\n");
     if plan.files.is_empty() {
         let _ = writeln!(out, "None.");
@@ -136,6 +149,27 @@ pub fn render_markdown(plan: &ExportPlan, h: &ReportHeader) -> String {
     for (path, kinds) in &homeless {
         let kinds: Vec<String> = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect();
         let _ = writeln!(out, "- {path}: {}", kinds.join(", "));
+    }
+    out
+}
+
+/// The `## Export result` section of an `export` report: the counts, then one line per file that
+/// was written, renamed or refused (an unchanged file is counted, not listed).
+pub fn render_apply_markdown(outcome: &crate::librarian::cutover::apply::ApplyOutcome) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "## Export result\n");
+    let _ = writeln!(out, "- written: {}", outcome.written.len());
+    let _ = writeln!(out, "- renamed: {}", outcome.renamed.len());
+    let _ = writeln!(out, "- unchanged: {}", outcome.unchanged.len());
+    let _ = writeln!(out, "- refused: {}\n", outcome.refused.len());
+    for (from, to) in &outcome.renamed {
+        let _ = writeln!(out, "- {from} renamed to {to}");
+    }
+    for path in &outcome.written {
+        let _ = writeln!(out, "- {path} written");
+    }
+    for (path, reason) in &outcome.refused {
+        let _ = writeln!(out, "- {path} refused — {reason}");
     }
     out
 }
@@ -166,6 +200,22 @@ const KEY_SPACE_ADVICE: &str = "To take a subtree whose names another tool dicta
 
 /// Where the old catalog's row has no file: the report says so in these words.
 const NO_FILE: &str = "the old catalog";
+
+/// A citation the rewrite moves: it is listed under `## Rewrites` so the operator reads the prose
+/// changes before `export` writes them (D-R20).
+fn is_rewrite(item: &Item) -> bool {
+    item.class == Class::Citation && item.status == Status::Moved
+}
+
+/// `<path>:<line> — <raw> -> <to>`. A citation's detail holds `raw -> to`.
+fn rewrite_line(item: &Item) -> String {
+    let at = match (&item.path, item.line) {
+        (Some(path), Some(n)) => format!("{path}:{n}"),
+        (Some(path), None) => path.clone(),
+        (None, _) => NO_FILE.to_owned(),
+    };
+    format!("{at} — {}", item.detail.as_deref().unwrap_or(&item.reason))
+}
 
 fn is_not_moved(item: &Item) -> bool {
     matches!(item.status, Status::Skipped | Status::Unrecoverable)
@@ -334,6 +384,113 @@ mod tests {
         }
     }
 
+    /// A citation item at `path:line`.
+    fn citation(status: Status, path: &str, line: u32, detail: &str) -> Item {
+        let mut it = item(Class::Citation, status, "rewritten: path link", Some(path));
+        it.line = Some(line);
+        it.detail = Some(detail.to_owned());
+        it
+    }
+
+    /// The lines of the `## Rewrites` section.
+    fn rewrites_section(text: &str) -> Vec<String> {
+        text.split("\n## Rewrites\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .unwrap_or_else(|| panic!("no Rewrites section:\n{text}"))
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    // mutation: sort by detail or by insertion order; sort the line as text ("30" before "4");
+    // list the unmoved citations; list a moved item of another class.
+    #[test]
+    fn the_rewrites_section_lists_each_moved_citation_by_path_then_line() {
+        let mut plan = sample();
+        plan.items = vec![
+            citation(Status::Moved, "docs/b.md", 30, "[[old-c]] -> [[docs-c]]"),
+            citation(Status::Moved, "docs/a.md", 7, "../b.md -> docs/b.md"),
+            citation(
+                Status::Moved,
+                "docs/b.md",
+                4,
+                "0123456789abcdef -> [[docs-a]]",
+            ),
+            // Not listed: a citation that stays, one that is open, one already done.
+            citation(Status::Skipped, "docs/a.md", 1, "inside inline code"),
+            citation(Status::Unrecoverable, "docs/a.md", 2, "[[nope]]"),
+            citation(Status::AlreadyExported, "docs/a.md", 3, "x -> y"),
+            // Not listed: moved, but not from the citation rewrite.
+            item(
+                Class::Event,
+                Status::Moved,
+                "carried by a note section",
+                Some("docs/a.md"),
+            ),
+            item(
+                Class::Rename,
+                Status::Moved,
+                "renamed to a name that gives a valid key",
+                Some("docs/A_B.md"),
+            ),
+        ];
+        let text = render_markdown(&plan, &header());
+        assert_eq!(
+            rewrites_section(&text),
+            vec![
+                "- docs/a.md:7 — ../b.md -> docs/b.md",
+                "- docs/b.md:4 — 0123456789abcdef -> [[docs-a]]",
+                "- docs/b.md:30 — [[old-c]] -> [[docs-c]]",
+            ],
+            "{text}"
+        );
+        assert!(
+            text.find("\n## Rewrites\n").unwrap() < text.find("\n## Files\n").unwrap(),
+            "the operator reads the rewrites before the file list"
+        );
+        for word in text.split_whitespace() {
+            assert!(!word.starts_with('/'), "an absolute path: {word}");
+        }
+    }
+
+    // mutation: print nothing for an empty list.
+    #[test]
+    fn the_rewrites_section_of_a_plan_with_no_rewrite_says_none() {
+        let mut plan = sample();
+        plan.items.clear();
+        let text = render_markdown(&plan, &header());
+        assert_eq!(rewrites_section(&text), vec!["None."], "{text}");
+    }
+
+    // mutation: leave the refused list out; print an absolute path.
+    #[test]
+    fn the_export_result_names_what_was_written_renamed_and_refused() {
+        use crate::librarian::cutover::apply::ApplyOutcome;
+        let outcome = ApplyOutcome {
+            written: vec!["docs/b.md".into(), "docs/new-name.md".into()],
+            renamed: vec![("docs/New_Name.md".into(), "docs/new-name.md".into())],
+            unchanged: vec!["docs/c.md".into()],
+            refused: vec![("docs/a.md".into(), "changed since HEAD".into())],
+        };
+        let text = render_apply_markdown(&outcome);
+        assert!(text.starts_with("## Export result\n"), "{text}");
+        for line in [
+            "- written: 2",
+            "- renamed: 1",
+            "- unchanged: 1",
+            "- refused: 1",
+            "- docs/b.md written",
+            "- docs/New_Name.md renamed to docs/new-name.md",
+            "- docs/a.md refused — changed since HEAD",
+        ] {
+            assert!(text.contains(&format!("\n{line}\n")), "{line}\n{text}");
+        }
+        let empty = render_apply_markdown(&ApplyOutcome::default());
+        assert!(empty.contains("\n- written: 0\n") && empty.contains("\n- refused: 0\n"));
+    }
+
     #[test]
     fn the_markdown_has_every_section_and_no_absolute_path() {
         let text = render_markdown(&sample(), &header());
@@ -349,6 +506,7 @@ mod tests {
             "## Reasons",
             "## Not moved",
             "## Frozen files and blocked renames",
+            "## Rewrites",
             "## Files",
             "## Rows with no committed home",
         ] {

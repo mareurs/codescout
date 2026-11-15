@@ -23,6 +23,7 @@
 //! # Parts
 //!
 //! - [`old_rows`] loads the rows of the old catalog that lie under the repository.
+//! - [`apply`] writes a plan to the working tree for `cutover export`, one file at a time.
 //! - [`plan`] holds the plan types and [`plan::plan_export`].
 //! - [`code_refs`] finds the markdown files that code, a dot directory or an mdBook reads by
 //!   path: they are frozen (D-R26).
@@ -36,6 +37,7 @@
 //! - [`sidecars`] plans the sidecar and the declaration of an augmentation's shape (D-R24).
 //! - [`report`] renders a plan as markdown or JSON. Neither form names an absolute path.
 
+pub mod apply;
 pub mod code_refs;
 pub mod entries;
 pub mod events;

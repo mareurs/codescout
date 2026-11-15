@@ -8,6 +8,15 @@ use rusqlite::Connection;
 
 /// The schema version stored in `PRAGMA user_version`.
 pub const SCHEMA_VERSION: i64 = 1;
+/// The file name of the new catalog, in the directory of the old one (D-R4).
+pub const DERIVED_CATALOG_FILE: &str = "derived.db";
+
+/// The new catalog for `old_catalog`: `derived.db` in the same directory, so
+/// `VectorCache::beside` gives both the same `vector-cache.db` (D-R4). An old binary opens only
+/// `LIBRARIAN_DB` or `<data dir>/librarian/catalog.db`, so it never opens this file.
+pub fn derived_catalog_beside(old_catalog: &Path) -> std::path::PathBuf {
+    old_catalog.with_file_name(DERIVED_CATALOG_FILE)
+}
 
 /// Milliseconds a connection waits on a lock held by another process.
 const BUSY_TIMEOUT_MS: i64 = 5000;
@@ -777,5 +786,24 @@ mod tests {
         let conn = open(&emptied).unwrap();
         assert_eq!(user_version(&conn), SCHEMA_VERSION);
         assert_eq!(table_names(&conn).len(), 8);
+    }
+    // mutation: make `derived_catalog_beside` return the old path, or a file of another directory.
+    #[test]
+    fn the_new_catalog_sits_beside_the_old_one_and_shares_its_vector_cache() {
+        use crate::librarian::vector_cache::{VectorCache, VECTOR_CACHE_FILE};
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("catalog.db");
+        let new = derived_catalog_beside(&old);
+        assert_eq!(new, dir.path().join("derived.db"));
+        assert_eq!(new.file_name().unwrap(), DERIVED_CATALOG_FILE);
+
+        let from_new = VectorCache::beside(Some(&new));
+        let from_old = VectorCache::beside(Some(&old));
+        assert_eq!(from_new.path(), from_old.path());
+        assert_eq!(
+            from_new.path().unwrap(),
+            dir.path().join(VECTOR_CACHE_FILE),
+            "both catalogs share one vector cache"
+        );
     }
 }

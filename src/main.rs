@@ -250,15 +250,21 @@ enum Commands {
     DeriveShadow(codescout::cli::derive_shadow::DeriveShadowArgs),
 
     /// Move the facts that only the old catalog holds into committed files, then build the new
-    /// derived catalog. `cutover plan` is the dry run: it prints what would move and what could
-    /// not, and writes nothing. The old catalog is `--old-db`, else `LIBRARIAN_DB`, else
+    /// derived catalog. Three subcommands: `cutover plan` is the dry run (it prints what would
+    /// move and what could not, and writes nothing); `cutover export` writes the plan into the
+    /// working tree and keeps the report beside the old catalog; `cutover build` builds the new
+    /// catalog. The tool never commits, stages or moves anything in git: commit the exported
+    /// files yourself. The old catalog is `--old-db`, else `LIBRARIAN_DB`, else
     /// `librarian/catalog.db` in the local data directory. It is opened read-only and never
     /// changed. Give `--old-root <path>` (repeatable, absolute) for each other spelling of this
     /// repository's root that old rows carry. The plan reads `HEAD`, not the working tree:
-    /// commit or stash first. Exits 0 when the plan ran, 2 and prints the reason when it did
-    /// not: no old catalog, a `-wal`, `-shm` or non-empty `-journal` file beside it (stop every
-    /// codescout process and checkpoint it), a catalog that changed while it was read, no git
-    /// repository, or a `HEAD` whose `.codescout/repo.toml` or `key-space.toml` does not parse.
+    /// commit or stash first. `export` refuses a file that changed since `HEAD`, and refuses the
+    /// whole run while another process holds the project write lock, or once the new catalog
+    /// (`derived.db`) exists. Exits 0 when the run did what it was asked, 1 when `export` refused
+    /// some files, 2 and prints the reason when it did not run: no old catalog, a `-wal`, `-shm`
+    /// or non-empty `-journal` file beside it (stop every codescout process and checkpoint it),
+    /// a catalog that changed while it was read, no git repository, or a `HEAD` whose
+    /// `.codescout/repo.toml` or `key-space.toml` does not parse.
     Cutover(codescout::cli::cutover::CutoverArgs),
 
     /// Read-only query: which active constitution rules apply to a given

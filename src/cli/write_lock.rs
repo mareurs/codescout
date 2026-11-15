@@ -26,19 +26,26 @@ use anyhow::{anyhow, Context, Result};
 use crate::agent::{acquire_write_guard, holder_record_path, open_lock_file, WriteGuard};
 use crate::librarian::current_project::CurrentProject;
 
+/// The directory whose `.codescout/write.lock` the CLI locks for a project that starts at `start`
+/// inside the git root `git_root`: the nearest directory from `start` up to and including
+/// `git_root` that holds `.codescout/project.toml`, else `git_root`.
+pub(crate) fn lock_root_for(start: &Path, git_root: &Path) -> PathBuf {
+    for dir in start.ancestors() {
+        if dir.join(".codescout").join("project.toml").is_file() {
+            return dir.to_path_buf();
+        }
+        if dir == git_root {
+            break;
+        }
+    }
+    git_root.to_path_buf()
+}
+
 /// The directory whose `.codescout/write.lock` the CLI locks for `cp`: the nearest directory from
 /// `cp.abs_path` up to and including `cp.git_root` that holds `.codescout/project.toml`, else
 /// `cp.git_root`.
 pub(crate) fn lock_root(cp: &CurrentProject) -> PathBuf {
-    for dir in cp.abs_path.ancestors() {
-        if dir.join(".codescout").join("project.toml").is_file() {
-            return dir.to_path_buf();
-        }
-        if dir == cp.git_root {
-            break;
-        }
-    }
-    cp.git_root.clone()
+    lock_root_for(&cp.abs_path, &cp.git_root)
 }
 
 /// Take the project write lock for `command`, waiting up to the project's
@@ -122,6 +129,37 @@ mod tests {
             main_root: None,
             umbrella: None,
         }
+    }
+
+    // mutation: make `lock_root_for` return `git_root`. (This test also pins that `lock_root` agrees
+    // with it; a `lock_root` that stopped calling it and kept its own loop would still pass.)
+    #[test]
+    fn lock_root_for_matches_lock_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        // A nested project: its `project.toml` is nearer than the git root.
+        let nested = repo.join("packages/app");
+        std::fs::create_dir_all(nested.join(".codescout")).unwrap();
+        std::fs::write(
+            nested.join(".codescout/project.toml"),
+            "[project]\nname = \"app\"\n",
+        )
+        .unwrap();
+        let deep = nested.join("src/deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        let bare = repo.join("docs");
+        std::fs::create_dir_all(&bare).unwrap();
+
+        for start in [&deep, &nested, &bare, &repo] {
+            assert_eq!(
+                lock_root_for(start, &repo),
+                lock_root(&project(start, &repo)),
+                "the same root for a start of {start:?}"
+            );
+        }
+        assert_eq!(lock_root_for(&deep, &repo), nested);
+        assert_eq!(lock_root_for(&bare, &repo), repo);
     }
 
     // mutation: make `lock_root` return `cp.abs_path.clone()`.
