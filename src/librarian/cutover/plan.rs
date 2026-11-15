@@ -769,10 +769,14 @@ fn open_document(
 }
 
 impl OpenDocument {
-    /// Put `text` back into the plan. Nothing changes when it equals the text the step started
-    /// from. A path the plan already holds keeps its `renamed_from` and `head_text` and takes the
-    /// new text; any other path gets a file whose `head_text` is the text in `HEAD`.
+    /// Put `text` back into the plan. The lines the step added take the line ending of the
+    /// document in `HEAD` ([`with_line_ends_of`]). Nothing changes when the text then equals the
+    /// text the step started from. A path the plan already holds keeps its `renamed_from` and
+    /// `head_text` and takes the new text; any other path gets a file whose `head_text` is the text
+    /// in `HEAD`.
     fn close(self, head: &Head, plan: &mut ExportPlan, text: String) {
+        let head_text = &head.files[&self.head_path];
+        let text = with_line_ends_of(head_text, text);
         if text == self.base {
             return;
         }
@@ -785,13 +789,33 @@ impl OpenDocument {
                     FileChange {
                         path: self.now,
                         renamed_from,
-                        head_text: Some(head.files[&self.head_path].clone()),
+                        head_text: Some(head_text.clone()),
                         new_text: text,
                     },
                 );
             }
         }
     }
+}
+
+/// `text` with every bare `\n` written `\r\n` when `head_text` ends every line with `\r\n`, so
+/// what a step adds (a section, a frontmatter line) uses the document's own line ending. A
+/// document with a bare `\n`, or with no line end at all, gets `text` as it is.
+fn with_line_ends_of(head_text: &str, text: String) -> String {
+    let lf = head_text.matches('\n').count();
+    if lf == 0 || head_text.matches("\r\n").count() != lf {
+        return text;
+    }
+    let mut out = String::with_capacity(text.len() + text.len() / 16);
+    let mut after_cr = false;
+    for c in text.chars() {
+        if c == '\n' && !after_cr {
+            out.push('\r');
+        }
+        out.push(c);
+        after_cr = c == '\r';
+    }
+    out
 }
 
 /// The rows of one document that [`plan_events_and_links`] writes.
@@ -3267,6 +3291,58 @@ mod tests {
         assert!(body.contains("\n## F-2 — two\n"), "{ledger}");
         let text = first.files.get("docs/src.md").map(|f| f.new_text.as_str());
         assert_eq!(text, Some("see [[ledger:F-2]] here and [[ledger:F-2]].\n"));
+        assert_fixed_point(&second);
+    }
+
+    /// Whether `text` ends a line with a bare `\n`.
+    fn has_a_bare_lf(text: &str) -> bool {
+        text.replace("\r\n", "").contains('\n')
+    }
+
+    /// A CRLF ledger gets its recovered section, its high-water mark and its declaration in CRLF.
+    #[test]
+    fn a_crlf_ledger_keeps_crlf_in_what_the_export_adds() {
+        let head = LEDGER_MD.replace('\n', "\r\n");
+        let (first, second) = ledger_entry_plans(&head, &[]);
+        let text = &first.files["docs/ledger.md"].new_text;
+        assert!(text.contains("\r\n## F-2 — two\r\n"), "{text:?}");
+        assert!(text.contains("entry_high_water_F: 2\r\n"), "{text:?}");
+        assert!(!has_a_bare_lf(text), "{text:?}");
+        assert_fixed_point(&second);
+    }
+
+    /// A CRLF document gets its events and relations sections in CRLF.
+    #[test]
+    fn a_crlf_document_keeps_crlf_in_its_events_and_relations() {
+        let head = SINGLE_WRITER_MD.replace('\n', "\r\n");
+        let (first, second) = plan_commit_and_replan(
+            &[
+                ("docs/n.md", head.as_bytes()),
+                ("docs/other.md", OTHER_MD.as_bytes()),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "n", "docs/n.md");
+                add_doc(cat, root, OTHER_ID, "docs/other.md");
+                add_event(cat, "e1", "n", "note", r#"{"text":"one\ntwo"}"#);
+                add_link(cat, "n", OTHER_ID, "depends_on");
+            },
+        );
+        let text = &first.files["docs/n.md"].new_text;
+        assert!(text.contains("\r\n## Events\r\n"), "{text:?}");
+        assert!(text.contains("\r\n## Relations\r\n"), "{text:?}");
+        assert!(!has_a_bare_lf(text), "{text:?}");
+        assert_fixed_point(&second);
+    }
+
+    /// A document whose line ends are mixed has no line ending of its own: what the export adds
+    /// keeps `\n`, and a body line it does not touch keeps its `\r\n`.
+    #[test]
+    fn a_document_with_mixed_line_ends_gets_lf() {
+        let head = LEDGER_MD.replace("# L\n", "# L\r\n");
+        let (first, second) = ledger_entry_plans(&head, &[]);
+        let text = &first.files["docs/ledger.md"].new_text;
+        assert!(text.contains("\n# L\r\n\n## F-1"), "{text:?}");
+        assert!(text.contains("x\n\n## F-2 — two\n\n"), "{text:?}");
         assert_fixed_point(&second);
     }
 
