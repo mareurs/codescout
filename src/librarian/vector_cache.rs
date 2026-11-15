@@ -1,8 +1,9 @@
 //! A per-user cache of embedding vectors, keyed by model and embed input.
 //!
-//! The file sits beside the catalog file. A vector the embedder made once is
-//! reused when the same text is embedded again under the same model, so a moved
-//! or rebuilt document costs no embed call.
+//! The file sits in the machine's librarian directory, shared by every checkout.
+//! A vector the embedder made once is reused when the same text is embedded
+//! again under the same model, so a moved or rebuilt document costs no embed
+//! call.
 //!
 //! A cache failure never fails a call and never returns a wrong vector. It
 //! degrades to a miss and is counted. The lock is never held across an await:

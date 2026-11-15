@@ -8,14 +8,14 @@ use rusqlite::Connection;
 
 /// The schema version stored in `PRAGMA user_version`.
 pub const SCHEMA_VERSION: i64 = 1;
-/// The file name of the new catalog, in the directory of the old one (D-R4).
-pub const DERIVED_CATALOG_FILE: &str = "derived.db";
+/// The path of the derived catalog under the root of a checkout. A path relative to the root,
+/// so no text built from it names an absolute path.
+pub const DERIVED_CATALOG_REL: &str = ".codescout/derived.db";
 
-/// The new catalog for `old_catalog`: `derived.db` in the same directory, so
-/// `VectorCache::beside` gives both the same `vector-cache.db` (D-R4). An old binary opens only
-/// `LIBRARIAN_DB` or `<data dir>/librarian/catalog.db`, so it never opens this file.
-pub fn derived_catalog_beside(old_catalog: &Path) -> std::path::PathBuf {
-    old_catalog.with_file_name(DERIVED_CATALOG_FILE)
+/// The derived catalog of the checkout at `checkout_root`: one file per checkout, git-ignored
+/// (E1-R1, E1-R2).
+pub fn derived_catalog_in(checkout_root: &Path) -> std::path::PathBuf {
+    checkout_root.join(DERIVED_CATALOG_REL)
 }
 
 /// Milliseconds a connection waits on a lock held by another process.
@@ -787,5 +787,14 @@ mod tests {
         let conn = open(&emptied).unwrap();
         assert_eq!(user_version(&conn), SCHEMA_VERSION);
         assert_eq!(table_names(&conn).len(), 8);
+    }
+
+    // mutation: return the old directory (`root.join("derived.db")`).
+    #[test]
+    fn the_new_catalog_is_in_the_checkouts_codescout_directory() {
+        assert_eq!(
+            derived_catalog_in(Path::new("/r")),
+            Path::new("/r/.codescout/derived.db")
+        );
     }
 }
