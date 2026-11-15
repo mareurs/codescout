@@ -5,14 +5,23 @@
 //! `cutover export` applies it.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::librarian::catalog::augmentation::AugmentationRow;
+use crate::librarian::cutover::code_refs::CodeRefs;
+use crate::librarian::cutover::history::HistoryIds;
 use crate::librarian::cutover::old_rows::{OldRows, OutOfScope};
+use crate::librarian::cutover::rewrite::{
+    rewrite_document, Finding, Form, IdSource, IdTarget, Outcome, Resolver, REASON_UNKNOWN_ID,
+};
 use crate::librarian::derived::build::{key_space_from_commit, repo_name_of};
 use crate::librarian::derived::scan::{scan_commit, Skip};
+use crate::librarian::identity::index::{DocInput, KeyIndex};
+use crate::librarian::identity::key::markdown_stem;
 use crate::librarian::identity::repo_name::RepoName;
+use crate::librarian::tools::link_scan::extract::{citation_spans, CitationKind};
 
 /// What kind of old fact an item is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -133,10 +142,10 @@ impl ExportPlan {
 
 /// The committed files of `HEAD` that the later steps of the plan read: the text of every
 /// markdown file in the key space, the paths the key space leaves out, and the repository name.
-/// The task that plans the rewrite, the renames and the exports reads `files` and `outside`.
-#[allow(dead_code)]
 struct Head {
     files: BTreeMap<String, String>,
+    /// Read by the rename step, which asks which paths are outside the key space.
+    #[allow(dead_code)]
     outside: BTreeSet<String>,
     repo_name: RepoName,
 }
@@ -189,7 +198,191 @@ pub fn plan_export(
     };
     plan_skipped_events(old, &mut plan);
     plan_write_cites(old, &mut plan);
+    plan_citations(repo, commit, old, &head, &mut plan)?;
     Ok(plan)
+}
+
+/// Rewrite the old citation forms of every in-space document (D-R5). A document that code,
+/// a dot directory or an mdBook reads by path is frozen (D-R26): its text stays, and each
+/// rewrite it would have had is an `unrecoverable` item.
+fn plan_citations(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    old: &OldRows,
+    head: &Head,
+    plan: &mut ExportPlan,
+) -> anyhow::Result<()> {
+    let index = KeyIndex::build(
+        head.repo_name.clone(),
+        head.files.iter().map(|(path, text)| DocInput {
+            rel_path: path.clone(),
+            text: text.clone(),
+        }),
+    );
+    let stems = stems_of(head);
+    let (ids, id_hints) = recover_ids(repo, commit, old, head, plan.shallow)?;
+    let renamed_keys = BTreeMap::new();
+    let resolver = Resolver {
+        index: &index,
+        this_repo: &head.repo_name,
+        renamed_keys: &renamed_keys,
+        stems: &stems,
+        ids: &ids,
+        id_hints: &id_hints,
+    };
+    let code = CodeRefs::load(repo, commit)?;
+    for (path, text) in &head.files {
+        let frozen = code.frozen(path);
+        let (new_text, findings) = rewrite_document(path, text, &resolver);
+        for finding in &findings {
+            plan.items.push(citation_item(
+                path,
+                finding,
+                frozen.as_deref(),
+                plan.shallow,
+            ));
+        }
+        if frozen.is_none() && new_text != *text {
+            plan.files.insert(
+                path.clone(),
+                FileChange {
+                    path: path.clone(),
+                    renamed_from: None,
+                    head_text: Some(text.clone()),
+                    new_text,
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The plan item of one citation the rewrite looked at.
+fn citation_item(path: &str, finding: &Finding, frozen: Option<&str>, shallow: bool) -> Item {
+    let item = |status, reason: &str, detail: String, suggestion| Item {
+        class: Class::Citation,
+        status,
+        reason: reason.to_owned(),
+        path: Some(path.to_owned()),
+        line: Some(finding.line),
+        detail: Some(detail),
+        suggestion,
+    };
+    let raw = finding.raw.clone();
+    match &finding.outcome {
+        Outcome::Rewritten { to } => {
+            let detail = format!("{raw} -> {to}");
+            match frozen {
+                Some(why) => item(
+                    Status::Unrecoverable,
+                    &format!("frozen: {why}"),
+                    detail,
+                    None,
+                ),
+                None => item(
+                    Status::Moved,
+                    &format!("rewritten: {}", finding.form.label()),
+                    detail,
+                    None,
+                ),
+            }
+        }
+        Outcome::Unresolved { reason, suggestion } => {
+            // Without history, an id nothing else names is open for that reason.
+            let reason = if shallow && finding.form == Form::HexId && reason == REASON_UNKNOWN_ID {
+                "shallow clone: history is incomplete"
+            } else {
+                reason
+            };
+            item(Status::Unrecoverable, reason, raw, suggestion.clone())
+        }
+        Outcome::Ambiguous { candidates } => item(
+            Status::Unrecoverable,
+            "ambiguous: several documents qualify",
+            format!("{raw}: {}", candidates.join(", ")),
+            None,
+        ),
+        Outcome::InCode => item(Status::Skipped, "inside inline code", raw, None),
+    }
+}
+
+/// Exact file stem of each in-space document to the paths that carry it.
+fn stems_of(head: &Head) -> BTreeMap<String, Vec<String>> {
+    let mut stems: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for path in head.files.keys() {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        if let Some(stem) = markdown_stem(name) {
+            stems.entry(stem.to_owned()).or_default().push(path.clone());
+        }
+    }
+    stems
+}
+
+/// What each old artifact id names. The old catalog first (`Catalog`): an id of a document that
+/// `HEAD` holds is its target, and one of a document `HEAD` lacks is a hint with the path the
+/// catalog knew. Then, for ids a document cites that are still open, git history (`History`),
+/// unless the clone is shallow: history is incomplete then, and each open id is reported so.
+fn recover_ids(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    old: &OldRows,
+    head: &Head,
+    shallow: bool,
+) -> anyhow::Result<(BTreeMap<String, IdTarget>, BTreeMap<String, String>)> {
+    let mut ids = BTreeMap::new();
+    let mut hints = BTreeMap::new();
+    for doc in old.documents.values() {
+        if head.files.contains_key(&doc.rel_path) {
+            ids.entry(doc.id.clone()).or_insert(IdTarget {
+                rel_path: doc.rel_path.clone(),
+                source: IdSource::Catalog,
+            });
+        } else {
+            hints
+                .entry(doc.id.clone())
+                .or_insert_with(|| doc.rel_path.clone());
+        }
+    }
+    if shallow {
+        return Ok((ids, hints));
+    }
+    let open: BTreeSet<String> = cited_ids(head)
+        .into_iter()
+        .filter(|id| !ids.contains_key(id) && !hints.contains_key(id))
+        .collect();
+    if open.is_empty() {
+        return Ok((ids, hints));
+    }
+    let spellings: Vec<&Path> = old.spellings.iter().map(PathBuf::as_path).collect();
+    let history = HistoryIds::load(repo, commit, &spellings)?;
+    for id in open {
+        match history.head_path(&id) {
+            Some(Ok(rel_path)) => {
+                ids.insert(
+                    id,
+                    IdTarget {
+                        rel_path,
+                        source: IdSource::History,
+                    },
+                );
+            }
+            Some(Err(historical)) => {
+                hints.insert(id, historical);
+            }
+            None => {}
+        }
+    }
+    Ok((ids, hints))
+}
+
+/// The 16-hex ids that in-space documents cite outside code.
+fn cited_ids(head: &Head) -> BTreeSet<String> {
+    head.files
+        .values()
+        .flat_map(|text| citation_spans(text))
+        .filter(|s| s.kind == CitationKind::ArtifactId && !s.in_code && s.range.is_some())
+        .map(|s| s.raw)
+        .collect()
 }
 
 /// Why an event of `kind` has no home in a text, or `None` when it has one.
@@ -499,6 +692,142 @@ mod tests {
         let slug = add_doc(cat, root, "a", "a.md");
         add_doc(cat, root, "b", "sub/b.md");
         slug
+    }
+
+    /// The plan of the single commit holding `files`, for the old catalog `fill` builds.
+    fn plan_of_files(
+        files: &[(&str, &[u8])],
+        fill: impl FnOnce(&crate::librarian::catalog::Catalog, &Path),
+    ) -> ExportPlan {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let entries: Vec<(&str, u32, &[u8])> = files.iter().map(|&(p, b)| (p, FILE, b)).collect();
+        let repo = repo_with(&root, &entries);
+        let old = old_catalog_with(|cat| fill(cat, &root));
+        let rows = load(&old, &RootMap::new(root.clone())).unwrap();
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        plan_export(&repo, &commit, &rows).unwrap()
+    }
+
+    fn citation_items(plan: &ExportPlan) -> Vec<&Item> {
+        plan.items
+            .iter()
+            .filter(|i| i.class == Class::Citation)
+            .collect()
+    }
+
+    #[test]
+    fn every_in_space_document_is_rewritten_and_frozen_ones_are_reported() {
+        let plan = plan_of_files(
+            &[
+                ("docs/ledger.md", b"# L\n\n## F-9 \xe2\x80\x94 nine\n"),
+                ("docs/b.md", b"# B\n\nsee F-9.\n"),
+                ("docs/frozen.md", b"# Z\n\nsee F-9.\n"),
+                ("src/x.rs", b"const P: &str = \"../docs/frozen.md\";\n"),
+            ],
+            |_, _| {},
+        );
+        let changed: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(changed, ["docs/b.md"], "the frozen file keeps its text");
+        let b = &plan.files["docs/b.md"];
+        assert_eq!(b.new_text, "# B\n\nsee [[ledger:F-9]].\n");
+        assert_eq!(b.head_text.as_deref(), Some("# B\n\nsee F-9.\n"));
+        assert_eq!(plan.writes(), 1);
+
+        let items = citation_items(&plan);
+        assert_eq!(items.len(), 2, "{items:?}");
+        let moved = items.iter().find(|i| i.status == Status::Moved).unwrap();
+        assert_eq!(moved.path.as_deref(), Some("docs/b.md"));
+        assert_eq!(moved.line, Some(3));
+        let frozen = items
+            .iter()
+            .find(|i| i.status == Status::Unrecoverable)
+            .unwrap();
+        assert_eq!(frozen.path.as_deref(), Some("docs/frozen.md"));
+        assert_eq!(frozen.line, Some(3));
+        assert!(frozen.reason.starts_with("frozen: "), "{}", frozen.reason);
+        assert!(frozen.reason.contains("src/x.rs:1"), "{}", frozen.reason);
+    }
+
+    #[test]
+    fn a_catalog_id_citation_is_rewritten_and_one_the_catalog_lacks_is_reported() {
+        let plan = plan_of_files(
+            &[
+                (
+                    "docs/a.md",
+                    b"# A\n\nsee 0123456789abcdef and 00112233aabbccdd.\n",
+                ),
+                ("docs/b.md", b"# B\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "0123456789abcdef", "docs/b.md");
+            },
+        );
+        assert_eq!(
+            plan.files["docs/a.md"].new_text,
+            "# A\n\nsee [[b]] and 00112233aabbccdd.\n"
+        );
+        let items = citation_items(&plan);
+        assert_eq!(items.len(), 2, "{items:?}");
+        let open = items
+            .iter()
+            .find(|i| i.status == Status::Unrecoverable)
+            .unwrap();
+        assert_eq!(
+            open.reason,
+            crate::librarian::cutover::rewrite::REASON_UNKNOWN_ID
+        );
+    }
+
+    /// A two-commit repository: `docs/old.md` of the first commit is `docs/new.md` in the second,
+    /// and `docs/a.md` of the second cites the id of the old path.
+    fn history_plan(shallow: bool) -> ExportPlan {
+        use crate::librarian::derived::testkit::commit_files;
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        const BODY: &[u8] =
+            b"# Notes\n\nSome text that makes the file big enough to match.\n\nMore.\n";
+        let repo = repo_with(
+            &root,
+            &[("docs/old.md", FILE, BODY), ("docs/a.md", FILE, b"# A\n")],
+        );
+        let first = repo.head().unwrap().peel_to_commit().unwrap();
+        let id = crate::librarian::ids::artifact_id_from_abs(&root.join("docs/old.md"));
+        let a_text = format!("# A\n\nsee {id}.\n");
+        let tip = commit_files(
+            &repo,
+            &[("docs/new.md", BODY), ("docs/a.md", a_text.as_bytes())],
+            &[&first],
+            "move",
+        );
+        if shallow {
+            std::fs::write(root.join(".git/shallow"), format!("{tip}\n")).unwrap();
+        }
+        let old = old_catalog_with(|_| {});
+        let rows = load(&old, &RootMap::new(root.clone())).unwrap();
+        let commit = repo.find_commit(tip).unwrap();
+        plan_export(&repo, &commit, &rows).unwrap()
+    }
+
+    #[test]
+    fn an_id_the_catalog_lacks_is_recovered_through_a_git_rename() {
+        let plan = history_plan(false);
+        assert!(!plan.shallow);
+        assert_eq!(plan.files["docs/a.md"].new_text, "# A\n\nsee [[new]].\n");
+    }
+
+    #[test]
+    fn a_shallow_clone_reports_the_ids_history_would_have_needed() {
+        let plan = history_plan(true);
+        assert!(plan.shallow);
+        assert!(
+            plan.files.is_empty(),
+            "nothing is rewritten without history"
+        );
+        let items = citation_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].status, Status::Unrecoverable);
+        assert_eq!(items[0].reason, "shallow clone: history is incomplete");
     }
 
     #[test]

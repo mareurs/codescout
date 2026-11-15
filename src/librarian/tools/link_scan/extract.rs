@@ -527,7 +527,6 @@ pub fn extract(text: &str) -> DocExtract {
 /// Never hits: frontmatter, fenced and indented code, HTML (a comment included), and link
 /// reference definitions (the parser consumes them and emits no event). A hit in inline code is
 /// kept, with `in_code` set.
-#[allow(dead_code)] // read by the cutover citation rewrite (Plan D task 4); tests read it now
 pub(crate) fn citation_spans(text: &str) -> Vec<CitationSpan> {
     let mut spans = Vec::new();
     scan_events(text, true, &mut |s| spans.push(s));

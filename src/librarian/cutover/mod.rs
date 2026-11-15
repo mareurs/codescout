@@ -24,11 +24,18 @@
 //!
 //! - [`old_rows`] loads the rows of the old catalog that lie under the repository.
 //! - [`plan`] holds the plan types and [`plan::plan_export`].
+//! - [`code_refs`] finds the markdown files that code, a dot directory or an mdBook reads by
+//!   path: they are frozen (D-R26).
+//! - [`history`] recovers the path an old artifact id hashes from git history (D-R28).
+//! - [`rewrite`] rewrites the old citation forms of one document into the grammar (D-R15).
 //! - [`report`] renders a plan as markdown or JSON. Neither form names an absolute path.
 
+pub mod code_refs;
+pub mod history;
 pub mod old_rows;
 pub mod plan;
 pub mod report;
+pub mod rewrite;
 
 #[cfg(test)]
 pub(crate) mod testkit;

@@ -100,6 +100,9 @@ pub struct KeyIndex {
     owners: HashMap<Key, Key>,
     /// Owner key, then token, to the owned documents that define it (unambiguous keys only).
     owned_tokens: HashMap<Key, HashMap<String, Vec<usize>>>,
+    /// Token to the sorted keys of the documents that define it, among documents whose key is
+    /// held by exactly one document.
+    definers: HashMap<String, Vec<Key>>,
     problems: Vec<IndexProblem>,
 }
 
@@ -189,6 +192,19 @@ impl KeyIndex {
             }
         }
 
+        let mut definers: HashMap<String, Vec<Key>> = HashMap::new();
+        for d in valid.iter().filter(|d| usable(d)) {
+            for token in &d.tokens {
+                definers
+                    .entry(token.clone())
+                    .or_default()
+                    .push(d.key.clone());
+            }
+        }
+        for keys in definers.values_mut() {
+            keys.sort();
+        }
+
         let mut problems: Vec<IndexProblem> = Vec::new();
         invalid.sort_by(|a, b| a.0.cmp(&b.0));
         problems.extend(
@@ -214,6 +230,7 @@ impl KeyIndex {
             collisions,
             owners,
             owned_tokens,
+            definers,
             problems,
         }
     }
@@ -232,6 +249,19 @@ impl KeyIndex {
     /// The key of the nearest ancestor folder index above the document with `key`.
     pub fn owner(&self, key: &Key) -> Option<&Key> {
         self.owners.get(key)
+    }
+    /// The keys of the documents that define `token`, sorted. Only a document whose key no other
+    /// document holds is listed: a document with a colliding key has no key to cite.
+    pub fn definers_of(&self, token: &str) -> Vec<Key> {
+        self.definers.get(token).cloned().unwrap_or_default()
+    }
+
+    /// The key of the document at `rel_path`, when exactly one document holds that key.
+    pub fn key_at(&self, rel_path: &str) -> Option<&Key> {
+        self.by_path
+            .get(&normalised(rel_path))
+            .map(|&i| &self.docs[i].key)
+            .filter(|key| self.by_key.contains_key(*key))
     }
 
     /// What `reference`, written in the document at `src_rel_path`, points at.
@@ -847,5 +877,44 @@ mod tests {
                 token: "F-1".into()
             }
         );
+    }
+    #[test]
+    fn definers_of_lists_unique_keys_sorted_and_skips_a_collision() {
+        let ix = KeyIndex::build(
+            repo(),
+            [
+                doc("logs/b-log.md", "## F-1 — b\n\n## F-2 — b\n"),
+                doc("logs/a-log.md", "## F-1 — a\n"),
+                // `dup` is held twice: neither document has a key to cite.
+                doc("one/dup.md", "## F-1 — one\n"),
+                doc("two/dup.md", "## F-1 — two\n"),
+                doc("Bad Name.md", "## F-1 — bad\n"),
+            ],
+        );
+        assert_eq!(ix.definers_of("F-1"), vec![k("a-log"), k("b-log")]);
+        assert_eq!(ix.definers_of("F-2"), vec![k("b-log")]);
+        assert!(ix.definers_of("F-3").is_empty());
+    }
+
+    #[test]
+    fn key_at_names_a_unique_document_only() {
+        let ix = KeyIndex::build(
+            repo(),
+            [
+                doc("docs/a/x.md", ""),
+                doc("one/dup.md", ""),
+                doc("two/dup.md", ""),
+                doc("Bad Name.md", ""),
+            ],
+        );
+        assert_eq!(ix.key_at("docs/a/x.md"), Some(&k("x")));
+        assert_eq!(
+            ix.key_at("./docs//a/x.md"),
+            Some(&k("x")),
+            "read as key_of reads it"
+        );
+        assert_eq!(ix.key_at("one/dup.md"), None, "its key is held twice");
+        assert_eq!(ix.key_at("Bad Name.md"), None, "no valid key");
+        assert_eq!(ix.key_at("nowhere.md"), None);
     }
 }

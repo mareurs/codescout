@@ -200,7 +200,6 @@ pub fn extract_spanned(text: &str) -> Vec<SpannedCitation> {
 /// and the `mailto:` and `doi:` forms are NOT flagged. A link whose destination is a URL
 /// (`[see F-1](https://h/)`) IS flagged, because the destination sits in the same word as the
 /// token; that false positive only produces a report line, never a rewrite.
-#[allow(dead_code)] // read by the cutover citation rewrite (Plan D task 4); tests read it now
 pub(crate) fn in_url_word(text: &str, range: &Range<usize>) -> bool {
     let (Some(before), Some(slice), Some(after)) = (
         text.get(..range.start),

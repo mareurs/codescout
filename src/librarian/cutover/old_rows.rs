@@ -7,6 +7,7 @@
 //! loaded.
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context};
 use rusqlite::{Connection, Statement};
@@ -95,6 +96,9 @@ pub struct OldRows {
     /// `entry_cite` rows with `origin = 'write'` whose source document is in scope.
     pub write_cites: usize,
     pub out_of_scope: OutOfScope,
+    /// The spellings of the repository root the rows were judged against: the git root, then
+    /// each `--old-root`. An old artifact id hashes `<one of these>/<path>`.
+    pub spellings: Vec<PathBuf>,
 }
 
 /// Load the in-scope rows of `old`.
@@ -109,7 +113,14 @@ pub fn load(old: &OldCatalog, roots: &RootMap) -> anyhow::Result<OldRows> {
         .context("starting a read snapshot of the old catalog")?;
     let mut queries = Queries::prepare(&snapshot)?;
 
-    let mut rows = OldRows::default();
+    let mut rows = OldRows {
+        spellings: roots
+            .spellings()
+            .into_iter()
+            .map(Path::to_path_buf)
+            .collect(),
+        ..OldRows::default()
+    };
     load_documents(&mut queries.documents, roots, &mut rows)?;
     let events = load_events(&mut queries.events, &rows.documents)?;
     let sources = load_sources(&mut queries.sources)?;
