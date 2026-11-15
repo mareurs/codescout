@@ -86,6 +86,15 @@ struct Doc {
     tokens: HashSet<String>,
 }
 
+/// A document that defines an entry token, as [`KeyIndex::definers_of`] lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Definer {
+    pub rel_path: String,
+    /// The document's key when exactly one document holds it; `None` for an invalid key or a
+    /// key two documents share.
+    pub key: Option<Key>,
+}
+
 #[derive(Debug)]
 pub struct KeyIndex {
     this_repo: RepoName,
@@ -100,9 +109,8 @@ pub struct KeyIndex {
     owners: HashMap<Key, Key>,
     /// Owner key, then token, to the owned documents that define it (unambiguous keys only).
     owned_tokens: HashMap<Key, HashMap<String, Vec<usize>>>,
-    /// Token to the sorted keys of the documents that define it, among documents whose key is
-    /// held by exactly one document.
-    definers: HashMap<String, Vec<Key>>,
+    /// Token to every document that defines it, sorted by path.
+    definers: HashMap<String, Vec<Definer>>,
     problems: Vec<IndexProblem>,
 }
 
@@ -114,6 +122,9 @@ fn normalised(rel_path: &str) -> String {
 impl KeyIndex {
     pub fn build(this_repo: RepoName, docs: impl IntoIterator<Item = DocInput>) -> KeyIndex {
         let mut invalid: Vec<(String, KeyError)> = Vec::new();
+        // The tokens a document with no valid key defines: it is no candidate to cite, but it is
+        // an owner, and a token with several owners is not rewritten to one of them.
+        let mut invalid_tokens: Vec<(String, HashSet<String>)> = Vec::new();
         let mut valid: Vec<Doc> = Vec::new();
         for d in docs {
             match key_of(&d.rel_path) {
@@ -122,7 +133,13 @@ impl KeyIndex {
                     rel_path: d.rel_path,
                     key,
                 }),
-                Err(e) => invalid.push((d.rel_path, e)),
+                Err(e) => {
+                    invalid_tokens.push((
+                        d.rel_path.clone(),
+                        defined_tokens(&d.text).into_iter().collect(),
+                    ));
+                    invalid.push((d.rel_path, e));
+                }
             }
         }
         // Sorted up front so every map below is built in one order whatever the input order.
@@ -192,17 +209,26 @@ impl KeyIndex {
             }
         }
 
-        let mut definers: HashMap<String, Vec<Key>> = HashMap::new();
-        for d in valid.iter().filter(|d| usable(d)) {
+        let mut definers: HashMap<String, Vec<Definer>> = HashMap::new();
+        for d in &valid {
+            let key = usable(d).then(|| d.key.clone());
             for token in &d.tokens {
-                definers
-                    .entry(token.clone())
-                    .or_default()
-                    .push(d.key.clone());
+                definers.entry(token.clone()).or_default().push(Definer {
+                    rel_path: d.rel_path.clone(),
+                    key: key.clone(),
+                });
             }
         }
-        for keys in definers.values_mut() {
-            keys.sort();
+        for (rel_path, tokens) in &invalid_tokens {
+            for token in tokens {
+                definers.entry(token.clone()).or_default().push(Definer {
+                    rel_path: rel_path.clone(),
+                    key: None,
+                });
+            }
+        }
+        for found in definers.values_mut() {
+            found.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
         }
 
         let mut problems: Vec<IndexProblem> = Vec::new();
@@ -250,9 +276,10 @@ impl KeyIndex {
     pub fn owner(&self, key: &Key) -> Option<&Key> {
         self.owners.get(key)
     }
-    /// The keys of the documents that define `token`, sorted. Only a document whose key no other
-    /// document holds is listed: a document with a colliding key has no key to cite.
-    pub fn definers_of(&self, token: &str) -> Vec<Key> {
+    /// Every document that defines `token`, sorted by path: those whose key no other document
+    /// holds, and also those with a colliding or an invalid key (their `key` is `None`). A caller
+    /// that picks one owner must count them all.
+    pub fn definers_of(&self, token: &str) -> Vec<Definer> {
         self.definers.get(token).cloned().unwrap_or_default()
     }
 
@@ -879,7 +906,7 @@ mod tests {
         );
     }
     #[test]
-    fn definers_of_lists_unique_keys_sorted_and_skips_a_collision() {
+    fn definers_of_lists_every_defining_document_sorted_and_marks_a_key_nobody_can_cite() {
         let ix = KeyIndex::build(
             repo(),
             [
@@ -891,8 +918,24 @@ mod tests {
                 doc("Bad Name.md", "## F-1 — bad\n"),
             ],
         );
-        assert_eq!(ix.definers_of("F-1"), vec![k("a-log"), k("b-log")]);
-        assert_eq!(ix.definers_of("F-2"), vec![k("b-log")]);
+        let definer = |path: &str, key: Option<&str>| Definer {
+            rel_path: path.to_owned(),
+            key: key.map(k),
+        };
+        assert_eq!(
+            ix.definers_of("F-1"),
+            vec![
+                definer("Bad Name.md", None),
+                definer("logs/a-log.md", Some("a-log")),
+                definer("logs/b-log.md", Some("b-log")),
+                definer("one/dup.md", None),
+                definer("two/dup.md", None),
+            ]
+        );
+        assert_eq!(
+            ix.definers_of("F-2"),
+            vec![definer("logs/b-log.md", Some("b-log"))]
+        );
         assert!(ix.definers_of("F-3").is_empty());
     }
 

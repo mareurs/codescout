@@ -319,9 +319,10 @@ fn stems_of(head: &Head) -> BTreeMap<String, Vec<String>> {
 }
 
 /// What each old artifact id names. The old catalog first (`Catalog`): an id of a document that
-/// `HEAD` holds is its target, and one of a document `HEAD` lacks is a hint with the path the
-/// catalog knew. Then, for ids a document cites that are still open, git history (`History`),
-/// unless the clone is shallow: history is incomplete then, and each open id is reported so.
+/// `HEAD` holds is its target. Then, for every cited id with no target yet, git history
+/// (`History`): the file may have moved since the catalog saw it. Last, an id of a document `HEAD`
+/// lacks that history did not settle is a hint with the path the catalog knew. A shallow clone
+/// has incomplete history and skips it: an id nothing else names is reported so.
 fn recover_ids(
     repo: &git2::Repository,
     commit: &git2::Commit,
@@ -331,6 +332,8 @@ fn recover_ids(
 ) -> anyhow::Result<(BTreeMap<String, IdTarget>, BTreeMap<String, String>)> {
     let mut ids = BTreeMap::new();
     let mut hints = BTreeMap::new();
+    // The path the catalog knew for each id whose file `HEAD` lacks.
+    let mut gone: BTreeMap<&str, &str> = BTreeMap::new();
     for doc in old.documents.values() {
         if head.files.contains_key(&doc.rel_path) {
             ids.entry(doc.id.clone()).or_insert(IdTarget {
@@ -338,38 +341,40 @@ fn recover_ids(
                 source: IdSource::Catalog,
             });
         } else {
-            hints
-                .entry(doc.id.clone())
-                .or_insert_with(|| doc.rel_path.clone());
+            gone.entry(doc.id.as_str()).or_insert(doc.rel_path.as_str());
         }
     }
-    if shallow {
-        return Ok((ids, hints));
-    }
+    // An id with no target in `HEAD` is still open, whether or not the catalog knew its file:
+    // git may show where the file went. The id binds to the path it hashes and to nothing else.
     let open: BTreeSet<String> = cited_ids(head)
         .into_iter()
-        .filter(|id| !ids.contains_key(id) && !hints.contains_key(id))
+        .filter(|id| !ids.contains_key(id))
         .collect();
-    if open.is_empty() {
-        return Ok((ids, hints));
+    if !shallow && !open.is_empty() {
+        let spellings: Vec<&Path> = old.spellings.iter().map(PathBuf::as_path).collect();
+        let history = HistoryIds::load(repo, commit, &spellings)?;
+        for id in &open {
+            match history.head_path(id) {
+                Some(Ok(rel_path)) => {
+                    ids.insert(
+                        id.clone(),
+                        IdTarget {
+                            rel_path,
+                            source: IdSource::History,
+                        },
+                    );
+                }
+                Some(Err(historical)) => {
+                    hints.insert(id.clone(), historical);
+                }
+                None => {}
+            }
+        }
     }
-    let spellings: Vec<&Path> = old.spellings.iter().map(PathBuf::as_path).collect();
-    let history = HistoryIds::load(repo, commit, &spellings)?;
-    for id in open {
-        match history.head_path(&id) {
-            Some(Ok(rel_path)) => {
-                ids.insert(
-                    id,
-                    IdTarget {
-                        rel_path,
-                        source: IdSource::History,
-                    },
-                );
-            }
-            Some(Err(historical)) => {
-                hints.insert(id, historical);
-            }
-            None => {}
+    // What history did not settle falls back to the path the catalog knew.
+    for (id, path) in gone {
+        if !ids.contains_key(id) && !hints.contains_key(id) {
+            hints.insert(id.to_owned(), path.to_owned());
         }
     }
     Ok((ids, hints))
@@ -781,7 +786,7 @@ mod tests {
 
     /// A two-commit repository: `docs/old.md` of the first commit is `docs/new.md` in the second,
     /// and `docs/a.md` of the second cites the id of the old path.
-    fn history_plan(shallow: bool) -> ExportPlan {
+    fn history_plan(shallow: bool, catalog_row: bool) -> ExportPlan {
         use crate::librarian::derived::testkit::commit_files;
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -803,7 +808,12 @@ mod tests {
         if shallow {
             std::fs::write(root.join(".git/shallow"), format!("{tip}\n")).unwrap();
         }
-        let old = old_catalog_with(|_| {});
+        // The old catalog may still hold the file at the path the first commit gave it.
+        let old = old_catalog_with(|cat| {
+            if catalog_row {
+                add_doc(cat, &root, &id, "docs/old.md");
+            }
+        });
         let rows = load(&old, &RootMap::new(root.clone())).unwrap();
         let commit = repo.find_commit(tip).unwrap();
         plan_export(&repo, &commit, &rows).unwrap()
@@ -811,14 +821,14 @@ mod tests {
 
     #[test]
     fn an_id_the_catalog_lacks_is_recovered_through_a_git_rename() {
-        let plan = history_plan(false);
+        let plan = history_plan(false, false);
         assert!(!plan.shallow);
         assert_eq!(plan.files["docs/a.md"].new_text, "# A\n\nsee [[new]].\n");
     }
 
     #[test]
     fn a_shallow_clone_reports_the_ids_history_would_have_needed() {
-        let plan = history_plan(true);
+        let plan = history_plan(true, false);
         assert!(plan.shallow);
         assert!(
             plan.files.is_empty(),
@@ -828,6 +838,51 @@ mod tests {
         assert_eq!(items.len(), 1, "{items:?}");
         assert_eq!(items[0].status, Status::Unrecoverable);
         assert_eq!(items[0].reason, "shallow clone: history is incomplete");
+    }
+
+    #[test]
+    fn a_catalog_id_whose_file_git_moved_is_recovered_through_history() {
+        let plan = history_plan(false, true);
+        assert_eq!(
+            plan.files["docs/a.md"].new_text, "# A\n\nsee [[new]].\n",
+            "the catalog knew docs/old.md; a later commit moved it"
+        );
+        let items = citation_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].status, Status::Moved);
+    }
+
+    #[test]
+    fn a_catalog_id_with_no_history_falls_back_to_the_catalogs_hint() {
+        let plan = plan_of_files(
+            &[
+                ("docs/a.md", b"# A\n\nsee 0123456789abcdef.\n"),
+                ("docs/b.md", b"# B\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "0123456789abcdef", "docs/gone.md");
+            },
+        );
+        assert!(plan.files.is_empty());
+        let items = citation_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].status, Status::Unrecoverable);
+        assert_eq!(
+            items[0].reason,
+            "the id names a file that HEAD no longer holds"
+        );
+    }
+
+    #[test]
+    fn a_shallow_clone_keeps_the_catalogs_hint_for_an_id_it_knows() {
+        let plan = history_plan(true, true);
+        assert!(plan.files.is_empty(), "no history, so no move is followed");
+        let items = citation_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(
+            items[0].reason,
+            "the id names a file that HEAD no longer holds"
+        );
     }
 
     #[test]
