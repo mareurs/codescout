@@ -15,6 +15,7 @@ pub mod doc;
 pub mod doc_augment;
 pub mod doc_event;
 pub mod doc_refresh;
+pub mod hot_view;
 pub mod key_gate;
 
 pub mod doctor;
