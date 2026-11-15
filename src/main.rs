@@ -261,10 +261,12 @@ enum Commands {
     /// commit or stash first. `export` refuses a file that changed since `HEAD`, and refuses the
     /// whole run while another process holds the project write lock, or once the new catalog
     /// (`derived.db`) exists. Exits 0 when the run did what it was asked, 1 when `export` refused
-    /// some files, 2 and prints the reason when it did not run: no old catalog, a `-wal`, `-shm`
-    /// or non-empty `-journal` file beside it (stop every codescout process and checkpoint it),
-    /// a catalog that changed while it was read, no git repository, or a `HEAD` whose
-    /// `.codescout/repo.toml` or `key-space.toml` does not parse.
+    /// some files or could not write its report files, 2 and prints the reason when it did not
+    /// run: no old catalog, a `-wal`, `-shm` or non-empty `-journal` file beside it (stop every
+    /// codescout process and checkpoint it), a catalog that changed while it was read, no git
+    /// repository, a `HEAD` whose `.codescout/repo.toml` or `key-space.toml` does not parse, or,
+    /// for `export`, a new catalog that already exists or a project write lock that is held (or
+    /// whose file cannot be opened).
     Cutover(codescout::cli::cutover::CutoverArgs),
 
     /// Read-only query: which active constitution rules apply to a given

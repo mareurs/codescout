@@ -557,6 +557,12 @@ mod tests {
         ]);
         let out = apply(&p, &r.root);
         assert_eq!(out.refused.len(), 2, "{out:?}");
+        for (_, reason) in &out.refused {
+            assert!(
+                reason.starts_with("outside the repository: "),
+                "the boundary refusal speaks, not the read door behind it: {reason}"
+            );
+        }
         assert!(out.renamed.is_empty() && out.written.is_empty(), "{out:?}");
         assert_eq!(read(&r, "Old_Name.md"), "# Old\n", "the source stays");
         assert!(!outside_dir.join("moved.md").exists(), "nothing moved out");

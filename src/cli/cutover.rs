@@ -242,8 +242,23 @@ const NEXT_STEP: &str = "Commit the changed files, then run: codescout cutover b
 /// How long `export` tries for the project write lock before it refuses. D-R30 names timeout 0,
 /// but `write_guard::acquire` treats a zero budget as already spent and refuses even a free lock
 /// (measured: "timed out before checking cross-process write lock"), so this is the smallest
-/// budget that tries the lock: one attempt, one 50 ms retry slot, no real wait.
+/// budget that tries the lock. `acquire` retries every 50 ms until the budget is spent (about five
+/// tries), so a held lock is a refusal after a quarter of a second, not a wait.
 const LOCK_ATTEMPT: Duration = Duration::from_millis(250);
+
+/// Why `take_at` did not give the lock, on one line that names no path. Two failures differ: the
+/// lock file cannot be opened (an `io::Error`, whose text names the path: only its kind is kept),
+/// or another process holds the lock (a `RecoverableError` with the holder record and a hint,
+/// which name no path).
+fn lock_refusal(e: &anyhow::Error) -> anyhow::Error {
+    match e.downcast_ref::<std::io::Error>() {
+        Some(io) => anyhow!(
+            "the project write lock file cannot be opened: {}",
+            io.kind()
+        ),
+        None => anyhow!("the project write lock is not free: {}", one_line(e)),
+    }
+}
 
 /// Run `cutover export`: plan `HEAD`, refuse when the new catalog exists or the project write
 /// lock is held, re-check the old catalog, write the plan into the working tree, and keep the
@@ -251,28 +266,31 @@ const LOCK_ATTEMPT: Duration = Duration::from_millis(250);
 /// with code 2, and a run that refused some files has code 1.
 ///
 /// The order is D-R8 and D-R30. The side-file refusal is the primary guard (an idle server holds
-/// no lock); the lock keeps another CLI writer out, with timeout 0 so a held lock is a refusal and
-/// not a wait.
+/// no lock); the lock keeps another CLI writer out, with a budget of [`LOCK_ATTEMPT`] so a held
+/// lock is a refusal and not a wait.
 pub async fn evaluate_export(
     args: &CommonArgs,
     cwd: &Path,
     librarian_db: Option<OsString>,
     data_dir: Option<PathBuf>,
 ) -> Outcome {
-    export_with(args, cwd, librarian_db, data_dir, &|_| {}).await
+    export_with(args, cwd, librarian_db, data_dir, &|_| {}, &|_| {}).await
 }
 
-/// [`evaluate_export`] with a hook that runs after the lock is taken and before the last
-/// re-check of the old catalog. A test uses it to change the catalog at the one moment the
-/// re-check exists for.
+/// [`evaluate_export`] with two hooks. `before_writes` runs after the lock is taken and before the
+/// last re-check of the old catalog: a test uses it to change the catalog at the one moment the
+/// re-check exists for. `at_end` runs after the report files are written, while the lock is still
+/// held, with the directory the lock is taken at: a test uses it to show the lock is held to
+/// the end of the run.
 async fn export_with(
     args: &CommonArgs,
     cwd: &Path,
     librarian_db: Option<OsString>,
     data_dir: Option<PathBuf>,
     before_writes: &dyn Fn(&Path),
+    at_end: &dyn Fn(&Path),
 ) -> Outcome {
-    match export_run(args, cwd, librarian_db, data_dir, before_writes).await {
+    match export_run(args, cwd, librarian_db, data_dir, before_writes, at_end).await {
         Ok(outcome) => outcome,
         Err(e) => did_not_run(args.json, &one_line(&e)),
     }
@@ -285,6 +303,7 @@ async fn export_run(
     librarian_db: Option<OsString>,
     data_dir: Option<PathBuf>,
     before_writes: &dyn Fn(&Path),
+    at_end: &dyn Fn(&Path),
 ) -> Result<Outcome> {
     let loaded = load_and_plan(args, cwd, librarian_db, data_dir)?;
     if std::fs::symlink_metadata(derived_catalog_beside(&loaded.old_db)).is_ok() {
@@ -293,13 +312,10 @@ async fn export_run(
              export runs before it is built"
         );
     }
-    let _lock = take_at(
-        &lock_root_for(&loaded.start, &loaded.git_root),
-        LOCK_ATTEMPT,
-        "cutover export",
-    )
-    .await
-    .map_err(|e| anyhow!("the project write lock is not free: {}", one_line(&e)))?;
+    let lock_root = lock_root_for(&loaded.start, &loaded.git_root);
+    let _lock = take_at(&lock_root, LOCK_ATTEMPT, "cutover export")
+        .await
+        .map_err(|e| lock_refusal(&e))?;
     before_writes(&loaded.old_db);
     if side_files_present(&loaded.old_db) || file_stamp(&loaded.old_db).ok() != Some(loaded.stamp) {
         bail!(
@@ -367,6 +383,7 @@ async fn export_run(
         text.insert_str(last, &notes);
         text
     };
+    at_end(&lock_root);
     Ok(Outcome { code, stdout })
 }
 
@@ -781,6 +798,130 @@ mod tests {
         assert_eq!(out.code, 0, "the lock is free again: {}", out.stdout);
     }
 
+    // mutation: forward the error chain of `take_at` for an open failure (it names the path), or
+    // call every lock failure "not free".
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn export_refuses_a_lock_file_it_cannot_open_and_names_no_path() {
+        // A link at `.codescout/write.lock` (committed content can plant one), then a directory.
+        for plant in ["link", "directory"] {
+            let f = fixture();
+            let dir = f.root.join(".codescout");
+            std::fs::create_dir_all(&dir).unwrap();
+            match plant {
+                "link" => {
+                    std::os::unix::fs::symlink("elsewhere.txt", dir.join("write.lock")).unwrap()
+                }
+                _ => std::fs::create_dir(dir.join("write.lock")).unwrap(),
+            }
+            let (a, c) = (read(&f, "a.md"), read(&f, "c.md"));
+            let out = evaluate_export(&args(&f), &f.root, None, None).await;
+            assert_eq!(out.code, 2, "{plant}: {}", out.stdout);
+            assert!(
+                out.stdout
+                    .contains("the project write lock file cannot be opened"),
+                "{plant}: {}",
+                out.stdout
+            );
+            assert!(
+                !out.stdout.contains("not free"),
+                "{plant}: a lock nobody holds is not called held: {}",
+                out.stdout
+            );
+            no_absolute_path(&f, &out.stdout);
+            assert!(
+                !out.stdout.contains("write.lock"),
+                "{plant}: {}",
+                out.stdout
+            );
+            assert_eq!((read(&f, "a.md"), read(&f, "c.md")), (a, c), "{plant}");
+            assert_eq!(report_files(&f), (vec![], vec![]), "{plant}");
+        }
+    }
+
+    // mutation: `let _lock = take_at(..)` becomes `let _ = take_at(..)` (the guard drops at once).
+    #[tokio::test]
+    async fn export_holds_the_lock_to_the_end_of_the_run() {
+        use fs4::fs_std::FileExt;
+        let f = fixture();
+        let probe = std::cell::Cell::new(None);
+        let at_end = |root: &Path| {
+            let file = crate::agent::open_lock_file(root).unwrap();
+            // A second open file description conflicts with the run's own, so a free lock
+            // would let this succeed.
+            probe.set(Some(file.try_lock_exclusive().is_err()));
+        };
+        let out = export_with(&args(&f), &f.root, None, None, &|_| {}, &at_end).await;
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        assert_eq!(
+            probe.get(),
+            Some(true),
+            "the hook ran after the writes and found the lock held"
+        );
+        // And the run released it: a new holder gets it now.
+        let again = take_at(
+            &lock_root_for(&f.root, &f.root),
+            std::time::Duration::from_secs(1),
+            "test holder",
+        )
+        .await;
+        assert!(again.is_ok(), "the lock is free after the run");
+    }
+
+    // mutation: drop the failure notes; return code 0 when only the report failed; put the notes
+    // after the next-step line.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_report_that_cannot_be_written_is_said_and_exits_1() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root ignores directory modes, so the write would succeed.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+        for json in [false, true] {
+            let f = fixture();
+            let _restore = Restore(f.catalog_dir.clone());
+            std::fs::set_permissions(&f.catalog_dir, std::fs::Permissions::from_mode(0o555))
+                .unwrap();
+            let mut a = args(&f);
+            a.json = json;
+            let out = evaluate_export(&a, &f.root, None, None).await;
+            assert_eq!(out.code, 1, "json={json}: {}", out.stdout);
+            assert_eq!(
+                read(&f, "c.md"),
+                "# C\n\nsee [[d]].\n",
+                "the files were written; only the report was not kept"
+            );
+            no_absolute_path(&f, &out.stdout);
+            if json {
+                let v: serde_json::Value = serde_json::from_str(out.stdout.trim()).unwrap();
+                let errors = v["report_errors"].as_array().unwrap();
+                assert_eq!(errors.len(), 2, "{errors:?}");
+                assert!(errors[0].as_str().unwrap().contains("could not be written"));
+            } else {
+                let lines: Vec<&str> = out.stdout.lines().collect();
+                assert_eq!(lines.last(), Some(&NEXT_STEP), "{}", out.stdout);
+                let notes: Vec<usize> = lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, l)| l.contains("could not be written"))
+                    .map(|(i, _)| i)
+                    .collect();
+                assert_eq!(notes.len(), 2, "one note per report file:\n{}", out.stdout);
+                assert!(
+                    notes.iter().all(|i| *i < lines.len() - 1),
+                    "the notes come before the last line"
+                );
+            }
+        }
+    }
+
     // mutation: drop the `side_files_present` half of the re-check; drop the `file_stamp` half.
     #[tokio::test]
     async fn export_refuses_when_a_side_file_appears_before_the_writes() {
@@ -792,7 +933,7 @@ mod tests {
             side.push("-wal");
             std::fs::write(PathBuf::from(side), b"x").unwrap();
         };
-        let out = export_with(&args(&f), &f.root, None, None, &create).await;
+        let out = export_with(&args(&f), &f.root, None, None, &create, &|_| {}).await;
         assert_eq!(out.code, 2, "{}", out.stdout);
         assert!(
             out.stdout
@@ -811,7 +952,7 @@ mod tests {
             let mut file = std::fs::OpenOptions::new().append(true).open(db).unwrap();
             file.write_all(b"x").unwrap();
         };
-        let out = export_with(&args(&f), &f.root, None, None, &touch).await;
+        let out = export_with(&args(&f), &f.root, None, None, &touch, &|_| {}).await;
         assert_eq!(out.code, 2, "{}", out.stdout);
         assert!(
             out.stdout
