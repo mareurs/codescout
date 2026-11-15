@@ -934,7 +934,7 @@ fn plain_label(label: &str) -> bool {
 }
 
 /// `dest` joined to `folder` and normalised; `None` when it is absolute or leaves the root.
-fn join_path(folder: &str, dest: &str) -> Option<String> {
+pub(crate) fn join_path(folder: &str, dest: &str) -> Option<String> {
     if dest.starts_with('/') {
         return None;
     }

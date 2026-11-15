@@ -82,7 +82,11 @@ impl RenameSet {
         let renamed: BTreeSet<&str> = self.all().map(|r| r.old_key.as_str()).collect();
         let mut found: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for path in head_paths.filter(|p| !moved.contains_key(*p)) {
-            let key = stem_of(path).to_ascii_lowercase();
+            // The key `key_of` gives, not the stem: a folder index has its folder's.
+            let Err(KeyError::NonCanonical { key, .. }) = key_of(path) else {
+                continue;
+            };
+            let key = key.to_ascii_lowercase();
             if renamed.contains(key.as_str()) {
                 found.entry(key).or_default().push(path.clone());
             }

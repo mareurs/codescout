@@ -17,12 +17,13 @@ use crate::librarian::cutover::rename::{
     applied_item, in_head_item, plan_renames_against, renames_already_in_head, RenameSet,
 };
 use crate::librarian::cutover::rewrite::{
-    rewrite_document, Finding, Form, IdSource, IdTarget, Outcome, Resolver, REASON_UNKNOWN_ID,
+    join_path, rewrite_document, Finding, Form, IdSource, IdTarget, Outcome, Resolver,
+    REASON_UNKNOWN_ID,
 };
 use crate::librarian::derived::build::{key_space_from_commit, repo_name_of};
 use crate::librarian::derived::scan::{scan_commit, Skip};
 use crate::librarian::identity::index::{DocInput, KeyIndex};
-use crate::librarian::identity::key::{key_of, markdown_stem, Key};
+use crate::librarian::identity::key::{folder_of, key_of, markdown_stem, Key};
 use crate::librarian::identity::repo_name::RepoName;
 use crate::librarian::tools::link_scan::extract::{citation_spans, CitationKind};
 
@@ -316,7 +317,11 @@ fn plan_citations(
 /// renames: the link breaks and no rewrite can fix it, so each one is an `unrecoverable` item
 /// (D-R7). The file is not rewritten and the rename is not blocked (D-R21 b blocks on code only).
 /// A path with no text (not UTF-8, a symlink) has nothing to scan. Items come sorted by path, then
-/// line.
+/// line, one per line and renamed file.
+///
+/// A file is found two ways: the paths its text names (`paths_named_in`), and its link
+/// destinations, percent-decoded and resolved against the folder of the file that holds them (a
+/// name with a space is written `My%20Notes.md` or `<My Notes.md>`, which no path run reads).
 fn plan_outside_links(
     repo: &git2::Repository,
     commit: &git2::Commit,
@@ -348,6 +353,20 @@ fn plan_outside_links(
                 hits.insert((*line, n));
             }
         }
+        let folder = folder_of(path);
+        for span in citation_spans(text)
+            .iter()
+            .filter(|s| s.kind == CitationKind::RelPathLink)
+        {
+            let Some(target) = join_path(&folder, &percent_decoded(&span.raw)) else {
+                continue;
+            };
+            for (n, rename) in renames.planned.iter().enumerate() {
+                if rename.from == target {
+                    hits.insert((span.line, n));
+                }
+            }
+        }
         for (line, n) in hits {
             let rename = &renames.planned[n];
             plan.items.push(Item {
@@ -362,6 +381,26 @@ fn plan_outside_links(
         }
     }
     Ok(())
+}
+
+/// `s` with each `%XX` byte sequence decoded; `s` itself when the result is not UTF-8.
+fn percent_decoded(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| char::from(b).to_digit(16);
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_owned())
 }
 
 /// The path of the document written at `path` in `HEAD`, after the renames.
@@ -1449,6 +1488,81 @@ mod tests {
         let plan = plan_export(&repo, &commit, &rows).unwrap();
         assert!(citation_items(&plan).is_empty(), "{:?}", plan.items);
         assert_eq!(plan.files.keys().collect::<Vec<_>>(), ["docs/my-notes.md"]);
+    }
+
+    #[test]
+    fn a_folder_index_whose_folder_gives_the_old_key_is_a_competitor() {
+        // `guides/My_Notes/README.md` has the key `my_notes` (its folder's) and its rename is refused
+        // (a folder index): `[[My_Notes]]` could mean it as well as `docs/My_Notes.md`.
+        let plan = plan_of_files(
+            &[
+                ("guides/My_Notes/README.md", b"# G\n"),
+                ("docs/My_Notes.md", b"# My\n"),
+                ("docs/b.md", b"# B\n\nsee [[My_Notes]].\n"),
+            ],
+            |_, _| {},
+        );
+        let paths: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(paths, ["docs/my-notes.md"], "docs/b.md keeps its text");
+        let ambiguous = ambiguous_items(&plan);
+        assert_eq!(ambiguous.len(), 1, "{ambiguous:?}");
+        assert_eq!(
+            ambiguous[0].detail.as_deref(),
+            Some("[[My_Notes]]: docs/My_Notes.md, guides/My_Notes/README.md")
+        );
+    }
+
+    #[test]
+    fn a_canonical_folder_index_is_no_competitor() {
+        let plan = plan_of_files(
+            &[
+                ("guides/notes/README.md", b"# G\n"),
+                ("docs/My_Notes.md", b"# My\n"),
+                ("docs/b.md", b"# B\n\nsee [[My_Notes]].\n"),
+            ],
+            |_, _| {},
+        );
+        assert_eq!(
+            plan.files["docs/b.md"].new_text,
+            "# B\n\nsee [[my-notes]].\n"
+        );
+        assert!(ambiguous_items(&plan).is_empty());
+    }
+
+    #[test]
+    fn a_link_to_a_renamed_file_with_a_space_in_its_name_is_found_decoded() {
+        let plan = plan_of_files(
+            &[
+                (".codescout/key-space.toml", b"exclude = [\"contrib/**\"]\n"),
+                ("docs/My Notes.md", b"# My\n"),
+                ("contrib/a.md", b"# A\n\n[x](../docs/My%20Notes.md)\n"),
+                ("contrib/b.md", b"# B\n\n[x](<../docs/My Notes.md>) and [y](../docs/My%20Notes.md#s)\n"),
+                // Only the tail matches: from this folder the path is another file's.
+                ("contrib/c.md", b"# C\n\n[x](other/docs/My%20Notes.md) and [y](My%20Notes.md)\n"),
+                ("contrib/d.md", b"# D\n\n[x](../docs/My%20Notes.md) [y](../docs/My%20Notes.md)\n[z](<../docs/My Notes.md>)\n"),
+            ],
+            |_, _| {},
+        );
+        assert_eq!(
+            plan.files.keys().collect::<Vec<_>>(),
+            ["docs/my-notes.md"],
+            "the name with a space is renamed"
+        );
+        let hits: Vec<(&str, Option<u32>)> = citation_items(&plan)
+            .into_iter()
+            .filter(|i| i.status == Status::Unrecoverable)
+            .map(|i| (i.path.as_deref().unwrap(), i.line))
+            .collect();
+        assert_eq!(
+            hits,
+            [
+                ("contrib/a.md", Some(3)),
+                ("contrib/b.md", Some(3)),
+                ("contrib/d.md", Some(3)),
+                ("contrib/d.md", Some(4)),
+            ],
+            "one item per line and renamed file, in order of path then line"
+        );
     }
 
     #[test]
