@@ -359,12 +359,10 @@ pub fn split_source(text: &str, kind: &SourceKind, extra: &[ExtraRecord]) -> Spl
         }
     };
 
-    // A `Whole` record's `heading_line` is only its first heading, not a record
-    // heading: that heading can still be a possible record.
-    let record_heads: BTreeSet<u32> = match kind {
-        SourceKind::Whole => BTreeSet::new(),
-        _ => records.iter().map(|r| r.heading_line).collect(),
-    };
+    // A `Whole` record's `heading_line` is its first heading (`## IC-10 — x` in a
+    // `files` cluster): that is the record's own heading, not a possible record. A
+    // later token-shaped heading inside it is still a possible.
+    let record_heads: BTreeSet<u32> = records.iter().map(|r| r.heading_line).collect();
     let mut possibles = Vec::new();
     for head in &heads {
         if record_heads.contains(&head.line)
@@ -905,6 +903,35 @@ text\n\
                 enclosing: None,
             }]
         );
+        assert_tiles(&split);
+    }
+
+    /// A `files` cluster file opens with `## IC-10 — x`: that heading is the whole
+    /// record's own heading, not a possible record. A later token-shaped heading is
+    /// still one. Breaks when `Whole` leaves its `heading_line` out of the record
+    /// headings.
+    #[test]
+    fn a_whole_records_own_heading_is_not_a_possible() {
+        let text = "---\n\
+title: c\n\
+---\n\
+## IC-10 — x\n\
+body\n\
+### IC-11 — y\n\
+more\n";
+        let split = split_source(text, &SourceKind::Whole, &[]);
+        assert_eq!(split.records.len(), 1);
+        assert_eq!(split.records[0].heading_line, 4);
+        assert_eq!(split.records[0].lines, 4..=7);
+        assert_eq!(
+            split.possibles,
+            vec![Possible {
+                line: 6,
+                token: "IC-11".into(),
+                enclosing: None,
+            }]
+        );
+        assert!(split.repeats.is_empty());
         assert_tiles(&split);
     }
 

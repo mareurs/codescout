@@ -448,6 +448,15 @@ fn source_problems(m: &Mapping, src: &SourceInventory, reads_status: bool, out: 
             .iter()
             .find(|r| (r.first..=r.last).contains(&line));
         match enclosing {
+            // records_extra has no effect on a whole source (it is refused above), so
+            // only possibles_inside settles a possible inside a whole record.
+            Some(_) if whole => {
+                if !kept_inside {
+                    out.push(format!(
+                        "possible record {token} at line {line} of {path} is inside the whole record of {path}. Add it to possibles_inside."
+                    ));
+                }
+            }
             Some(r) => {
                 if !in_extra(line) && !kept_inside {
                     let name = match &r.token {
@@ -1261,6 +1270,107 @@ F-2 = "A short body."
             mapping_problems(&m, &inv),
             vec!["records_extra line 41 of docs/trackers/ic/ic-1.md has no effect: a whole source has one record".to_string()]
         );
+    }
+
+    /// A `files` cluster file, split by the real splitter: its own `## IC-10 — x`
+    /// heading needs nothing, and its later `### IC-11 — y` is settled only by
+    /// possibles_inside (records_extra has no effect on a whole source). Breaks when
+    /// the splitter reports the record's own heading (an IC-10 message appears) or
+    /// when the whole-record message names records_extra.
+    #[test]
+    fn a_files_source_needs_possibles_inside_only_for_its_later_possibles() {
+        use crate::librarian::tracker_migration::records::{split_source, SourceKind};
+        let path = "docs/trackers/issue-clusters/IC-10.md";
+        let text = "---\n\
+title: c\n\
+---\n\
+## IC-10 — x\n\
+body\n\
+### IC-11 — y\n\
+more\n";
+        let split = split_source(text, &SourceKind::Whole, &[]);
+        let src = SourceInventory {
+            path: path.into(),
+            line_count: split.line_count,
+            records: split
+                .records
+                .iter()
+                .map(|r| RecordRow {
+                    token: r.token.clone(),
+                    heading_line: r.heading_line,
+                    level: r.level,
+                    title: r.title.clone(),
+                    first: *r.lines.start(),
+                    last: *r.lines.end(),
+                    raw_status: Some("open".into()),
+                    status_origin: Some("body".into()),
+                    stated_dates: vec![],
+                })
+                .collect(),
+            sections: split
+                .sections
+                .iter()
+                .map(|s| section(s.start, *s.lines.end(), &s.first_line))
+                .collect(),
+            possibles: split.possibles.clone(),
+            repeats: split.repeats.clone(),
+            tables: vec![],
+            status_values: BTreeMap::from([("open".to_string(), 1)]),
+            no_status: vec![],
+            row_only: vec![],
+            no_row: vec![],
+            duplicate_rows: vec![],
+            disagreements: vec![],
+        };
+        let inv = Inventory {
+            sources: vec![src],
+            mentions: Mentions {
+                citations: vec![],
+                paths: vec![],
+                ids: vec![],
+                code: vec![],
+            },
+            sidecar: None,
+        };
+        let mut m = base_mapping();
+        m.sources = vec![SourceSpec {
+            path: "docs/trackers/issue-clusters".into(),
+            kind: "files".into(),
+            level: None,
+        }];
+        m.records_extra.clear();
+        m.possibles_inside.clear();
+        m.sections.clear();
+        m.code_mentions.clear();
+        m.sidecar = None;
+        assert_eq!(
+            mapping_problems(&m, &inv),
+            vec![
+                "possible record IC-11 at line 6 of docs/trackers/issue-clusters/IC-10.md is inside the whole record of docs/trackers/issue-clusters/IC-10.md. Add it to possibles_inside."
+                    .to_string()
+            ]
+        );
+        // records_extra does not settle it: it is refused, and the possible stays open.
+        m.records_extra.push(ExtraRecordSpec {
+            source: path.into(),
+            line: 6,
+            token: "IC-11".into(),
+        });
+        assert_eq!(
+            mapping_problems(&m, &inv),
+            vec![
+                "records_extra line 6 of docs/trackers/issue-clusters/IC-10.md has no effect: a whole source has one record"
+                    .to_string(),
+                "possible record IC-11 at line 6 of docs/trackers/issue-clusters/IC-10.md is inside the whole record of docs/trackers/issue-clusters/IC-10.md. Add it to possibles_inside."
+                    .to_string(),
+            ]
+        );
+        m.records_extra.clear();
+        m.possibles_inside.push(PossibleSpec {
+            source: path.into(),
+            line: 6,
+        });
+        assert_eq!(mapping_problems(&m, &inv), Vec::<String>::new());
     }
 
     /// Breaks when the inventory is checked against a mapping whose sources do not
