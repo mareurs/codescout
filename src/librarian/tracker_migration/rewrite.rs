@@ -19,33 +19,35 @@ pub struct RewriteCounts {
     pub rewritten: usize,
     pub skipped_link_text: usize,
     pub skipped_url: usize,
+    pub skipped_adjacent: usize,
 }
 
 /// Byte ranges of the TEXT (not the destination) of every ordinary markdown link and image.
 /// Wiki links are citations themselves and autolinks have no prose text, so both are left out.
 fn link_text_ranges(text: &str) -> Vec<Range<usize>> {
     let opts = Options::ENABLE_WIKILINKS | Options::ENABLE_TABLES;
-    // One open link per entry: the union of the ranges of its child events (None until a child).
-    let mut open: Vec<Option<Range<usize>>> = Vec::new();
+    // One entry per open link, wiki and autolink included, so every End pops its own entry:
+    // (union of the ranges of its child events, whether its text is kept). Links nest: an
+    // autolink or email link can sit inside an ordinary link's text.
+    let mut open: Vec<(Option<Range<usize>>, bool)> = Vec::new();
     let mut out = Vec::new();
     for (event, range) in Parser::new_ext(text, opts).into_offset_iter() {
         match event {
-            Event::Start(Tag::Link { link_type, .. })
-                if !matches!(
+            Event::Start(Tag::Link { link_type, .. }) => {
+                let keep = !matches!(
                     link_type,
                     LinkType::WikiLink { .. } | LinkType::Autolink | LinkType::Email
-                ) =>
-            {
-                open.push(None);
+                );
+                open.push((None, keep));
             }
             Event::End(TagEnd::Link) => {
-                if let Some(Some(r)) = open.pop() {
+                if let Some((Some(r), true)) = open.pop() {
                     out.push(r);
                 }
             }
             _ => {
-                // A child event extends every open link's text range (nested links cannot occur).
-                for slot in open.iter_mut() {
+                // A child event extends every open link's text range.
+                for (slot, _) in open.iter_mut() {
                     *slot = Some(match slot.take() {
                         Some(r) => r.start.min(range.start)..r.end.max(range.end),
                         None => range.clone(),
@@ -77,6 +79,7 @@ pub fn rewrite_record_citations(
         rewritten: 0,
         skipped_link_text: 0,
         skipped_url: 0,
+        skipped_adjacent: 0,
     };
     let links = link_text_ranges(text);
     // (byte range to replace, replacement)
@@ -91,6 +94,11 @@ pub fn rewrite_record_citations(
                     counts.skipped_link_text += 1;
                 } else if in_url_word(text, &range) {
                     counts.skipped_url += 1;
+                } else if text.as_bytes().get(range.end) == Some(&b'(')
+                    || (range.start > 0 && text.as_bytes()[range.start - 1] == b'!')
+                {
+                    // `[[k:T]](..)` re-parses as a markdown link and `![[k:T]]` as an embed.
+                    counts.skipped_adjacent += 1;
                 } else {
                     edits.push((range, format!("[[{new_key}:{token}]]")));
                     counts.rewritten += 1;
@@ -138,6 +146,7 @@ mod tests {
             rewritten,
             skipped_link_text,
             skipped_url,
+            skipped_adjacent: 0,
         }
     }
 
@@ -215,5 +224,43 @@ mod tests {
         );
         assert_eq!(twice, once);
         assert_eq!(c.rewritten, 0);
+    }
+
+    #[test]
+    fn an_autolink_inside_link_text_keeps_the_text_protected() {
+        for inner in ["<https://x.org/>", "<me@x.org>"] {
+            let text = format!("[a {inner} then F-1](b.md)");
+            let (out, c) = rewrite_record_citations(&text, &set(&["F-1"]), "k", "k");
+            assert_eq!(out, text);
+            assert_eq!(c, counts(0, 1, 0));
+        }
+    }
+
+    #[test]
+    fn a_token_followed_by_a_paren_or_preceded_by_a_bang_is_left() {
+        // `[[k:G-11]](b)` would re-parse as a markdown link and `![[k:F-1]]` as an embed.
+        for text in ["G-11(b) does bite", "!F-1"] {
+            let (out, c) = rewrite_record_citations(text, &set(&["G-11", "F-1"]), "k", "k");
+            assert_eq!(out, text);
+            assert_eq!(
+                c,
+                RewriteCounts {
+                    skipped_adjacent: 1,
+                    ..counts(0, 0, 0)
+                }
+            );
+        }
+        // A space before the paren makes no link: rewritten.
+        let (out, c) = rewrite_record_citations("日本語 F-1 (b)", &set(&["F-1"]), "k", "k");
+        assert_eq!(out, "日本語 [[k:F-1]] (b)");
+        assert_eq!(c, counts(1, 0, 0));
+    }
+
+    #[test]
+    fn repo_qualified_citations_are_not_rewritten() {
+        let text = "[[old/old:F-1]] [[oldrepo/old]] [[r/old]]";
+        let (out, c) = rewrite_record_citations(text, &set(&[]), "old", "new");
+        assert_eq!(out, text);
+        assert_eq!(c, counts(0, 0, 0));
     }
 }
