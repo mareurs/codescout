@@ -47,7 +47,7 @@ fn a_crlf_readme_body_works() {
 // ---- new_entry -------------------------------------------------------------------------------
 
 use crate::librarian::frontmatter::{self, Frontmatter};
-use crate::librarian::lifecycle::entry::{parse_entry, validate_entry, EntryMeta};
+use crate::librarian::lifecycle::entry::{parse_entry, validate_entry, EntryError, EntryMeta};
 use crate::librarian::lifecycle::layout::Lifecycle;
 use crate::librarian::lifecycle::naming::StemError;
 use crate::librarian::lifecycle::schema::{parse_schema, CollectionSchema, FieldType};
@@ -775,4 +775,413 @@ fn no_frontmatter_and_bad_yaml_are_named() {
         matches!(bad.as_slice(), [WriteProblem::BadYaml(_)]),
         "{bad:?}"
     );
+}
+
+// ---- revisit rule ----------------------------------------------------------------------------
+
+#[test]
+fn new_entry_refuses_a_past_revisit_by() {
+    let today = d("2026-11-14");
+    let yesterday = d("2026-11-13");
+    let mut i = input("friction", "Late");
+    i.status = Some("waiting");
+    i.revisit_by = Some(yesterday);
+    let problems = new_entry(&schema(), DIR, None, &i, today).unwrap_err();
+    assert_eq!(problems, vec![WriteProblem::RevisitPast(yesterday)]);
+    // A date equal to today is allowed: the doctor fires only when `revisit_by < today`.
+    i.revisit_by = Some(today);
+    let m = meta(&new_entry(&schema(), DIR, None, &i, today).unwrap().text);
+    assert_eq!(m.revisit_by, Some(today));
+}
+
+#[test]
+fn change_status_refuses_a_past_revisit_by_and_a_stored_past_date() {
+    // (a) the call's own date is before today (today is `d1()`, 2026-11-14).
+    let past = d("2026-11-13");
+    assert_eq!(
+        change(&doc("open"), "waiting", Some(past)).unwrap_err(),
+        vec![WriteProblem::RevisitPast(past)]
+    );
+    // A date equal to today is allowed.
+    let m = meta(&change(&doc("open"), "waiting", Some(d1())).unwrap());
+    assert_eq!(m.revisit_by, Some(d1()));
+    // (b) no call date, and the stored one is before today.
+    let stale = d("2026-11-10");
+    let stored = doc_with("waiting", Some(stale), None);
+    assert_eq!(
+        change(&stored, "parked", None).unwrap_err(),
+        vec![WriteProblem::RevisitPast(stale)]
+    );
+    // A fresh date from the call replaces the stale stored one.
+    let m = meta(&change(&stored, "parked", Some(x())).unwrap());
+    assert_eq!(m.revisit_by, Some(x()));
+    // (c) an open or terminal target drops the stored past date.
+    for status in ["open", "fixed"] {
+        let m = meta(&change(&stored, status, None).unwrap());
+        assert_eq!(m.status, status);
+        assert_eq!(m.revisit_by, None);
+    }
+}
+
+#[test]
+fn a_blank_body_is_the_template() {
+    let body_of = |body: Option<&str>| {
+        let mut i = input("friction", "Blank");
+        i.body = body;
+        let file = new_entry(&schema(), DIR, Some("template text"), &i, d("2026-11-14")).unwrap();
+        read(&file.text).1
+    };
+    let template = body_of(None);
+    assert_eq!(template, frontmatter::render_body("template text"));
+    for blank in ["  \n", "", " \t\r\n\n"] {
+        assert_eq!(body_of(Some(blank)), template, "{blank:?}");
+    }
+    // A body with text keeps its own text.
+    assert_eq!(body_of(Some("mine")), frontmatter::render_body("mine"));
+}
+
+#[test]
+fn every_problem_text_names_its_remedy() {
+    let entry_problem = |status: &str| EntryProblem::RevisitMissing {
+        status: status.into(),
+    };
+    let hex_stem =
+        entry_stem(name_schema().key_style, d("2026-11-14"), "0123456789abcdef").unwrap_err();
+    let all = vec![
+        WriteProblem::KindUndeclared("bug".into()),
+        WriteProblem::StatusUndeclared("nope".into()),
+        WriteProblem::Title("???".into()),
+        WriteProblem::Stem(StemError::ReservedName("readme".into())),
+        WriteProblem::Stem(hex_stem),
+        WriteProblem::BadYaml("did not find expected ']'".into()),
+        WriteProblem::NoFrontmatter,
+        WriteProblem::FieldUndeclared("colour".into()),
+        WriteProblem::RevisitNotNeeded("open".into()),
+        WriteProblem::RevisitPast(d("2026-11-13")),
+        WriteProblem::EmptyUpdate,
+        WriteProblem::KindFixed,
+        WriteProblem::KindNotRepairable("bug".into()),
+        WriteProblem::Invalid(vec![entry_problem("waiting")]),
+        // Several inner problems must not add a second separator.
+        WriteProblem::Invalid(vec![entry_problem("waiting"), entry_problem("parked")]),
+        // `parse_entry` collects several errors at once; `Unparsed` carries them all.
+        WriteProblem::Invalid(vec![EntryProblem::Unparsed(vec![
+            EntryError::Missing("created"),
+            EntryError::Missing("status_since"),
+        ])]),
+    ];
+    // No wildcard: a new variant fails to compile here until a case is added above.
+    let _exhaustive = |p: &WriteProblem| match p {
+        WriteProblem::KindUndeclared(_)
+        | WriteProblem::StatusUndeclared(_)
+        | WriteProblem::Title(_)
+        | WriteProblem::Stem(_)
+        | WriteProblem::BadYaml(_)
+        | WriteProblem::NoFrontmatter
+        | WriteProblem::FieldUndeclared(_)
+        | WriteProblem::RevisitNotNeeded(_)
+        | WriteProblem::RevisitPast(_)
+        | WriteProblem::EmptyUpdate
+        | WriteProblem::KindFixed
+        | WriteProblem::KindNotRepairable(_)
+        | WriteProblem::Invalid(_) => (),
+    };
+    const OPENERS: [&str; 7] = ["pass", "use", "remove", "declare", "fix", "give", "name"];
+    for problem in all {
+        let text = problem.to_string();
+        let parts: Vec<&str> = text.split("; ").collect();
+        assert_eq!(parts.len(), 2, "{text}");
+        assert!(parts.iter().all(|p| !p.trim().is_empty()), "{text}");
+        assert!(
+            OPENERS.iter().any(|o| parts[1].starts_with(o)),
+            "the remedy of {text:?} must start with one of {OPENERS:?}"
+        );
+    }
+}
+
+// ---- update_entry ----------------------------------------------------------------------------
+
+fn upd(text: &str, spec: &UpdateSpec<'_>) -> Result<String, Vec<WriteProblem>> {
+    update_entry(text, &schema(), spec, d1())
+}
+
+fn with_fields(list: &[(&str, Option<Value>)]) -> UpdateSpec<'static> {
+    UpdateSpec {
+        fields: edits(list),
+        ..UpdateSpec::default()
+    }
+}
+
+/// A document hand-edited into two defects: an undeclared status and an undeclared stray key.
+fn stray_doc() -> String {
+    let text = doc("open").replacen("status: open\n", "status: wip\nbogus: 1\n", 1);
+    assert!(text.contains("status: wip\nbogus: 1\n"), "{text}");
+    text
+}
+
+#[test]
+fn one_update_repairs_a_stray_key_and_a_bad_status() {
+    let text = stray_doc();
+    let spec = UpdateSpec {
+        status: Some("open"),
+        fields: edits(&[("bogus", None)]),
+        ..UpdateSpec::default()
+    };
+    let fixed = upd(&text, &spec).unwrap();
+    let m = meta(&fixed);
+    assert!(validate_entry(&schema(), &m).is_empty());
+    assert_eq!(m.status, "open");
+    assert_eq!(m.status_since, d1());
+    assert!(!fixed.contains("bogus"), "{fixed}");
+}
+
+#[test]
+fn two_separate_calls_cannot_repair_the_same_document() {
+    // Call B of the write-core spec still holds: each function re-reads its own result.
+    let text = stray_doc();
+    let problems = change(&text, "open", None).unwrap_err();
+    assert!(!invalid(&problems).is_empty(), "{problems:?}");
+    let problems = alter(&text, &[("bogus", None)]).unwrap_err();
+    assert!(!invalid(&problems).is_empty(), "{problems:?}");
+}
+
+#[test]
+fn update_entry_sets_title_tags_and_valid_together() {
+    let spec = UpdateSpec {
+        title: Some("A new title"),
+        tags: Some(vec![" a ".into(), "".into(), "b".into(), "a".into()]),
+        valid: Some(Some("dated 2026-11-14")),
+        ..UpdateSpec::default()
+    };
+    let text = upd(&doc("open"), &spec).unwrap();
+    let m = meta(&text);
+    assert_eq!(m.title, "A new title");
+    assert_eq!(m.tags, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(m.valid, Some(Validity::Dated("2026-11-14".into())));
+    // The body and the untouched status_since survive.
+    assert_eq!(read(&text).1, read(&doc("open")).1);
+    assert_eq!(m.status_since, d0());
+    let removed = UpdateSpec {
+        valid: Some(None),
+        ..UpdateSpec::default()
+    };
+    let text = upd(&text, &removed).unwrap();
+    assert_eq!(meta(&text).valid, None);
+    assert!(!text.contains("valid"), "{text}");
+    // `Some(vec![])` clears the tags.
+    let cleared = UpdateSpec {
+        tags: Some(Vec::new()),
+        ..UpdateSpec::default()
+    };
+    assert!(meta(&upd(&text, &cleared).unwrap()).tags.is_empty());
+}
+
+#[test]
+fn a_valid_that_names_no_class_is_invalid_in_an_update() {
+    let spec = UpdateSpec {
+        valid: Some(Some("forever")),
+        ..UpdateSpec::default()
+    };
+    let problems = upd(&doc("open"), &spec).unwrap_err();
+    assert!(!invalid(&problems).is_empty(), "{problems:?}");
+}
+
+#[test]
+fn a_title_with_a_line_break_is_refused() {
+    for title in ["two\nlines", "two\rlines", "???", ""] {
+        let spec = UpdateSpec {
+            title: Some(title),
+            ..UpdateSpec::default()
+        };
+        assert_eq!(
+            upd(&doc("open"), &spec).unwrap_err(),
+            vec![WriteProblem::Title(title.into())],
+            "{title:?}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_spec_is_refused() {
+    assert_eq!(
+        upd(&doc("open"), &UpdateSpec::default()).unwrap_err(),
+        vec![WriteProblem::EmptyUpdate]
+    );
+}
+
+#[test]
+fn entry_kind_cannot_change() {
+    let problems = upd(
+        &doc("open"),
+        &with_fields(&[("entry_kind", Some(json!("note")))]),
+    )
+    .unwrap_err();
+    assert_eq!(problems, vec![WriteProblem::KindFixed]);
+    assert!(problems[0].to_string().contains("fixed"), "{problems:?}");
+    // The other refusals of the same call are still collected.
+    let both = upd(
+        &doc("open"),
+        &with_fields(&[
+            ("entry_kind", Some(json!("note"))),
+            ("colour", Some(json!("red"))),
+        ]),
+    )
+    .unwrap_err();
+    assert!(both.contains(&WriteProblem::KindFixed), "{both:?}");
+    assert!(
+        both.contains(&WriteProblem::FieldUndeclared("colour".into())),
+        "{both:?}"
+    );
+}
+
+#[test]
+fn a_document_that_does_not_parse_as_an_entry_is_not_repaired() {
+    let text: String = doc("open")
+        .split_inclusive('\n')
+        .filter(|l| !l.starts_with("created:"))
+        .collect();
+    let spec = UpdateSpec {
+        title: Some("Retitled"),
+        ..UpdateSpec::default()
+    };
+    let problems = upd(&text, &spec).unwrap_err();
+    assert!(
+        invalid(&problems)
+            .iter()
+            .any(|p| matches!(p, EntryProblem::Unparsed(errors) if errors.contains(&EntryError::Missing("created")))),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn an_undeclared_entry_kind_is_not_repaired_and_the_refusal_names_it() {
+    let text = doc("open").replacen("entry_kind: friction\n", "entry_kind: bug\n", 1);
+    assert!(text.contains("entry_kind: bug\n"), "{text}");
+    let spec = UpdateSpec {
+        title: Some("Retitled"),
+        ..UpdateSpec::default()
+    };
+    let problems = upd(&text, &spec).unwrap_err();
+    assert_eq!(
+        problems,
+        vec![WriteProblem::KindNotRepairable("bug".into())]
+    );
+    let shown = problems[0].to_string();
+    assert!(
+        shown.contains("\"bug\"") && shown.contains("cannot change"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn an_entry_with_closed_missing_is_repaired_by_a_terminal_status_write() {
+    let text: String = doc("fixed")
+        .split_inclusive('\n')
+        .filter(|l| !l.starts_with("closed:"))
+        .collect();
+    let spec = UpdateSpec {
+        status: Some("wontfix"),
+        ..UpdateSpec::default()
+    };
+    let m = meta(&upd(&text, &spec).unwrap());
+    assert_eq!(m.status, "wontfix");
+    assert_eq!(m.closed, Some(d1()));
+    assert_eq!(m.status_since, d1());
+}
+
+#[test]
+fn title_only_update_ignores_a_past_revisit_by() {
+    let stale = d("2026-11-10");
+    let stored = doc_with("waiting", Some(stale), None);
+    let spec = UpdateSpec {
+        title: Some("Retitled"),
+        ..UpdateSpec::default()
+    };
+    let m = meta(&upd(&stored, &spec).unwrap());
+    assert_eq!(m.title, "Retitled");
+    assert_eq!(m.revisit_by, Some(stale));
+    assert_eq!(m.status_since, d0());
+}
+
+#[test]
+fn an_overdue_blocked_entry_takes_a_new_date_with_a_status_write() {
+    let stored = doc_with("waiting", Some(d("2026-11-10")), None);
+    let spec = UpdateSpec {
+        status: Some("waiting"),
+        revisit_by: Some(x()),
+        ..UpdateSpec::default()
+    };
+    let m = meta(&upd(&stored, &spec).unwrap());
+    assert_eq!(m.status, "waiting");
+    assert_eq!(m.revisit_by, Some(x()));
+    assert_eq!(m.status_since, d1());
+}
+
+#[test]
+fn revisit_by_alone_redates_and_keeps_status_since() {
+    let stored = doc_with("waiting", Some(d("2026-11-10")), None);
+    let spec = UpdateSpec {
+        revisit_by: Some(x()),
+        ..UpdateSpec::default()
+    };
+    let m = meta(&upd(&stored, &spec).unwrap());
+    assert_eq!(m.status, "waiting");
+    assert_eq!(m.revisit_by, Some(x()));
+    assert_eq!(m.status_since, d0());
+    // A date equal to today is allowed.
+    let today = UpdateSpec {
+        revisit_by: Some(d1()),
+        ..UpdateSpec::default()
+    };
+    assert_eq!(meta(&upd(&stored, &today).unwrap()).revisit_by, Some(d1()));
+}
+
+#[test]
+fn revisit_by_alone_on_an_open_entry_is_refused() {
+    let spec = UpdateSpec {
+        revisit_by: Some(x()),
+        ..UpdateSpec::default()
+    };
+    assert_eq!(
+        upd(&doc("open"), &spec).unwrap_err(),
+        vec![WriteProblem::RevisitNotNeeded("open".into())]
+    );
+}
+
+#[test]
+fn revisit_by_alone_in_the_past_is_refused() {
+    let past = d("2026-11-13");
+    let spec = UpdateSpec {
+        revisit_by: Some(past),
+        ..UpdateSpec::default()
+    };
+    assert_eq!(
+        upd(&doc_with("waiting", Some(x()), None), &spec).unwrap_err(),
+        vec![WriteProblem::RevisitPast(past)]
+    );
+}
+
+#[test]
+fn update_entry_collects_the_refusals_of_every_part() {
+    let spec = UpdateSpec {
+        status: Some("nope"),
+        title: Some("two\nlines"),
+        fields: edits(&[("colour", Some(json!("red")))]),
+        ..UpdateSpec::default()
+    };
+    let problems = upd(&doc("open"), &spec).unwrap_err();
+    assert!(problems.contains(&WriteProblem::StatusUndeclared("nope".into())));
+    assert!(problems.contains(&WriteProblem::Title("two\nlines".into())));
+    assert!(problems.contains(&WriteProblem::FieldUndeclared("colour".into())));
+}
+
+#[test]
+fn update_entry_re_reads_its_result() {
+    // A wrongly typed value passes every pre-check and is caught by the one re-read.
+    let problems = upd(
+        &doc("open"),
+        &with_fields(&[("severity", Some(json!("medium")))]),
+    )
+    .unwrap_err();
+    assert!(!invalid(&problems).is_empty(), "{problems:?}");
 }

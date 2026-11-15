@@ -7,42 +7,42 @@ use crate::librarian::catalog::artifact;
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-struct UpdatePatch {
+pub(super) struct UpdatePatch {
     #[serde(default)]
-    status: Option<String>,
+    pub(super) status: Option<String>,
     #[serde(default)]
-    title: Option<String>,
+    pub(super) title: Option<String>,
     #[serde(default)]
-    owners: Option<Vec<String>>,
+    pub(super) owners: Option<Vec<String>>,
     #[serde(default)]
-    tags: Option<Vec<String>>,
+    pub(super) tags: Option<Vec<String>>,
     #[serde(default)]
-    topic: Option<String>,
+    pub(super) topic: Option<String>,
     /// Temporal scope tag (e.g. "2026-W25", a date, or "dated_snapshot").
     /// Recognized first-class frontmatter + catalog field.
     #[serde(default)]
-    time_scope: Option<String>,
+    pub(super) time_scope: Option<String>,
     /// Custom frontmatter keys to merge. Each entry is upserted into the
     /// artifact's frontmatter; a `null` value deletes the key. Not
     /// catalog-indexed (YAML-only, not filterable via find). Keys not present
     /// here are preserved (round-trip-safe).
     #[serde(default)]
-    extra: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    pub(super) extra: Option<std::collections::BTreeMap<String, serde_json::Value>>,
     /// Full body replacement. Total-overwrite — destroys existing body content.
     /// Gated by a 50% shrink guard unless `force=true` is passed on the call.
     /// Mutually exclusive with `body_edits`.
     #[serde(default)]
-    body: Option<String>,
+    pub(super) body: Option<String>,
     /// Surgical body edits — array of edit-markdown-shaped entries
     /// `{heading, action, content?, old_string?, new_string?, replace_all?, at?, occurrence?, include_subsections?}`.
     /// Applied atomically (all-or-nothing). Mirrors edit_file's heading-addressed batch-mode `edits` array.
     /// Mutually exclusive with `body`.
     #[serde(default)]
-    body_edits: Option<Vec<serde_json::Value>>,
+    pub(super) body_edits: Option<Vec<serde_json::Value>>,
     /// RFC 7396 merge-patch applied to the augmentation params.
     /// Requires an existing augmentation; ignored silently if none.
     #[serde(default)]
-    params: Option<serde_json::Value>,
+    pub(super) params: Option<serde_json::Value>,
 }
 
 impl UpdatePatch {
@@ -590,6 +590,42 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let original = crate::librarian::read_door::ReadDoor::new(super::managed_roots(ctx))
         .text_for_write(&full)
         .map_err(crate::librarian::read_door::ReadError::into_anyhow)?;
+    // A lifecycle entry (`layout::place` gives `Role::Entry`; the frontmatter `kind` is not read)
+    // takes its frontmatter change from `update_entry`, which validates the result. From here on
+    // the generic code reads the changed text as `original` and a patch without `status`, `title`,
+    // `tags` and `extra`, so its file-writing branches add only the body change and the bug
+    // `closed` stamp below never reaches an entry; the row takes the status, title and tags the
+    // file now holds. `None`: every other document, and an entry patch that changes no
+    // frontmatter, take the generic path unchanged.
+    let entry = match super::root_and_rel_path(&super::managed_roots(ctx), &full)? {
+        Some((root, rel_path)) => super::lifecycle_update::entry_update(
+            &root,
+            &rel_path,
+            &original,
+            &a.patch,
+            chrono::Utc::now().date_naive(),
+        )?,
+        None => None,
+    };
+    let original = match &entry {
+        Some(entry) => {
+            // The one guard on `extra` below that `entry_update` does not run, run before `extra`
+            // is cleared.
+            if let Some(extra) = &a.patch.extra {
+                crate::librarian::catalog::augmentation::refuse_taken_prefixes(
+                    &cat.conn,
+                    &full,
+                    &crate::librarian::catalog::augmentation::claimed_prefixes(extra),
+                )?;
+            }
+            a.patch.status = None;
+            a.patch.title = None;
+            a.patch.tags = None;
+            a.patch.extra = None;
+            entry.text.clone()
+        }
+        None => original,
+    };
     // A file with no frontmatter block (a zero-byte leftover of a failed create) would be
     // re-serialized from a default frontmatter: an empty block while the row keeps the id and
     // kind, so doctor's id check flags it and `doc(get)` disagrees with the file. Seed the block
@@ -784,6 +820,9 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         })?;
         untouched_rows = untouched_index_rows(&working, &edited, edits);
         edited
+    } else if entry.is_some() {
+        // The entry's frontmatter change is already in `original`.
+        original.clone()
     } else {
         match try_preserving_frontmatter_patch(&original, patch) {
             Some(preserved) => preserved,
@@ -869,10 +908,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         id: row.id.clone(),
         abs_path: row.abs_path.clone(),
         kind: row.kind.clone(),
-        status: patch.status.clone().unwrap_or(row.status),
-        title: patch.title.clone().or(row.title),
+        status: entry
+            .as_ref()
+            .map(|e| e.status.clone())
+            .or_else(|| patch.status.clone())
+            .unwrap_or(row.status),
+        title: entry
+            .as_ref()
+            .map(|e| e.title.clone())
+            .or_else(|| patch.title.clone())
+            .or(row.title),
         owners: patch.owners.clone().unwrap_or(row.owners),
-        tags: patch.tags.clone().unwrap_or(row.tags),
+        tags: entry
+            .as_ref()
+            .map(|e| e.tags.clone())
+            .or_else(|| patch.tags.clone())
+            .unwrap_or(row.tags),
         topic: patch.topic.clone().or(row.topic),
         time_scope: patch.time_scope.clone().or(row.time_scope),
         source: row.source,

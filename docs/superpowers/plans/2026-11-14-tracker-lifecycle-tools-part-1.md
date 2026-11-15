@@ -1,7 +1,7 @@
 ---
 id: '67870a11f0ed7a0e'
 kind: plan
-status: draft
+status: done
 title: Tracker Lifecycle Tools, Part 1 Implementation Plan
 ---
 

@@ -310,6 +310,8 @@ owner: <who decides when it ends>
 exit_when: <condition>      # REQUIRED under streams/ and temp/; refused under ledgers/
 writer: <tool>              # optional: a tool owns this collection
 review_every: 30d           # optional: for event-driven ledgers
+hot_cap: 12                 # optional: the hot view (`codescout hot-view`) shows at most this many entries
+stale_after: 45d            # optional: the hot view flags an open entry idle for more than this many days
 ```
 
 `fields:` exists because two concrete consumers need typed per-entry fields: operator rules

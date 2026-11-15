@@ -336,7 +336,8 @@ doc(action="get", id="<id>", heading="## Foo")
 ```
 
 **Filterable trackers:** pass `entry_filter={…}` (same AST as `filter`) to `doc(action="get")`
-once the augmentation declares an `entry_collection`. Prose trackers need retrofit first.
+on a lifecycle collection readme, or once the augmentation declares an `entry_collection`. Other
+prose trackers need retrofit first.
 Deeper mechanics: `get_guide("librarian")`; trackers that carry cross-session behavior:
 `get_guide("librarian-runtime")` § *Trackers as cross-session behavior*.
 

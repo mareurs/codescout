@@ -205,6 +205,14 @@ enum Commands {
     /// when clean, 1 on problems, 2 and prints `NOT CHECKED — <reason>` when it cannot ask.
     KeyGate(codescout::cli::key_gate::KeyGateArgs),
 
+    /// Read-only: print the live hot entries of one lifecycle collection (the open ones, and the
+    /// blocked or deferred ones whose revisit date has passed). Exits 0 when it printed the view;
+    /// exits 2 and prints `NOT SHOWN — <reason>` when it could not. Exit 2 with EMPTY stdout is
+    /// an argument error (for example a binary that lacks this command): treat any non-zero exit
+    /// as "not shown", and read a reason only when stdout starts with `NOT SHOWN — ` (text) or
+    /// parses as an object with `"shown": false` (`--json`). Used by session-start hooks.
+    HotView(codescout::cli::hot_view::HotViewArgs),
+
     /// Scan the librarian catalog for invariant violations — path form, ADS
     /// colons, `..` segments, missing files, worktree-scoped rows, entry
     /// validity, claim liveness and more. Read-only by default; `--fix=<repair>`
@@ -561,6 +569,9 @@ async fn main() -> Result<()> {
         }
         Commands::KeyGate(args) => {
             codescout::cli::key_gate::run(args).await?;
+        }
+        Commands::HotView(args) => {
+            codescout::cli::hot_view::run(args).await?;
         }
         Commands::Doctor(args) => {
             codescout::cli::doctor::run(args).await?;

@@ -219,18 +219,34 @@ pub enum EntryProblem {
     Unparsed(Vec<EntryError>),
 }
 
-/// The messages of `errors`, `; `-separated.
+/// The messages of `errors`, ` | `-separated: a `; ` here would add a second separator to the
+/// `<what is wrong>; <remedy>` text of a `WriteProblem` that holds them.
 fn joined(errors: &[EntryError]) -> String {
     errors
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
-        .join("; ")
+        .join(" | ")
 }
 
 /// The class the schema gives this entry's status word, if it declares one.
 pub fn class_of(schema: &CollectionSchema, meta: &EntryMeta) -> Option<StatusClass> {
     schema.statuses.get(&meta.status).copied()
+}
+
+/// The date an entry whose class `needs_revisit()` ([`StatusClass::needs_revisit`] is the single
+/// source of which classes) is overdue to be revisited, if it is: `revisit_by` strictly before
+/// `today`. A date of today is not yet overdue; an entry of any other class is never due, and
+/// neither is one with no `revisit_by`.
+pub fn revisit_due(
+    class: StatusClass,
+    revisit_by: Option<NaiveDate>,
+    today: NaiveDate,
+) -> Option<NaiveDate> {
+    if !class.needs_revisit() {
+        return None;
+    }
+    revisit_by.filter(|by| *by < today)
 }
 
 /// Whether `v` has the shape `ty` declares.
@@ -338,6 +354,27 @@ mod tests {
             }]
         );
         assert_eq!(class_of(&s, &reopened), Some(StatusClass::Open));
+    }
+
+    #[test]
+    fn revisit_due_is_strictly_before_today_and_only_for_blocked_and_deferred() {
+        let today = d("2026-11-11");
+        let due = |class, by: Option<&str>| revisit_due(class, by.map(d), today);
+        assert_eq!(
+            due(StatusClass::Blocked, Some("2026-11-10")),
+            Some(d("2026-11-10"))
+        );
+        // The boundary: a revisit date of today is not yet overdue.
+        assert_eq!(due(StatusClass::Blocked, Some("2026-11-11")), None);
+        assert_eq!(
+            due(StatusClass::Deferred, Some("2026-11-01")),
+            Some(d("2026-11-01"))
+        );
+        assert_eq!(due(StatusClass::Open, Some("2026-11-01")), None);
+        assert_eq!(due(StatusClass::Terminal, Some("2026-11-01")), None);
+        assert_eq!(due(StatusClass::Blocked, None), None);
+        // A deferred entry is subject to the same strict boundary.
+        assert_eq!(due(StatusClass::Deferred, Some("2026-11-11")), None);
     }
 
     #[test]

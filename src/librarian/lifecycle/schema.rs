@@ -89,6 +89,12 @@ pub struct CollectionSchema {
     pub exit_when: Option<String>,
     pub writer: Option<String>,
     pub review_every_days: Option<u32>,
+    /// The most entries the hot view lists, when the collection sets one.
+    pub hot_cap: Option<u32>,
+    /// The number of days after which an open entry is stale in the hot view: it is stale when MORE
+    /// than this many days have passed since its `status_since` (not since `created`). `None`
+    /// means no stale flag.
+    pub stale_after_days: Option<u32>,
 }
 
 /// One problem in a collection schema.
@@ -113,7 +119,64 @@ pub enum SchemaError {
     ExitRequired,
     #[error("`exit_when` is not allowed on a ledger")]
     ExitRefused,
+    #[error("field name {name:?} is reserved (a table column or a frontmatter key no write can set); give the field another name")]
+    FieldNameReserved { name: String },
 }
+/// The serialised keys of [`super::table::EntryRow`], in row order. A declared field may not
+/// take one of these names (`table_columns_match_the_serialised_row` keeps the list honest).
+pub const TABLE_COLUMNS: &[&str] = &[
+    "key",
+    "entry_kind",
+    "title",
+    "status",
+    "status_since",
+    "class",
+    "created",
+    "closed",
+    "revisit_by",
+    "archived",
+    "fields",
+];
+
+/// Whether `name` is taken: a table column, an `entry::RESERVED` key, or a
+/// `frontmatter::RESERVED_KEYS` key. A field declared under such a name could never be set by
+/// any write, so the schema is refused instead.
+fn is_reserved_field_name(name: &str) -> bool {
+    TABLE_COLUMNS.contains(&name)
+        || super::entry::RESERVED.contains(&name)
+        || crate::librarian::frontmatter::RESERVED_KEYS.contains(&name)
+}
+
+/// The frontmatter keys of a collection readme that [`parse_schema`] reads, besides `title`.
+/// The readme renderer writes the same names, so a key is spelled once.
+pub const KEY_ENTRY_KINDS: &str = "entry_kinds";
+pub const KEY_STATUSES: &str = "statuses";
+pub const KEY_INITIAL_STATUS: &str = "initial_status";
+pub const KEY_KEY_STYLE: &str = "key_style";
+pub const KEY_FIELDS: &str = "fields";
+pub const KEY_OWNER: &str = "owner";
+pub const KEY_EXIT_WHEN: &str = "exit_when";
+pub const KEY_WRITER: &str = "writer";
+pub const KEY_REVIEW_EVERY: &str = "review_every";
+/// The readme key that sets the most entries the hot view lists.
+// cap-class: NOT_A_CAP — the name of a collection readme key, not a bound; the per-collection cap value is applied by the hot view, which reports how many entries it hid (`hidden`, `hidden_flagged`), so a capped result is never presented as complete
+pub const KEY_HOT_CAP: &str = "hot_cap";
+pub const KEY_STALE_AFTER: &str = "stale_after";
+
+/// Every schema key, in the order a readme lists them.
+pub const SCHEMA_KEYS: [&str; 11] = [
+    KEY_ENTRY_KINDS,
+    KEY_STATUSES,
+    KEY_INITIAL_STATUS,
+    KEY_KEY_STYLE,
+    KEY_FIELDS,
+    KEY_OWNER,
+    KEY_EXIT_WHEN,
+    KEY_WRITER,
+    KEY_REVIEW_EVERY,
+    KEY_HOT_CAP,
+    KEY_STALE_AFTER,
+];
 
 fn malformed(key: &'static str, detail: impl Into<String>) -> SchemaError {
     SchemaError::Malformed {
@@ -192,12 +255,15 @@ fn parse_statuses(
     fm: &Frontmatter,
     errs: &mut Vec<SchemaError>,
 ) -> Option<(Vec<String>, BTreeMap<String, StatusClass>)> {
-    let Some(v) = present(fm, "statuses") else {
-        errs.push(SchemaError::MissingKey("statuses"));
+    let Some(v) = present(fm, KEY_STATUSES) else {
+        errs.push(SchemaError::MissingKey(KEY_STATUSES));
         return None;
     };
     let Some(map) = v.as_object() else {
-        errs.push(malformed("statuses", "must be a mapping of word to class"));
+        errs.push(malformed(
+            KEY_STATUSES,
+            "must be a mapping of word to class",
+        ));
         return None;
     };
     let mut declared = Vec::new();
@@ -215,7 +281,7 @@ fn parse_statuses(
                 }),
             },
             None => errs.push(malformed(
-                "statuses",
+                KEY_STATUSES,
                 format!("the class of {word:?} must be a string"),
             )),
         }
@@ -228,17 +294,21 @@ fn parse_statuses(
 
 fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<String, FieldType> {
     let mut out = BTreeMap::new();
-    let Some(v) = present(fm, "fields") else {
+    let Some(v) = present(fm, KEY_FIELDS) else {
         return out;
     };
     let Some(map) = v.as_object() else {
         errs.push(malformed(
-            "fields",
+            KEY_FIELDS,
             "must be a mapping of field name to type",
         ));
         return out;
     };
     for (name, spec) in map {
+        if is_reserved_field_name(name) {
+            errs.push(SchemaError::FieldNameReserved { name: name.clone() });
+            continue;
+        }
         match spec.get("type").and_then(Value::as_str) {
             Some("scalar") => {
                 out.insert(name.clone(), FieldType::Scalar);
@@ -248,22 +318,22 @@ fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<Strin
             }
             Some("enum") => match spec.get("values") {
                 None => errs.push(malformed(
-                    "fields",
+                    KEY_FIELDS,
                     format!("enum field {name:?} needs `values`"),
                 )),
                 Some(vals) => {
                     let what = format!("`values` of {name:?}");
-                    if let Some(w) = string_list(vals, "fields", &what, errs) {
+                    if let Some(w) = string_list(vals, KEY_FIELDS, &what, errs) {
                         out.insert(name.clone(), FieldType::Enum(w));
                     }
                 }
             },
             Some(other) => errs.push(malformed(
-                "fields",
+                KEY_FIELDS,
                 format!("field {name:?} has unknown type {other:?} (scalar, enum or list)"),
             )),
             None => errs.push(malformed(
-                "fields",
+                KEY_FIELDS,
                 format!("field {name:?} needs a `type` (scalar, enum or list)"),
             )),
         }
@@ -271,9 +341,9 @@ fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<Strin
     out
 }
 
-/// `"<n>d"` with `n` a positive whole number.
-fn parse_review_every(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u32> {
-    let raw = present(fm, "review_every")?;
+/// `"<n>d"` with `n` a positive whole number, under `key`.
+fn parse_days(fm: &Frontmatter, key: &'static str, errs: &mut Vec<SchemaError>) -> Option<u32> {
+    let raw = present(fm, key)?;
     let days = raw
         .as_str()
         .and_then(|s| s.strip_suffix('d'))
@@ -282,11 +352,27 @@ fn parse_review_every(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u
         .filter(|n| *n > 0);
     if days.is_none() {
         errs.push(malformed(
-            "review_every",
+            key,
             "must be `<n>d` with n a positive whole number, for example `30d`",
         ));
     }
     days
+}
+
+/// A JSON number that is a whole number from 1 to `u32::MAX`.
+fn parse_hot_cap(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u32> {
+    let raw = present(fm, KEY_HOT_CAP)?;
+    let cap = raw
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n > 0);
+    if cap.is_none() {
+        errs.push(malformed(
+            KEY_HOT_CAP,
+            "must be a whole number from 1 to 4294967295, for example `5`",
+        ));
+    }
+    cap
 }
 
 /// Parse a collection's schema from its `readme.md` frontmatter, collecting every error.
@@ -304,22 +390,22 @@ pub fn parse_schema(
         }
     };
 
-    let entry_kinds = match present(fm, "entry_kinds") {
+    let entry_kinds = match present(fm, KEY_ENTRY_KINDS) {
         None => {
-            errs.push(SchemaError::MissingKey("entry_kinds"));
+            errs.push(SchemaError::MissingKey(KEY_ENTRY_KINDS));
             None
         }
-        Some(v) => string_list(v, "entry_kinds", "`entry_kinds`", &mut errs),
+        Some(v) => string_list(v, KEY_ENTRY_KINDS, "`entry_kinds`", &mut errs),
     };
 
     let statuses = parse_statuses(fm, &mut errs);
 
-    let initial_status = match present(fm, "initial_status") {
+    let initial_status = match present(fm, KEY_INITIAL_STATUS) {
         None => {
-            errs.push(SchemaError::MissingKey("initial_status"));
+            errs.push(SchemaError::MissingKey(KEY_INITIAL_STATUS));
             None
         }
-        Some(v) => string_of(v, "initial_status", &mut errs),
+        Some(v) => string_of(v, KEY_INITIAL_STATUS, &mut errs),
     };
     if let (Some(init), Some((declared, known))) = (&initial_status, &statuses) {
         if !declared.contains(init) {
@@ -329,26 +415,28 @@ pub fn parse_schema(
         }
     }
 
-    let key_style = match present(fm, "key_style") {
+    let key_style = match present(fm, KEY_KEY_STYLE) {
         None => KeyStyle::Dated,
         Some(v) => match v.as_str() {
             Some("dated") => KeyStyle::Dated,
             Some("name") => KeyStyle::Name,
             _ => {
-                errs.push(malformed("key_style", "must be `dated` or `name`"));
+                errs.push(malformed(KEY_KEY_STYLE, "must be `dated` or `name`"));
                 KeyStyle::Dated
             }
         },
     };
 
     let fields = parse_fields(fm, &mut errs);
-    let owner = optional_string(fm, "owner", &mut errs);
-    let exit_when = optional_string(fm, "exit_when", &mut errs);
-    let writer = optional_string(fm, "writer", &mut errs);
-    let review_every_days = parse_review_every(fm, &mut errs);
+    let owner = optional_string(fm, KEY_OWNER, &mut errs);
+    let exit_when = optional_string(fm, KEY_EXIT_WHEN, &mut errs);
+    let writer = optional_string(fm, KEY_WRITER, &mut errs);
+    let review_every_days = parse_days(fm, KEY_REVIEW_EVERY, &mut errs);
+    let hot_cap = parse_hot_cap(fm, &mut errs);
+    let stale_after_days = parse_days(fm, KEY_STALE_AFTER, &mut errs);
 
     // A malformed `exit_when` still counts as declared; it is reported as malformed above.
-    let exit_declared = present(fm, "exit_when").is_some();
+    let exit_declared = present(fm, KEY_EXIT_WHEN).is_some();
     if lifecycle.requires_exit() && !exit_declared {
         errs.push(SchemaError::ExitRequired);
     } else if !lifecycle.requires_exit() && exit_declared {
@@ -370,6 +458,8 @@ pub fn parse_schema(
                 exit_when,
                 writer,
                 review_every_days,
+                hot_cap,
+                stale_after_days,
             })
         }
         _ => Err(errs),
@@ -399,6 +489,60 @@ mod tests {
         );
         assert_eq!(s.fields.get("covers"), Some(&FieldType::List));
         assert_eq!(s.review_every_days, Some(30));
+    }
+    #[test]
+    fn hot_view_keys_parse() {
+        let text = format!("{LEDGER}hot_cap: 5\nstale_after: 45d\n");
+        let s = parse_schema(Lifecycle::Ledger, &fm(&text)).unwrap();
+        assert_eq!(s.hot_cap, Some(5));
+        assert_eq!(s.stale_after_days, Some(45));
+    }
+    #[test]
+    fn hot_cap_accepts_both_ends_of_its_range() {
+        for (raw, want) in [("1", 1), ("4294967295", u32::MAX)] {
+            let text = format!("{LEDGER}hot_cap: {raw}\n");
+            let s = parse_schema(Lifecycle::Ledger, &fm(&text))
+                .unwrap_or_else(|e| panic!("{raw} is accepted: {e:?}"));
+            assert_eq!(s.hot_cap, Some(want), "{raw}");
+        }
+    }
+
+    #[test]
+    fn absent_hot_view_keys_are_none() {
+        let s = parse_schema(Lifecycle::Ledger, &fm(LEDGER)).unwrap();
+        assert_eq!(s.hot_cap, None);
+        assert_eq!(s.stale_after_days, None);
+    }
+
+    #[test]
+    fn a_bad_hot_cap_is_malformed_naming_the_key() {
+        for bad in ["0", "\"5\"", "2.5", "-1", "true", "5000000000"] {
+            let text = format!("{LEDGER}hot_cap: {bad}\n");
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&text)).unwrap_err();
+            assert!(
+                errs.iter()
+                    .any(|e| matches!(e, SchemaError::Malformed { key: "hot_cap", .. })),
+                "{bad}: {errs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bad_stale_after_is_malformed_naming_the_key() {
+        for bad in ["45", "\"45\"", "\"0d\"", "\"d\""] {
+            let text = format!("{LEDGER}stale_after: {bad}\n");
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&text)).unwrap_err();
+            assert!(
+                errs.iter().any(|e| matches!(
+                    e,
+                    SchemaError::Malformed {
+                        key: "stale_after",
+                        ..
+                    }
+                )),
+                "{bad}: {errs:?}"
+            );
+        }
     }
 
     #[test]
@@ -469,5 +613,52 @@ mod tests {
         assert!(parse_schema(Lifecycle::Ledger, &fm(y))
             .unwrap_err()
             .contains(&SchemaError::InitialNotOpen("done".into())));
+    }
+    #[test]
+    fn a_declared_field_named_like_a_reserved_name_is_refused() {
+        let base = "title: T\nentry_kinds: [k]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n";
+        // One name from each of the three sets: a table column, `entry::RESERVED`, a frontmatter key.
+        for name in ["archived", "created", "owners"] {
+            let readme = format!("{base}fields:\n  {name}: {{type: scalar}}\n");
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&readme)).unwrap_err();
+            assert!(
+                errs.contains(&SchemaError::FieldNameReserved { name: name.into() }),
+                "{name}: {errs:?}"
+            );
+        }
+        // An unreserved name still parses.
+        let ok = format!("{base}fields:\n  owner: {{type: scalar}}\n");
+        assert!(parse_schema(Lifecycle::Ledger, &fm(&ok)).is_ok());
+    }
+
+    #[test]
+    fn a_reserved_field_name_error_reads_as_problem_semicolon_remedy() {
+        let text = SchemaError::FieldNameReserved {
+            name: "status".into(),
+        }
+        .to_string();
+        assert_eq!(text.matches("; ").count(), 1, "{text}");
+        assert!(text.contains("\"status\""), "{text}");
+        let remedy = text.split("; ").nth(1).unwrap();
+        assert!(remedy.starts_with("give "), "{text}");
+    }
+
+    #[test]
+    fn every_name_in_the_three_reserved_sets_is_refused() {
+        let base = "title: T\nentry_kinds: [k]\nstatuses: {open: open, done: terminal}\ninitial_status: open\n";
+        let all = TABLE_COLUMNS
+            .iter()
+            .chain(crate::librarian::lifecycle::entry::RESERVED.iter())
+            .chain(crate::librarian::frontmatter::RESERVED_KEYS.iter());
+        for name in all {
+            let readme = format!("{base}fields:\n  {name}: {{type: list}}\n");
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&readme)).unwrap_err();
+            assert!(
+                errs.contains(&SchemaError::FieldNameReserved {
+                    name: (*name).into()
+                }),
+                "{name}: {errs:?}"
+            );
+        }
     }
 }

@@ -28,7 +28,7 @@ use std::fmt::Write as _;
 use chrono::{Days, NaiveDate};
 use serde::Serialize;
 
-use super::entry::{class_of, validate_entry, EntryProblem};
+use super::entry::{class_of, revisit_due, validate_entry, EntryProblem};
 use super::layout::{Lifecycle, PlacementError};
 use super::relations::{is_backward, Relation};
 use super::schema::{SchemaError, StatusClass};
@@ -301,13 +301,11 @@ fn check_entry(
     let Some(class) = class_of(&collection.schema, meta) else {
         return;
     };
-    if class.needs_revisit() {
-        if let Some(revisit_by) = meta.revisit_by.filter(|r| *r < today) {
-            out.push(Finding::RevisitDue {
-                entry: entry.key.clone(),
-                revisit_by,
-            });
-        }
+    if let Some(revisit_by) = revisit_due(class, meta.revisit_by, today) {
+        out.push(Finding::RevisitDue {
+            entry: entry.key.clone(),
+            revisit_by,
+        });
     }
     if class != StatusClass::Terminal {
         let mut seen: BTreeSet<&Key> = BTreeSet::new();

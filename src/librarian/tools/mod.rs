@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::librarian::catalog::Catalog;
 use crate::librarian::classify::CompiledRule;
+use crate::librarian::lifecycle::layout::{place, Placement, PlacementError};
 #[cfg(test)]
 use crate::librarian::workspace::Root;
 use crate::librarian::workspace::WorkspaceConfig;
@@ -325,12 +326,7 @@ pub(crate) fn arm_write_roots(
 /// trimmed there — rewriting separators would corrupt real names.
 fn comparable_path(path: &std::path::Path) -> Vec<u8> {
     #[cfg(windows)]
-    let normalized: Vec<u8> = {
-        let raw = path.to_string_lossy();
-        let slashed = raw.replace('\\', "/");
-        let stripped = slashed.strip_prefix("//?/").unwrap_or(&slashed);
-        stripped.as_bytes().to_vec()
-    };
+    let normalized: Vec<u8> = windows_comparable(&path.to_string_lossy()).into_bytes();
     // On Unix the comparison is over the RAW bytes: a lossy UTF-8 conversion maps every invalid
     // byte to U+FFFD, so the roots `n\xff` and `n\xfe` compared equal and one "contained" the
     // other's rows.
@@ -346,6 +342,14 @@ fn comparable_path(path: &std::path::Path) -> Vec<u8> {
         out.pop();
     }
     out
+}
+
+/// The Windows half of [`comparable_path`], on a string: `\` becomes `/` and a leading `//?/`
+/// goes. A plain function so the rule can be tested on any host; [`rel_path_below`] reads a
+/// catalogued path below its root with it.
+fn windows_comparable(raw: &str) -> String {
+    let slashed = raw.replace('\\', "/");
+    slashed.strip_prefix("//?/").unwrap_or(&slashed).to_string()
 }
 
 /// The first managed root that contains `abs_path`, if any.
@@ -374,6 +378,85 @@ pub(crate) fn containing_root<'a>(
         target == root || (target.starts_with(&root) && target.get(root.len()) == Some(&b'/'))
     })
 }
+
+/// The root `full` is read against, and `full` below it as a `/` path: the first of `roots`
+/// that contains it, matched by `containing_root`, so the catalog's Windows spelling
+/// (`//?/C:/…`) is found below a root spelled `\\?\C:\…`. `managed_roots` lists the session's
+/// git root first, so a worktree session reads its own checkout. When the path below that root
+/// places as nothing but the file sits in a lifecycle tree, the root is narrowed to the nearest
+/// repository that holds the file (`util::door_root` within that one root): a nested worktree
+/// checkout (`<main>/.worktrees/x/docs/trackers/…`) is read as its own checkout. `Ok(None)`: the
+/// generic path runs. A file in a lifecycle tree that no root gives a path for is refused, never
+/// `Ok(None)`.
+fn root_and_rel_path(
+    roots: &[std::path::PathBuf],
+    full: &std::path::Path,
+) -> Result<Option<(std::path::PathBuf, String)>> {
+    let below = |root: &std::path::Path| match (root.to_str(), full.to_str()) {
+        (Some(r), Some(f)) => rel_path_below(r, f, cfg!(windows)),
+        _ => None,
+    };
+    if let Some(root) = containing_root(roots, full) {
+        if let Some(rel) = below(root) {
+            if place(&rel).is_none() && unrooted_placement(full).is_some() {
+                let inner = crate::librarian::util::door_root(std::slice::from_ref(root), full);
+                if let Some((inner, inner_rel)) = inner.and_then(|i| below(&i).map(|r| (i, r))) {
+                    if place(&inner_rel).is_some() {
+                        return Ok(Some((inner, inner_rel)));
+                    }
+                }
+            }
+            return Ok(Some((root.clone(), rel)));
+        }
+    }
+    // No root gives a path to place. A file that sits in a lifecycle tree is refused rather than
+    // updated on the generic path, which would skip every lifecycle check in silence.
+    if unrooted_placement(full).is_some() {
+        return Err(LibrarianRecoverableError::new(format!(
+            "{} is a lifecycle tracker file that no managed root of this session holds at a \
+             UTF-8 path, so its collection cannot be loaded; use a session whose project holds \
+             the file",
+            full.display()
+        )));
+    }
+    Ok(None)
+}
+
+/// What `layout::place` makes of `full`, a path no root gives a repo-relative form of, read from
+/// its first `docs/trackers/` segment that places; `None` when no such segment places (the file
+/// is in no lifecycle tree).
+fn unrooted_placement(full: &std::path::Path) -> Option<Result<Placement, PlacementError>> {
+    let lossy = full.to_string_lossy();
+    let spelled = if cfg!(windows) {
+        windows_comparable(&lossy)
+    } else {
+        lossy.into_owned()
+    };
+    spelled
+        .match_indices("docs/trackers/")
+        .filter(|(i, _)| *i == 0 || spelled[..*i].ends_with('/'))
+        .find_map(|(i, _)| place(&spelled[i..]))
+}
+
+/// `full` below `root`, both as spelled, as a repo-relative path; `None` when `root` does not
+/// contain it (a component boundary, not a string prefix) or is `full` itself. `windows`: read
+/// both as `comparable_path` does on Windows (`\` is `/`, a leading `//?/` goes); else the bytes
+/// are compared as they are, as `comparable_path` does on Unix.
+fn rel_path_below(root: &str, full: &str, windows: bool) -> Option<String> {
+    let spell = |s: &str| {
+        if windows {
+            windows_comparable(s)
+        } else {
+            s.to_string()
+        }
+    };
+    let (root, full) = (spell(root), spell(full));
+    let rel = full
+        .strip_prefix(root.trim_end_matches('/'))?
+        .strip_prefix('/')?;
+    (!rel.is_empty()).then(|| rel.to_string())
+}
+
 /// The actions a tool's schema advertises: its `action` enum.
 ///
 /// The enum is the one list of valid actions that a test already holds against each tool's
@@ -486,7 +569,14 @@ pub trait Tool: Send + Sync {
 }
 
 pub mod create;
-
+// Not a registered `Tool`: the entry mode of `create` (`collection` = a lifecycle collection's key),
+// called from `create::call`.
+pub(crate) mod create_lifecycle;
+// Not a registered `Tool`: `update` on a lifecycle entry, called from `update::call`.
+pub(crate) mod lifecycle_update;
+// Not a registered `Tool`: the entry table of `get` on a lifecycle collection readme, called from
+// `get::call`.
+pub(crate) mod get_table;
 pub mod update;
 
 pub mod link;
@@ -560,6 +650,22 @@ mod link_dir_tests;
 /// The read door's layout table (see the module doc).
 #[cfg(test)]
 mod read_door_tests;
+
+/// Git fixtures (a repository with one commit, one with a linked worktree) shared by tool tests.
+#[cfg(test)]
+pub(crate) mod testfixture;
+
+/// Entry mode of `create` (see `create_lifecycle`).
+#[cfg(test)]
+mod create_lifecycle_tests;
+
+/// `update` on a lifecycle entry (see `lifecycle_update`).
+#[cfg(test)]
+mod lifecycle_update_tests;
+
+/// `get` on a lifecycle collection readme: the entry table (see `get_table`).
+#[cfg(test)]
+mod get_table_tests;
 
 #[cfg(test)]
 mod containing_root_tests {

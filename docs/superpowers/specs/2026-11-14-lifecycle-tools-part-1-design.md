@@ -1,7 +1,7 @@
 ---
 id: afc72d5722d1d601
 kind: spec
-status: draft
+status: active
 title: 'Tracker lifecycle tools, part 1: entry and collection create, entry update and the collection table on the id-addressed doc tools (design)'
 ---
 

@@ -24,6 +24,9 @@ pub struct EntryRow {
     pub entry_kind: String,
     pub title: String,
     pub status: String,
+    /// The day the entry last took or reconfirmed its current `status`: writing the same status
+    /// again advances it to that day.
+    pub status_since: NaiveDate,
     /// The class the collection's schema gives `status`; `None` when the schema names no class
     /// for the word.
     pub class: Option<StatusClass>,
@@ -64,6 +67,7 @@ pub fn rows(
                     entry_kind: e.meta.entry_kind.clone(),
                     title: e.meta.title.clone(),
                     status: e.meta.status.clone(),
+                    status_since: e.meta.status_since,
                     class: class_of(&c.schema, &e.meta),
                     created: e.meta.created,
                     closed: e.meta.closed,
@@ -79,7 +83,7 @@ pub fn rows(
 
 /// One table cell's text: a newline or carriage return becomes a space, and `|` and `[` are
 /// escaped, so the cell stays one cell and its text can never open a citation.
-fn cell(s: &str) -> String {
+pub(super) fn cell(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -96,8 +100,9 @@ fn date_cell(d: Option<NaiveDate>) -> String {
     d.map(|d| d.to_string()).unwrap_or_default()
 }
 
-/// The rows as a GFM table with the columns `Entry | Kind | Status | Created | Closed`. The
-/// entry cell is `[[<key>]] <title>`.
+/// The rows as a GFM table with the columns `Entry | Kind | Status | Created | Closed |
+/// Archived`. The entry cell is `[[<key>]] <title>`; the `Archived` cell is `yes` for an archived
+/// row and empty otherwise.
 ///
 /// Guaranteed: each row cites its own entry key once, as a wiki link; a title (or any other
 /// text cell) cannot add a wiki-link citation or break its row, because `|` and `[` are
@@ -107,17 +112,19 @@ fn date_cell(d: Option<NaiveDate>) -> String {
 /// `grammar::extract`, and a bare token resolves only inside the document that hosts the table.
 /// A caller that writes the table into a file must decide whether to neutralise bare tokens first.
 pub fn render_markdown(rows: &[EntryRow]) -> String {
-    let mut out =
-        String::from("| Entry | Kind | Status | Created | Closed |\n|---|---|---|---|---|\n");
+    let mut out = String::from(
+        "| Entry | Kind | Status | Created | Closed | Archived |\n|---|---|---|---|---|---|\n",
+    );
     for r in rows {
         out.push_str(&format!(
-            "| [[{}]] {} | {} | {} | {} | {} |\n",
+            "| [[{}]] {} | {} | {} | {} | {} | {} |\n",
             r.key,
             cell(&r.title),
             cell(&r.entry_kind),
             cell(&r.status),
             r.created,
             date_cell(r.closed),
+            if r.archived { "yes" } else { "" },
         ));
     }
     out
@@ -213,10 +220,28 @@ mod tests {
             ),
         ]);
         let md = render_markdown(&rows(&tree, &k("l"), false).unwrap());
-        assert!(md.starts_with("| Entry | Kind | Status | Created | Closed |"));
+        assert!(md.starts_with("| Entry | Kind | Status | Created | Closed | Archived |\n"));
         assert!(md.contains("[[2026-10-01-old]] t"));
         let cites = grammar::extract(&md);
         assert_eq!(cites.len(), 1);
+    }
+
+    #[test]
+    fn a_row_carries_status_since_apart_from_created() {
+        let d = crate::librarian::lifecycle::testkit::d;
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-a.md",
+                "---\nentry_kind: f\ntitle: t\nstatus: open\nstatus_since: 2026-10-20\ncreated: 2026-10-01\n---\n",
+            ),
+        ]);
+        let r = rows(&tree, &k("l"), false).unwrap();
+        let row = &r[0];
+        assert_eq!(row.status_since, d("2026-10-20"));
+        assert_eq!(row.created, d("2026-10-01"));
+        let json = serde_json::to_value(row).unwrap();
+        assert_eq!(json["status_since"], "2026-10-20");
     }
 
     #[test]
@@ -274,6 +299,28 @@ mod tests {
         assert_eq!(json["archived"], false);
         assert_eq!(json["fields"]["owner"], "sam");
     }
+    #[test]
+    fn table_columns_match_the_serialised_row() {
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-01-w.md",
+                &entry_created("waiting", "2026-10-01", ""),
+            ),
+        ]);
+        let row = &rows(&tree, &k("l"), false).unwrap()[0];
+        let json = serde_json::to_value(row).unwrap();
+        let mut serialised: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut declared: Vec<&str> = crate::librarian::lifecycle::schema::TABLE_COLUMNS.to_vec();
+        serialised.sort_unstable();
+        declared.sort_unstable();
+        assert_eq!(serialised, declared);
+    }
 
     #[test]
     fn the_table_prints_the_closed_date_and_cites_each_row() {
@@ -290,8 +337,8 @@ mod tests {
         ]);
         let r = rows(&tree, &k("l"), false).unwrap();
         let md = render_markdown(&r);
-        assert!(md.contains("| [[2026-10-01-a]] t | f | open | 2026-10-01 |  |"));
-        assert!(md.contains("| [[2026-10-01-b]] t | f | fixed | 2026-10-01 | 2026-10-04 |"));
+        assert!(md.contains("| [[2026-10-01-a]] t | f | open | 2026-10-01 |  |  |\n"));
+        assert!(md.contains("| [[2026-10-01-b]] t | f | fixed | 2026-10-01 | 2026-10-04 |  |\n"));
         assert_eq!(grammar::extract(&md).len(), 2);
     }
 
@@ -392,8 +439,8 @@ mod tests {
         let md = table_of(&titled("\"a | b\""));
         let row = md.lines().nth(2).unwrap();
         assert!(row.contains("a \\| b"), "{row}");
-        assert_eq!(separators(row), 6, "{row}");
-        assert_eq!(cells(&md), 10, "{md}");
+        assert_eq!(separators(row), 7, "{row}");
+        assert_eq!(cells(&md), 12, "{md}");
     }
 
     #[test]
@@ -401,7 +448,7 @@ mod tests {
         // The title is `a\|b`: the backslash must not turn the pipe escape into an escaped backslash.
         let md = table_of(&titled("\"a\\\\|b\""));
         let row = md.lines().nth(2).unwrap();
-        assert_eq!(cells(&md), 10, "{row}");
+        assert_eq!(cells(&md), 12, "{row}");
     }
 
     #[test]
@@ -432,7 +479,7 @@ mod tests {
             md.contains("[[2026-10-01-old]] first second third"),
             "{md:?}"
         );
-        assert_eq!(cells(&md), 10);
+        assert_eq!(cells(&md), 12);
     }
 
     #[test]
@@ -442,6 +489,7 @@ mod tests {
             entry_kind: "k|[[x]]".into(),
             title: "t".into(),
             status: "s|[[y]]\n".into(),
+            status_since: crate::librarian::lifecycle::testkit::d("2026-10-01"),
             class: None,
             created: crate::librarian::lifecycle::testkit::d("2026-10-01"),
             closed: None,
@@ -452,7 +500,42 @@ mod tests {
         let md = render_markdown(&[row]);
         assert_eq!(md.lines().count(), 3, "{md:?}");
         assert_eq!(grammar::extract(&md).len(), 1, "{md}");
-        assert_eq!(cells(&md), 10, "{md}");
+        assert_eq!(cells(&md), 12, "{md}");
+    }
+    /// P-R5: the table lists archived entries too (`doc(get)` asks for them), so a reader must
+    /// tell them apart: the `Archived` column says `yes` for an archived row and nothing else.
+    #[test]
+    fn the_archived_column_prints_yes_for_an_archived_row() {
+        let tree = LifecycleTree::build([
+            doc("docs/trackers/ledgers/l/readme.md", LEDGER),
+            doc(
+                "docs/trackers/ledgers/l/2026-10-02-live.md",
+                &entry_created("open", "2026-10-02", ""),
+            ),
+            doc(
+                "docs/trackers/ledgers/l/archive/2026-10-01-gone.md",
+                &entry_created("fixed", "2026-10-01", "closed: 2026-10-03\n"),
+            ),
+        ]);
+        let md = render_markdown(&rows(&tree, &k("l"), true).unwrap());
+        let lines: Vec<&str> = md.lines().collect();
+        assert_eq!(
+            lines[..2],
+            [
+                "| Entry | Kind | Status | Created | Closed | Archived |",
+                "|---|---|---|---|---|---|"
+            ],
+            "{md}"
+        );
+        assert_eq!(
+            lines[2],
+            "| [[2026-10-02-live]] t | f | open | 2026-10-02 |  |  |"
+        );
+        assert_eq!(
+            lines[3],
+            "| [[2026-10-01-gone]] t | f | fixed | 2026-10-01 | 2026-10-03 | yes |"
+        );
+        assert_eq!(cells(&md), 18, "{md}");
     }
 
     /// Prints a census of this repository's tracked markdown under the lifecycle model. Run by hand.

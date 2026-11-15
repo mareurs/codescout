@@ -80,6 +80,51 @@ pub enum TreeProblem {
     Frontmatter { rel_path: String, detail: String },
 }
 
+/// One line that starts with the repo-relative path of the file at fault, then what is wrong.
+/// Several problems of one file join with ` | `. An inner text may carry a `; remedy` of its own
+/// (`SchemaError::FieldNameReserved`, `KeyError`); each `; ` is written `, ` here, so the `; ` a
+/// caller appends between a problem and its remedy is the only one in the text.
+impl std::fmt::Display for TreeProblem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn bar<E: std::fmt::Display>(errors: &[E]) -> String {
+            errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(" | ")
+        }
+        let text = match self {
+            TreeProblem::Placement(PlacementError::NotMarkdown(path)) => {
+                format!("{path}: is not a markdown file")
+            }
+            TreeProblem::Placement(PlacementError::OutsideCollection(path)) => {
+                format!("{path}: sits directly under a lifecycle folder, in no collection")
+            }
+            TreeProblem::Placement(PlacementError::BadKey { rel_path, error }) => {
+                format!("{rel_path}: its name is not a valid key ({error})")
+            }
+            TreeProblem::NestedCollection(path) => {
+                format!("{path}: sits below a subfolder that holds its own readme")
+            }
+            TreeProblem::DuplicateReadme(path) => format!(
+                "{path}: is another readme in its collection folder (only the first in path \
+                 order is the readme)"
+            ),
+            TreeProblem::OrphanEntry(path) => {
+                format!("{path}: no collection readme above this file")
+            }
+            TreeProblem::Schema { rel_path, errors } => {
+                format!("{rel_path}: {}", bar(errors))
+            }
+            TreeProblem::Entry {
+                rel_path, errors, ..
+            } => format!("{rel_path}: {}", bar(errors)),
+            TreeProblem::Frontmatter { rel_path, detail } => format!("{rel_path}: {detail}"),
+        };
+        f.write_str(&text.replace("; ", ", "))
+    }
+}
+
 /// The placed, parsed tracker tree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LifecycleTree {
@@ -776,5 +821,74 @@ mod tests {
                 ("dup", d("2026-05-06"))
             ]
         );
+    }
+
+    #[test]
+    fn every_tree_problem_displays_with_its_path() {
+        let path = "docs/trackers/streams/s/x.md";
+        let all = [
+            TreeProblem::Placement(PlacementError::NotMarkdown(path.into())),
+            TreeProblem::Placement(PlacementError::OutsideCollection(path.into())),
+            TreeProblem::Placement(PlacementError::BadKey {
+                rel_path: path.into(),
+                error: Key::parse("Bad_Name").unwrap_err(),
+            }),
+            TreeProblem::NestedCollection(path.into()),
+            TreeProblem::DuplicateReadme(path.into()),
+            TreeProblem::OrphanEntry(path.into()),
+            TreeProblem::Schema {
+                rel_path: path.into(),
+                errors: vec![SchemaError::ExitRequired, SchemaError::NoTerminalStatus],
+            },
+            TreeProblem::Entry {
+                rel_path: path.into(),
+                key: k("x"),
+                errors: vec![
+                    EntryError::Missing("status"),
+                    EntryError::Missing("created"),
+                ],
+            },
+            TreeProblem::Frontmatter {
+                rel_path: path.into(),
+                detail: "malformed frontmatter YAML: x".into(),
+            },
+        ];
+        // No wildcard: a new variant fails to compile here until a case is added above.
+        let _exhaustive = |p: &TreeProblem| match p {
+            TreeProblem::Placement(_)
+            | TreeProblem::NestedCollection(_)
+            | TreeProblem::DuplicateReadme(_)
+            | TreeProblem::OrphanEntry(_)
+            | TreeProblem::Schema { .. }
+            | TreeProblem::Entry { .. }
+            | TreeProblem::Frontmatter { .. } => (),
+        };
+        for problem in &all {
+            let text = problem.to_string();
+            assert!(text.starts_with(&format!("{path}: ")), "{text}");
+            assert!(text.len() > path.len() + 2, "{text}");
+            assert!(!text.contains('\n'), "{text}");
+        }
+        // The inner texts of a real `KeyError` and a real `SchemaError` carry a `; remedy` of
+        // their own; the one `; ` of a caller's problem-and-remedy must stay unique.
+        for problem in &all {
+            assert!(!problem.to_string().contains("; "), "{problem}");
+        }
+        assert!(
+            all[2].to_string().contains(", rename the file"),
+            "{}",
+            all[2]
+        );
+        assert!(TreeProblem::Schema {
+            rel_path: path.into(),
+            errors: vec![SchemaError::FieldNameReserved { name: "key".into() }],
+        }
+        .to_string()
+        .contains("no write can set), give the field another name"));
+        // Several problems of one file join with a bar, never with `; ` (a remedy's separator).
+        let schema = all[6].to_string();
+        assert!(schema.contains("`exit_when` is required"), "{schema}");
+        assert!(schema.contains(" | no status word"), "{schema}");
+        assert!(all[7].to_string().contains(" | "), "{}", all[7]);
     }
 }

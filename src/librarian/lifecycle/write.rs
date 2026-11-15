@@ -14,26 +14,35 @@ use crate::librarian::frontmatter::{self, Frontmatter, RESERVED_KEYS};
 use crate::librarian::identity::key::Key;
 use crate::util::markdown_fence::FenceState;
 
-/// Why a write function refused to produce a document.
+/// Why a write function refused to produce a document. Every text has the shape
+/// `<what is wrong>; <remedy>`: one `; `, then an imperative clause the caller can act on.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WriteProblem {
-    #[error("entry_kind {0:?} is not declared in the collection readme")]
+    #[error("entry_kind {0:?} is not declared in the collection readme; use one of the entry_kinds the readme declares")]
     KindUndeclared(String),
-    #[error("status {0:?} is not declared in the collection readme")]
+    #[error("status {0:?} is not declared in the collection readme; use one of the statuses the readme declares")]
     StatusUndeclared(String),
-    #[error("title {0:?} is not a one-line title with a slug")]
+    #[error("title {0:?} is not a one-line title with a slug; give a one-line title with at least one letter or digit from a-z, A-Z or 0-9")]
     Title(String),
     #[error("no entry stem can be built: {0}")]
     Stem(StemError),
-    #[error("frontmatter is not valid YAML: {0}")]
+    #[error("frontmatter is not valid YAML: {0}; fix the YAML between the leading --- lines")]
     BadYaml(String),
-    #[error("the document has no frontmatter")]
+    #[error("the document has no frontmatter; give it a frontmatter block between two --- lines at the top")]
     NoFrontmatter,
-    #[error("field {0:?} is not a writable field of this collection")]
+    #[error("field {0:?} is not a writable field of this collection; remove it, or declare it under fields in the collection readme")]
     FieldUndeclared(String),
-    #[error("status {0:?} takes no revisit_by date")]
+    #[error("status {0:?} takes no revisit_by date; remove revisit_by")]
     RevisitNotNeeded(String),
-    #[error("the result is not a valid entry: {}", problems_text(.0))]
+    #[error("revisit_by {0} is before today; pass a revisit_by of today or later")]
+    RevisitPast(NaiveDate),
+    #[error("the update changes nothing; pass at least one of status, revisit_by, title, tags, valid or fields")]
+    EmptyUpdate,
+    #[error("entry_kind is fixed: an update cannot change it; remove entry_kind from the update")]
+    KindFixed,
+    #[error("entry_kind {0:?} is not declared in the collection readme and an update cannot change it; declare it in the collection readme, or fix the file by hand")]
+    KindNotRepairable(String),
+    #[error("the result is not a valid entry: {}; fix each problem named", problems_text(.0))]
     Invalid(Vec<EntryProblem>),
 }
 
@@ -67,13 +76,14 @@ pub fn entry_template(readme_body: &str) -> Option<String> {
     let text = text.trim();
     (!text.is_empty()).then(|| text.to_string())
 }
-/// The messages of `problems`, `; `-separated.
+/// The messages of `problems`, ` | `-separated: a `; ` here would add a second separator to the
+/// `<what is wrong>; <remedy>` shape of the text that holds them.
 fn problems_text(problems: &[EntryProblem]) -> String {
     problems
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
-        .join("; ")
+        .join(" | ")
 }
 
 /// What `new_entry` is asked to create.
@@ -131,8 +141,31 @@ pub(crate) fn read_entry(text: &str) -> Result<EntryMeta, Vec<WriteProblem>> {
         Ok((None, _)) => return Err(vec![WriteProblem::NoFrontmatter]),
         Err(e) => return Err(vec![WriteProblem::BadYaml(e.to_string())]),
     };
-    parse_entry(&fm)
+    entry_of(&fm)
+}
+
+/// `parse_entry` with its errors as write problems.
+fn entry_of(fm: &Frontmatter) -> Result<EntryMeta, Vec<WriteProblem>> {
+    parse_entry(fm)
         .map_err(|errors| vec![WriteProblem::Invalid(vec![EntryProblem::Unparsed(errors)])])
+}
+
+/// Rewrite the frontmatter of `doc` with `edit`, normalising as `rewrite_frontmatter_normalizing`
+/// does. `edit` returns the refusals it found; they come back as the `Err`, and the rewritten
+/// text is dropped. The re-read is the caller's.
+fn edit_doc(
+    doc: &str,
+    edit: impl FnOnce(&mut Frontmatter) -> Result<(), Vec<WriteProblem>>,
+) -> Result<String, Vec<WriteProblem>> {
+    let mut refused = None;
+    let text = frontmatter::rewrite_frontmatter_normalizing(doc, |fm| {
+        refused = edit(fm).err();
+    })
+    .map_err(|e| vec![WriteProblem::BadYaml(e.to_string())])?;
+    match refused {
+        Some(problems) => Err(problems),
+        None => Ok(text),
+    }
 }
 
 /// Set the date key `key` to `date`, or remove it when `None`.
@@ -151,6 +184,8 @@ pub(crate) fn set_date(fm: &mut Frontmatter, key: &str, date: Option<NaiveDate>)
 /// always `today`. `closed` is present iff the target is terminal: kept when the entry is itself
 /// terminal and has one, else `today`. A blocked or deferred target takes the call's `revisit_by`
 /// over the stored one; an open or terminal target drops the stored one and refuses a passed one.
+/// A blocked or deferred target whose date (passed or stored) is before `today` is refused with
+/// `RevisitPast`; `today` itself is allowed.
 /// The result is re-read.
 pub fn change_status(
     doc: &str,
@@ -159,7 +194,24 @@ pub fn change_status(
     revisit_by: Option<NaiveDate>,
     today: NaiveDate,
 ) -> Result<String, Vec<WriteProblem>> {
-    let meta = read_entry(doc)?;
+    read_entry(doc)?;
+    let text = edit_doc(doc, |fm| {
+        apply_status(fm, schema, new_status, revisit_by, today)
+    })?;
+    reread(schema, &text)?;
+    Ok(text)
+}
+
+/// The status step of `change_status` on a frontmatter, without the re-read: every refusal comes
+/// before any edit. The frontmatter must parse as an entry.
+fn apply_status(
+    fm: &mut Frontmatter,
+    schema: &CollectionSchema,
+    new_status: &str,
+    revisit_by: Option<NaiveDate>,
+    today: NaiveDate,
+) -> Result<(), Vec<WriteProblem>> {
+    let meta = entry_of(fm)?;
     let Some(class) = schema.statuses.get(new_status).copied() else {
         return Err(vec![WriteProblem::StatusUndeclared(new_status.to_string())]);
     };
@@ -168,6 +220,9 @@ pub fn change_status(
     }
     let revisit = if class.needs_revisit() {
         match revisit_by.or(meta.revisit_by) {
+            Some(date) if date < today => {
+                return Err(vec![WriteProblem::RevisitPast(date)]);
+            }
             Some(date) => Some(date),
             None => {
                 return Err(vec![WriteProblem::Invalid(vec![
@@ -185,15 +240,33 @@ pub fn change_status(
         Some(date) if was_terminal => date,
         _ => today,
     });
-    let text = frontmatter::rewrite_frontmatter_normalizing(doc, |fm| {
-        fm.status = Some(new_status.to_string());
-        set_date(fm, "status_since", Some(today));
-        set_date(fm, "closed", closed);
-        set_date(fm, "revisit_by", revisit);
-    })
-    .map_err(|e| vec![WriteProblem::BadYaml(e.to_string())])?;
-    reread(schema, &text)?;
-    Ok(text)
+    fm.status = Some(new_status.to_string());
+    set_date(fm, "status_since", Some(today));
+    set_date(fm, "closed", closed);
+    set_date(fm, "revisit_by", revisit);
+    Ok(())
+}
+
+/// Re-date the revisit of an entry without a status write: the entry's own status must need one,
+/// and `date` must not be before `today`. `status_since` and `closed` stay.
+fn apply_revisit(
+    fm: &mut Frontmatter,
+    schema: &CollectionSchema,
+    date: NaiveDate,
+    today: NaiveDate,
+) -> Result<(), Vec<WriteProblem>> {
+    let meta = entry_of(fm)?;
+    let Some(class) = schema.statuses.get(&meta.status).copied() else {
+        return Err(vec![WriteProblem::StatusUndeclared(meta.status)]);
+    };
+    if !class.needs_revisit() {
+        return Err(vec![WriteProblem::RevisitNotNeeded(meta.status)]);
+    }
+    if date < today {
+        return Err(vec![WriteProblem::RevisitPast(date)]);
+    }
+    set_date(fm, "revisit_by", Some(date));
+    Ok(())
 }
 /// Set or delete declared fields of an entry document. `Some(v)` sets a field; `None` and
 /// `Some(Value::Null)` delete it. Every refusal is collected before any edit: a reserved name
@@ -208,13 +281,29 @@ pub fn change_fields(
     schema: &CollectionSchema,
     edits: &BTreeMap<String, Option<Value>>,
 ) -> Result<String, Vec<WriteProblem>> {
-    let meta = read_entry(doc)?;
+    read_entry(doc)?;
+    if edits.is_empty() {
+        reread(schema, doc)?;
+        return Ok(doc.to_string());
+    }
+    let text = edit_doc(doc, |fm| apply_fields(fm, schema, edits))?;
+    reread(schema, &text)?;
+    Ok(text)
+}
+
+/// The field step of `change_fields` on a frontmatter, without the re-read: every refusal is
+/// collected before any edit.
+fn apply_fields(
+    fm: &mut Frontmatter,
+    schema: &CollectionSchema,
+    edits: &BTreeMap<String, Option<Value>>,
+) -> Result<(), Vec<WriteProblem>> {
     let problems: Vec<WriteProblem> = edits
         .iter()
         .filter(|(name, edit)| {
             let deleting = matches!(edit, None | Some(Value::Null));
             let known = if deleting {
-                schema.fields.contains_key(*name) || meta.fields.contains_key(*name)
+                schema.fields.contains_key(*name) || fm.extra.contains_key(*name)
             } else {
                 schema.fields.contains_key(*name)
             };
@@ -225,23 +314,112 @@ pub fn change_fields(
     if !problems.is_empty() {
         return Err(problems);
     }
-    if edits.is_empty() {
-        reread(schema, doc)?;
-        return Ok(doc.to_string());
-    }
-    let text = frontmatter::rewrite_frontmatter_normalizing(doc, |fm| {
-        for (name, edit) in edits {
-            match edit {
-                Some(value) if !value.is_null() => {
-                    fm.extra.insert(name.clone(), value.clone());
-                }
-                _ => {
-                    fm.extra.remove(name);
-                }
+    for (name, edit) in edits {
+        match edit {
+            Some(value) if !value.is_null() => {
+                fm.extra.insert(name.clone(), value.clone());
+            }
+            _ => {
+                fm.extra.remove(name);
             }
         }
-    })
-    .map_err(|e| vec![WriteProblem::BadYaml(e.to_string())])?;
+    }
+    Ok(())
+}
+
+/// What `update_entry` is asked to change. A `None` part is left alone.
+#[derive(Debug, Clone, Default)]
+pub struct UpdateSpec<'a> {
+    pub status: Option<&'a str>,
+    pub revisit_by: Option<NaiveDate>,
+    pub title: Option<&'a str>,
+    pub tags: Option<Vec<String>>,
+    /// `Some(None)` removes `valid`.
+    pub valid: Option<Option<&'a str>>,
+    /// As the edits of `change_fields`.
+    pub fields: BTreeMap<String, Option<Value>>,
+}
+
+/// Apply every part of `spec` to an entry document and validate the final text once, so a defect
+/// one part repairs (an undeclared status next to a stray key) does not block the other.
+/// A `status` is a `change_status` (with `revisit_by`); a `revisit_by` alone re-dates the entry's
+/// own revisit, keeps `status_since`, and is refused unless its status needs one. `title` must be
+/// one line with a slug. `tags` are trimmed, emptied and de-duplicated. `valid: Some(None)`
+/// removes `valid`. `fields` are `change_fields` edits. The refusals of every part are returned
+/// together.
+/// `entry_kind` is fixed: setting it is `KindFixed`, and a document whose own kind the schema
+/// does not declare is `KindNotRepairable`, which names that kind. A document that does not parse as an entry is `Invalid`; neither is
+/// repairable here. An empty spec is `EmptyUpdate`.
+pub fn update_entry(
+    doc: &str,
+    schema: &CollectionSchema,
+    spec: &UpdateSpec<'_>,
+    today: NaiveDate,
+) -> Result<String, Vec<WriteProblem>> {
+    if spec.status.is_none()
+        && spec.revisit_by.is_none()
+        && spec.title.is_none()
+        && spec.tags.is_none()
+        && spec.valid.is_none()
+        && spec.fields.is_empty()
+    {
+        return Err(vec![WriteProblem::EmptyUpdate]);
+    }
+    let meta = read_entry(doc)?;
+    if !schema.entry_kinds.contains(&meta.entry_kind) {
+        return Err(vec![WriteProblem::KindNotRepairable(meta.entry_kind)]);
+    }
+    let text = edit_doc(doc, |fm| {
+        let mut problems = Vec::new();
+        let mut collect = |step: Result<(), Vec<WriteProblem>>| {
+            if let Err(found) = step {
+                problems.extend(found);
+            }
+        };
+        match (spec.status, spec.revisit_by) {
+            (Some(status), revisit_by) => {
+                collect(apply_status(fm, schema, status, revisit_by, today))
+            }
+            (None, Some(date)) => collect(apply_revisit(fm, schema, date, today)),
+            (None, None) => {}
+        }
+        let mut edits = spec.fields.clone();
+        if edits.remove("entry_kind").is_some() {
+            collect(Err(vec![WriteProblem::KindFixed]));
+        }
+        collect(apply_fields(fm, schema, &edits));
+        if let Some(title) = spec.title {
+            if slug(title).is_some() && !title.contains(['\n', '\r']) {
+                fm.title = Some(title.to_string());
+            } else {
+                collect(Err(vec![WriteProblem::Title(title.to_string())]));
+            }
+        }
+        if let Some(tags) = &spec.tags {
+            let mut kept: Vec<String> = Vec::new();
+            for tag in tags.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+                if !kept.iter().any(|k| k == tag) {
+                    kept.push(tag.to_string());
+                }
+            }
+            fm.tags = kept;
+        }
+        match spec.valid {
+            Some(Some(valid)) => {
+                fm.extra
+                    .insert("valid".to_string(), Value::String(valid.to_string()));
+            }
+            Some(None) => {
+                fm.extra.remove("valid");
+            }
+            None => {}
+        }
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(problems)
+        }
+    })?;
     reread(schema, &text)?;
     Ok(text)
 }
@@ -266,7 +444,11 @@ pub fn new_entry(
         Some(c) if !c.needs_revisit() && input.revisit_by.is_some() => {
             problems.push(WriteProblem::RevisitNotNeeded(status.to_string()));
         }
-        Some(_) => {}
+        Some(_) => {
+            if let Some(date) = input.revisit_by.filter(|date| *date < today) {
+                problems.push(WriteProblem::RevisitPast(date));
+            }
+        }
     }
     let title_slug = slug(input.title).filter(|_| !input.title.contains(['\n', '\r']));
     let key = match &title_slug {
@@ -318,7 +500,12 @@ pub fn new_entry(
         extra,
         ..Frontmatter::default()
     };
-    let body = input.body.or(template).unwrap_or("");
+    // A blank body is no body: the template stands in for it, as for `None`.
+    let body = input
+        .body
+        .filter(|body| !body.trim().is_empty())
+        .or(template)
+        .unwrap_or("");
     let text = frontmatter::write(&fm, &frontmatter::render_body(body));
     reread(schema, &text)?;
     Ok(EntryFile {

@@ -41,13 +41,13 @@ impl std::fmt::Display for StemError {
                     f,
                     "the title gives the stem {stem:?}, which must match \
                      ^[a-z0-9]+(-[a-z0-9]+)*$ and must not be 16 hex characters; \
-                     choose another title"
+                     give another title"
                 )
             }
             StemError::ReservedName(n) => write!(
                 f,
                 "the name {n:?} is reserved for a collection's folder-index file; \
-                 choose another title"
+                 give another title"
             ),
         }
     }
@@ -217,7 +217,7 @@ mod tests {
             let err = entry_stem(KeyStyle::Name, d("2026-11-11"), slug_text).unwrap_err();
             let msg = err.to_string();
             assert!(msg.contains(slug_text), "{msg}");
-            assert!(msg.contains("choose another title"), "{msg}");
+            assert!(msg.contains("give another title"), "{msg}");
             assert!(!msg.contains("rename the file"), "{msg}");
         }
         // A dated style names the whole stem, date included.
@@ -265,7 +265,7 @@ mod tests {
         ));
         let msg = StemError::ReservedName("readme".into()).to_string();
         assert!(
-            msg.contains("readme") && msg.contains("choose another"),
+            msg.contains("readme") && msg.contains("give another"),
             "{msg}"
         );
     }
