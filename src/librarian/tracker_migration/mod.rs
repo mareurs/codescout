@@ -5,3 +5,4 @@
 
 pub mod index_rows;
 pub mod records;
+pub mod rewrite;
