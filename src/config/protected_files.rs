@@ -33,8 +33,9 @@
 //! **Scope, stated so it is not read as wider.** This is a property of the file-writing
 //! tools. It does not stop `run_command` (a shell can write any file the user can, and is
 //! gated by `shell_command_mode`), a human editing the file, or codescout's own `onboarding`
-//! tool, which writes `project.toml` directly with `std::fs::write` and not through this
-//! function. A `profile = "root"` profile is also unaffected: it already allows every write.
+//! tool's create-if-absent write of `project.toml`, which uses `std::fs::write` and not this
+//! function. (Its `patch_project_table` goes through `atomic_write`, so that one is guarded.) A
+//! `profile = "root"` profile is also unaffected: it already allows every write.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};

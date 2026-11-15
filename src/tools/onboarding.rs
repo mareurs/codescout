@@ -115,7 +115,9 @@ pub(crate) fn system_prompt_stale(
 ///
 /// **The file is replaced atomically**, not truncated in place: a staging file in the same
 /// directory, then a rename (`atomic_write`), after a probe that keeps a read-only file refused
-/// (`refuse_unwritable_existing`). A write that fails leaves the old bytes and no staging file.
+/// (`refuse_unwritable_existing`). A write that returns an error leaves the old bytes and no
+/// staging file. A process killed between the staging file and the rename also leaves the old
+/// bytes, but may leave a `project.<hex>.tmp` beside the file (see `atomic_write`, "Leftovers").
 /// A link to the config is followed first, so the target is patched and the link stays a link.
 /// The replace needs write permission on the file's directory, and it breaks a hard link to the
 /// file; no `fsync` is called, so this closes a full disk and a killed process, not power loss.
@@ -147,10 +149,19 @@ fn patch_project_table(
     let text = toml::to_string_pretty(&doc)?;
     // Follow a link to the config first, as the in-place write did: the probe below opens with
     // `O_NOFOLLOW` (it would refuse the link with `ELOOP`) and `atomic_write` renames over the
-    // directory entry (it would replace the link and leave the target unpatched). The read above
-    // already succeeded, so the path exists. A link swapped in after this line is outside what
-    // this closes (docs/issues/2026-11-14-onboarding-rewrites-project-toml-with-a-truncating-fs-write-so-a-failed-write-empties-it.md).
-    let target = std::fs::canonicalize(config_path)?;
+    // directory entry (it would replace the link and leave the target unpatched). Only a link is
+    // resolved: a regular path keeps the spelling the caller gave, so the guard and the errors see
+    // it unchanged and no `canonicalize` runs where it can fail (some Windows volumes). The read
+    // above already succeeded, so the path exists. A link swapped in after this line is outside
+    // what this closes (docs/issues/2026-11-14-onboarding-rewrites-project-toml-with-a-truncating-fs-write-so-a-failed-write-empties-it.md).
+    let target = if std::fs::symlink_metadata(config_path)?
+        .file_type()
+        .is_symlink()
+    {
+        std::fs::canonicalize(config_path)?
+    } else {
+        config_path.to_path_buf()
+    };
     // A rename needs no permission on the file, only on its directory, so a read-only
     // `project.toml` is asked first and stays refused. A failed write then leaves the old bytes
     // and no staging file, where the truncating `std::fs::write` left an empty file.
@@ -3749,11 +3760,11 @@ mod atomic_patch_tests {
         std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let e = result.expect_err("a replace in a read-only directory must be refused");
-        assert!(
-            e.downcast_ref::<std::io::Error>()
-                .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied),
-            "{e:#}"
-        );
+        let io = e.downcast_ref::<std::io::Error>().expect("an io::Error");
+        assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied, "{e:#}");
+        // The OS refused the staging file. A guard refusal is also `PermissionDenied`, with no
+        // OS error, so this tells the two apart.
+        assert_eq!(io.raw_os_error(), Some(libc::EACCES), "{e:#}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), OLD);
         assert_eq!(names(&sub), vec!["project.toml"], "no staging file left");
     }
@@ -3815,18 +3826,19 @@ mod atomic_patch_tests {
         assert_eq!(names(dir.path()), vec!["link.toml", "real.toml"]);
     }
 
-    /// The replaced file keeps its permission bits (a private config stays private).
+    /// The replaced file keeps its permission bits. The mode is `0640`, not `0600`: the staging
+    /// file of an existing target is created `0600`, so `0600` would survive a dropped chmod.
     #[test]
     fn a_patch_keeps_the_file_mode() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("project.toml");
         std::fs::write(&p, OLD).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o640)).unwrap();
 
         patch_project_table(&p, add_key).unwrap();
 
         let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
+        assert_eq!(mode, 0o640);
         assert!(std::fs::read_to_string(&p).unwrap().contains("added"));
     }
 
