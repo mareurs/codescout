@@ -24,7 +24,14 @@ Atomic write door: executed by peer session codescout-eb (SID 6f2f7046) from my 
 
 Plan C3 LANDED 2026-11-14 (subagent-driven; operator said "do c1 and then c3 in subagents", then chose "merge locally"): `experiments` fast-forwarded `8f4696f7f` to `a54988e05`; worktree and branch removed. Gate on the gated tree: lean 10129, default 10224, python 1836, fmt and clippy clean. Record, rulings R1-R8, deferred findings, follow-ups (seeding, eviction, per-run handle, embed URL in the key, cache location vs the cutover): `docs/research/2026-11-14-artifact-identity-plan-c3-execution-state.md` (id `512e01311fe5d7bb`). Honest limit: on ship day the cache is EMPTY for the existing corpus (queueing is per artifact); the cutover rebuild needs `reembed=true` per project or seeding first. Next: the Plan D plan (open: who commits; file-only variant vs scratch copy; C3 cache location), then E.
 
+## Status 2026-11-15 (Plan D landed on integration, not on experiments)
+
+Plan D (`codescout cutover plan|export|build`) was built subagent-driven on `feat/cutover-tool-20261114`, merged with `integration/identity-lifecycle-20261114`, gated (python 1836, fmt, clippy, lean and default lanes all 0), and fast-forwarded onto integration: `5d655bfef` to `ead2f7b31`. Peer `codescout-e4` (lifecycle session) was told before and after. `experiments` gets ONE merge from integration only when the user says all work is done. The feature branch and worktree `.worktrees/cutover-tool-20261114` still exist; the SDD workspace (ledger `progress.md`, reviews, `final-fix-report.md`, `final-rereview.md`) is kept because the final re-review is not clean.
+
+Open items from the final review: C1-a (Important, parked): `plan.rs:257` builds the citation index before `plan_augmentations` adds recovered entry sections, so a token defined only by a recovered params entry resolves differently in plan 1 and plan 2; effect: `build` refuses once, a second export plus commit converges; reviewer's fix: build the index after entry recovery. Minors parked: C1-b, C1-c, C1-d (test gap), I1-a, one manual-page nit. I1 fix (b) (a full-path mention blocks only the rename, relaxing D-R26) waits for the operator: after fix (a) 914 of 2639 docs stay frozen (738 bug files, because Rust doc comments name them). Multi-repo `derived.db` (one repository's index beside the shared catalog) is NOT decided; Plan E decides, the manual page warns the operator. Plan text D-R8, D-R9, D-R20 corrected on `experiments` (`57eb13a88`).
+
 ## Rules that bite when resuming
+
 
 - A full gate runs only on an UNTOUCHED tree (no implementer holds an open round); see session-log F-16.
 - `TOOL_SURFACE_CHAR_BUDGET` is exactly 57_664 with zero headroom: any advertised description or schema edit is character-neutral or smaller, or re-measured with a log entry.
