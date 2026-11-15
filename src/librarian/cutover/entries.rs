@@ -278,7 +278,9 @@ fn home_offset(doc: &str) -> Option<usize> {
 }
 
 /// `doc` with `section` before the first `## Events` or `## Relations` heading, else at the end,
-/// with a blank line between it and the text before it.
+/// with a blank line between it and the text before it. At the end only the line ends of `doc` go:
+/// its last line keeps its bytes (trailing spaces too), so the step changes no line of `doc` and
+/// [`rewrite_added`](super::rewrite::rewrite_added) reads only the section as added.
 fn insert_section(doc: &str, section: &str) -> String {
     match home_offset(doc) {
         Some(at) => {
@@ -293,8 +295,8 @@ fn insert_section(doc: &str, section: &str) -> String {
             format!("{head}{lead}{section}{tail}")
         }
         None => {
-            let head = doc.trim_end();
-            if head.is_empty() {
+            let head = doc.trim_end_matches(['\n', '\r']);
+            if head.trim_end().is_empty() {
                 format!("{}\n", section.trim_end())
             } else {
                 format!("{head}\n\n{}\n", section.trim_end())
@@ -683,6 +685,14 @@ mod tests {
             "{out}"
         );
         assert!(out.ends_with("```\n"), "{out}");
+    }
+    /// C1-b: the section goes after the text's line ends; the last line keeps its bytes.
+    #[test]
+    fn a_section_at_the_end_leaves_the_last_line_as_it_is() {
+        assert_eq!(insert_section("a  ", "## S\n"), "a  \n\n## S\n");
+        assert_eq!(insert_section("a  \r\n\n", "## S\n"), "a  \n\n## S\n");
+        assert_eq!(insert_section("", "## S\n"), "## S\n");
+        assert_eq!(insert_section("\n \n", "## S\n"), "## S\n");
     }
 
     #[test]

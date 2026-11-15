@@ -3179,6 +3179,36 @@ mod tests {
         assert_eq!(citation_reasons_in(&first, "docs/src.md"), []);
         assert_fixed_point(&second);
     }
+    /// C1-b: a recovered section after a last line with trailing spaces leaves that line as it is,
+    /// so the first plan reports its citation once, as the plan after the commit does.
+    #[test]
+    fn a_citation_on_a_last_line_with_trailing_spaces_is_reported_once() {
+        let head = format!("{LEDGER_MD}see ledger:F-9   ");
+        let (first, second) =
+            plan_commit_and_replan(&[("docs/ledger.md", head.as_bytes())], |cat, root| {
+                add_doc(cat, root, "led", "docs/ledger.md");
+                add_augmentation(
+                    cat,
+                    "led",
+                    r#"{"entries":[{"id":"F-2","title":"two"}]}"#,
+                    Some("entries"),
+                );
+            });
+        let in_ledger = |plan: &ExportPlan| -> Vec<(Option<u32>, Status)> {
+            citation_items(plan)
+                .into_iter()
+                .filter(|i| i.path.as_deref() == Some("docs/ledger.md"))
+                .map(|i| (i.line, i.status))
+                .collect()
+        };
+        let want = [(Some(11), Status::Unrecoverable)];
+        assert_eq!(in_ledger(&first), want, "{:#?}", first.items);
+        let text = &first.files["docs/ledger.md"].new_text;
+        assert!(text.contains("\nsee ledger:F-9   \n\n## F-2"), "{text:?}");
+        assert_fixed_point(&second);
+        // The commit's frontmatter holds two more lines: the high-water mark and the declaration.
+        assert_eq!(in_ledger(&second), [(Some(13), Status::Unrecoverable)]);
+    }
 
     /// I2: a ledger whose text ends inside an unclosed code fence swallows a recovered section. The
     /// entry is reported and the text is not touched, so a rerun does not add it again.
