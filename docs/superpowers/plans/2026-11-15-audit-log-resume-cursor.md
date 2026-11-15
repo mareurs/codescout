@@ -1,7 +1,7 @@
 ---
 id: '4456f8d93eeced1c'
 kind: plan
-status: draft
+status: parked
 title: 'audit_log resume cursor: a forward read over the catalog audit trail'
 tags:
 - audit-log
@@ -23,6 +23,23 @@ tags:
 **Spec:** none. The plan carries its decisions (P1-P8), as the hot-view plan did. Input: memory `research/managed-agents-interfaces-20261115` (Anthropic, "Scaling Managed Agents", 2026-04-08: a session log answers positional reads; the harness shapes the context). That memory first said no read of the logs existed. That was wrong, and the memory now says so: the read exists, only the resumable forward read is missing.
 
 **Where this file lives:** on `experiments` (docs only). Integration receives it when `experiments` is merged into it. Until then an executor reads it from the main checkout.
+
+## Review outcome (2026-11-15): parked until a consumer exists
+
+An independent Opus review (reconnaissance + architecture-snow-lion, reading only, no cargo) found 1 Critical, 5 Important and 11 Minor findings and a verdict of **not ready, and not needed yet**. I re-read the decisive evidence: `src/server.rs:6611-6625` (budget log: "headroom 0", `TOOL_SURFACE_CHAR_BUDGET` = 57_664), `src/server.rs:6663-6666` (raising IS allowed with a harness reason) and `src/prompts/guide_index.rs:273` (`MAX_DECLARED_SECTION_BYTES` = 2500). The review's report was a job-local file; its content is kept here.
+
+**Decision: park.** Do not build until a consumer is named. For now the answer costs zero tool-surface bytes: poll with `audit_log(since=<stored at_ms>, limit=500)` and drop the boundary rows client-side (`since` is `>=`, so it re-reads them) with `seq > <stored seq>`. Read `truncated` and `filtered_total`: they say "capped". Measured by the reviewer: 348 rows machine-wide in 24 hours, below `MAX_LIMIT` 500. The cursor would add only paging past 500 rows in one gap (a reindex burst) and independence from the wall clock.
+
+**Two statements above and below are wrong, and stay corrected here:** (1) a `since` poller CAN tell caught up from capped (`truncated`, `audit_log.rs:323-334`); (2) `TOOL_SURFACE_CHAR_BUDGET` is not strictly lower-only: a raise is allowed with a harness reason, and content pressure is not one (`src/prompts/README.md` § Caps follow the harness). The comment `types.rs:1699` says "lower-only" and contradicts `server.rs:6663`.
+
+**Fix before this plan is unparked (the reviewer's findings):**
+- **C1 (Critical).** Task 2 cannot pass `tool_surface_under_budget`: headroom is 0 (the memory said at most 65), and the `librarian` description is 1,765 of 1,800 characters, so at most 35 may be added. Add a Task 0 that measures with `tool_surface_report_lengths`, names the sentence elsewhere that gives the bytes, or records an operator decision that this is not funded. That measurement is the go/no-go.
+- **I1.** `after_seq > head_seq` misses a rebuilt catalog whose new head has already passed the old cursor (rows 1..N skipped silently). A new catalog mints a new host id (`host.rs` `mint_host_id`), so use `cursor.host` as the cursor's epoch: accept `after_host`, set `cursor.reset: true` when it differs, and test two catalogs.
+- **I2.** Filters (`tbl`, `actor`) hide the prune marker, and the marker arrives after the gap (its `seq` is the newest). Add `oldest_seq` and `gap_before_page` (`after_seq + 1 < oldest_seq`); test with a filter that excludes the marker and a cursor strictly inside the pruned range, not at 0.
+- **I3.** The Task 3 guide sentence (about 140 B) will exceed `MAX_DECLARED_SECTION_BYTES` 2500 (the `librarian` reference section is about 2,480 B). Split the section at a `###` or move the sentence to an undeclared section; count the `CEILING` p50 emission budget too.
+- **I4.** The premise (above): no consumer; `since` plus `seq` covers it today.
+- **I5.** An adapter call runs `gc::maybe_reconcile` first (`adapter.rs:389-392`, `gc.rs:108-122`), which can write audit rows under the reader's actor, at most once per interval. `reading_the_log_does_not_move_the_head` calls `audit_log::call` directly and cannot see it. Reword Review Focus 5 to "a polling loop terminates" and assert it through the adapter, or say the adapter path is out of scope.
+- **Minor:** reads are not one snapshot (use one deferred read transaction, or derive `complete = filtered_total == count`); `limit=0` never advances (refuse it with `after_seq`); a `u64` above `i64::MAX` wraps negative (use `i64::try_from`); `seq_is_not_reused_after_a_prune` cannot fail because the marker row keeps the max (delete every row with raw SQL, marker included); assert ascending `seq` order at the tool level with a fixture whose `at_ms` falls as `seq` rises; specify the cursor-mode response (keep `shards.self_host`, `table_total`, `unit`, `note`; the truncation hint must say `after_seq=<next_after_seq>`); the `limit` and description texts say "newest first" and go stale; the param sweep needs only `after_seq` in the unprobed list and the comment/doc key lists (the floor 39 does not change); the existing sweep comment "every librarian call writes an audit row" is already false live; `read_door` test is `no_librarian_production_read_bypasses_the_read_door` (`read_door.rs:1414`); `actor` is one per process under the HTTP transport (`server.rs:3696-3707`); add the `BEGIN IMMEDIATE` two-connection test for P8; split Task 2 into 2a (logic, `audit_log.rs` only) and 2b (surface, needs the Task 0 decision).
 
 ## What exists today (read 2026-11-15)
 
