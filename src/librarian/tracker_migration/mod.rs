@@ -4,5 +4,7 @@
 //! Spec: `docs/superpowers/specs/2026-11-15-tracker-migration-design.md`.
 
 pub mod index_rows;
+pub mod inventory;
+pub mod mapping;
 pub mod records;
 pub mod rewrite;
