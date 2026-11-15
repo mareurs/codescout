@@ -436,6 +436,18 @@ fn a_full_ledger_readme_renders_and_parses() {
 }
 
 #[test]
+fn a_collection_readme_with_the_hot_view_keys_renders_and_parses() {
+    let mut extra = ledger_extra();
+    extra.insert("hot_cap".into(), serde_json::json!(5));
+    extra.insert("stale_after".into(), serde_json::json!("45d"));
+    let text = collection_readme(Lifecycle::Ledger, "Frictions", &extra, "").unwrap();
+    let (fm, _) = frontmatter::parse(&text).unwrap();
+    let schema = parse_schema(Lifecycle::Ledger, &fm.unwrap()).unwrap();
+    assert_eq!(schema.hot_cap, Some(5));
+    assert_eq!(schema.stale_after_days, Some(45));
+}
+
+#[test]
 fn a_stream_without_exit_when_is_refused() {
     let mut extra = stream_extra();
     extra.remove("exit_when");

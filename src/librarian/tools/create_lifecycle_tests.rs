@@ -537,6 +537,21 @@ async fn creates_a_ledger_collection_that_load_collection_reads() {
     .unwrap();
     assert!(entry["abs_path"].as_str().unwrap().contains(NEW_DIR));
 }
+
+#[tokio::test]
+async fn a_collection_create_accepts_hot_cap() {
+    use crate::librarian::lifecycle::collection::load_collection_dir;
+    let tmp = checkout(&[]);
+    let ctx = mk_ctx(tmp.path());
+    let mut extra = ledger_schema();
+    extra["hot_cap"] = json!(3);
+
+    call(&ctx, new_ledger(extra)).await.unwrap();
+
+    let loaded = load_collection_dir(tmp.path(), NEW_DIR).unwrap();
+    assert_eq!(loaded.schema().hot_cap, Some(3));
+}
+
 /// A `rel_path` spelled with a `.` component or a doubled separator is written and catalogued at
 /// the canonical path: the row's id and `abs_path` are the ones a reindex of the file gives, so
 /// no second row is ever made for it.

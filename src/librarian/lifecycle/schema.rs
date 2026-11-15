@@ -89,6 +89,10 @@ pub struct CollectionSchema {
     pub exit_when: Option<String>,
     pub writer: Option<String>,
     pub review_every_days: Option<u32>,
+    /// The most entries the hot view lists, when the collection sets one.
+    pub hot_cap: Option<u32>,
+    /// The age in days after which an open entry is stale in the hot view, when set.
+    pub stale_after_days: Option<u32>,
 }
 
 /// One problem in a collection schema.
@@ -152,9 +156,11 @@ pub const KEY_OWNER: &str = "owner";
 pub const KEY_EXIT_WHEN: &str = "exit_when";
 pub const KEY_WRITER: &str = "writer";
 pub const KEY_REVIEW_EVERY: &str = "review_every";
+pub const KEY_HOT_CAP: &str = "hot_cap";
+pub const KEY_STALE_AFTER: &str = "stale_after";
 
 /// Every schema key, in the order a readme lists them.
-pub const SCHEMA_KEYS: [&str; 9] = [
+pub const SCHEMA_KEYS: [&str; 11] = [
     KEY_ENTRY_KINDS,
     KEY_STATUSES,
     KEY_INITIAL_STATUS,
@@ -164,6 +170,8 @@ pub const SCHEMA_KEYS: [&str; 9] = [
     KEY_EXIT_WHEN,
     KEY_WRITER,
     KEY_REVIEW_EVERY,
+    KEY_HOT_CAP,
+    KEY_STALE_AFTER,
 ];
 
 fn malformed(key: &'static str, detail: impl Into<String>) -> SchemaError {
@@ -329,9 +337,9 @@ fn parse_fields(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> BTreeMap<Strin
     out
 }
 
-/// `"<n>d"` with `n` a positive whole number.
-fn parse_review_every(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u32> {
-    let raw = present(fm, KEY_REVIEW_EVERY)?;
+/// `"<n>d"` with `n` a positive whole number, under `key`.
+fn parse_days(fm: &Frontmatter, key: &'static str, errs: &mut Vec<SchemaError>) -> Option<u32> {
+    let raw = present(fm, key)?;
     let days = raw
         .as_str()
         .and_then(|s| s.strip_suffix('d'))
@@ -340,11 +348,27 @@ fn parse_review_every(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u
         .filter(|n| *n > 0);
     if days.is_none() {
         errs.push(malformed(
-            KEY_REVIEW_EVERY,
+            key,
             "must be `<n>d` with n a positive whole number, for example `30d`",
         ));
     }
     days
+}
+
+/// A JSON number that is a whole number from 1 to `u32::MAX`.
+fn parse_hot_cap(fm: &Frontmatter, errs: &mut Vec<SchemaError>) -> Option<u32> {
+    let raw = present(fm, KEY_HOT_CAP)?;
+    let cap = raw
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| *n > 0);
+    if cap.is_none() {
+        errs.push(malformed(
+            KEY_HOT_CAP,
+            "must be a positive whole number, for example `5`",
+        ));
+    }
+    cap
 }
 
 /// Parse a collection's schema from its `readme.md` frontmatter, collecting every error.
@@ -403,7 +427,9 @@ pub fn parse_schema(
     let owner = optional_string(fm, KEY_OWNER, &mut errs);
     let exit_when = optional_string(fm, KEY_EXIT_WHEN, &mut errs);
     let writer = optional_string(fm, KEY_WRITER, &mut errs);
-    let review_every_days = parse_review_every(fm, &mut errs);
+    let review_every_days = parse_days(fm, KEY_REVIEW_EVERY, &mut errs);
+    let hot_cap = parse_hot_cap(fm, &mut errs);
+    let stale_after_days = parse_days(fm, KEY_STALE_AFTER, &mut errs);
 
     // A malformed `exit_when` still counts as declared; it is reported as malformed above.
     let exit_declared = present(fm, KEY_EXIT_WHEN).is_some();
@@ -428,6 +454,8 @@ pub fn parse_schema(
                 exit_when,
                 writer,
                 review_every_days,
+                hot_cap,
+                stale_after_days,
             })
         }
         _ => Err(errs),
@@ -457,6 +485,51 @@ mod tests {
         );
         assert_eq!(s.fields.get("covers"), Some(&FieldType::List));
         assert_eq!(s.review_every_days, Some(30));
+    }
+    #[test]
+    fn hot_view_keys_parse() {
+        let text = format!("{LEDGER}hot_cap: 5\nstale_after: 45d\n");
+        let s = parse_schema(Lifecycle::Ledger, &fm(&text)).unwrap();
+        assert_eq!(s.hot_cap, Some(5));
+        assert_eq!(s.stale_after_days, Some(45));
+    }
+
+    #[test]
+    fn absent_hot_view_keys_are_none() {
+        let s = parse_schema(Lifecycle::Ledger, &fm(LEDGER)).unwrap();
+        assert_eq!(s.hot_cap, None);
+        assert_eq!(s.stale_after_days, None);
+    }
+
+    #[test]
+    fn a_bad_hot_cap_is_malformed_naming_the_key() {
+        for bad in ["0", "\"5\"", "2.5", "-1", "true", "5000000000"] {
+            let text = format!("{LEDGER}hot_cap: {bad}\n");
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&text)).unwrap_err();
+            assert!(
+                errs.iter()
+                    .any(|e| matches!(e, SchemaError::Malformed { key: "hot_cap", .. })),
+                "{bad}: {errs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bad_stale_after_is_malformed_naming_the_key() {
+        for bad in ["45", "\"45\"", "\"0d\"", "\"d\""] {
+            let text = format!("{LEDGER}stale_after: {bad}\n");
+            let errs = parse_schema(Lifecycle::Ledger, &fm(&text)).unwrap_err();
+            assert!(
+                errs.iter().any(|e| matches!(
+                    e,
+                    SchemaError::Malformed {
+                        key: "stale_after",
+                        ..
+                    }
+                )),
+                "{bad}: {errs:?}"
+            );
+        }
     }
 
     #[test]
