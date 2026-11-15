@@ -5,7 +5,7 @@
 //! `event_create` (`event_text::splice_event`), and the home rules are `event_text::twin_home_refusal`,
 //! so a live writer and the cutover share one format and one rule.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
@@ -53,9 +53,9 @@ pub fn export_events(
 ) -> (String, Vec<Item>) {
     let mut text = text.to_owned();
     let mut items = Vec::new();
-    let mut held: BTreeSet<String> = parse_event_sections(&text)
+    let mut held: BTreeMap<String, EventText> = parse_event_sections(&text)
         .into_iter()
-        .map(|section| section.id)
+        .map(|section| (section.id.clone(), section))
         .collect();
 
     for event in sorted_events(events) {
@@ -66,7 +66,7 @@ pub fn export_events(
             items.push(report(Status::Skipped, &no_home(why)));
             continue;
         }
-        if held.contains(&event.id) {
+        if held.contains_key(&event.id) {
             items.push(report(Status::AlreadyExported, REASON_HELD));
             continue;
         }
@@ -128,8 +128,15 @@ pub fn export_events(
             mutates: Vec::new(),
             payload,
         };
-        if held.contains(&section.id) {
-            items.push(report(Status::AlreadyExported, REASON_HELD));
+        if let Some(holder) = held.get(&section.id) {
+            // An observation id is a rowid of one machine's catalog: a section another machine wrote
+            // under the same id is another fact, so the content is compared (events carry ULIDs).
+            if same_content(holder, &section) {
+                items.push(report(Status::AlreadyExported, REASON_HELD));
+            } else {
+                let reason = format!("another section holds id {}", section.id);
+                items.push(report(Status::Unrecoverable, &reason));
+            }
             continue;
         }
         let (status, reason) = write_section(&section, &mut text, &mut held);
@@ -194,12 +201,12 @@ fn carries(note: &OldEvent, row: &OldObservation) -> bool {
 fn write_section(
     section: &EventText,
     text: &mut String,
-    held: &mut BTreeSet<String>,
+    held: &mut BTreeMap<String, EventText>,
 ) -> (Status, String) {
     match splice_event(text, section) {
         Ok(next) => {
             *text = next;
-            held.insert(section.id.clone());
+            held.insert(section.id.clone(), section.clone());
             (Status::Moved, REASON_WRITTEN.to_owned())
         }
         Err(err) => (
@@ -207,6 +214,13 @@ fn write_section(
             format!("the section cannot be added to the text: {err:#}"),
         ),
     }
+}
+
+/// Whether the section the text holds is the one `section` would write: the payload (text and
+/// source) and the creation time. The format reads a written section back exactly, whatever the
+/// text (the awkward-text test pins it), so a plain comparison is enough.
+fn same_content(held: &EventText, section: &EventText) -> bool {
+    held.payload == section.payload && held.created_at_ms == section.created_at_ms
 }
 
 #[cfg(test)]
@@ -522,6 +536,63 @@ mod tests {
         let item = only(&items);
         assert_eq!(item.status, Status::AlreadyExported, "{item:?}");
         assert_eq!(item.class, Class::Observation);
+    }
+    /// Observation ids are the rowids of one machine's catalog: another machine's observation 7 is
+    /// another fact. A held id with other content is reported, never overwritten and never skipped.
+    #[test]
+    fn an_observation_whose_id_holds_other_content_is_unrecoverable_and_the_text_unchanged() {
+        let theirs = observation(7, "seen on the other machine");
+        let (held, _) = run(FLAGGED, &[], &[&theirs], &[]);
+        let mine = observation(7, "seen here");
+        let (out, items) = run(&held, &[], &[&mine], &[]);
+        assert_eq!(out, held, "nothing is overwritten and no id is invented");
+        let item = only(&items);
+        assert_eq!(item.class, Class::Observation);
+        assert_eq!(item.status, Status::Unrecoverable, "{item:?}");
+        assert_eq!(item.reason, "another section holds id observation-7");
+        assert_eq!(item.path.as_deref(), Some(REL));
+        assert_eq!(ids(&out), ["observation-7"]);
+        // The same text at another time is another fact too.
+        let mut later = observation(7, "seen on the other machine");
+        later.created_at_ms += 1;
+        let (out, items) = run(&held, &[], &[&later], &[]);
+        assert_eq!(out, held);
+        assert_eq!(only(&items).status, Status::Unrecoverable);
+        // A source that differs is other content.
+        let mut sourced = observation(7, "seen on the other machine");
+        sourced.source = Some("review".to_owned());
+        let (_, items) = run(&held, &[], &[&sourced], &[]);
+        assert_eq!(only(&items).status, Status::Unrecoverable);
+        // The row the text was written from is still already exported.
+        let (again, items) = run(&held, &[], &[&theirs], &[]);
+        assert_eq!(again, held);
+        assert_eq!(only(&items).status, Status::AlreadyExported);
+    }
+
+    #[test]
+    fn an_observation_with_awkward_text_is_already_exported_on_a_rerun() {
+        // What the text holds is compared with what would be written, so a text the format
+        // reads back differently (CRLF, trailing blanks, empty lines, a lone CR) is not "other content".
+        for text in [
+            "two  \r\nlines  ",
+            "a\n\n\nb\n",
+            "lone\rcr",
+            "  leading and trailing  ",
+            "unicode \u{e9}\u{1f600} and `ticks` ```",
+            "",
+            "\n\nstarts and ends with empty lines\n\n",
+            "> quoted\n# heading\n```\nfence",
+            "\r\n",
+            "line\u{2028}sep\u{85}nel\ttab",
+            "    indented\n\ttabbed",
+        ] {
+            let o = observation(3, text);
+            let (once, items) = run(FLAGGED, &[], &[&o], &[]);
+            assert_eq!(only(&items).status, Status::Moved, "{text:?}");
+            let (twice, items) = run(&once, &[], &[&o], &[]);
+            assert_eq!(twice, once, "{text:?}");
+            assert_eq!(only(&items).status, Status::AlreadyExported, "{text:?}");
+        }
     }
 
     #[test]

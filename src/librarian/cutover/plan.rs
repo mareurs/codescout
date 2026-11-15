@@ -2484,6 +2484,177 @@ mod tests {
         assert!(text.contains("\"id\":\"observation-2\""), "{text}");
         assert!(!text.contains("\"id\":\"observation-1\""), "{text}");
     }
+    fn note_section(id: &str, text: &str) -> crate::librarian::catalog::event_text::EventText {
+        crate::librarian::catalog::event_text::EventText {
+            id: id.to_owned(),
+            kind: "note".to_owned(),
+            created_at_ms: 1,
+            author: None,
+            anchor_commit: None,
+            head_commit: None,
+            parent: None,
+            resolves: None,
+            source: None,
+            mutates: Vec::new(),
+            payload: serde_json::json!({ "text": text }),
+        }
+    }
+
+    /// `base` with the sections of `sections` spliced under its `## Events` heading.
+    fn with_sections(
+        base: &str,
+        sections: &[crate::librarian::catalog::event_text::EventText],
+    ) -> String {
+        sections.iter().fold(base.to_owned(), |text, section| {
+            crate::librarian::catalog::event_text::splice_event(&text, section).unwrap()
+        })
+    }
+
+    #[test]
+    fn a_held_observation_id_with_other_text_is_reported_not_skipped() {
+        // Observation ids are rowids of one machine's catalog. `observation-2` in the committed text
+        // is another machine's fact: this machine's observation 2 must not be reported as exported.
+        let head = with_sections(
+            SINGLE_WRITER_MD,
+            &[
+                note_section("observation-1", "same"),
+                note_section("observation-2", "theirs"),
+            ],
+        );
+        let plan = plan_of_files(&[("docs/my_notes.md", head.as_bytes())], |cat, root| {
+            add_doc(cat, root, "mine", "docs/my_notes.md");
+            add_observation(cat, "mine", "same");
+            add_observation(cat, "mine", "mine, not theirs");
+        });
+        let items = items_of(&plan, Class::Observation);
+        let outcome: Vec<(&Status, &str)> = items
+            .iter()
+            .map(|i| (&i.status, i.reason.as_str()))
+            .collect();
+        assert_eq!(
+            outcome,
+            [
+                (&Status::AlreadyExported, "the text already holds it"),
+                (
+                    &Status::Unrecoverable,
+                    "another section holds id observation-2"
+                )
+            ]
+        );
+        for item in &items {
+            assert_eq!(item.path.as_deref(), Some("docs/my-notes.md"));
+        }
+        let file = &plan.files["docs/my-notes.md"];
+        assert_eq!(file.renamed_from.as_deref(), Some("docs/my_notes.md"));
+        assert!(file.new_text.contains("theirs"));
+        assert!(
+            !file.new_text.contains("mine, not theirs"),
+            "the other machine's section is not overwritten and this row is not written"
+        );
+        assert_eq!(plan.tally()[&Class::Observation].unrecoverable, 1);
+    }
+
+    /// D-R7: every row of an event, observation or link class is moved, already exported, or named in
+    /// a report line, so the population of each class equals its items. The fixture mixes the cases
+    /// that each have a path of their own through the planner.
+    #[test]
+    fn the_population_of_events_observations_and_links_equals_their_items() {
+        let home_head = with_sections(
+            SINGLE_WRITER_MD,
+            &[
+                note_section("e-held", "an event the text holds"),
+                note_section("observation-3", "held, same text"),
+                note_section("observation-4", "held, other machine's text"),
+            ],
+        );
+        let home_head = format!("{home_head}\n## Relations\n\n**Supersedes:** [[plain]]\n");
+        let plan = plan_of_files(
+            &[
+                ("docs/home.md", home_head.as_bytes()),
+                ("docs/plain.md", b"# Plain\n"),
+                ("docs/frozen.md", SINGLE_WRITER_MD.as_bytes()),
+                ("src/x.rs", b"const P: &str = \"../docs/frozen.md\";\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "home", "docs/home.md");
+                add_doc(cat, root, "plain", "docs/plain.md");
+                add_doc(cat, root, "fro", "docs/frozen.md");
+                add_doc(cat, root, "gone", "docs/gone.md");
+                // Twin kinds, a held id and the kinds no text holds (the catalog admits no other kind).
+                add_event(cat, "e1", "home", "note", r#"{"text":"hello"}"#);
+                add_event(cat, "e2", "home", "verdict", r#"{"v":1}"#);
+                add_event(cat, "e3", "home", "intent", r#"{"i":1}"#);
+                add_event(
+                    cat,
+                    "e-held",
+                    "home",
+                    "note",
+                    r#"{"text":"an event the text holds"}"#,
+                );
+                for (n, kind) in [
+                    "field_patch",
+                    "status_change",
+                    "superseded_by",
+                    "worktree_fork",
+                    "worktree_merge",
+                ]
+                .iter()
+                .enumerate()
+                {
+                    add_event(cat, &format!("k{n}"), "home", kind, "{}");
+                }
+                // Observations: carried (1), written (2), held with the same text (3) and with
+                // other text (4).
+                add_observation(cat, "home", "hello");
+                add_observation(cat, "home", "a lone observation");
+                add_observation(cat, "home", "held, same text");
+                add_observation(cat, "home", "this machine's text");
+                // Links: written, no label, no target, a line the text holds.
+                add_link(cat, "home", "plain", "depends_on");
+                add_link(cat, "home", "plain", "v2_rel");
+                add_link(cat, "home", "gone", "depends_on");
+                add_link(cat, "home", "plain", "supersedes");
+                // A non-home, a frozen document and one `HEAD` lacks: every row refused.
+                for doc in ["plain", "fro", "gone"] {
+                    add_event(cat, &format!("e-{doc}"), doc, "note", r#"{"text":"t"}"#);
+                    add_event(cat, &format!("f-{doc}"), doc, "field_patch", "{}");
+                    add_observation(cat, doc, &format!("seen on {doc}"));
+                    add_link(cat, doc, "home", "depends_on");
+                }
+            },
+        );
+        let events: usize = plan
+            .population
+            .iter()
+            .filter(|(key, _)| key.starts_with("event:"))
+            .map(|(_, n)| n)
+            .sum();
+        assert_eq!(events, 4 + 5 + 3 * 2, "the fixture's own count");
+        assert_eq!(plan.population["observation"], 4 + 3);
+        assert_eq!(plan.population["manual_link"], 4 + 3);
+        let count = |class: Class| items_of(&plan, class).len();
+        assert_eq!(count(Class::Event), events, "every event has one item");
+        assert_eq!(
+            count(Class::Observation),
+            plan.population["observation"],
+            "every observation has one item"
+        );
+        assert_eq!(
+            count(Class::ManualLink),
+            plan.population["manual_link"],
+            "every link has one item"
+        );
+        // Each status the fixture was built to reach is reached.
+        let tally = plan.tally();
+        for class in [Class::Event, Class::Observation, Class::ManualLink] {
+            let t = &tally[&class];
+            assert!(t.moved > 0, "{class:?}");
+            assert!(t.already_exported > 0, "{class:?}");
+            assert!(t.unrecoverable > 0, "{class:?}");
+        }
+        assert!(tally[&Class::Event].skipped > 0);
+        assert!(tally[&Class::Observation].skipped > 0);
+    }
 
     #[test]
     fn a_rerun_over_the_written_text_reports_everything_already_exported() {
