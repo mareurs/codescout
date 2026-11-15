@@ -32,9 +32,9 @@
 //!
 //! **Scope, stated so it is not read as wider.** This is a property of the file-writing
 //! tools. It does not stop `run_command` (a shell can write any file the user can, and is
-//! gated by `shell_command_mode`), a human editing the file, or codescout's own `onboarding`
-//! tool's create-if-absent write of `project.toml`, which uses `std::fs::write` and not this
-//! function. (Its `patch_project_table` goes through `atomic_write`, so that one is guarded.) A
+//! gated by `shell_command_mode`) or a human editing the file. Codescout's own `onboarding` tool
+//! is covered: its create-if-absent write of `project.toml` goes through `write_new_utf8`, which
+//! runs this guard, and its `patch_project_table` goes through `atomic_write`. A
 //! `profile = "root"` profile is also unaffected: it already allows every write.
 
 use std::ffi::OsStr;

@@ -1589,6 +1589,26 @@ fn build_key_files(gathered: &GatheredContext) -> Vec<String> {
     key_files
 }
 
+/// Create `path` with `content` unless something is there, for the callers that checked
+/// `exists()` first. `Ok(true)`: this call created it. `Ok(false)`: the file was made by someone
+/// else between the caller's check and the publish, and is left exactly as it is.
+///
+/// "Someone else made it" is `AlreadyExists` **and** a path that is there now
+/// (`symlink_metadata`): `write_new_utf8` re-kinds every other `AlreadyExists` to `Other`, and the
+/// second condition keeps an error that only carries the kind from reading as an occupied target.
+/// Every other error propagates, including a file where a directory of the path should be.
+fn publish_if_absent(path: &std::path::Path, content: &str) -> std::io::Result<bool> {
+    match crate::util::fs::write_new_utf8(path, content) {
+        Ok(()) => Ok(true),
+        Err(e)
+            if e.kind() == std::io::ErrorKind::AlreadyExists && path.symlink_metadata().is_ok() =>
+        {
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Write `.codescout/workspace.toml` for multi-project repos when it does not yet exist.
 fn write_workspace_config_if_needed(
     root: &std::path::Path,
@@ -1626,7 +1646,9 @@ fn write_workspace_config_if_needed(
                 .collect(),
         };
         let toml_str = toml::to_string_pretty(&ws_config)?;
-        std::fs::write(&workspace_config_path, &toml_str)?;
+        // Published without replacing: a `workspace.toml` that appeared after the check above is
+        // someone else's and stays as it is. Any other failure is a failure.
+        publish_if_absent(&workspace_config_path, &toml_str)?;
     }
     Ok(())
 }
@@ -1839,12 +1861,16 @@ async fn perform_full_onboarding(
             table.remove("security");
         }
         let toml_str = toml::to_string_pretty(&doc)?;
-        std::fs::write(&config_path, &toml_str)?;
-        // Reload in-memory config so the version is visible within this session
-        ctx.agent
-            .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
-            .await;
-        true
+        // Published without replacing: a `project.toml` that appeared after the check above is
+        // someone else's, so this call did not create it and neither reloads nor reports it.
+        let created = publish_if_absent(&config_path, &toml_str)?;
+        if created {
+            // Reload in-memory config so the version is visible within this session
+            ctx.agent
+                .reload_config_if_project_toml_for(ctx.workspace_override.as_deref(), &config_path)
+                .await;
+        }
+        created
     } else {
         false
     };
@@ -3862,5 +3888,416 @@ mod atomic_patch_tests {
         let doc: toml::Table = toml::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(doc["project"]["added"].as_integer(), Some(7));
         assert_eq!(doc["security"]["shell_enabled"].as_bool(), Some(false));
+    }
+}
+
+/// The two create-if-absent writes of onboarding (`project.toml`, and `workspace.toml` for a repo
+/// with several projects) check that the file is absent, then publish. A file that appears between
+/// the check and the publish belongs to someone else and must stay as it is.
+///
+/// Each refusal test plants the occupant THROUGH the publish seam of `util::fs`, so the path is
+/// free when the caller's own `exists()` check runs (a path that is occupied before the call is
+/// skipped by that check and passes on the unfixed code). The seam is thread-local, so these run
+/// on the test's own thread: a plain `#[test]` or a current-thread `#[tokio::test]`.
+#[cfg(all(test, unix))]
+mod no_clobber_create_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    const THEIRS: &str = "[project]\nname = \"theirs\"\n";
+    const THEIRS_WITH_SECURITY: &str =
+        "[project]\nname = \"theirs\"\n\n[security]\nshell_command_mode = \"disabled\"\n";
+    const THEIR_WORKSPACE: &str = "# theirs\n[workspace]\nname = \"theirs\"\n";
+
+    type Planted = std::rc::Rc<std::cell::Cell<u32>>;
+
+    /// Plant `content` at any path named `name` that is about to be published, and count the
+    /// plants so a test can assert its control: the file really appeared in the window.
+    fn plant(
+        name: &'static str,
+        content: &'static str,
+    ) -> (crate::util::fs::BeforePublishGuard, Planted) {
+        let planted: Planted = Default::default();
+        let seen = planted.clone();
+        let guard = crate::util::fs::set_before_publish(move |p| {
+            if p.file_name().and_then(|n| n.to_str()) == Some(name) {
+                std::fs::write(p, content).unwrap();
+                seen.set(seen.get() + 1);
+            }
+        });
+        (guard, planted)
+    }
+
+    async fn ctx_over(root: &std::path::Path) -> ToolContext {
+        let agent = crate::agent::Agent::new(Some(root.to_path_buf()))
+            .await
+            .unwrap();
+        ToolContext {
+            agent,
+            lsp: crate::lsp::LspManager::new_arc(),
+            output_buffer: std::sync::Arc::new(crate::tools::output_buffer::OutputBuffer::new(20)),
+            progress: None,
+            peer: None,
+            section_coverage: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::tools::section_coverage::SectionCoverage::new(),
+            )),
+            guide_hints_emitted: std::sync::Arc::new(parking_lot::Mutex::new(Default::default())),
+            workspace_override: None,
+        }
+    }
+
+    /// A project root with a `.codescout` folder, no `project.toml`, and one source file.
+    async fn fixture() -> (tempfile::TempDir, ToolContext) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".codescout")).unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        let ctx = ctx_over(dir.path()).await;
+        (dir, ctx)
+    }
+
+    fn project(name: &str, language: &str, manifest: &str) -> crate::workspace::DiscoveredProject {
+        crate::workspace::DiscoveredProject {
+            id: name.into(),
+            relative_root: name.into(),
+            languages: vec![language.into()],
+            manifest: Some(manifest.into()),
+        }
+    }
+
+    /// A context that lists two projects, so `write_workspace_config_if_needed` writes.
+    fn two_projects() -> GatheredContext {
+        GatheredContext {
+            readme_path: None,
+            build_file_name: None,
+            claude_md_exists: false,
+            ci_files: vec![],
+            entry_points: vec![],
+            test_dirs: vec![],
+            features_md: None,
+            projects: vec![
+                project("a", "rust", "Cargo.toml"),
+                project("b", "go", "go.mod"),
+            ],
+        }
+    }
+
+    fn leftovers(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect()
+    }
+
+    fn project_toml(root: &std::path::Path) -> toml::Table {
+        let text = std::fs::read_to_string(root.join(".codescout").join("project.toml")).unwrap();
+        toml::from_str(&text).unwrap()
+    }
+
+    /// A `project.toml` that appears after the existence check is kept: not replaced, not
+    /// reported as created by this call.
+    /// Mutation named: `std::fs::write` at the site never reaches the seam (control fails) and
+    /// would replace it; dropping the `AlreadyExists` arm makes the call fail.
+    #[tokio::test]
+    async fn a_project_toml_that_appears_after_the_existence_check_is_kept_and_not_reported_created(
+    ) {
+        let (dir, ctx) = fixture().await;
+        let (_hook, planted) = plant("project.toml", THEIRS);
+
+        let out = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        assert_eq!(planted.get(), 1, "control: the file appeared in the window");
+        assert_eq!(out["config_created"], false, "{out}");
+        let doc = project_toml(dir.path());
+        assert_eq!(doc["project"]["name"].as_str(), Some("theirs"), "{doc}");
+        assert!(
+            doc.get("embeddings").is_none(),
+            "onboarding's content replaced theirs: {doc}"
+        );
+        assert_eq!(
+            leftovers(&dir.path().join(".codescout")),
+            Vec::<String>::new()
+        );
+    }
+
+    /// The same, for a `project.toml` that holds a `[security]` table. Onboarding's own content has
+    /// none, so a guard that compared it with the file on disk would refuse with
+    /// `PermissionDenied`; the call must instead succeed and leave their table as written.
+    #[tokio::test]
+    async fn a_project_toml_with_a_security_table_that_appears_in_the_window_is_kept_and_the_call_succeeds(
+    ) {
+        let (dir, ctx) = fixture().await;
+        let (_hook, planted) = plant("project.toml", THEIRS_WITH_SECURITY);
+
+        let out = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        assert_eq!(planted.get(), 1, "control: the file appeared in the window");
+        assert_eq!(out["config_created"], false, "{out}");
+        let doc = project_toml(dir.path());
+        assert_eq!(doc["project"]["name"].as_str(), Some("theirs"), "{doc}");
+        assert_eq!(
+            doc["security"]["shell_command_mode"].as_str(),
+            Some("disabled"),
+            "their [security] table changed: {doc}"
+        );
+        assert!(doc.get("embeddings").is_none(), "{doc}");
+        assert_eq!(
+            leftovers(&dir.path().join(".codescout")),
+            Vec::<String>::new()
+        );
+    }
+
+    /// A `workspace.toml` that appears after the existence check is kept, byte for byte, and the
+    /// call succeeds.
+    #[test]
+    fn a_workspace_toml_that_appears_after_the_existence_check_is_kept_and_the_call_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".codescout")).unwrap();
+        let (_hook, planted) = plant("workspace.toml", THEIR_WORKSPACE);
+
+        write_workspace_config_if_needed(dir.path(), &two_projects())
+            .expect("a file made by someone else is not an error");
+
+        assert_eq!(planted.get(), 1, "control: the file appeared in the window");
+        let cfg = dir.path().join(".codescout");
+        assert_eq!(
+            std::fs::read_to_string(cfg.join("workspace.toml")).unwrap(),
+            THEIR_WORKSPACE
+        );
+        assert_eq!(leftovers(&cfg), Vec::<String>::new());
+    }
+
+    /// With nothing in the way, `workspace.toml` is created with the content `std::fs::write`
+    /// wrote, and with the mode a plain write gives a new file.
+    #[test]
+    fn a_first_workspace_toml_is_created_with_the_serialised_workspace_and_the_plain_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join(".codescout")).unwrap();
+
+        write_workspace_config_if_needed(root, &two_projects()).unwrap();
+
+        let path = root.join(".codescout").join("workspace.toml");
+        let name = root.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            // What `toml::to_string_pretty` produced for this workspace, captured from the
+            // `std::fs::write` this site used before.
+            format!(
+                "exclude_projects = []\n\n[workspace]\nname = \"{name}\"\ndiscovery_max_depth = 3\n\n\
+                 [resources]\nmax_lsp_clients = 5\nidle_timeout_secs = 600\n\n\
+                 [[project]]\nid = \"a\"\nroot = \"a\"\nlanguages = [\"rust\"]\ndepends_on = []\n\n\
+                 [[project]]\nid = \"b\"\nroot = \"b\"\nlanguages = [\"go\"]\ndepends_on = []\n"
+            )
+        );
+        // The mode a new file gets from a plain write, whatever the umask is.
+        let sibling = root.join("plain");
+        std::fs::write(&sibling, "x").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            std::fs::metadata(&sibling).unwrap().permissions().mode() & 0o777
+        );
+        assert_eq!(leftovers(&root.join(".codescout")), Vec::<String>::new());
+    }
+
+    /// A first onboarding of a repo with two projects creates both files.
+    #[tokio::test]
+    async fn a_first_onboarding_creates_project_toml_and_workspace_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".codescout")).unwrap();
+        for (sub, manifest) in [("a", "Cargo.toml"), ("b", "go.mod")] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+            std::fs::write(root.join(sub).join(manifest), "").unwrap();
+        }
+        let ctx = ctx_over(root).await;
+
+        let out = Onboarding.call(json!({}), &ctx).await.unwrap();
+
+        assert_eq!(out["config_created"], true, "{out}");
+        let doc = project_toml(root);
+        assert_eq!(
+            doc["project"]["name"].as_str(),
+            root.file_name().unwrap().to_str()
+        );
+        assert!(doc.get("embeddings").is_some(), "{doc}");
+        assert!(doc.get("security").is_none(), "{doc}");
+        let ws: toml::Table = toml::from_str(
+            &std::fs::read_to_string(root.join(".codescout").join("workspace.toml")).unwrap(),
+        )
+        .unwrap();
+        let ids: Vec<&str> = ws["project"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p["id"].as_str())
+            .collect();
+        assert!(ids.contains(&"a") && ids.contains(&"b"), "{ws}");
+        assert_eq!(leftovers(&root.join(".codescout")), Vec::<String>::new());
+    }
+
+    /// Run `Onboarding` over a fresh project under the stock observer (Linux), planting a
+    /// `project.toml` in the publish window when asked, and return the store's records.
+    #[cfg(target_os = "linux")]
+    async fn observed_onboarding(
+        plant_project_toml: bool,
+    ) -> (
+        tempfile::TempDir,
+        Vec<crate::observations::contract::ObservationV1>,
+    ) {
+        use crate::observations::server::{observe_call, LocalInvocationId, ObservationContext};
+        use crate::observations::store::{enable, read_store, Limits};
+        let (dir, ctx) = fixture().await;
+        git2::Repository::init(dir.path()).unwrap();
+        enable(dir.path()).unwrap();
+        let _hook = plant_project_toml.then(|| plant("project.toml", THEIRS));
+        let meta = json!({"sessionId":"root","threadId":"child","callId":"onboarding-call"});
+        let context = ObservationContext::from_meta(
+            Some(dir.path().to_path_buf()),
+            meta.as_object(),
+            Some(&crate::tools::ClientIdentity {
+                name: "codex-mcp-client".into(),
+                version: Some("0.167.0".into()),
+            }),
+        );
+        let arguments = json!({});
+        observe_call(
+            context,
+            LocalInvocationId::new("onboarding-connection", 0),
+            "onboarding",
+            &arguments,
+            async {
+                Onboarding
+                    .call_content(arguments.clone(), &ctx)
+                    .await
+                    .map(rmcp::model::CallToolResult::success)
+                    .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))
+            },
+        )
+        .await
+        .unwrap();
+        let read = read_store(dir.path(), Limits::default());
+        assert!(read.diagnostics.is_empty(), "{:?}", read.diagnostics);
+        (dir, read.records)
+    }
+
+    /// What the observer records for the create: the phases of `project.toml`, in order, and the
+    /// outcome of the call.
+    #[cfg(target_os = "linux")]
+    fn project_toml_phases_and_outcome(
+        dir: &tempfile::TempDir,
+        records: &[crate::observations::contract::ObservationV1],
+    ) -> (Vec<String>, String) {
+        let path = dir
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join(".codescout")
+            .join("project.toml");
+        let phases = records
+            .iter()
+            .flat_map(|r| r.targets.iter())
+            .filter(|t| t.path == path.to_str().unwrap())
+            .map(|t| t.phase.to_string())
+            .collect();
+        let outcome = records
+            .iter()
+            .find(|r| r.event == "result-observed")
+            .map(|r| r.outcome.to_string())
+            .unwrap();
+        (phases, outcome)
+    }
+
+    /// The facts `write_new_utf8` adds to the observer's record for these creates do no harm: a
+    /// create that wins reads `attempted`, `committed`; one that loses the race reads `attempted`,
+    /// `uncertain` (the file is theirs, the observer cannot call it ours); each is followed by the
+    /// `attempted`, `committed` of the baseline patch, and the call still ends `returned-success`.
+    /// Measured against the real tool under the stock observer.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn the_creates_record_their_phases_and_do_not_change_the_calls_outcome() {
+        let phases = |p: &[&str]| p.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        let (dir, records) = observed_onboarding(false).await;
+        assert_eq!(
+            project_toml_phases_and_outcome(&dir, &records),
+            (
+                phases(&["attempted", "committed", "attempted", "committed"]),
+                "returned-success".to_string()
+            )
+        );
+
+        let (dir, records) = observed_onboarding(true).await;
+        assert_eq!(
+            project_toml_phases_and_outcome(&dir, &records),
+            (
+                phases(&["attempted", "uncertain", "attempted", "committed"]),
+                "returned-success".to_string()
+            )
+        );
+    }
+
+    /// A regular file where a directory of the config path should be is an ERROR, not "someone
+    /// else made it": `write_new_utf8` reports that as a failure other than `AlreadyExists`.
+    #[test]
+    fn a_file_in_the_way_of_the_workspace_toml_directory_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join(".codescout");
+        std::fs::write(&blocker, "not a directory").unwrap();
+
+        let err = write_workspace_config_if_needed(dir.path(), &two_projects())
+            .expect_err("a blocked path is not a created file");
+
+        let io = err.downcast_ref::<std::io::Error>().expect("an io::Error");
+        assert_ne!(io.kind(), std::io::ErrorKind::AlreadyExists, "{err:#}");
+        assert_eq!(
+            std::fs::read_to_string(&blocker).unwrap(),
+            "not a directory"
+        );
+    }
+
+    /// A `project.toml` that cannot be created for a reason other than "occupied" is an ERROR
+    /// too: the OS refuses the staging file in a read-only `.codescout`, and the call reports it
+    /// instead of carrying on as if someone else had made the file.
+    #[tokio::test]
+    async fn a_project_toml_that_cannot_be_staged_is_an_error_not_created_by_someone_else() {
+        let (dir, ctx) = fixture().await;
+        let cfg = dir.path().join(".codescout");
+        std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::File::create(cfg.join("probe")).is_ok() {
+            // A process that ignores directory modes (root) cannot show the refusal.
+            std::fs::remove_file(cfg.join("probe")).unwrap();
+            std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+
+        let result = Onboarding.call(json!({}), &ctx).await;
+        std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let err = result.expect_err("a project.toml that was never written is not 'created'");
+        let io = err.downcast_ref::<std::io::Error>().expect("an io::Error");
+        assert_eq!(io.raw_os_error(), Some(libc::EACCES), "{err:#}");
+        assert!(!cfg.join("project.toml").exists());
+    }
+
+    /// The helper both sites use, one outcome at a time: a free path is created (`true`), a path
+    /// that is occupied is left alone (`false`), and a refusal that is not "occupied" is an error.
+    #[test]
+    fn publish_if_absent_tells_created_from_occupied_from_failed() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let free = dir.path().join("free.toml");
+        assert!(publish_if_absent(&free, "NEW").unwrap());
+        assert_eq!(std::fs::read_to_string(&free).unwrap(), "NEW");
+
+        assert!(!publish_if_absent(&free, "NEWER").unwrap());
+        assert_eq!(std::fs::read_to_string(&free).unwrap(), "NEW");
+
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, "file").unwrap();
+        let e = publish_if_absent(&blocker.join("x.toml"), "NEW")
+            .expect_err("a file where a directory belongs is not an occupied target");
+        assert_ne!(e.kind(), std::io::ErrorKind::AlreadyExists, "{e}");
+        assert_eq!(std::fs::read_to_string(&blocker).unwrap(), "file");
     }
 }
