@@ -82,7 +82,7 @@ pub fn rows(
 
 /// One table cell's text: a newline or carriage return becomes a space, and `|` and `[` are
 /// escaped, so the cell stays one cell and its text can never open a citation.
-fn cell(s: &str) -> String {
+pub(super) fn cell(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

@@ -5,6 +5,7 @@
 pub mod checks;
 pub mod collection;
 pub mod entry;
+pub mod hot_view;
 pub mod layout;
 pub mod naming;
 pub mod relations;
