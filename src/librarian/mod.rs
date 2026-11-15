@@ -42,6 +42,7 @@ pub mod current_project;
 
 pub mod server;
 pub mod tools;
+pub mod tracker_migration;
 
 use anyhow::Result;
 
