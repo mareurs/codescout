@@ -10,7 +10,7 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 238
+entry_high_water_F: 239
 entry_high_water_W: 159
 ---
 
@@ -92,6 +92,7 @@ entry_high_water_W: 159
 |----|------|---------:|----------|--------|-------|
 | F-238 | 2026-11-12 | med | process | open | **A confirmation run executed my mutant binary because a scratch build shared the slot with the real tree** — 16 tests failed in all 20 iterations; the baked-in manifest path and the test count gave it away; with-slot evicts by checkout, not by --manifest-path. |
 | F-237 | 2026-11-12 | med | measurement | promoted-to-bug-tracker | **A load job I ran on the shared host overlapped the timeouts that a later decision counted** — all three timed_out rows of 2026-11-12 fall in my burn.py windows, two more beside other sessions' gates; coincidence, not shown as cause; bug 20927ccfe293c34e. |
+| F-239 | 2026-11-14 | low | plan-prose | mitigated | **The atomic-write-door plan names no refusal from `atomic_write`'s protected-config check, states a door signature the code does not have, and counts references as call sites** — recon before Task 1; none blocks the plan; ruling R1 in the SDD ledger. |
 | F-218 | 2026-11-08 | med | process | mitigated | **A chained fast-forward merge exited 1 with no message, twice, because a peer held a dirty file and then committed to the base** - recovered by messaging the peer, then merging in the isolated worktree and gating the identical tree after the fast-forward. |
 | F-206 | 2026-11-01 | med | plan-drift | open | **"Owners only" holds for the red hint but not for `file-provenance.py`, which the gate and the pre-edit hook also run** — a floor on operations would change the CLI's MINE/SHARED verdicts; the hook's "~7s" is now 16 to 23 s warm. |
 | F-197 | 2026-10-15 | med | stale-doc | fixed-verified | **The `ArtifactBackend::Qdrant` doc named a superseded collection, and I counted it** — the live collection is per project (`artifact_chunks_<base>_<hash>`, 48,223 points here), so my "the Qdrant index looks stale" was wrong. Corrected in `934946e9`. |
@@ -18445,6 +18446,22 @@ Also seen, not a gap: background children run in their own process group (`proce
 **Fix idea / Pointer:** `scripts/with-slot.sh` could refuse, or warn, when `--manifest-path` names a manifest outside the checkout of the working directory. That is the owner's choice and not done. Related: F-237 (an instrument that wrote into what it measured), `a73c49456056fb92` (the mutation matrix), `8117d5eac05e5723` (the test whose confirmation run was affected).
 
 ---
+
+## F-239 — The atomic-write-door plan omits atomic_write's protected-config refusal, misstates the door's signature, and counts references as call sites
+
+**Valid:** dated 2026-11-14
+
+**Observed:** 2026-11-14, scouting `docs/superpowers/plans/2026-11-14-atomic-catalogued-write-door.md` before the Task 1 dispatch (bug a806db1ec4ea162b). Three places where the plan text and the code differ. None blocks the plan.
+
+1. **A refusal the plan does not name.** The plan says the door calls `crate::util::fs::atomic_write` and that a read-only target is the only new refusal to keep. `atomic_write` (`src/util/fs.rs:428`) first runs `config::protected_files::check_write` and returns `PermissionDenied` for `.codescout/project.toml`, the global config and a loaded project's config. The door did not refuse those before. No door writer targets them: the one non-`.md` writer, `identity/repo_name.rs:182`, writes `.codescout/repo.toml`.
+2. **A signature the plan states as fact.** The plan's Interfaces section gives `contents: impl AsRef<str>`. The door today takes `impl AsRef<[u8]>` (`src/librarian/util.rs:85`), and `atomic_write` takes `&str`. Ruling A-R3 already lets the compiler decide.
+3. **A count that mixes two things.** "19 call sites" is the number of references to `write_catalogued_file` (definition, imports and tests included). Production call sites: 13.
+
+**Cost without the scout:** an implementer meets item 1 as an unexpected `PermissionDenied` in a test or in review, and spends a round on it. Items 2 and 3 cost a compile error and a wrong estimate of the change size.
+
+**Handled:** ruling R1 in the SDD ledger (`.superpowers/sdd/2026-11-14-atomic-catalogued-write-door/progress.md`) accepts item 1 as the same guard the edit tools already have. The Task 1 brief carries all three.
+
+**What this does not establish:** I read the guard's scope from `is_project_toml` and `check_write_with`. I did not run a write through the door against a protected path. Whether any catalogued document can resolve to a protected config path is not shown.
 
 ## Template for new entries
 
