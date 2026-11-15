@@ -861,6 +861,17 @@ fn every_problem_text_names_its_remedy() {
         WriteProblem::EmptyUpdate,
         WriteProblem::KindFixed,
         WriteProblem::KindNotRepairable("bug".into()),
+        WriteProblem::DateOrder {
+            field: "closed",
+            date: d("2026-07-01"),
+            created: d("2026-08-01"),
+        },
+        WriteProblem::DateInFuture {
+            field: "created",
+            date: d("2026-12-01"),
+        },
+        WriteProblem::ClosedMismatch { terminal: true },
+        WriteProblem::ClosedMismatch { terminal: false },
         WriteProblem::Invalid(vec![entry_problem("waiting")]),
         // Several inner problems must not add a second separator.
         WriteProblem::Invalid(vec![entry_problem("waiting"), entry_problem("parked")]),
@@ -884,6 +895,9 @@ fn every_problem_text_names_its_remedy() {
         | WriteProblem::EmptyUpdate
         | WriteProblem::KindFixed
         | WriteProblem::KindNotRepairable(_)
+        | WriteProblem::DateOrder { .. }
+        | WriteProblem::DateInFuture { .. }
+        | WriteProblem::ClosedMismatch { .. }
         | WriteProblem::Invalid(_) => (),
     };
     const OPENERS: [&str; 7] = ["pass", "use", "remove", "declare", "fix", "give", "name"];
@@ -1184,4 +1198,167 @@ fn update_entry_re_reads_its_result() {
     )
     .unwrap_err();
     assert!(!invalid(&problems).is_empty(), "{problems:?}");
+}
+
+// ---- render_entry ----------------------------------------------------------------------------
+
+fn dates(created: &str, since: &str, closed: Option<&str>) -> EntryDates {
+    EntryDates {
+        created: d(created),
+        status_since: d(since),
+        closed: closed.map(d),
+    }
+}
+
+fn rules(refuse_past_revisit: bool, fixed_stem: Option<&str>) -> RenderRules {
+    RenderRules {
+        refuse_past_revisit,
+        fixed_stem: fixed_stem.map(str::to_string),
+    }
+}
+
+fn render(
+    input: &NewEntry<'_>,
+    dates: &EntryDates,
+    rules: &RenderRules,
+) -> Result<EntryFile, Vec<WriteProblem>> {
+    render_entry(&schema(), DIR, None, input, dates, d("2026-11-15"), rules)
+}
+
+#[test]
+fn render_entry_writes_the_three_dates_it_is_given() {
+    let mut i = input("friction", "Old and closed");
+    i.status = Some("fixed");
+    let file = render(
+        &i,
+        &dates("2026-08-01", "2026-09-01", Some("2026-10-01")),
+        &rules(true, None),
+    )
+    .unwrap();
+    let m = meta(&file.text);
+    assert_eq!(m.created, d("2026-08-01"));
+    assert_eq!(m.status_since, d("2026-09-01"));
+    assert_eq!(m.closed, Some(d("2026-10-01")));
+}
+
+#[test]
+fn render_entry_builds_the_dated_stem_from_created() {
+    let i = input("friction", "Old one");
+    let file = render(
+        &i,
+        &dates("2026-08-01", "2026-08-01", None),
+        &rules(true, None),
+    )
+    .unwrap();
+    assert_eq!(file.rel_path, format!("{DIR}/2026-08-01-old-one.md"));
+    assert_eq!(file.key.as_str(), "2026-08-01-old-one");
+}
+
+#[test]
+fn render_entry_uses_a_fixed_stem() {
+    let i = input("friction", "Whatever the title says");
+    let file = render(
+        &i,
+        &dates("2026-08-01", "2026-08-01", None),
+        &rules(true, Some("ic-16-declared-not-wired")),
+    )
+    .unwrap();
+    assert_eq!(file.rel_path, format!("{DIR}/ic-16-declared-not-wired.md"));
+    assert_eq!(file.key.as_str(), "ic-16-declared-not-wired");
+    // A stem that is not a key is refused.
+    let problems = render(
+        &i,
+        &dates("2026-08-01", "2026-08-01", None),
+        &rules(true, Some("Not A Key")),
+    )
+    .unwrap_err();
+    assert!(
+        problems.iter().any(|p| matches!(p, WriteProblem::Stem(_))),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn render_entry_refuses_dates_out_of_order() {
+    let mut i = input("friction", "Backwards");
+    i.status = Some("fixed");
+    let problems = render(
+        &i,
+        &dates("2026-08-01", "2026-07-01", Some("2026-07-15")),
+        &rules(true, None),
+    )
+    .unwrap_err();
+    assert!(
+        problems.contains(&WriteProblem::DateOrder {
+            field: "status_since",
+            date: d("2026-07-01"),
+            created: d("2026-08-01"),
+        }),
+        "{problems:?}"
+    );
+    assert!(
+        problems.contains(&WriteProblem::DateOrder {
+            field: "closed",
+            date: d("2026-07-15"),
+            created: d("2026-08-01"),
+        }),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn render_entry_refuses_a_date_after_now() {
+    let i = input("friction", "From the future");
+    let problems = render(
+        &i,
+        &dates("2026-12-01", "2026-12-01", None),
+        &rules(true, None),
+    )
+    .unwrap_err();
+    assert!(
+        problems.contains(&WriteProblem::DateInFuture {
+            field: "created",
+            date: d("2026-12-01"),
+        }),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn render_entry_refuses_closed_mismatch() {
+    let open = input("friction", "Open with closed");
+    let problems = render(
+        &open,
+        &dates("2026-08-01", "2026-08-01", Some("2026-09-01")),
+        &rules(true, None),
+    )
+    .unwrap_err();
+    assert!(
+        problems.contains(&WriteProblem::ClosedMismatch { terminal: false }),
+        "{problems:?}"
+    );
+    let mut done = input("friction", "Terminal without closed");
+    done.status = Some("fixed");
+    let problems = render(
+        &done,
+        &dates("2026-08-01", "2026-08-01", None),
+        &rules(true, None),
+    )
+    .unwrap_err();
+    assert!(
+        problems.contains(&WriteProblem::ClosedMismatch { terminal: true }),
+        "{problems:?}"
+    );
+}
+
+#[test]
+fn render_entry_keeps_a_past_revisit_by_when_the_rule_is_off() {
+    let mut i = input("friction", "Parked long ago");
+    i.status = Some("parked");
+    i.revisit_by = Some(d("2026-10-01"));
+    let when = dates("2026-08-01", "2026-08-01", None);
+    let m = meta(&render(&i, &when, &rules(false, None)).unwrap().text);
+    assert_eq!(m.revisit_by, Some(d("2026-10-01")));
+    let problems = render(&i, &when, &rules(true, None)).unwrap_err();
+    assert_eq!(problems, vec![WriteProblem::RevisitPast(d("2026-10-01"))]);
 }

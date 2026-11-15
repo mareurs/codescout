@@ -8,7 +8,7 @@ use chrono::NaiveDate;
 use serde_json::Value;
 
 use super::entry::{parse_entry, validate_entry, EntryMeta, EntryProblem, RESERVED};
-use super::naming::{entry_rel_path, entry_stem, slug, StemError};
+use super::naming::{entry_rel_path, entry_stem, slug, StemError, RESERVED_STEM};
 use super::schema::{CollectionSchema, StatusClass};
 use crate::librarian::frontmatter::{self, Frontmatter, RESERVED_KEYS};
 use crate::librarian::identity::key::Key;
@@ -36,6 +36,19 @@ pub enum WriteProblem {
     RevisitNotNeeded(String),
     #[error("revisit_by {0} is before today; pass a revisit_by of today or later")]
     RevisitPast(NaiveDate),
+    #[error("{field} {date} is before created {created}; pass a {field} of {created} or later")]
+    DateOrder {
+        field: &'static str,
+        date: NaiveDate,
+        created: NaiveDate,
+    },
+    #[error("{field} {date} is after today; pass a {field} of today or earlier")]
+    DateInFuture {
+        field: &'static str,
+        date: NaiveDate,
+    },
+    #[error("{}", closed_mismatch_text(*.terminal))]
+    ClosedMismatch { terminal: bool },
     #[error("the update changes nothing; pass at least one of status, revisit_by, title, tags, valid or fields")]
     EmptyUpdate,
     #[error("entry_kind is fixed: an update cannot change it; remove entry_kind from the update")]
@@ -44,6 +57,14 @@ pub enum WriteProblem {
     KindNotRepairable(String),
     #[error("the result is not a valid entry: {}; fix each problem named", problems_text(.0))]
     Invalid(Vec<EntryProblem>),
+}
+
+fn closed_mismatch_text(terminal: bool) -> &'static str {
+    if terminal {
+        "the status is terminal and no closed date is given; give a closed date"
+    } else {
+        "the status is not terminal and a closed date is given; remove the closed date"
+    }
 }
 
 const TEMPLATE_HEADING: &str = "## Entry template";
@@ -424,14 +445,44 @@ pub fn update_entry(
     Ok(text)
 }
 
-/// Render a new entry file. Every problem the pre-checks find is returned together; the text is
-/// rendered and re-read only when they found none.
-pub fn new_entry(
+/// The three dates an entry file carries. The caller owns them: `new_entry` gives all three the
+/// value of today, a migration gives the dates the old entry had.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryDates {
+    pub created: NaiveDate,
+    pub status_since: NaiveDate,
+    pub closed: Option<NaiveDate>,
+}
+
+/// How `render_entry` differs from `new_entry`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderRules {
+    /// Refuse a `revisit_by` before `now`. A migration of old entries turns this off.
+    pub refuse_past_revisit: bool,
+    /// The file stem to use in place of the dated or slug stem built from the title.
+    pub fixed_stem: Option<String>,
+}
+
+/// The key of a fixed stem: the key rules `key_of` applies to a file name, and the reserved stem
+/// is refused.
+fn fixed_key(stem: &str) -> Result<Key, StemError> {
+    let key = Key::parse(stem).map_err(StemError::BadKey)?;
+    if key.as_str() == RESERVED_STEM {
+        return Err(StemError::ReservedName(key.as_str().to_string()));
+    }
+    Ok(key)
+}
+
+/// Render a new entry file with the dates the caller gives. Every problem the pre-checks find is
+/// returned together; the text is rendered and re-read only when they found none.
+pub fn render_entry(
     schema: &CollectionSchema,
     collection_dir: &str,
     template: Option<&str>,
     input: &NewEntry<'_>,
-    today: NaiveDate,
+    dates: &EntryDates,
+    now: NaiveDate,
+    rules: &RenderRules,
 ) -> Result<EntryFile, Vec<WriteProblem>> {
     let mut problems = Vec::new();
     if !schema.entry_kinds.iter().any(|k| k == input.entry_kind) {
@@ -445,24 +496,54 @@ pub fn new_entry(
             problems.push(WriteProblem::RevisitNotNeeded(status.to_string()));
         }
         Some(_) => {
-            if let Some(date) = input.revisit_by.filter(|date| *date < today) {
+            let past = input
+                .revisit_by
+                .filter(|date| rules.refuse_past_revisit && *date < now);
+            if let Some(date) = past {
                 problems.push(WriteProblem::RevisitPast(date));
             }
         }
     }
+    if let Some(class) = class {
+        let terminal = class == StatusClass::Terminal;
+        if terminal != dates.closed.is_some() {
+            problems.push(WriteProblem::ClosedMismatch { terminal });
+        }
+    }
+    let dated = [
+        ("created", Some(dates.created)),
+        ("status_since", Some(dates.status_since)),
+        ("closed", dates.closed),
+    ];
+    for (field, date) in dated {
+        let Some(date) = date else { continue };
+        if field != "created" && date < dates.created {
+            problems.push(WriteProblem::DateOrder {
+                field,
+                date,
+                created: dates.created,
+            });
+        }
+        if date > now {
+            problems.push(WriteProblem::DateInFuture { field, date });
+        }
+    }
     let title_slug = slug(input.title).filter(|_| !input.title.contains(['\n', '\r']));
-    let key = match &title_slug {
-        None => {
+    let stem = match (&title_slug, &rules.fixed_stem) {
+        (None, _) => {
             problems.push(WriteProblem::Title(input.title.to_string()));
             None
         }
-        Some(s) => match entry_stem(schema.key_style, today, s) {
-            Ok(key) => Some(key),
-            Err(e) => {
-                problems.push(WriteProblem::Stem(e));
-                None
-            }
-        },
+        (Some(_), Some(fixed)) => Some(fixed_key(fixed)),
+        (Some(s), None) => Some(entry_stem(schema.key_style, dates.created, s)),
+    };
+    let key = match stem {
+        None => None,
+        Some(Ok(key)) => Some(key),
+        Some(Err(e)) => {
+            problems.push(WriteProblem::Stem(e));
+            None
+        }
     };
     for name in input.fields.keys() {
         if is_reserved_name(name) || !schema.fields.contains_key(name) {
@@ -481,10 +562,10 @@ pub fn new_entry(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     extra.insert("entry_kind".into(), Value::String(input.entry_kind.into()));
-    extra.insert("status_since".into(), iso(today));
-    extra.insert("created".into(), iso(today));
-    if class == StatusClass::Terminal {
-        extra.insert("closed".into(), iso(today));
+    extra.insert("status_since".into(), iso(dates.status_since));
+    extra.insert("created".into(), iso(dates.created));
+    if let Some(closed) = dates.closed {
+        extra.insert("closed".into(), iso(closed));
     }
     if let Some(date) = input.revisit_by {
         extra.insert("revisit_by".into(), iso(date));
@@ -513,6 +594,36 @@ pub fn new_entry(
         key,
         text,
     })
+}
+
+/// Render a new entry file, dated today. See [`render_entry`].
+pub fn new_entry(
+    schema: &CollectionSchema,
+    collection_dir: &str,
+    template: Option<&str>,
+    input: &NewEntry<'_>,
+    today: NaiveDate,
+) -> Result<EntryFile, Vec<WriteProblem>> {
+    let terminal = schema
+        .statuses
+        .get(input.status.unwrap_or(&schema.initial_status))
+        .is_some_and(|class| *class == StatusClass::Terminal);
+    render_entry(
+        schema,
+        collection_dir,
+        template,
+        input,
+        &EntryDates {
+            created: today,
+            status_since: today,
+            closed: terminal.then_some(today),
+        },
+        today,
+        &RenderRules {
+            refuse_past_revisit: true,
+            fixed_stem: None,
+        },
+    )
 }
 
 #[cfg(test)]
