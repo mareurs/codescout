@@ -1137,7 +1137,9 @@ mod tests {
 
         let sites = src.matches("EmbeddingService::with_budget(").count();
         let attached = src.matches(".with_vector_cache(model, cache)").count();
-        let bound = src.matches("VectorCache::beside(Some(&db_path))").count();
+        let bound = src
+            .matches("VectorCache::open(&paths.vector_cache)")
+            .count();
 
         assert!(sites >= 1, "found no construction site; the scan is stale");
         assert!(
@@ -1151,8 +1153,8 @@ mod tests {
         );
         assert_eq!(
             bound, sites,
-            "every site binds `cache` with `VectorCache::beside(Some(&db_path))`, so the cache \
-             sits beside the catalog the site opens"
+            "every site opens the machine's cache (`paths.vector_cache`), never a path made from \
+             a catalog it opens"
         );
         assert_eq!(
             src.matches(".with_vector_cache(\"").count(),

@@ -788,23 +788,4 @@ mod tests {
         assert_eq!(user_version(&conn), SCHEMA_VERSION);
         assert_eq!(table_names(&conn).len(), 8);
     }
-    // mutation: make `derived_catalog_beside` return the old path, or a file of another directory.
-    #[test]
-    fn the_new_catalog_sits_beside_the_old_one_and_shares_its_vector_cache() {
-        use crate::librarian::vector_cache::{VectorCache, VECTOR_CACHE_FILE};
-        let dir = tempfile::tempdir().unwrap();
-        let old = dir.path().join("catalog.db");
-        let new = derived_catalog_beside(&old);
-        assert_eq!(new, dir.path().join("derived.db"));
-        assert_eq!(new.file_name().unwrap(), DERIVED_CATALOG_FILE);
-
-        let from_new = VectorCache::beside(Some(&new));
-        let from_old = VectorCache::beside(Some(&old));
-        assert_eq!(from_new.path(), from_old.path());
-        assert_eq!(
-            from_new.path().unwrap(),
-            dir.path().join(VECTOR_CACHE_FILE),
-            "both catalogs share one vector cache"
-        );
-    }
 }

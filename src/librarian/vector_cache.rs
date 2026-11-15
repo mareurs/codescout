@@ -14,7 +14,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-/// File name of the cache, in the directory of the catalog file.
+/// File name of the cache, in the machine's librarian directory (`LibrarianEnv::machine_paths`).
 pub const VECTOR_CACHE_FILE: &str = "vector-cache.db";
 
 /// Version of how (title, text) becomes the stored vector in `EmbeddingService::embed_artifact`:
@@ -263,15 +263,6 @@ pub struct VectorCache {
 }
 
 impl VectorCache {
-    /// `Some(p)`: the file `VECTOR_CACHE_FILE` in the parent of `p`.
-    /// `None`, or a path with no parent: in memory.
-    pub fn beside(catalog_path: Option<&Path>) -> Self {
-        match catalog_path.and_then(Path::parent) {
-            Some(dir) => Self::open(&dir.join(VECTOR_CACHE_FILE)),
-            None => Self::in_memory(),
-        }
-    }
-
     /// Lazy: nothing is touched until first use.
     pub fn open(path: &Path) -> Self {
         Self::open_with_busy_timeout(path, Duration::from_millis(PRODUCTION_BUSY_MS))
@@ -654,7 +645,7 @@ mod tests {
     fn an_unused_cache_creates_no_file() {
         let tmp = tempfile::tempdir().unwrap();
         {
-            let c = VectorCache::beside(Some(&tmp.path().join("catalog.db")));
+            let c = VectorCache::open(&tmp.path().join(VECTOR_CACHE_FILE));
             let _ = c.path();
             let _ = c.status();
             c.rearm();
@@ -665,19 +656,14 @@ mod tests {
     }
 
     #[test]
-    fn the_cache_file_sits_beside_the_catalog_file() {
+    fn a_cache_in_a_directory_that_does_not_exist_creates_it() {
+        // mutation: drop the `create_dir_all` in `open_connection`.
         let tmp = tempfile::tempdir().unwrap();
-        let catalog = tmp.path().join("sub").join("catalog.db");
-        let c = VectorCache::beside(Some(&catalog));
-        put(&c, "h1", &[1.0]);
         let want = tmp.path().join("sub").join(VECTOR_CACHE_FILE);
+        let c = VectorCache::open(&want);
+        put(&c, "h1", &[1.0]);
         assert!(want.exists());
         assert_eq!(c.path(), Some(want.as_path()));
-        assert_eq!(VectorCache::beside(None).path(), None);
-        assert_eq!(
-            VectorCache::beside(Some(Path::new("catalog.db"))).path(),
-            Some(Path::new(VECTOR_CACHE_FILE))
-        );
     }
 
     #[test]
