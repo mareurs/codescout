@@ -60,7 +60,7 @@ pub(crate) fn params_of(row: &AugmentationRow) -> Params {
     }
 }
 
-fn item(
+pub(super) fn item(
     rel_path: &str,
     class: Class,
     status: Status,

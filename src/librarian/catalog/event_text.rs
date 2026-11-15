@@ -416,6 +416,42 @@ pub(crate) fn splice_event(doc: &str, e: &EventText) -> Result<String> {
     Ok(out)
 }
 
+/// The event kinds whose fact has a text twin (an `## Events` section of a single-writer document).
+pub(crate) const TWIN_KINDS: &[&str] =
+    &["note", "verdict", "intent", "reviewed", "external_signal"];
+
+/// Why events of `kind` have no text twin at all, or `None` when the kind has one. `event_create`
+/// asks this before it reads the target document.
+pub(crate) fn twin_kind_refusal(kind: &str) -> Option<&'static str> {
+    (!TWIN_KINDS.contains(&kind)).then_some("kind has no text twin")
+}
+
+/// `None` when the document with text `doc` is a home for an event of `kind`; else the reason
+/// `event_create` gives for the skipped twin: `"kind has no text twin"`, `"not a single-writer
+/// document"` or `"ledger or entry document"`, judged in that order.
+///
+/// A home is a document whose frontmatter parses and has `single_writer: true`, and that is neither
+/// a ledger (`entry_prefix`) nor an entry document (`entry_kind`): a section appended to one of
+/// those would be read as an entry or as a declared-field problem. A document whose frontmatter does
+/// not parse has no flag to read, so it is not single-writer.
+pub(crate) fn twin_home_refusal(doc: &str, kind: &str) -> Option<&'static str> {
+    if let Some(reason) = twin_kind_refusal(kind) {
+        return Some(reason);
+    }
+    let Ok((Some(fm), _)) = frontmatter::parse(doc) else {
+        return Some("not a single-writer document");
+    };
+    if fm.extra.get("single_writer") != Some(&Value::Bool(true)) {
+        return Some("not a single-writer document");
+    }
+    if !crate::librarian::catalog::augmentation::raw_declared_prefixes(Some(&fm)).is_empty()
+        || fm.extra.contains_key("entry_kind")
+    {
+        return Some("ledger or entry document");
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,6 +486,74 @@ mod tests {
             .map(|e| e.id)
             .collect()
     }
+    /// `twin_home_refusal` gives the reasons `event_create` gives, in its order: the kind first,
+    /// then the flag (a string `"true"`, no flag and unparsable frontmatter all read as "no flag"),
+    /// then a ledger or an entry document.
+    #[test]
+    fn twin_home_refusal_gives_event_creates_reasons() {
+        let flagged = "---\nsingle_writer: true\n---\n\n# Doc\n";
+        assert_eq!(twin_home_refusal(flagged, "note"), None);
+        for kind in TWIN_KINDS {
+            assert_eq!(twin_home_refusal(flagged, kind), None, "{kind}");
+        }
+        assert_eq!(
+            twin_home_refusal(flagged, "field_patch"),
+            Some("kind has no text twin")
+        );
+        // The kind is judged before the document: a non-twin kind on a non-home says the kind.
+        assert_eq!(
+            twin_home_refusal("# No frontmatter\n", "status_change"),
+            Some("kind has no text twin")
+        );
+        for (label, doc) in [
+            ("no frontmatter", "# Doc\n"),
+            ("no flag", "---\ntitle: x\n---\n\n# Doc\n"),
+            (
+                "flag as a string",
+                "---\nsingle_writer: \"true\"\n---\n\n# Doc\n",
+            ),
+            ("flag false", "---\nsingle_writer: false\n---\n\n# Doc\n"),
+            (
+                "unparsable frontmatter",
+                "---\nsingle_writer: [true\n---\n\n# Doc\n",
+            ),
+        ] {
+            assert_eq!(
+                twin_home_refusal(doc, "note"),
+                Some("not a single-writer document"),
+                "{label}"
+            );
+        }
+        for (label, doc) in [
+            (
+                "entry_prefix",
+                "---\nsingle_writer: true\nentry_prefix: F\n---\n\n# Ledger\n",
+            ),
+            (
+                "entry_prefix list",
+                "---\nsingle_writer: true\nentry_prefix: [F, W]\n---\n\n# Ledger\n",
+            ),
+            (
+                "entry_kind",
+                "---\nsingle_writer: true\nentry_kind: friction\n---\n\n# Entry\n",
+            ),
+        ] {
+            assert_eq!(
+                twin_home_refusal(doc, "verdict"),
+                Some("ledger or entry document"),
+                "{label}"
+            );
+        }
+        // An empty prefix declares no ledger.
+        assert_eq!(
+            twin_home_refusal(
+                "---\nsingle_writer: true\nentry_prefix: \"\"\n---\n\n# Doc\n",
+                "note"
+            ),
+            None
+        );
+    }
+
     /// The fence of a payload block is the longest backtick run of the content plus one, never
     /// fewer than three: a run of backticks inside the payload cannot close the block.
     #[test]

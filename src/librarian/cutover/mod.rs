@@ -31,12 +31,16 @@
 //!   (D-R14, D-R21).
 //! - [`rewrite`] rewrites the old citation forms of one document into the grammar (D-R15).
 //! - [`entries`] recovers the params entries a body does not define, and reports the other params.
+//! - [`events`] writes events and observations into the `## Events` section of a single-writer
+//!   document (D-R6, D-R12), and [`links`] writes manual links as relation lines (D-R19).
 //! - [`sidecars`] plans the sidecar and the declaration of an augmentation's shape (D-R24).
 //! - [`report`] renders a plan as markdown or JSON. Neither form names an absolute path.
 
 pub mod code_refs;
 pub mod entries;
+pub mod events;
 pub mod history;
+pub mod links;
 pub mod old_rows;
 pub mod plan;
 pub mod rename;

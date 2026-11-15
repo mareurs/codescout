@@ -14,8 +14,10 @@ use crate::librarian::cutover::code_refs::{paths_named_in, CodeRefs, LINK_MODE};
 use crate::librarian::cutover::entries::{
     other_params, params_of, recover_params_entries, refuse_entries, Params,
 };
+use crate::librarian::cutover::events::{export_events, refuse_events};
 use crate::librarian::cutover::history::HistoryIds;
-use crate::librarian::cutover::old_rows::{OldRows, OutOfScope};
+use crate::librarian::cutover::links::{export_links, refuse_links};
+use crate::librarian::cutover::old_rows::{OldEvent, OldObservation, OldRows, OutOfScope};
 use crate::librarian::cutover::rename::{
     applied_item, in_head_item, plan_renames_against, renames_already_in_head, RenameSet,
 };
@@ -28,7 +30,8 @@ use crate::librarian::cutover::sidecars::{
 };
 use crate::librarian::derived::build::{key_space_from_commit, repo_name_of};
 use crate::librarian::derived::scan::{scan_commit, Skip};
-use crate::librarian::identity::index::{DocInput, KeyIndex};
+use crate::librarian::identity::grammar::Reference;
+use crate::librarian::identity::index::{DocInput, KeyIndex, Resolution};
 use crate::librarian::identity::key::{folder_of, key_of, markdown_stem, Key};
 use crate::librarian::identity::repo_name::RepoName;
 use crate::librarian::tools::link_scan::extract::{citation_spans, CitationKind};
@@ -222,6 +225,10 @@ impl Head {
 /// valid key (with the ones it cannot make as items), the items for the events whose kind has no
 /// home in any text, and the rewrite of every citation. Old rows follow a renamed document to the
 /// path it has after the renames, and every citation is rendered against that final path set.
+///
+/// The params, the sidecars, the events, the observations and the manual links of a document go into
+/// its text in that order ([`plan_augmentations`], then [`plan_events_and_links`]), each step from
+/// the text the one before left.
 pub fn plan_export(
     repo: &git2::Repository,
     commit: &git2::Commit,
@@ -243,6 +250,7 @@ pub fn plan_export(
     plan_write_cites(old, &mut plan);
     plan_citations(repo, commit, old, &head, &code, &renames, &mut plan)?;
     plan_augmentations(repo, commit, old, &head, &code, &renames, &mut plan)?;
+    plan_events_and_links(old, &head, &code, &renames, &mut plan);
     plan_outside_links(repo, commit, &head, &renames, &mut plan)?;
     Ok(plan)
 }
@@ -418,23 +426,13 @@ fn plan_augmentations(
     for rows in by_path.values_mut() {
         rows.sort_by(|a, b| a.artifact_id.cmp(&b.artifact_id));
     }
-    let refusal_of = |plan: &ExportPlan, now: &str| -> (String, Option<String>) {
-        let renamed_from = plan.files.get(now).and_then(|f| f.renamed_from.clone());
-        let head_path = renamed_from.unwrap_or_else(|| now.to_owned());
-        let refusal = match (head.files.get(&head_path), code.frozen(&head_path)) {
-            (None, _) if head.outside.contains(&head_path) => Some(REASON_NOT_IN_SPACE.to_owned()),
-            (None, _) => Some(REASON_NOT_IN_HEAD.to_owned()),
-            (Some(_), Some(why)) => Some(format!("frozen: {why}")),
-            (Some(_), None) => None,
-        };
-        (head_path, refusal)
-    };
+    let refusal_of = |plan: &ExportPlan, now: &str| document_refusal(head, code, plan, now);
 
     // Who names each sidecar path: a document with a shape to plan, by its name, and a document of
     // `HEAD`, by its declaration.
     let mut claims: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for now in by_path.keys() {
-        if refusal_of(plan, now).1.is_none() {
+        if refusal_of(plan, now).is_none() {
             claims
                 .entry(sidecar_rel(now))
                 .or_default()
@@ -449,21 +447,19 @@ fn plan_augmentations(
     }
 
     for (now, rows) in by_path {
-        let (head_path, refusal) = refusal_of(plan, &now);
-        if let Some(reason) = refusal {
-            for row in rows {
-                plan.items.extend(refuse_entries(&now, row, &reason));
-                plan.items.extend(other_params(&now, row));
-                plan.items
-                    .push(shape_item(&now, Status::Unrecoverable, &reason, None));
+        let document = match open_document(head, code, plan, &now) {
+            Ok(document) => document,
+            Err(reason) => {
+                for row in rows {
+                    plan.items.extend(refuse_entries(&now, row, &reason));
+                    plan.items.extend(other_params(&now, row));
+                    plan.items
+                        .push(shape_item(&now, Status::Unrecoverable, &reason, None));
+                }
+                continue;
             }
-            continue;
-        }
-        let head_text = &head.files[&head_path];
-        let base = plan
-            .files
-            .get(&now)
-            .map_or_else(|| head_text.clone(), |f| f.new_text.clone());
+        };
+        let base = document.base.clone();
         let mut text = base.clone();
 
         let sidecar_path = sidecar_rel(&now);
@@ -599,24 +595,209 @@ fn plan_augmentations(
             }
         }
 
-        if text != base {
-            match plan.files.get_mut(&now) {
-                Some(file) => file.new_text = text,
-                None => {
-                    plan.files.insert(
-                        now.clone(),
-                        FileChange {
-                            path: now.clone(),
-                            renamed_from: None,
-                            head_text: Some(head_text.clone()),
-                            new_text: text,
-                        },
-                    );
-                }
+        document.close(head, plan, text);
+    }
+    Ok(())
+}
+
+/// Why the plan may not edit the text of the document at `now` (a path after the renames), or
+/// `None` when it may. The document's path in `HEAD` is the one it was renamed from.
+///
+/// `HEAD` may not hold the path ([`REASON_NOT_IN_HEAD`]), the path may lie outside the key space
+/// ([`REASON_NOT_IN_SPACE`]), and code, a dot directory or an mdBook may read the file by path
+/// (`frozen: <why>`, D-R26).
+fn document_refusal(head: &Head, code: &CodeRefs, plan: &ExportPlan, now: &str) -> Option<String> {
+    let head_path = head_path_of(plan, now);
+    match (head.files.get(&head_path), code.frozen(&head_path)) {
+        (None, _) if head.outside.contains(&head_path) => Some(REASON_NOT_IN_SPACE.to_owned()),
+        (None, _) => Some(REASON_NOT_IN_HEAD.to_owned()),
+        (Some(_), Some(why)) => Some(format!("frozen: {why}")),
+        (Some(_), None) => None,
+    }
+}
+
+/// The path the document at `now` has in `HEAD`: the one a planned rename moved it from, else `now`.
+fn head_path_of(plan: &ExportPlan, now: &str) -> String {
+    plan.files
+        .get(now)
+        .and_then(|file| file.renamed_from.clone())
+        .unwrap_or_else(|| now.to_owned())
+}
+
+/// A document a step edits: the text the steps before it left (the plan's text for the path, else
+/// `HEAD`'s), and where to put the result back. Every step that edits a document's text goes
+/// through [`open_document`] and [`OpenDocument::close`], so none of them can drop what an earlier
+/// step wrote or what the plan knows of the file (its rename and its text in `HEAD`).
+struct OpenDocument {
+    /// The path after the renames.
+    now: String,
+    /// The path in `HEAD`.
+    head_path: String,
+    /// The text before this step.
+    base: String,
+}
+
+/// The document at `now` for editing, or the reason the plan may not edit it
+/// ([`document_refusal`]).
+fn open_document(
+    head: &Head,
+    code: &CodeRefs,
+    plan: &ExportPlan,
+    now: &str,
+) -> Result<OpenDocument, String> {
+    if let Some(reason) = document_refusal(head, code, plan, now) {
+        return Err(reason);
+    }
+    let head_path = head_path_of(plan, now);
+    let base = plan
+        .files
+        .get(now)
+        .map_or_else(|| head.files[&head_path].clone(), |f| f.new_text.clone());
+    Ok(OpenDocument {
+        now: now.to_owned(),
+        head_path,
+        base,
+    })
+}
+
+impl OpenDocument {
+    /// Put `text` back into the plan. Nothing changes when it equals the text the step started
+    /// from. A path the plan already holds keeps its `renamed_from` and `head_text` and takes the
+    /// new text; any other path gets a file whose `head_text` is the text in `HEAD`.
+    fn close(self, head: &Head, plan: &mut ExportPlan, text: String) {
+        if text == self.base {
+            return;
+        }
+        match plan.files.get_mut(&self.now) {
+            Some(file) => file.new_text = text,
+            None => {
+                let renamed_from = (self.head_path != self.now).then(|| self.head_path.clone());
+                plan.files.insert(
+                    self.now.clone(),
+                    FileChange {
+                        path: self.now,
+                        renamed_from,
+                        head_text: Some(head.files[&self.head_path].clone()),
+                        new_text: text,
+                    },
+                );
             }
         }
     }
-    Ok(())
+}
+
+/// The rows of one document that [`plan_events_and_links`] writes.
+#[derive(Default)]
+struct DocumentRows<'a> {
+    /// Events of a kind a text can hold.
+    events: Vec<&'a OldEvent>,
+    /// Its `note` events: they carry the observations that repeat their text.
+    notes: Vec<&'a OldEvent>,
+    observations: Vec<&'a OldObservation>,
+    /// `(rel, grammar form of the destination)`.
+    links: Vec<(String, Option<String>)>,
+}
+
+/// Events, observations and manual links (D-R6, D-R12, D-R19), per document path after the renames,
+/// into the text the steps before this one left (the citation rewrite, the params entries, the
+/// declaration stamp). A document's events and observations go first, then its relation lines.
+///
+/// A path `HEAD` does not hold, one outside the key space and a frozen document (D-R26) are never
+/// edited: each of their rows is an `unrecoverable` item with that reason. The events of a kind
+/// that no text holds are reported by [`plan_skipped_events`]; the others are counted here, so
+/// every row of the three classes has one item.
+///
+/// A destination's form is the one its document has after the renames in the index of the final
+/// paths ([`KeyIndex`] over `HEAD`, D-R11), and only when that index resolves it to a file.
+fn plan_events_and_links(
+    old: &OldRows,
+    head: &Head,
+    code: &CodeRefs,
+    renames: &RenameSet,
+    plan: &mut ExportPlan,
+) {
+    let moved = renames.paths();
+    let index = KeyIndex::build(
+        head.repo_name.clone(),
+        head.files.iter().map(|(path, text)| DocInput {
+            rel_path: final_path(&moved, path).to_owned(),
+            text: text.clone(),
+        }),
+    );
+    let form_of = |artifact_id: &str| -> Option<String> {
+        let document = old.documents.get(artifact_id)?;
+        let key = index.key_at(final_path(&moved, &document.rel_path))?;
+        let reference = Reference::File {
+            repo: None,
+            key: key.clone(),
+        };
+        matches!(
+            index.resolve(&document.rel_path, &reference),
+            Resolution::File { .. }
+        )
+        .then(|| format!("[[{key}]]"))
+    };
+
+    let mut by_path: BTreeMap<String, DocumentRows> = BTreeMap::new();
+    let path_of = |artifact_id: &str| {
+        old.documents
+            .get(artifact_id)
+            .map(|document| final_path(&moved, &document.rel_path).to_owned())
+    };
+    for event in &old.events {
+        let Some(now) = path_of(&event.artifact_id) else {
+            continue;
+        };
+        let rows = by_path.entry(now).or_default();
+        if event.kind == "note" {
+            rows.notes.push(event);
+        }
+        if no_text_home(&event.kind).is_none() {
+            rows.events.push(event);
+        }
+    }
+    for row in &old.observations {
+        if let Some(now) = path_of(&row.artifact_id) {
+            by_path.entry(now).or_default().observations.push(row);
+        }
+    }
+    for link in &old.links {
+        if let Some(now) = path_of(&link.src_id) {
+            by_path
+                .entry(now)
+                .or_default()
+                .links
+                .push((link.rel.clone(), form_of(&link.dst_id)));
+        }
+    }
+
+    for (now, rows) in by_path {
+        let document = match open_document(head, code, plan, &now) {
+            Ok(document) => document,
+            Err(reason) => {
+                plan.items.extend(refuse_events(
+                    &now,
+                    &rows.events,
+                    &rows.observations,
+                    &reason,
+                ));
+                plan.items.extend(refuse_links(&now, &rows.links, &reason));
+                continue;
+            }
+        };
+        let (text, items) = export_events(
+            &now,
+            &document.base,
+            &rows.events,
+            &rows.observations,
+            &rows.notes,
+            &form_of,
+        );
+        plan.items.extend(items);
+        let (text, items) = export_links(&now, &text, &rows.links);
+        plan.items.extend(items);
+        document.close(head, plan, text);
+    }
 }
 
 /// The item of one augmentation's shape; `detail` is the sidecar's path.
@@ -1134,18 +1315,19 @@ mod tests {
             reason_of("worktree_merge"),
             ["the worktree overlay is removed"]
         );
-        assert!(
-            reason_of("note").is_empty(),
-            "a note has a text home: it is not skipped here"
+        assert_eq!(
+            reason_of("note"),
+            ["no committed home yet: not a single-writer document"],
+            "a note has a text home in a single-writer document only: a.md is not one"
         );
-        assert_eq!(plan.items.len(), 5);
+        assert_eq!(plan.items.len(), 6);
         for item in &plan.items {
             assert_eq!(item.status, Status::Skipped);
             assert_eq!(item.path.as_deref(), Some("a.md"));
         }
         let tally = plan.tally();
         let events = &tally[&Class::Event];
-        assert_eq!(events.skipped, 5);
+        assert_eq!(events.skipped, 6);
         assert_eq!(
             events.moved + events.already_exported + events.unrecoverable,
             0
@@ -2172,6 +2354,235 @@ mod tests {
             [Status::Unrecoverable]
         );
     }
+    const SINGLE_WRITER_MD: &str = "---\nsingle_writer: true\n---\n\n# Notes\n";
+
+    fn add_observation(cat: &crate::librarian::catalog::Catalog, artifact_id: &str, text: &str) {
+        observations::insert(
+            cat,
+            &ObservationRow {
+                id: None,
+                artifact_id: artifact_id.into(),
+                text: text.into(),
+                source: None,
+                created_at: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    fn add_link(cat: &crate::librarian::catalog::Catalog, src: &str, dst: &str, rel: &str) {
+        links::insert(
+            cat,
+            &LinkRow {
+                src_id: src.into(),
+                dst_id: dst.into(),
+                rel: rel.into(),
+                created_at: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn events_and_links_of_a_renamed_document_land_under_its_new_path() {
+        let plan = plan_of_files(
+            &[
+                ("docs/my_notes.md", SINGLE_WRITER_MD.as_bytes()),
+                ("docs/b.md", b"# B\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "mine", "docs/my_notes.md");
+                add_doc(cat, root, "bee", "docs/b.md");
+                add_event(cat, "e1", "mine", "note", r#"{"text":"hello"}"#);
+                add_edge(cat, "e1", "mutates", None, Some("bee"), None);
+                add_observation(cat, "mine", "seen");
+                add_link(cat, "mine", "bee", "depends_on");
+                // A link toward the renamed file is written with the key it now has.
+                add_link(cat, "bee", "mine", "supersedes");
+            },
+        );
+        let mine = &plan.files["docs/my-notes.md"];
+        assert_eq!(mine.renamed_from.as_deref(), Some("docs/my_notes.md"));
+        assert_eq!(mine.head_text.as_deref(), Some(SINGLE_WRITER_MD));
+        let text = &mine.new_text;
+        assert!(text.starts_with(SINGLE_WRITER_MD), "{text}");
+        let at = |needle: &str| {
+            text.find(needle)
+                .unwrap_or_else(|| panic!("{needle}: {text}"))
+        };
+        assert!(at("<!-- event {\"id\":\"e1\"") < at("<!-- event {\"id\":\"observation-1\""));
+        assert!(at("<!-- event {\"id\":\"observation-1\"") < at("## Relations"));
+        assert!(text.contains("**Mutates:** [[b]]\n"), "{text}");
+        assert!(text.contains("**Depends on:** [[b]]\n"), "{text}");
+        let b = &plan.files["docs/b.md"];
+        assert_eq!(b.renamed_from, None);
+        assert_eq!(b.head_text.as_deref(), Some("# B\n"));
+        assert_eq!(
+            b.new_text,
+            "# B\n\n## Relations\n\n**Supersedes:** [[my-notes]]\n"
+        );
+        for class in [Class::Event, Class::Observation, Class::ManualLink] {
+            for item in items_of(&plan, class) {
+                assert_eq!(item.status, Status::Moved, "{item:?}");
+                assert!(
+                    matches!(item.path.as_deref(), Some("docs/my-notes.md" | "docs/b.md")),
+                    "{item:?}"
+                );
+            }
+        }
+        let tally = plan.tally();
+        assert_eq!(tally[&Class::Event].moved, 1);
+        assert_eq!(tally[&Class::Observation].moved, 1);
+        assert_eq!(tally[&Class::ManualLink].moved, 2);
+    }
+
+    #[test]
+    fn events_go_into_the_text_the_augmentation_step_left() {
+        // Task 6 stamps the declaration into the same document; the events then start from that
+        // text, not from `HEAD`'s.
+        let plan = plan_of_files(
+            &[("docs/n.md", SINGLE_WRITER_MD.as_bytes())],
+            |cat, root| {
+                add_doc(cat, root, "n", "docs/n.md");
+                add_augmentation(cat, "n", r#"{"k":1}"#, None);
+                add_event(cat, "e1", "n", "note", r#"{"text":"hello"}"#);
+            },
+        );
+        let text = &plan.files["docs/n.md"].new_text;
+        assert_eq!(
+            declared_in(text).as_deref(),
+            Some("docs/augmentations/docs-n.yaml")
+        );
+        assert!(text.contains("<!-- event {\"id\":\"e1\""), "{text}");
+    }
+    #[test]
+    fn an_observation_a_live_note_recorded_is_carried_by_that_note() {
+        // `event_create` records the observation of a note as well: the note's text twin is the
+        // fact, and the observation row repeats it.
+        let plan = plan_of_files(
+            &[("docs/n.md", SINGLE_WRITER_MD.as_bytes())],
+            |cat, root| {
+                add_doc(cat, root, "n", "docs/n.md");
+                add_event(cat, "e1", "n", "note", r#"{"text":"hello"}"#);
+                add_observation(cat, "n", "hello");
+                add_observation(cat, "n", "only an observation");
+            },
+        );
+        let observations = items_of(&plan, Class::Observation);
+        let reasons: Vec<(&Status, &str)> = observations
+            .iter()
+            .map(|i| (&i.status, i.reason.as_str()))
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                (&Status::Skipped, "carried by its note event"),
+                (&Status::Moved, "section written")
+            ]
+        );
+        let text = &plan.files["docs/n.md"].new_text;
+        assert!(text.contains("\"id\":\"observation-2\""), "{text}");
+        assert!(!text.contains("\"id\":\"observation-1\""), "{text}");
+    }
+
+    #[test]
+    fn a_rerun_over_the_written_text_reports_everything_already_exported() {
+        let first = plan_of_files(
+            &[("docs/n.md", SINGLE_WRITER_MD.as_bytes())],
+            |cat, root| {
+                add_doc(cat, root, "n", "docs/n.md");
+                add_event(cat, "e1", "n", "note", r#"{"text":"hello"}"#);
+            },
+        );
+        assert_eq!(first.tally()[&Class::Event].moved, 1);
+        let written = first.files["docs/n.md"].new_text.clone();
+        let second = plan_of_files(&[("docs/n.md", written.as_bytes())], |cat, root| {
+            add_doc(cat, root, "n", "docs/n.md");
+            add_event(cat, "e1", "n", "note", r#"{"text":"hello"}"#);
+        });
+        assert!(second.files.is_empty(), "{:?}", second.files.keys());
+        let events = &second.tally()[&Class::Event];
+        assert_eq!((events.moved, events.already_exported), (0, 1));
+    }
+
+    #[test]
+    fn events_and_links_of_a_frozen_or_missing_document_are_unrecoverable() {
+        let plan = plan_of_files(
+            &[
+                ("docs/frozen.md", SINGLE_WRITER_MD.as_bytes()),
+                ("src/x.rs", b"const P: &str = \"../docs/frozen.md\";\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "fro", "docs/frozen.md");
+                add_doc(cat, root, "gone", "docs/gone.md");
+                for doc in ["fro", "gone"] {
+                    add_event(cat, &format!("e-{doc}"), doc, "note", r#"{"text":"t"}"#);
+                    add_observation(cat, doc, "seen");
+                    add_link(cat, doc, "fro", "depends_on");
+                }
+            },
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        for class in [Class::Event, Class::Observation, Class::ManualLink] {
+            let items = items_of(&plan, class);
+            assert_eq!(items.len(), 2, "{class:?}");
+            for item in &items {
+                assert_eq!(item.status, Status::Unrecoverable, "{item:?}");
+            }
+            let frozen = items
+                .iter()
+                .find(|i| i.path.as_deref() == Some("docs/frozen.md"))
+                .unwrap();
+            assert!(frozen.reason.starts_with("frozen: "), "{}", frozen.reason);
+            let gone = items
+                .iter()
+                .find(|i| i.path.as_deref() == Some("docs/gone.md"))
+                .unwrap();
+            assert_eq!(gone.reason, "document not in HEAD");
+        }
+    }
+
+    #[test]
+    fn a_document_outside_the_key_space_is_reported_as_such() {
+        let plan = plan_of_files(
+            &[
+                (".codescout/key-space.toml", b"exclude = [\"contrib/**\"]\n"),
+                ("contrib/c.md", SINGLE_WRITER_MD.as_bytes()),
+                ("docs/ok.md", b"# Ok\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "c", "contrib/c.md");
+                add_doc(cat, root, "ok", "docs/ok.md");
+                add_event(cat, "e1", "c", "note", r#"{"text":"t"}"#);
+                add_observation(cat, "c", "seen");
+                add_link(cat, "c", "ok", "depends_on");
+            },
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        for class in [Class::Event, Class::Observation, Class::ManualLink] {
+            let items = items_of(&plan, class);
+            assert_eq!(items.len(), 1, "{class:?}");
+            assert_eq!(items[0].status, Status::Unrecoverable);
+            assert_eq!(items[0].reason, REASON_NOT_IN_SPACE, "{class:?}");
+        }
+    }
+
+    #[test]
+    fn a_target_outside_the_head_makes_the_link_unrecoverable() {
+        let plan = plan_of_files(&[("docs/a.md", b"# A\n")], |cat, root| {
+            add_doc(cat, root, "a", "docs/a.md");
+            add_doc(cat, root, "gone", "docs/gone.md");
+            add_link(cat, "a", "gone", "depends_on");
+        });
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let items = items_of(&plan, Class::ManualLink);
+        assert_eq!(items.len(), 1);
+        for item in items {
+            assert_eq!(item.status, Status::Unrecoverable);
+            assert_eq!(item.reason, "the target has no name in the key space");
+            assert_eq!(item.path.as_deref(), Some("docs/a.md"));
+        }
+    }
 
     #[test]
     fn a_committed_sidecar_is_compared_never_overwritten() {
@@ -2364,13 +2775,12 @@ mod tests {
 
     #[test]
     fn a_class_with_a_population_and_no_item_has_a_zero_row() {
-        // `note` events have no item yet: the class has a population and no outcome, and the
-        // tally says so with zeros rather than leaving the class out.
-        let plan = plan_for(|cat, root| {
+        // Every event kind has an item now, so a class with rows and no item is built by hand: the
+        // tally says it with zeros rather than leaving the class out.
+        let mut plan = plan_for(|cat, root| {
             let _ = with_docs_slug(cat, root);
-            add_event(cat, "e1", "a", "note", r#"{"text":"t"}"#);
         });
-        assert_eq!(plan.population["event:note"], 1);
+        plan.population.insert("event:note".to_owned(), 1);
         let tally = plan.tally();
         let event = &tally[&Class::Event];
         assert_eq!(

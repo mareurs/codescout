@@ -332,9 +332,6 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
     parse_args(args.clone()).map(|_| ())
 }
 
-/// The event kinds whose fact has a text twin (an `## Events` section of a single-writer document).
-const TWIN_KINDS: &[&str] = &["note", "verdict", "intent", "reviewed", "external_signal"];
-
 /// The document an event's text twin goes into: its path and the bytes read from it.
 struct TwinDocument {
     path: std::path::PathBuf,
@@ -350,19 +347,19 @@ const TWIN_WHAT: TwinWhat = TwinWhat {
 /// The document at the write target when it is single-writer and takes this event kind, or the
 /// reason it takes no text twin. A document whose file cannot be read has its own reason, which
 /// names the cause by the document's label and never by its path. A document whose frontmatter
-/// does not parse has no flag to read, so it is not single-writer.
+/// does not parse has no flag to read, so it is not single-writer. The rules about the kind and the
+/// document's text are `event_text::twin_home_refusal`'s, shared with the cutover.
 fn single_writer_target(
     ctx: &ToolContext,
     cat: &crate::librarian::catalog::Catalog,
     artifact_id: &str,
     kind: &str,
 ) -> std::result::Result<TwinDocument, String> {
-    const NOT_SINGLE_WRITER: &str = "not a single-writer document";
-    if !TWIN_KINDS.contains(&kind) {
-        return Err("kind has no text twin".to_string());
+    if let Some(reason) = crate::librarian::catalog::event_text::twin_kind_refusal(kind) {
+        return Err(reason.to_string());
     }
     let Ok(Some(row)) = crate::librarian::catalog::artifact::get(cat, artifact_id) else {
-        return Err(NOT_SINGLE_WRITER.to_string());
+        return Err("not a single-writer document".to_string());
     };
     let path = row.abs_path;
     let text =
@@ -377,20 +374,10 @@ fn single_writer_target(
                 ));
             }
         };
-    let Ok((Some(fm), _)) = crate::librarian::frontmatter::parse(&text) else {
-        return Err(NOT_SINGLE_WRITER.to_string());
-    };
-    if fm.extra.get("single_writer") != Some(&Value::Bool(true)) {
-        return Err(NOT_SINGLE_WRITER.to_string());
+    match crate::librarian::catalog::event_text::twin_home_refusal(&text, kind) {
+        Some(reason) => Err(reason.to_string()),
+        None => Ok(TwinDocument { path, text }),
     }
-    // A ledger or an entry document ignores the flag: a section appended to it would be read as
-    // an entry, or as a declared-field problem.
-    if !crate::librarian::catalog::augmentation::raw_declared_prefixes(Some(&fm)).is_empty()
-        || fm.extra.contains_key("entry_kind")
-    {
-        return Err("ledger or entry document".to_string());
-    }
-    Ok(TwinDocument { path, text })
 }
 
 /// The grammar form of each `also_mutates` id, or the reason the twin is skipped: a target that
