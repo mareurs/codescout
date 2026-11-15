@@ -1,16 +1,17 @@
 //! `codescout cutover` — move the catalog-only facts of the old catalog into committed files.
 //!
-//! This file holds `cutover plan` and `cutover export`. `plan` is the dry run: it resolves the old
-//! catalog, refuses when a side file lies beside it, opens it immutable, loads the rows under the
+//! This file holds `cutover plan`, `cutover export` and `cutover build`. `plan` is the dry run:
+//! it resolves the old catalog, refuses when a side file lies beside it, opens it immutable,
+//! loads the rows under the
 //! repository, plans `HEAD`, checks that the catalog did not change while it was read, and prints
 //! the report. It writes nothing: not to the old catalog, not to the repository, not to a report
 //! file. `export` does the same, then (in D-R8 and D-R30's order) refuses when the new catalog
 //! (`.codescout/derived.db` in the checkout) exists or the project write lock is held, re-checks
 //! the old catalog, applies the plan to the working tree (`librarian::cutover::apply`), and keeps
 //! the report beside the old catalog. `build` writes the new catalog from `HEAD`, in the git root
-//! of the checkout it runs in; it refuses a link, a tracked file, or a repository that does not
-//! ignore the file (E1-R1 to E1-R4, E1-R12). See `librarian::cutover` for the three subcommands
-//! and the rules every one of them follows.
+//! of the checkout it runs in; it refuses a link, a hard link, a tracked file, or a repository
+//! that does not ignore the file (E1-R1 to E1-R4, E1-R12). See `librarian::cutover` for the three
+//! subcommands and the rules every one of them follows.
 //!
 //! Exit codes: `0` the run did what it was asked, whatever it found; `1` `cutover export` refused
 //! some files (or could not keep its report); `2` it did not run. Every reason is one line and
@@ -466,15 +467,22 @@ fn catalog_dir_is_the_checkouts(git_root: &Path, canonical_dir: &Path) -> bool {
 }
 
 /// Refuse before anything is opened when a write of the new catalog could land outside the
-/// checkout or on a committed file (E1-R12): a link at `.codescout`, a `.codescout` that resolves
-/// to another directory, a link at the catalog or one of its side files, or one of the four names
-/// in the git index. The ignore rules cannot see any of these: they match patterns only.
+/// checkout or on a committed file (E1-R12): a link at `.codescout`, a `.codescout` that is not a
+/// directory or resolves to another directory, a link, a hard link or an uninspectable file at the
+/// catalog or one of its side files, or one of the four names in the git index (any stage). The
+/// ignore rules cannot see any of these: they match patterns only. A hard link is a name for a
+/// file that another path also names, so a write through it changes that other file (E1-R12 says
+/// "link"; a hard link is one).
 fn refuse_unsafe_catalog_path(repo: &git2::Repository, git_root: &Path) -> Result<()> {
     let dir = git_root.join(".codescout");
     match std::fs::symlink_metadata(&dir) {
         Ok(meta) if meta.file_type().is_symlink() => bail!(
             ".codescout in this checkout is a link, and build writes only inside the checkout. \
              Replace the link with a directory, then run this again"
+        ),
+        Ok(meta) if !meta.is_dir() => bail!(
+            ".codescout in this checkout is not a directory. Replace it with a directory, then \
+             run this again"
         ),
         Ok(_) => {
             let canonical = std::fs::canonicalize(&dir)
@@ -493,20 +501,26 @@ fn refuse_unsafe_catalog_path(repo: &git2::Repository, git_root: &Path) -> Resul
         ),
     }
     for name in CATALOG_NAMES {
-        if let Ok(meta) = std::fs::symlink_metadata(git_root.join(name)) {
-            if meta.file_type().is_symlink() {
-                bail!(
-                    "{name} is a link, and build does not write through a link. Remove it, then \
-                     run this again"
-                );
-            }
+        match std::fs::symlink_metadata(git_root.join(name)) {
+            Ok(meta) if meta.file_type().is_symlink() => bail!(
+                "{name} is a link, and build does not write through a link. Remove it, then run \
+                 this again"
+            ),
+            Ok(meta) if has_other_hard_links(&meta) => bail!(
+                "{name} has more than one hard link, and build would write into the other copy. \
+                 Remove it, then run this again"
+            ),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => bail!("{name} cannot be inspected: {}", e.kind()),
         }
     }
     let index = repo
         .index()
         .map_err(|_| anyhow!("git cannot read the index of this checkout"))?;
     for name in CATALOG_NAMES {
-        if index.get_path(Path::new(name), 0).is_some() {
+        // Stage 0 is a tracked file; stages 1 to 3 are a conflicted merge entry.
+        if (0..=3).any(|stage| index.get_path(Path::new(name), stage).is_some()) {
             bail!(
                 "{name} is tracked by git, and build would overwrite a committed file. Run git \
                  rm --cached {name}, commit, then run this again"
@@ -514,6 +528,21 @@ fn refuse_unsafe_catalog_path(repo: &git2::Repository, git_root: &Path) -> Resul
         }
     }
     Ok(())
+}
+
+/// True when the file has another name. On a platform without a link count in its metadata the
+/// answer is always `false`: a hard link at the catalog is not refused there (known gap).
+fn has_other_hard_links(meta: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.nlink() > 1
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        false
+    }
 }
 
 /// Refuse unless git ignores the new catalog and its three side files, from any source
@@ -1979,32 +2008,43 @@ mod tests {
     }
 
     // mutation: drop the index check (the ignore check alone passes: libgit2 matches patterns
-    // only, so it calls a tracked file ignored).
+    // only, so it calls a tracked file ignored); limit the index check to the first name.
     #[tokio::test]
     async fn build_refuses_a_tracked_catalog_file_and_leaves_it_unchanged() {
         let f = fixture();
         exported_and_committed(&f).await;
-        let file = f.root.join(DERIVED_CATALOG_REL);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        let bytes = b"a committed file that is not a database";
-        std::fs::write(&file, bytes).unwrap();
         let repo = git2::Repository::open(&f.root).unwrap();
-        let mut index = repo.index().unwrap();
-        index.add_path(Path::new(DERIVED_CATALOG_REL)).unwrap();
-        index.write().unwrap();
+        for name in CATALOG_NAMES {
+            let file = f.root.join(name);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            let bytes = b"a committed file that is not a database";
+            std::fs::write(&file, bytes).unwrap();
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new(name)).unwrap();
+            index.write().unwrap();
 
-        let out = evaluate_build(&args(&f), &f.root, None, None).await;
-        assert_eq!(out.code, 2, "{}", out.stdout);
-        assert!(
-            out.stdout.contains(
-                ".codescout/derived.db is tracked by git, and build would overwrite a committed \
-                 file. Run git rm --cached .codescout/derived.db, commit, then run this again"
-            ),
-            "{}",
-            out.stdout
-        );
-        no_absolute_path(&f, &out.stdout);
-        assert_eq!(std::fs::read(&file).unwrap(), bytes, "left as it was");
+            let out = evaluate_build(&args(&f), &f.root, None, None).await;
+            assert_eq!(out.code, 2, "{name}: {}", out.stdout);
+            assert!(
+                out.stdout.contains(&format!(
+                    "{name} is tracked by git, and build would overwrite a committed file. Run \
+                     git rm --cached {name}, commit, then run this again"
+                )),
+                "{name}: {}",
+                out.stdout
+            );
+            no_absolute_path(&f, &out.stdout);
+            assert_eq!(
+                std::fs::read(&file).unwrap(),
+                bytes,
+                "{name}: left as it was"
+            );
+
+            // The next name starts from a clean index.
+            index.remove_path(Path::new(name)).unwrap();
+            index.write().unwrap();
+            std::fs::remove_file(&file).unwrap();
+        }
     }
 
     // mutation: return `true`.
@@ -2036,5 +2076,247 @@ mod tests {
         let out = evaluate_build(&args(&f), &f.root, None, None).await;
         assert_eq!(out.code, 0, "{}", out.stdout);
         assert_eq!(count(&derived(&f), "document"), 4);
+    }
+
+    /// Hard-link `target` at `link`; `false` when the file system refuses, and the test returns.
+    #[cfg(unix)]
+    fn hard_link_made(target: &Path, link: &Path) -> bool {
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::fs::hard_link(target, link).is_ok()
+    }
+
+    #[cfg(unix)]
+    const HARD_LINK_REFUSAL: &str =
+        "has more than one hard link, and build would write into the other copy. Remove it, then \
+         run this again";
+
+    // mutation: drop the hard-link check.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn build_refuses_a_hard_linked_catalog_file_and_writes_nothing_outside() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let (_outside, outside) = outside_dir();
+        let target = outside.join("other.db");
+        std::fs::write(&target, b"outside").unwrap();
+        if !hard_link_made(&target, &f.root.join(DERIVED_CATALOG_REL)) {
+            return;
+        }
+
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains(&format!(".codescout/derived.db {HARD_LINK_REFUSAL}")),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+        assert!(
+            !out.stdout.contains(outside.to_str().unwrap()),
+            "{}",
+            out.stdout
+        );
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"outside",
+            "left as it was"
+        );
+    }
+
+    // mutation: drop the hard-link check.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn build_refuses_a_catalog_hard_linked_from_another_checkout_and_leaves_it_unchanged() {
+        use sha2::{Digest, Sha256};
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let first = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(first.code, 0, "{}", first.stdout);
+        let main_file = f.root.join(DERIVED_CATALOG_REL);
+        let main_sha = Sha256::digest(std::fs::read(&main_file).unwrap());
+
+        // A clone made with `cp -al` shares the catalog's file with the main checkout.
+        let (_clone_dir, clone_base) = outside_dir();
+        let clone_root = clone_base.join("clone");
+        let cloned = git2::Repository::clone(f.root.to_str().unwrap(), &clone_root).unwrap();
+        no_global_excludes(&cloned);
+        if !hard_link_made(&main_file, &clone_root.join(DERIVED_CATALOG_REL)) {
+            return;
+        }
+        let own = CommonArgs {
+            project: Some(clone_root.clone()),
+            old_db: Some(f.db.clone()),
+            old_root: vec![f.root.clone()],
+            json: false,
+        };
+
+        let out = evaluate_build(&own, &clone_root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains(&format!(".codescout/derived.db {HARD_LINK_REFUSAL}")),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+        assert!(
+            !out.stdout.contains(clone_root.to_str().unwrap()),
+            "{}",
+            out.stdout
+        );
+        assert_eq!(
+            Sha256::digest(std::fs::read(&main_file).unwrap()),
+            main_sha,
+            "the other checkout's catalog is byte for byte as it was"
+        );
+    }
+
+    // mutation: check the hard link count of `derived.db` only, not of its side files.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn build_refuses_a_hard_linked_side_file_and_writes_nothing_outside() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let (_outside, outside) = outside_dir();
+        for name in &CATALOG_NAMES[1..] {
+            let target = outside.join("other");
+            std::fs::write(&target, b"outside").unwrap();
+            let link = f.root.join(name);
+            if !hard_link_made(&target, &link) {
+                return;
+            }
+
+            let out = evaluate_build(&args(&f), &f.root, None, None).await;
+            assert_eq!(out.code, 2, "{name}: {}", out.stdout);
+            assert!(
+                out.stdout.contains(&format!("{name} {HARD_LINK_REFUSAL}")),
+                "{name}: {}",
+                out.stdout
+            );
+            no_absolute_path(&f, &out.stdout);
+            assert_eq!(std::fs::read(&target).unwrap(), b"outside", "{name}");
+            std::fs::remove_file(&link).unwrap();
+            std::fs::remove_file(&target).unwrap();
+        }
+        assert_eq!(catalog_files(&f.root), Vec::<PathBuf>::new());
+    }
+
+    // mutation: read stage 0 of the index only.
+    #[tokio::test]
+    async fn build_refuses_a_conflicted_catalog_entry() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let repo = git2::Repository::open(&f.root).unwrap();
+        let mut index = repo.index().unwrap();
+        // A merge that stopped on this file leaves it at stages 2 and 3, and no stage 0.
+        for (stage, bytes) in [(2u16, &b"ours"[..]), (3, b"theirs")] {
+            let entry = git2::IndexEntry {
+                ctime: git2::IndexTime::new(0, 0),
+                mtime: git2::IndexTime::new(0, 0),
+                dev: 0,
+                ino: 0,
+                mode: 0o100644,
+                uid: 0,
+                gid: 0,
+                file_size: bytes.len() as u32,
+                id: repo.blob(bytes).unwrap(),
+                flags: stage << 12,
+                flags_extended: 0,
+                path: DERIVED_CATALOG_REL.as_bytes().to_vec(),
+            };
+            index.add(&entry).unwrap();
+        }
+        index.write().unwrap();
+        let index = git2::Repository::open(&f.root).unwrap().index().unwrap();
+        let stages: Vec<i32> = (0..=3)
+            .filter(|s| index.get_path(Path::new(DERIVED_CATALOG_REL), *s).is_some())
+            .collect();
+        assert_eq!(
+            stages,
+            [2, 3],
+            "the index holds a conflict and no stage 0 entry"
+        );
+
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains(".codescout/derived.db is tracked by git, and build would overwrite"),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+        assert!(!f.root.join(DERIVED_CATALOG_REL).exists());
+    }
+
+    // mutation: drop the `is_dir` arm for `.codescout`.
+    #[tokio::test]
+    async fn build_refuses_a_codescout_that_is_a_file_and_leaves_it_unchanged() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let path = f.root.join(".codescout");
+        std::fs::remove_dir_all(&path).unwrap();
+        std::fs::write(&path, b"not a directory").unwrap();
+
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout.contains(
+                ".codescout in this checkout is not a directory. Replace it with a directory, \
+                 then run this again"
+            ),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+        assert_eq!(std::fs::read(&path).unwrap(), b"not a directory");
+    }
+
+    // mutation: treat an error other than NotFound at a catalog name as "absent".
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn build_refuses_a_catalog_name_it_cannot_inspect() {
+        use std::os::unix::fs::PermissionsExt;
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let dir = f.root.join(".codescout");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _restore = Restore(dir.clone());
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = std::fs::symlink_metadata(dir.join("derived.db"))
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
+        if !denied {
+            return; // running as root: a mode does not stop the stat
+        }
+
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains(".codescout/derived.db cannot be inspected: permission denied"),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+    }
+
+    // mutation: change a name or the ignore line without the other (each follows the one path).
+    #[test]
+    fn the_catalog_names_and_the_ignore_line_follow_the_one_relative_path() {
+        use crate::librarian::derived::old_catalog::SIDE_FILE_SUFFIXES;
+        assert_eq!(CATALOG_NAMES[0], DERIVED_CATALOG_REL);
+        let sides: Vec<String> = SIDE_FILE_SUFFIXES
+            .iter()
+            .map(|suffix| format!("{DERIVED_CATALOG_REL}{suffix}"))
+            .collect();
+        assert_eq!(&CATALOG_NAMES[1..], sides.as_slice());
+        assert_eq!(IGNORE_LINE, format!("/{DERIVED_CATALOG_REL}*"));
     }
 }

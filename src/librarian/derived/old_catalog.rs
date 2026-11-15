@@ -163,7 +163,7 @@ impl RootMap {
 
 /// The suffixes of the files SQLite keeps beside a database while a process has it open or after
 /// one stopped without closing it.
-const SIDE_FILE_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
+pub(crate) const SIDE_FILE_SUFFIXES: [&str; 3] = ["-wal", "-shm", "-journal"];
 
 /// What an operator reads when [`open_old_immutable`] refuses. It names no path: the caller
 /// knows which file it asked for.

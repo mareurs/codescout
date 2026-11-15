@@ -699,7 +699,8 @@ fn tracked_src_files_lists_production_files_and_excludes_test_only_ones() {
 ///
 /// Blind spots: a test-only file whose name lacks `tests` (`derived/testkit.rs`, which names
 /// neither), and a path built from the literal text.
-// mutation: call `derived_catalog_in` from `build_tool_context_with` in `src/librarian/mod.rs`.
+// mutation: use `derived_catalog_in` from `build_tool_context_with` in `src/librarian/mod.rs`,
+// called or passed as a value (`.map(schema::derived_catalog_in)`).
 #[test]
 fn only_the_cutover_uses_the_checkouts_catalog_path() {
     let mut users = std::collections::BTreeSet::new();
@@ -708,8 +709,7 @@ fn only_the_cutover_uses_the_checkouts_catalog_path() {
             .unwrap_or_else(|e| panic!("{file} is tracked but unreadable: {e}"));
         let (production, _) = excise_test_items(&lex(&src).code)
             .unwrap_or_else(|at| panic!("{file}: a test-gated item at byte {at} never ends"));
-        if production.contains("derived_catalog_in(") || production.contains("DERIVED_CATALOG_REL")
-        {
+        if production.contains("derived_catalog_in") || production.contains("DERIVED_CATALOG_REL") {
             users.insert(file);
         }
     }
