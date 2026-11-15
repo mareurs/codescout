@@ -2961,10 +2961,13 @@ mod tests {
         );
     }
 
-    /// D-R28 binds an id that history knows. The text a note adds is searched for ids like the
-    /// committed text, so the first plan binds it as the plan after the commit would.
-    #[test]
-    fn a_note_that_cites_an_id_only_history_knows_is_rewritten_once() {
+    /// D-R28 binds an id that history knows. `add_row` adds to the old catalog the row of
+    /// `docs/n.md` (single-writer) whose text is the given one, which cites an id only history
+    /// knows: the first plan writes it with the id rewritten, and the plan after the commit writes
+    /// nothing.
+    fn assert_a_history_id_is_rewritten_once(
+        add_row: impl Fn(&crate::librarian::catalog::Catalog, &str),
+    ) {
         use crate::librarian::derived::testkit::commit_files;
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -2991,8 +2994,7 @@ mod tests {
         let plan_at = |commit: git2::Oid| {
             let old = old_catalog_with(|cat| {
                 add_doc(cat, &root, "n", "docs/n.md");
-                let payload = serde_json::json!({ "text": format!("see {id}") }).to_string();
-                add_event(cat, "e1", "n", "note", &payload);
+                add_row(cat, &format!("see {id}"));
             });
             let rows = load(&old, &RootMap::new(root.clone())).unwrap();
             plan_export(&repo, &repo.find_commit(commit).unwrap(), &rows).unwrap()
@@ -3008,6 +3010,22 @@ mod tests {
             "export",
         );
         assert_fixed_point(&plan_at(exported));
+    }
+
+    /// The text a note adds is searched for ids like the committed text, so the first plan binds
+    /// it as the plan after the commit would.
+    #[test]
+    fn a_note_that_cites_an_id_only_history_knows_is_rewritten_once() {
+        assert_a_history_id_is_rewritten_once(|cat, text| {
+            let payload = serde_json::json!({ "text": text }).to_string();
+            add_event(cat, "e1", "n", "note", &payload);
+        });
+    }
+
+    /// C1-d: an observation's text is searched too (an observation with no note event).
+    #[test]
+    fn an_observation_that_cites_an_id_only_history_knows_is_rewritten_once() {
+        assert_a_history_id_is_rewritten_once(|cat, text| add_observation(cat, "n", text));
     }
 
     /// m7: an entry title goes into a heading, where no form is rewritten. The first plan reports
