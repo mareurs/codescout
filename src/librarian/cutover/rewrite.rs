@@ -45,6 +45,10 @@ pub struct Resolver<'a> {
     pub renamed_keys: &'a BTreeMap<String, Key>,
     /// Old path of a renamed file to its path now: a link written with the old path follows it.
     pub renamed_paths: &'a BTreeMap<String, String>,
+    /// Old key to the HEAD documents that could be what the key named: a renamed file and another
+    /// document with the same lowercase stem whose rename is not applied. Such a key is never
+    /// followed (D-R7: ambiguous targets are reported, never guessed).
+    pub ambiguous_keys: &'a BTreeMap<String, Vec<String>>,
     /// Old file stem (as written in the file name) to the final paths of the files that carried it.
     pub stems: &'a BTreeMap<String, Vec<String>>,
     /// A 16-hex id to the file it names.
@@ -388,25 +392,30 @@ impl<'a> Pass<'a> {
     }
 
     /// A malformed wiki link whose target is a file the cutover renamed: `[[Old_Name]]` follows
-    /// the rename. A malformed link with no rename on record is not this tool's to judge.
+    /// the rename, label and all (D-R15 keeps the label's bytes, not the target's). A malformed
+    /// link with no rename on record is not this tool's to judge.
     ///
     /// The old key is the lowercase stem, so the lookup folds ASCII case. A `repo/` qualifier is
-    /// kept when it names this repository and ends the matter when it names another: only this
-    /// repository's files were renamed.
+    /// kept when it names this repository. A qualifier that does not, and a `#fragment`, make the
+    /// target unsafe to guess: they are reported with the new form as the suggestion. A key that
+    /// another document of `HEAD` also has (its rename refused) is ambiguous and never followed.
     fn renamed_key(&mut self, range: &Range<usize>, raw: &str) {
         let (target, token) = match raw.rsplit_once(':') {
             Some((target, token)) if is_entry_token(token) => (target, Some(token)),
             _ => (raw, None),
         };
-        let (repo, stem) = match target.split_once('/') {
-            Some((repo, stem)) if !stem.contains('/') => match RepoName::parse(repo) {
-                Ok(repo) if repo == *self.r.this_repo => (Some(repo), stem),
-                _ => return,
-            },
-            Some(_) => return,
+        let (target, fragment) = match target.split_once('#') {
+            Some((target, fragment)) => (target, Some(fragment)),
+            None => (target, None),
+        };
+        let (qualifier, stem) = match target.split_once('/') {
+            Some((_, stem)) if stem.contains('/') => return,
+            Some((qualifier, stem)) => (Some(qualifier), stem),
             None => (None, target),
         };
-        let Some(new_key) = self.r.renamed_keys.get(&stem.to_ascii_lowercase()) else {
+        let old_key = stem.to_ascii_lowercase();
+        let ambiguous = self.r.ambiguous_keys.get(&old_key);
+        let Some(new_key) = self.r.renamed_keys.get(&old_key) else {
             return;
         };
         let new_key = new_key.clone();
@@ -414,20 +423,49 @@ impl<'a> Pass<'a> {
             self.unresolved_or_skip(Form::RenamedKey, range, REASON_URL);
             return;
         }
-        let bare_link = self.text[range.clone()]
+        if let Some(candidates) = ambiguous {
+            self.ambiguous(Form::RenamedKey, range, candidates.clone());
+            return;
+        }
+        let this_repo = qualifier
+            .and_then(|q| RepoName::parse(q).ok())
+            .filter(|r| r == self.r.this_repo);
+        if fragment.is_some() || (qualifier.is_some() && this_repo.is_none()) {
+            let why = if fragment.is_some() {
+                "a renamed file is named with a #fragment"
+            } else {
+                "a renamed file is named with a qualifier that is not this repository's"
+            };
+            let suggestion = self.render(this_repo.as_ref(), &new_key, token);
+            self.unresolved(Form::RenamedKey, range, why, suggestion);
+            return;
+        }
+        // What follows the target inside the brackets: nothing, or `|label` (`\|label` in a table
+        // cell), copied as it is.
+        let tail = self.text[range.clone()]
             .strip_prefix("[[")
             .and_then(|s| s.strip_suffix("]]"))
-            .map(|inner| inner.trim_matches(|c: char| c.is_ascii_whitespace()));
-        if bare_link != Some(raw) {
+            .map(|inner| inner.trim_start_matches(|c: char| c.is_ascii_whitespace()))
+            .and_then(|inner| inner.strip_prefix(raw))
+            .map(|rest| rest.trim_start_matches(|c: char| c.is_ascii_whitespace()))
+            .filter(|rest| rest.is_empty() || rest.starts_with('|') || rest.starts_with("\\|"))
+            .map(str::to_owned);
+        let Some(tail) = tail else {
             self.unresolved(
                 Form::RenamedKey,
                 range,
-                "a renamed file is named in a wiki link with a label",
+                "the wiki link to a renamed file is not written as [[target]] or [[target|label]]",
                 None,
             );
             return;
-        }
-        match self.render(repo.as_ref(), &new_key, token) {
+        };
+        let to = self
+            .render(this_repo.as_ref(), &new_key, token)
+            .and_then(|link| {
+                link.strip_suffix("]]")
+                    .map(|head| format!("{head}{tail}]]"))
+            });
+        match to {
             Some(to) => self.rewrite(Form::RenamedKey, range.clone(), to),
             None => self.unresolved(Form::RenamedKey, range, REASON_NOT_RENDERABLE, None),
         }
@@ -940,6 +978,7 @@ mod tests {
         repo: RepoName,
         renamed: BTreeMap<String, Key>,
         paths: BTreeMap<String, String>,
+        ambiguous: BTreeMap<String, Vec<String>>,
         stems: BTreeMap<String, Vec<String>>,
         ids: BTreeMap<String, IdTarget>,
         hints: BTreeMap<String, String>,
@@ -960,6 +999,7 @@ mod tests {
                 repo,
                 renamed: BTreeMap::new(),
                 paths: BTreeMap::new(),
+                ambiguous: BTreeMap::new(),
                 stems: BTreeMap::new(),
                 ids: BTreeMap::new(),
                 hints: BTreeMap::new(),
@@ -992,6 +1032,7 @@ mod tests {
                     this_repo: &self.repo,
                     renamed_keys: &self.renamed,
                     renamed_paths: &self.paths,
+                    ambiguous_keys: &self.ambiguous,
                     stems: &self.stems,
                     ids: &self.ids,
                     id_hints: &self.hints,
@@ -1453,17 +1494,90 @@ mod tests {
             "docs/b.md",
             "# B\n\nsee [[My_Notes]] and [[My_Notes|label]]\n",
         );
-        assert_eq!(out, "# B\n\nsee [[my-notes]] and [[My_Notes|label]]\n");
+        assert_eq!(out, "# B\n\nsee [[my-notes]] and [[my-notes|label]]\n");
         assert_eq!(f.len(), 2, "{f:?}");
-        assert_eq!(f[0].form, Form::RenamedKey);
+        assert!(f.iter().all(|f| f.form == Form::RenamedKey), "{f:?}");
         assert_eq!(rewritten(&f[0]), "[[my-notes]]");
-        assert!(matches!(f[1].outcome, Outcome::Unresolved { .. }));
+        assert_eq!(rewritten(&f[1]), "[[my-notes|label]]");
         // With no rename on record a malformed link is left alone and not reported.
         let fx = Fx::standard();
         let text = "# B\n\nsee [[My_Notes]]\n";
         let (out, f) = fx.run("docs/b.md", text);
         assert_eq!(out, text);
         assert!(f.is_empty(), "{f:?}");
+    }
+
+    #[test]
+    fn a_label_on_a_link_to_a_renamed_file_is_kept_byte_for_byte() {
+        let fx = Fx::after_rename("My_Notes");
+        let text = "# B\n\n[[My_Notes|label]] [[my_notes:F-2|a b]] [[ My_Notes | spaced ]] [[demo/My_Notes|x]]\n\n\
+                    | a | b |\n|---|---|\n| [[My_Notes\\|cell label]] | plain |\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(
+            out,
+            "# B\n\n[[my-notes|label]] [[my-notes:F-2|a b]] [[my-notes| spaced ]] [[demo/my-notes|x]]\n\n\
+             | a | b |\n|---|---|\n| [[my-notes\\|cell label]] | plain |\n"
+        );
+        assert_eq!(f.len(), 5, "{f:?}");
+        assert!(
+            f.iter()
+                .all(|f| matches!(f.outcome, Outcome::Rewritten { .. })),
+            "{f:?}"
+        );
+    }
+
+    #[test]
+    fn a_label_form_that_does_not_resolve_is_reported_not_written() {
+        let fx = Fx::after_rename("My_Notes");
+        let text = "# B\n\n[[my_notes:F-9|x]]\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(out, text);
+        assert_eq!(unresolved(&f[0]).0, REASON_NOT_RENDERABLE);
+    }
+
+    #[test]
+    fn a_key_two_files_could_be_is_reported_ambiguous_and_left_alone() {
+        let mut fx = Fx::after_rename("My_Notes");
+        fx.ambiguous.insert(
+            "my_notes".into(),
+            vec![".github/My_Notes.md".into(), "docs/My_Notes.md".into()],
+        );
+        let text = "# B\n\n[[My_Notes]] [[my_notes:F-2]] [[My_Notes|x]] [[docs/My_Notes]] [[My_Notes#S]]\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(out, text);
+        assert_eq!(f.len(), 5, "{f:?}");
+        for finding in &f {
+            assert_eq!(finding.form, Form::RenamedKey);
+            match &finding.outcome {
+                Outcome::Ambiguous { candidates } => {
+                    assert_eq!(candidates, &[".github/My_Notes.md", "docs/My_Notes.md"])
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_foreign_qualifier_or_a_fragment_on_a_renamed_key_is_reported_with_the_new_form() {
+        let fx = Fx::after_rename("My_Notes");
+        let text = "# B\n\n[[docs/My_Notes]] [[My_Notes#Sec]] [[demo/My_Notes#Sec]] [[docs/my_notes:F-2]]\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(out, text, "neither form is safe to guess");
+        assert_eq!(f.len(), 4, "{f:?}");
+        assert_eq!(unresolved(&f[0]).1, Some("[[my-notes]]"));
+        assert_eq!(unresolved(&f[1]).1, Some("[[my-notes]]"));
+        assert_eq!(unresolved(&f[2]).1, Some("[[demo/my-notes]]"));
+        assert_eq!(unresolved(&f[3]).1, Some("[[my-notes:F-2]]"));
+        // A qualifier on a stem that is not a renamed key is nobody's business here.
+        let text = "# B\n\n[[docs/Other_Thing]] [[Other_Thing#Sec]] [[other/My_Notes]]\n";
+        let (out, f) = fx.run("docs/b.md", text);
+        assert_eq!(out, text);
+        assert_eq!(f.len(), 1, "{f:?}");
+        assert_eq!(
+            unresolved(&f[0]).1,
+            Some("[[my-notes]]"),
+            "another repository's My_Notes names a renamed key too"
+        );
     }
 
     #[test]
@@ -1477,8 +1591,8 @@ mod tests {
         );
         assert_eq!(f.len(), 4, "{f:?}");
         assert!(f.iter().all(|f| f.form == Form::RenamedKey), "{f:?}");
-        // The qualifier is this repository's: another repository's file was not renamed here.
-        let text = "# B\n\n[[other/My_Notes]] [[a:b:c]]\n";
+        // The qualifier is this repository's to keep; another one on a stem nobody renamed is not ours.
+        let text = "# B\n\n[[other/Plain]] [[a:b:c]]\n";
         let (out, f) = fx.run("docs/b.md", text);
         assert_eq!(out, text);
         assert!(f.is_empty(), "{f:?}");

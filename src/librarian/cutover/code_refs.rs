@@ -110,7 +110,7 @@ impl CodeRefs {
 }
 
 /// The mode of a symlink tree entry.
-const LINK_MODE: i32 = 0o120000;
+pub(crate) const LINK_MODE: i32 = 0o120000;
 
 fn is_markdown(path: &str) -> bool {
     path.len() >= 3 && path.as_bytes()[path.len() - 3..].eq_ignore_ascii_case(b".md")
@@ -166,6 +166,15 @@ fn note_markdown_paths(named: &mut HashMap<String, Vec<(String, u32)>>, blob: &s
             named.entry(key).or_default().push((blob.to_owned(), line));
         }
     }
+}
+
+/// The repository paths that the text of the markdown file `blob` names (a link, or a path written
+/// out), each with the lines that name it, in the sense of [`CodeRefs::mentions`]. The cutover asks
+/// it about files outside the key space, which it reports and never rewrites.
+pub(crate) fn paths_named_in(blob: &str, text: &str) -> HashMap<String, Vec<(String, u32)>> {
+    let mut named = HashMap::new();
+    note_markdown_paths(&mut named, blob, text);
+    named
 }
 
 /// The repository paths a written `run` can name: each tail of it that starts at a component

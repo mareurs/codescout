@@ -10,11 +10,11 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::librarian::catalog::augmentation::AugmentationRow;
-use crate::librarian::cutover::code_refs::CodeRefs;
+use crate::librarian::cutover::code_refs::{paths_named_in, CodeRefs, LINK_MODE};
 use crate::librarian::cutover::history::HistoryIds;
 use crate::librarian::cutover::old_rows::{OldRows, OutOfScope};
 use crate::librarian::cutover::rename::{
-    applied_item, in_head_item, plan_renames, renames_already_in_head, RenameSet,
+    applied_item, in_head_item, plan_renames_against, renames_already_in_head, RenameSet,
 };
 use crate::librarian::cutover::rewrite::{
     rewrite_document, Finding, Form, IdSource, IdTarget, Outcome, Resolver, REASON_UNKNOWN_ID,
@@ -86,6 +86,7 @@ pub struct Item {
 pub struct FileChange {
     /// The final path.
     pub path: String,
+    /// Export moves the old path to this one; the old path is not kept.
     pub renamed_from: Option<String>,
     /// The text in `HEAD`; `None` for a new file.
     pub head_text: Option<String>,
@@ -209,11 +210,16 @@ pub fn plan_export(
     plan_skipped_events(old, &renames.paths(), &mut plan);
     plan_write_cites(old, &mut plan);
     plan_citations(repo, commit, old, &head, &code, &renames, &mut plan)?;
+    plan_outside_links(repo, commit, &head, &renames, &mut plan)?;
     Ok(plan)
 }
 
 /// The renames of the run (D-R14): the ones this run applies, with an item for each and for each
 /// it cannot make, and the ones `HEAD` already holds (D-R25), each an `already_exported` item.
+///
+/// A path `HEAD` lacks that the old catalog still holds a live row for is taken: a rename onto it
+/// would put two documents' rows on one path, and the run after the commit could not work the
+/// rename out.
 fn plan_file_renames(
     head: &Head,
     old: &OldRows,
@@ -228,9 +234,15 @@ fn plan_file_renames(
         }),
     );
     let paths: Vec<String> = head.files.keys().chain(&head.outside).cloned().collect();
+    let head_paths: BTreeSet<String> = paths.iter().cloned().collect();
+    let held: BTreeSet<String> = old
+        .documents
+        .values()
+        .filter(|d| !d.missing && !head_paths.contains(&d.rel_path))
+        .map(|d| d.rel_path.clone())
+        .collect();
     let keys: BTreeSet<Key> = head.files.keys().filter_map(|p| key_of(p).ok()).collect();
-    let (planned, blocked) = plan_renames(&paths, &keys, before.problems(), code);
-    let head_paths: BTreeSet<String> = paths.into_iter().collect();
+    let (planned, blocked) = plan_renames_against(&paths, &held, &keys, before.problems(), code);
     let in_head = renames_already_in_head(old, &head_paths);
     plan.items.extend(blocked);
     plan.items.extend(planned.iter().map(applied_item));
@@ -265,11 +277,13 @@ fn plan_citations(
     let stems = stems_of(head, renames);
     let (ids, id_hints) = recover_ids(repo, commit, old, head, &moved, plan.shallow)?;
     let renamed_keys = renames.keys();
+    let ambiguous_keys = renames.ambiguous_keys(head.files.keys());
     let resolver = Resolver {
         index: &index,
         this_repo: &head.repo_name,
         renamed_keys: &renamed_keys,
         renamed_paths: &moved,
+        ambiguous_keys: &ambiguous_keys,
         stems: &stems,
         ids: &ids,
         id_hints: &id_hints,
@@ -293,6 +307,58 @@ fn plan_citations(
                     new_text,
                 },
             );
+        }
+    }
+    Ok(())
+}
+
+/// Markdown outside the key space (and so outside the rewrite, D-R15) that links to a file this run
+/// renames: the link breaks and no rewrite can fix it, so each one is an `unrecoverable` item
+/// (D-R7). The file is not rewritten and the rename is not blocked (D-R21 b blocks on code only).
+/// A path with no text (not UTF-8, a symlink) has nothing to scan. Items come sorted by path, then
+/// line.
+fn plan_outside_links(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    head: &Head,
+    renames: &RenameSet,
+    plan: &mut ExportPlan,
+) -> anyhow::Result<()> {
+    if renames.planned.is_empty() {
+        return Ok(());
+    }
+    let tree = commit.tree()?;
+    for path in &head.outside {
+        let Ok(entry) = tree.get_path(Path::new(path)) else {
+            continue;
+        };
+        if entry.kind() != Some(git2::ObjectType::Blob) || entry.filemode() == LINK_MODE {
+            continue;
+        }
+        let Ok(blob) = repo.find_blob(entry.id()) else {
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(blob.content()) else {
+            continue;
+        };
+        let named = paths_named_in(path, text);
+        let mut hits: BTreeSet<(u32, usize)> = BTreeSet::new();
+        for (n, rename) in renames.planned.iter().enumerate() {
+            for (_, line) in named.get(&rename.from).into_iter().flatten() {
+                hits.insert((*line, n));
+            }
+        }
+        for (line, n) in hits {
+            let rename = &renames.planned[n];
+            plan.items.push(Item {
+                class: Class::Citation,
+                status: Status::Unrecoverable,
+                reason: "outside the key space: links to a file this run renames".to_owned(),
+                path: Some(path.clone()),
+                line: Some(line),
+                detail: Some(format!("{} -> {}", rename.from, rename.to)),
+                suggestion: Some(rename.to.clone()),
+            });
         }
     }
     Ok(())
@@ -1250,6 +1316,191 @@ mod tests {
         let items = rename_items(&plan);
         assert_eq!(items.len(), 1, "{items:?}");
         assert_eq!(items[0].reason, "target exists");
+    }
+
+    fn ambiguous_items(plan: &ExportPlan) -> Vec<&Item> {
+        citation_items(plan)
+            .into_iter()
+            .filter(|i| i.reason == "ambiguous: several documents qualify")
+            .collect()
+    }
+
+    #[test]
+    fn an_old_key_a_refused_file_also_has_is_not_rewritten_to_the_renamed_one() {
+        // `.github/My_Notes.md` is frozen and keeps its invalid key: `[[My_Notes]]` could mean either.
+        let plan = plan_of_files(
+            &[
+                (".github/My_Notes.md", b"# G\n"),
+                ("docs/My_Notes.md", b"# My\n\n## F-2 \xe2\x80\x94 two\n"),
+                ("docs/b.md", b"# B\n\nsee [[My_Notes]] and My_Notes:F-2.\n"),
+            ],
+            |_, _| {},
+        );
+        let paths: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(paths, ["docs/my-notes.md"], "docs/b.md keeps its text");
+        let ambiguous = ambiguous_items(&plan);
+        assert_eq!(ambiguous.len(), 1, "{ambiguous:?}");
+        assert_eq!(ambiguous[0].path.as_deref(), Some("docs/b.md"));
+        assert_eq!(
+            ambiguous[0].detail.as_deref(),
+            Some("[[My_Notes]]: .github/My_Notes.md, docs/My_Notes.md")
+        );
+    }
+
+    #[test]
+    fn a_rename_already_in_head_next_to_a_refused_file_leaves_the_old_key_ambiguous() {
+        // `notes/My_Notes.md` is refused (its key is held by `docs/my-notes.md`), so the old key
+        // `my_notes` names it as well as the file the catalog knew at `docs/My_Notes.md`.
+        let plan = plan_of_files(
+            &[
+                ("docs/my-notes.md", b"# My\n"),
+                ("notes/My_Notes.md", b"# Other\n"),
+                ("docs/b.md", b"# B\n\nsee [[My_Notes]].\n"),
+            ],
+            |cat, root| {
+                add_doc(cat, root, "0123456789abcdef", "docs/My_Notes.md");
+            },
+        );
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let ambiguous = ambiguous_items(&plan);
+        assert_eq!(ambiguous.len(), 1, "{ambiguous:?}");
+        assert_eq!(
+            ambiguous[0].detail.as_deref(),
+            Some("[[My_Notes]]: docs/my-notes.md, notes/My_Notes.md")
+        );
+        let in_head = rename_items(&plan)
+            .into_iter()
+            .filter(|i| i.status == Status::AlreadyExported)
+            .count();
+        assert_eq!(in_head, 1);
+    }
+
+    #[test]
+    fn a_link_in_a_file_outside_the_key_space_to_a_renamed_file_is_reported() {
+        let plan = plan_of_files(
+            &[
+                (".codescout/key-space.toml", b"exclude = [\"contrib/**\"]\n"),
+                ("docs/My_Notes.md", b"# My\n"),
+                ("docs/Kept_Name.md", b"# K\n"),
+                (
+                    "contrib/x.md",
+                    b"# X\n\nsee [n](../docs/My_Notes.md) and\n[k](../docs/Fine.md) and [again](../docs/My_Notes.md#s).\n",
+                ),
+                ("contrib/sub/y.md", b"# Y\n\n[n](../../docs/My_Notes.md)\n"),
+                ("contrib/untouched.md", b"# U\n\n[o](other/My_Notes.md)\n"),
+                ("contrib/binary.md", b"\xff\xfe ../docs/My_Notes.md"),
+            ],
+            |_, _| {},
+        );
+        let paths: Vec<&str> = plan.files.keys().map(String::as_str).collect();
+        assert_eq!(
+            paths,
+            ["docs/kept-name.md", "docs/my-notes.md"],
+            "the files outside are not rewritten, and the renames still happen"
+        );
+        let hits: Vec<(&str, Option<u32>)> = citation_items(&plan)
+            .into_iter()
+            .filter(|i| i.status == Status::Unrecoverable)
+            .map(|i| (i.path.as_deref().unwrap(), i.line))
+            .collect();
+        assert_eq!(
+            hits,
+            [
+                ("contrib/sub/y.md", Some(3)),
+                ("contrib/x.md", Some(3)),
+                ("contrib/x.md", Some(4)),
+            ]
+        );
+        let item = citation_items(&plan)
+            .into_iter()
+            .find(|i| i.path.as_deref() == Some("contrib/x.md"))
+            .unwrap();
+        assert_eq!(
+            item.reason,
+            "outside the key space: links to a file this run renames"
+        );
+        assert_eq!(
+            item.detail.as_deref(),
+            Some("docs/My_Notes.md -> docs/my-notes.md")
+        );
+    }
+
+    #[test]
+    fn a_symlink_outside_the_key_space_is_not_scanned_for_links() {
+        use crate::librarian::derived::testkit::LINK;
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let repo = repo_with(
+            &root,
+            &[
+                (
+                    ".codescout/key-space.toml",
+                    FILE,
+                    b"exclude = [\"contrib/**\"]\n" as &[u8],
+                ),
+                ("docs/My_Notes.md", FILE, b"# My\n"),
+                // The blob of a link holds its target, a path: not text that links anywhere.
+                ("contrib/link.md", LINK, b"../docs/My_Notes.md"),
+            ],
+        );
+        let old = old_catalog_with(|_| {});
+        let rows = load(&old, &RootMap::new(root.clone())).unwrap();
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let plan = plan_export(&repo, &commit, &rows).unwrap();
+        assert!(citation_items(&plan).is_empty(), "{:?}", plan.items);
+        assert_eq!(plan.files.keys().collect::<Vec<_>>(), ["docs/my-notes.md"]);
+    }
+
+    #[test]
+    fn a_live_old_catalog_row_at_the_target_blocks_the_rename() {
+        let fill = |stale: bool| {
+            move |cat: &crate::librarian::catalog::Catalog, root: &Path| {
+                add_doc(cat, root, "0000000000000001", "docs/My_Notes.md");
+                add_doc(cat, root, "0000000000000002", "docs/my-notes.md");
+                if stale {
+                    cat.conn
+                        .execute(
+                            "UPDATE artifact SET missing_since = 5 WHERE id = '0000000000000002'",
+                            [],
+                        )
+                        .unwrap();
+                }
+            }
+        };
+        let files: &[(&str, &[u8])] = &[("docs/My_Notes.md", b"# My\n")];
+        let plan = plan_of_files(files, fill(false));
+        assert!(plan.files.is_empty(), "{:?}", plan.files.keys());
+        let items = rename_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].reason, "target exists");
+        assert!(
+            items[0].detail.as_deref().unwrap().contains("old catalog"),
+            "{:?}",
+            items[0].detail
+        );
+        // A row the catalog marked missing is a leftover, not a document.
+        let plan = plan_of_files(files, fill(true));
+        assert_eq!(plan.files.keys().collect::<Vec<_>>(), ["docs/my-notes.md"]);
+    }
+
+    #[test]
+    fn a_rename_blocked_by_code_names_the_first_place_and_the_count_in_the_detail() {
+        let plan = plan_of_files(
+            &[
+                ("docs/My_Notes.md", b"# My\n"),
+                ("scripts/a.sh", b"cat My_Notes.md\n"),
+                ("scripts/b.sh", b"cat My_Notes.md\n"),
+                ("scripts/c.sh", b"cat My_Notes.md\n"),
+            ],
+            |_, _| {},
+        );
+        let items = rename_items(&plan);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].reason, "named by code");
+        assert_eq!(
+            items[0].detail.as_deref(),
+            Some("scripts/a.sh:1 and 2 more; would be docs/my-notes.md")
+        );
     }
 
     #[test]

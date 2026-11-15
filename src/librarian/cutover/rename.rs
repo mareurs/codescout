@@ -32,6 +32,7 @@ const REASON_NO_NAME: &str = "no canonical name";
 const REASON_HEX: &str = "hex-shaped name";
 const REASON_TARGET: &str = "target exists";
 const REASON_COLLISION: &str = "key collision";
+const REASON_NAMED_BY_CODE: &str = "named by code";
 
 /// A file renamed in its own folder to a name that gives a valid key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +67,41 @@ impl RenameSet {
         self.all()
             .map(|r| (r.old_key.clone(), r.new_key.clone()))
             .collect()
+    }
+
+    /// Old key to every document of `HEAD` it could have named, for each old key that a document
+    /// other than the renamed file also has: the same lowercase stem, its rename not applied (it was
+    /// refused, or it has no rename). A link written with such a key is not followed to the renamed
+    /// file. The renamed file is named by the path `HEAD` holds: the old one while this run renames
+    /// it, the new one after the commit.
+    pub fn ambiguous_keys<'a>(
+        &self,
+        head_paths: impl Iterator<Item = &'a String>,
+    ) -> BTreeMap<String, Vec<String>> {
+        let moved = self.paths();
+        let renamed: BTreeSet<&str> = self.all().map(|r| r.old_key.as_str()).collect();
+        let mut found: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for path in head_paths.filter(|p| !moved.contains_key(*p)) {
+            let key = stem_of(path).to_ascii_lowercase();
+            if renamed.contains(key.as_str()) {
+                found.entry(key).or_default().push(path.clone());
+            }
+        }
+        let held_by_renamed = self
+            .planned
+            .iter()
+            .map(|r| (&r.old_key, &r.from))
+            .chain(self.in_head.iter().map(|r| (&r.old_key, &r.to)));
+        for (old_key, path) in held_by_renamed {
+            if let Some(paths) = found.get_mut(old_key) {
+                paths.push(path.clone());
+            }
+        }
+        for paths in found.values_mut() {
+            paths.sort();
+            paths.dedup();
+        }
+        found
     }
 }
 
@@ -212,6 +248,18 @@ pub fn plan_renames(
     problems: &[IndexProblem],
     refs: &CodeRefs,
 ) -> (Vec<Rename>, Vec<Item>) {
+    plan_renames_against(paths, &BTreeSet::new(), keys, problems, refs)
+}
+
+/// [`plan_renames`] with the paths the old catalog still holds a live row for but `HEAD` lacks
+/// (`held`): a rename onto one of them would put two documents' rows on one path (D-R25).
+pub(crate) fn plan_renames_against(
+    paths: &[String],
+    held: &BTreeSet<String>,
+    keys: &BTreeSet<Key>,
+    problems: &[IndexProblem],
+    refs: &CodeRefs,
+) -> (Vec<Rename>, Vec<Item>) {
     let taken_paths: BTreeSet<&str> = paths.iter().map(String::as_str).collect();
     let mut items = Vec::new();
     let mut survivors: Vec<Rename> = Vec::new();
@@ -221,7 +269,7 @@ pub fn plan_renames(
                 match repair(rel_path) {
                     Repair::Refused(reason) => items.push(blocked(rel_path, reason, None, None)),
                     Repair::To(rename) => {
-                        match blocker_of(&rename, &taken_paths, keys, refs) {
+                        match blocker_of(&rename, &taken_paths, held, keys, refs) {
                             Some(item) => items.push(item),
                             None => survivors.push(rename),
                         };
@@ -288,12 +336,17 @@ pub fn plan_renames(
 fn blocker_of(
     rename: &Rename,
     taken_paths: &BTreeSet<&str>,
+    held: &BTreeSet<String>,
     keys: &BTreeSet<Key>,
     refs: &CodeRefs,
 ) -> Option<Item> {
-    let would_be = Some(format!("would be {}", rename.to));
+    let would_be = format!("would be {}", rename.to);
     if taken_paths.contains(rename.to.as_str()) {
-        return Some(blocked(&rename.from, REASON_TARGET, would_be, None));
+        return Some(blocked(&rename.from, REASON_TARGET, Some(would_be), None));
+    }
+    if held.contains(&rename.to) {
+        let detail = format!("{would_be}; the old catalog still holds a live row for it");
+        return Some(blocked(&rename.from, REASON_TARGET, Some(detail), None));
     }
     if keys.contains(&rename.new_key) {
         let detail = Some(format!(
@@ -307,20 +360,29 @@ fn blocker_of(
         return Some(blocked(
             &rename.from,
             &format!("frozen: {why}"),
-            would_be,
+            Some(would_be),
             None,
         ));
     }
-    // D-R21 b: a name tools read is not ours to change, wherever the text that holds it sits.
+    // D-R21 b: a name tools read is not ours to change, wherever the text that holds it sits. The
+    // reason stays one constant (it is the key of the report's tally); the first place and the
+    // count go in the detail, as `frozen` does it.
     let mut named = refs.mentions(file_name(&rename.from));
     named.extend(refs.mentions(&rename.from));
     named.sort();
     named.dedup();
-    if !named.is_empty() {
-        let reason = format!("named by code: {}", named.join(", "));
-        return Some(blocked(&rename.from, &reason, would_be, None));
-    }
-    None
+    let first = named.first()?;
+    let more = match named.len() {
+        1 => String::new(),
+        n => format!(" and {} more", n - 1),
+    };
+    let detail = format!("{first}{more}; {would_be}");
+    Some(blocked(
+        &rename.from,
+        REASON_NAMED_BY_CODE,
+        Some(detail),
+        None,
+    ))
 }
 
 /// D-R25: the renames a run after the commit finds already made. An old-catalog path that `HEAD`
@@ -370,6 +432,11 @@ mod tests {
 
     /// What `plan_renames` gives for the committed `files` (markdown ones are documents).
     fn run(files: &[(&str, &str)]) -> (Vec<Rename>, Vec<Item>) {
+        run_held(files, &[])
+    }
+
+    /// [`run`] with paths the old catalog still holds a live row for.
+    fn run_held(files: &[(&str, &str)], held: &[&str]) -> (Vec<Rename>, Vec<Item>) {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let entries: Vec<(&str, u32, &[u8])> = files
@@ -389,8 +456,26 @@ mod tests {
             .collect();
         let paths: Vec<String> = docs.iter().map(|d| d.rel_path.clone()).collect();
         let keys: BTreeSet<Key> = paths.iter().filter_map(|p| key_of(p).ok()).collect();
+        let held: BTreeSet<String> = held.iter().map(|p| (*p).to_owned()).collect();
         let index = KeyIndex::build(RepoName::parse("demo").unwrap(), docs);
-        plan_renames(&paths, &keys, index.problems(), &refs)
+        plan_renames_against(&paths, &held, &keys, index.problems(), &refs)
+    }
+
+    #[test]
+    fn a_path_the_old_catalog_holds_a_live_row_for_is_taken() {
+        let files = [("docs/My_Notes.md", "# M\n")];
+        let (renames, items) = run_held(&files, &["docs/my-notes.md"]);
+        assert!(renames.is_empty());
+        assert_eq!(reasons(&items), [("docs/My_Notes.md", "target exists")]);
+        assert_eq!(
+            items[0].detail.as_deref(),
+            Some("would be docs/my-notes.md; the old catalog still holds a live row for it")
+        );
+        // Another path held changes nothing.
+        let (renames, _) = run_held(&files, &["docs/other.md"]);
+        assert_eq!(renames.len(), 1);
+        // `plan_renames` is the same call with nothing held.
+        assert_eq!(run(&files).0.len(), 1);
     }
 
     fn reasons(items: &[Item]) -> Vec<(&str, &str)> {
@@ -581,8 +666,25 @@ mod tests {
         assert!(renames.is_empty());
         assert_eq!(
             reasons(&items),
-            [("scripts/m/judge_prompt.md", "named by code: scripts/x.py:1")],
+            [("scripts/m/judge_prompt.md", "named by code")],
             "blocked by the name, though the file is not frozen"
+        );
+        assert_eq!(
+            items[0].detail.as_deref(),
+            Some("scripts/x.py:1; would be scripts/m/judge-prompt.md")
+        );
+    }
+
+    #[test]
+    fn many_places_that_name_a_file_are_shortened_to_the_first_and_a_count() {
+        let (_, items) = run(&[
+            ("docs/My_Notes.md", "# M\n"),
+            ("scripts/b.sh", "cat My_Notes.md\ncat My_Notes.md\n"),
+            ("scripts/a.sh", "cat My_Notes.md\n"),
+        ]);
+        assert_eq!(
+            items[0].detail.as_deref(),
+            Some("scripts/a.sh:1 and 2 more; would be docs/my-notes.md")
         );
     }
 

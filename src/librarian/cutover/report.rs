@@ -174,7 +174,9 @@ fn is_blocked(item: &Item) -> bool {
     (item.class == Class::Rename && is_not_moved(item)) || item.reason.starts_with("frozen")
 }
 
-/// `<path>[:<line>] — <reason>[ — use <suggestion>]`.
+/// `<path>[:<line>] — <reason>[ — <detail>][ — use <suggestion>]`. A rename's detail is printed
+/// because it holds the blockers (`path:line`) and the new name; another class keeps its detail
+/// to itself (an event's kind, a count).
 fn item_line(item: &Item) -> String {
     let mut line = match (&item.path, item.line) {
         (Some(path), Some(n)) => format!("{path}:{n}"),
@@ -186,6 +188,10 @@ fn item_line(item: &Item) -> String {
     };
     line.push_str(" — ");
     line.push_str(&item.reason);
+    if let (Class::Rename, Some(detail)) = (item.class, &item.detail) {
+        line.push_str(" — ");
+        line.push_str(detail);
+    }
     if let Some(suggestion) = &item.suggestion {
         line.push_str(" — use ");
         line.push_str(suggestion);
@@ -419,6 +425,25 @@ mod tests {
             .unwrap();
         assert!(section.contains("None."), "{section}");
         assert!(!section.contains("my-notes"), "{section}");
+    }
+
+    #[test]
+    fn a_blocked_rename_prints_its_detail_after_the_reason() {
+        let mut plan = sample();
+        plan.items.clear();
+        let mut blocked = item(
+            Class::Rename,
+            Status::Unrecoverable,
+            "named by code",
+            Some("docs/My_Notes.md"),
+        );
+        blocked.detail = Some("scripts/run.sh:4 and 2 more; would be docs/my-notes.md".into());
+        blocked.suggestion = Some("docs/docs-my-notes.md".into());
+        plan.items.push(blocked);
+        let text = render_markdown(&plan, &header());
+        let line = "- docs/My_Notes.md — named by code — scripts/run.sh:4 and 2 more; \
+                    would be docs/my-notes.md — use docs/docs-my-notes.md";
+        assert!(text.contains(line), "{text}");
     }
 
     #[test]
