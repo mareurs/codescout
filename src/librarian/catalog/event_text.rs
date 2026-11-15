@@ -92,7 +92,7 @@ pub(crate) struct EventSource {
 
 /// The text a heading shows for `s`: control characters (line ends included) become spaces, so
 /// no value can start a second line.
-fn one_line(s: &str) -> String {
+pub(crate) fn one_line(s: &str) -> String {
     s.chars()
         .map(|c| {
             if c.is_control() || c == '\u{2028}' || c == '\u{2029}' {
@@ -130,6 +130,13 @@ fn plain_note_text(e: &EventText) -> Option<&str> {
     }
     let text = map.get("text")?.as_str()?;
     (!has_lone_cr(text)).then_some(text)
+}
+
+/// The fence for a fenced block that holds `content`: the longest run of backticks in it plus one,
+/// at least three, so no line of `content` can close the block.
+pub(crate) fn fence_for(content: &str) -> String {
+    let longest = content.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    "`".repeat((longest + 1).max(3))
 }
 
 /// The section for `e`, ending in one newline, with no blank line before or after it.
@@ -179,8 +186,7 @@ pub(crate) fn render_event_section(e: &EventText) -> String {
         None => {
             let pretty =
                 serde_json::to_string_pretty(&e.payload).expect("a JSON value always serializes");
-            let longest = pretty.split(|c| c != '`').map(str::len).max().unwrap_or(0);
-            let fence = "`".repeat((longest + 1).max(3));
+            let fence = fence_for(&pretty);
             out.push_str(&format!("{fence}{PAYLOAD_INFO}\n{pretty}\n{fence}\n"));
         }
     }
@@ -443,6 +449,17 @@ mod tests {
             .into_iter()
             .map(|e| e.id)
             .collect()
+    }
+    /// The fence of a payload block is the longest backtick run of the content plus one, never
+    /// fewer than three: a run of backticks inside the payload cannot close the block.
+    #[test]
+    fn fence_for_is_one_longer_than_the_longest_run() {
+        assert_eq!(fence_for(""), "```");
+        assert_eq!(fence_for("no ticks"), "```");
+        assert_eq!(fence_for("a ` b"), "```");
+        assert_eq!(fence_for("a `` b"), "```");
+        assert_eq!(fence_for("a ``` b"), "````");
+        assert_eq!(fence_for("x ````` y ``` z"), "``````");
     }
 
     #[test]

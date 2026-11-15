@@ -13,7 +13,9 @@ use anyhow::{anyhow, Context};
 use rusqlite::{Connection, Statement};
 use serde::Serialize;
 
-use crate::librarian::catalog::augmentation::AugmentationRow;
+use crate::librarian::catalog::augmentation::{
+    row_from_sql, AugmentationRow, AUGMENTATION_COLUMNS,
+};
 use crate::librarian::derived::diff::{OldCatalog, RootMap, Scope};
 
 /// An artifact row that lies under the repository.
@@ -87,7 +89,10 @@ pub struct OutOfScope {
 /// Every row of the old catalog that lies under the repository.
 #[derive(Debug, Default)]
 pub struct OldRows {
-    /// In-scope artifacts, by id.
+    /// In-scope artifacts, by id. Two live rows may name one path (the same file under two
+    /// spellings of the root, each hashed into its own id): both are kept, so a later step that
+    /// works per path groups them (the cutover reports the params of both and exports the path
+    /// once).
     pub documents: BTreeMap<String, OldDocument>,
     pub augmentations: Vec<AugmentationRow>,
     pub events: Vec<OldEvent>,
@@ -145,10 +150,6 @@ const LINKS_SQL: &str = "SELECT src_id, dst_id, rel FROM artifact_link \
      WHERE rel NOT IN ('cites', 'worktree_of') ORDER BY src_id, dst_id, rel";
 const WRITE_CITES_SQL: &str = "SELECT a.id, count(*) FROM entry_cite c \
      JOIN artifact a ON a.slug = c.src_slug WHERE c.origin = 'write' GROUP BY a.id";
-const AUGMENTATIONS_SQL: &str = "SELECT artifact_id, prompt, params, last_refreshed_at, \
-     refresh_count, created_at, updated_at, render_template, params_schema, append_mode, \
-     history_cap, entry_collection, refreshed_at_commit \
-     FROM artifact_augmentation ORDER BY artifact_id";
 
 /// Every statement the load runs, prepared before the first row is read.
 struct Queries<'c> {
@@ -178,7 +179,9 @@ impl<'c> Queries<'c> {
             observations: prepare(OBSERVATIONS_SQL)?,
             links: prepare(LINKS_SQL)?,
             write_cites: prepare(WRITE_CITES_SQL)?,
-            augmentations: prepare(AUGMENTATIONS_SQL)?,
+            augmentations: prepare(&format!(
+                "SELECT {AUGMENTATION_COLUMNS} FROM artifact_augmentation ORDER BY artifact_id"
+            ))?,
         })
     }
 }
@@ -369,25 +372,10 @@ fn load_augmentations(
     let mut augmentations = Vec::new();
     let mut found = stmt.query([])?;
     while let Some(row) = found.next()? {
-        let artifact_id: String = row.get(0)?;
-        if !documents.contains_key(&artifact_id) {
-            continue;
+        let augmentation = row_from_sql(row)?;
+        if documents.contains_key(&augmentation.artifact_id) {
+            augmentations.push(augmentation);
         }
-        augmentations.push(AugmentationRow {
-            artifact_id,
-            prompt: row.get(1)?,
-            params: row.get(2)?,
-            last_refreshed_at: row.get(3)?,
-            refresh_count: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
-            render_template: row.get(7)?,
-            params_schema: row.get(8)?,
-            append_mode: row.get(9)?,
-            history_cap: row.get(10)?,
-            entry_collection: row.get(11)?,
-            refreshed_at_commit: row.get(12)?,
-        });
     }
     Ok(augmentations)
 }
@@ -411,6 +399,32 @@ mod tests {
 
     fn doc(cat: &crate::librarian::catalog::Catalog, id: &str, rel: &str) -> String {
         add_doc(cat, Path::new(ROOT), id, rel)
+    }
+
+    /// Two live rows may name one path: an old artifact id hashes `<spelling of the root>/<path>`,
+    /// so the same file under two spellings is two rows. `documents` is keyed by id and keeps both.
+    /// Later steps group them by path (the cutover reports the params of both and exports once).
+    #[test]
+    fn two_live_rows_naming_one_path_are_both_kept() {
+        let old = old_catalog_with(|cat| {
+            add_doc_at(cat, "d1", "/work/proj/docs/l.md");
+            add_doc_at(cat, "d2", "/old/spelling/docs/l.md");
+            add_augmentation(cat, "d1", r#"{"a":1}"#, None);
+            add_augmentation(cat, "d2", r#"{"b":2}"#, None);
+        });
+        let map =
+            RootMap::with_old_roots(PathBuf::from(ROOT), vec![PathBuf::from("/old/spelling")])
+                .unwrap();
+        let rows = load(&old, &map).unwrap();
+        assert_eq!(rows.documents.len(), 2);
+        assert_eq!(rows.documents["d1"].rel_path, "docs/l.md");
+        assert_eq!(rows.documents["d2"].rel_path, "docs/l.md");
+        let ids: Vec<&str> = rows
+            .augmentations
+            .iter()
+            .map(|a| a.artifact_id.as_str())
+            .collect();
+        assert_eq!(ids, ["d1", "d2"], "both augmentations are loaded, by id");
     }
 
     #[test]

@@ -78,23 +78,25 @@ pub fn get(cat: &Catalog, artifact_id: &str) -> Result<Option<AugmentationRow>> 
     get_by_conn(&cat.conn, artifact_id)
 }
 
+/// The columns of `artifact_augmentation`, in the order [`row_from_sql`] reads them.
+pub(crate) const AUGMENTATION_COLUMNS: &str = "artifact_id, prompt, params, last_refreshed_at, \
+     refresh_count, created_at, updated_at, render_template, params_schema, append_mode, \
+     history_cap, entry_collection, refreshed_at_commit";
+
 /// `get` against a bare connection, for callers that hold one rather than a `Catalog` —
 /// notably `doctor`'s scan family, whose functions all take `&rusqlite::Connection`.
 pub fn get_by_conn(
     conn: &rusqlite::Connection,
     artifact_id: &str,
 ) -> Result<Option<AugmentationRow>> {
-    let mut stmt = conn.prepare(
-        "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
-                created_at, updated_at, render_template, params_schema,
-                append_mode, history_cap, entry_collection, refreshed_at_commit
-         FROM artifact_augmentation WHERE artifact_id = ?1",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {AUGMENTATION_COLUMNS} FROM artifact_augmentation WHERE artifact_id = ?1"
+    ))?;
     let mut rows = stmt.query_map([artifact_id], row_from_sql)?;
     Ok(rows.next().transpose()?)
 }
 
-fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<AugmentationRow> {
+pub(crate) fn row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<AugmentationRow> {
     Ok(AugmentationRow {
         artifact_id: row.get(0)?,
         prompt: row.get(1)?,
@@ -2346,26 +2348,9 @@ fn resync_snapshot_row(
     Ok(SnapshotRow::Rewritten)
 }
 
-/// Splice a [`PendingSection`] — and its optional index row — into `doc`, returning the
-/// whole document so the caller writes it in ONE `fs::write`.
-///
-/// **Extracted so the params path can reach it, and shared rather than copied for the
-/// reason this module keeps paying for.** It was inline in [`allocate_entry_id`], which
-/// is why `append_entry` accepted `title`/`body`/`anchor_heading`/`index_row` and silently
-/// dropped all four: the code that honours them lived inside the branch that excluded it
-/// (`docs/issues/archive/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`).
-/// A second copy would have reproduced that the moment either drifted.
-///
-/// `caller` names the function in the refusal text. Both callers abort BEFORE any write,
-/// so both can honestly say nothing was written — see each call site for the ordering that
-/// makes that true.
-pub(crate) fn splice_pending_section(
-    doc: &str,
-    id: &str,
-    level: usize,
-    s: &PendingSection,
-    caller: &str,
-) -> Result<String> {
+/// `<#×level> <id> — <title>`, a blank line, the prose with the allocator's validity stamp, a blank
+/// line.
+pub(crate) fn render_pending_section(id: &str, level: usize, s: &PendingSection) -> Result<String> {
     let heading = "#".repeat(level);
     let prose = s.body.trim_end();
     // Every section the server writes is born with a declared decay class, the same way it
@@ -2386,7 +2371,30 @@ pub(crate) fn splice_pending_section(
     // `link_scan`'s `def_re`, so an entry written through this path cannot be born
     // undefined. Trailing blank line so the anchor heading that follows is not glued to
     // this section's last prose line.
-    let section_text = format!("{heading} {id} — {}\n\n{stamped}\n\n", s.title);
+    Ok(format!("{heading} {id} — {}\n\n{stamped}\n\n", s.title))
+}
+
+/// Splice a [`PendingSection`] — and its optional index row — into `doc`, returning the
+/// whole document so the caller writes it in ONE `fs::write`.
+///
+/// **Extracted so the params path can reach it, and shared rather than copied for the
+/// reason this module keeps paying for.** It was inline in [`allocate_entry_id`], which
+/// is why `append_entry` accepted `title`/`body`/`anchor_heading`/`index_row` and silently
+/// dropped all four: the code that honours them lived inside the branch that excluded it
+/// (`docs/issues/archive/2026-09-12-append-entry-drops-section-and-index-row-on-the-params-path.md`).
+/// A second copy would have reproduced that the moment either drifted.
+///
+/// `caller` names the function in the refusal text. Both callers abort BEFORE any write,
+/// so both can honestly say nothing was written — see each call site for the ordering that
+/// makes that true.
+pub(crate) fn splice_pending_section(
+    doc: &str,
+    id: &str,
+    level: usize,
+    s: &PendingSection,
+    caller: &str,
+) -> Result<String> {
+    let section_text = render_pending_section(id, level, s)?;
     let with_section = crate::tools::markdown::edit_markdown::perform_section_edit_ext(
         doc,
         &s.anchor_heading,
@@ -2996,10 +3004,7 @@ pub fn get_batch(
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
-        "SELECT artifact_id, prompt, params, last_refreshed_at, refresh_count,
-                created_at, updated_at, render_template, params_schema,
-                append_mode, history_cap, entry_collection, refreshed_at_commit
-         FROM artifact_augmentation WHERE artifact_id IN ({placeholders})"
+        "SELECT {AUGMENTATION_COLUMNS} FROM artifact_augmentation WHERE artifact_id IN ({placeholders})"
     );
     let mut stmt = cat.conn.prepare(&sql)?;
     let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
@@ -4941,6 +4946,44 @@ mod tests {
         // `F` must not match `FX-9`, and `F-12x` is not `F-12`.
         let body = "## FX-900 — other tracker\n## F-12x — malformed\n## F-2 — real\n";
         assert_eq!(body_claimed_indices(body, "F"), [2].into_iter().collect());
+    }
+
+    /// The section text is built in one place: `splice_pending_section` inserts exactly what
+    /// `render_pending_section` returns, so the cutover renders a recovered entry as a live write does.
+    #[test]
+    fn render_pending_section_is_the_text_splice_inserts() {
+        let doc = "# L\n\n## U-1 — first\n\nx\n\n## Template for new entries\n";
+        let section_of = |body: &str| PendingSection {
+            title: "second".into(),
+            body: body.into(),
+            anchor_heading: "## Template for new entries".into(),
+            index_row: None,
+        };
+        for body in ["prose here\n", "**Valid:** dated 2026-01-02\n\nprose here"] {
+            let s = section_of(body);
+            let section = render_pending_section("U-2", 2, &s).unwrap();
+            let spliced = splice_pending_section(doc, "U-2", 2, &s, "test").unwrap();
+            let anchor = "## Template for new entries\n";
+            assert_eq!(spliced, doc.replace(anchor, &format!("{section}{anchor}")));
+        }
+        let stamped = render_pending_section("U-2", 3, &section_of("prose here\n")).unwrap();
+        let today = today_iso();
+        assert_eq!(
+            stamped,
+            format!("### U-2 — second\n\n**Valid:** dated {today}\n\nprose here\n\n")
+        );
+        let declared =
+            render_pending_section("U-2", 2, &section_of("**Valid:** dated 2026-01-02\n\nx"))
+                .unwrap();
+        assert_eq!(
+            declared,
+            "## U-2 — second\n\n**Valid:** dated 2026-01-02\n\nx\n\n"
+        );
+        let malformed = render_pending_section("U-2", 2, &section_of("**Valid:** dated nope\n\nx"));
+        assert!(
+            malformed.is_err(),
+            "a malformed declaration is refused, not double-stamped"
+        );
     }
 
     #[test]

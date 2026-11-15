@@ -306,6 +306,25 @@ fn declared_target(
     Ok(Some((rel, path)))
 }
 
+/// The YAML text of a sidecar: what [`write`] puts on disk.
+pub fn render(sidecar: &AugmentationSidecar) -> Result<String> {
+    serde_yml::to_string(sidecar).context("serializing augmentation sidecar")
+}
+
+/// `content` with its `expects_augmentation:` frontmatter key set to `sidecar_rel`, the body byte
+/// for byte. The block is re-serialised by `frontmatter::write` (first-class fields first, extras
+/// after, comments dropped), as `doctor fix=export_augmentations` does. An error when `content` has
+/// no frontmatter block or one that does not parse.
+pub(crate) fn declaration_stamped(content: &str, sidecar_rel: &str) -> Result<String> {
+    let (fm, body) = crate::librarian::frontmatter::parse(content)?;
+    let mut fm = fm.ok_or_else(|| anyhow::anyhow!("no frontmatter block"))?;
+    fm.extra.insert(
+        "expects_augmentation".to_string(),
+        serde_json::Value::String(sidecar_rel.to_string()),
+    );
+    Ok(crate::librarian::frontmatter::write(&fm, body))
+}
+
 pub fn write(path: &Path, sidecar: &AugmentationSidecar) -> Result<()> {
     // A sidecar is a committed file at a repo-relative path, so a repository can ship a link
     // there; `write_catalogued_file` refuses it rather than following it.
@@ -313,7 +332,7 @@ pub fn write(path: &Path, sidecar: &AugmentationSidecar) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
     }
-    let yaml = serde_yml::to_string(sidecar).context("serializing augmentation sidecar")?;
+    let yaml = render(sidecar)?;
     crate::librarian::util::write_catalogued_file(&[], path, yaml)
         .with_context(|| format!("writing {}", path.display()))?;
     Ok(())
@@ -520,6 +539,41 @@ mod tests {
             entry_collection: Some("observations".into()),
             refreshed_at_commit: Some("deadbeef".into()),
         }
+    }
+    /// `render` is the one place a sidecar becomes text: the bytes `write` puts on disk are the
+    /// bytes `render` returns, so the cutover plans a sidecar as a live export would write it.
+    #[test]
+    fn render_is_what_write_puts_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("x.yaml");
+        let sidecar = AugmentationSidecar::from_row(&row());
+        write(&p, &sidecar).unwrap();
+        let rendered = render(&sidecar).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), rendered);
+        assert!(rendered.contains("prompt:"), "{rendered}");
+    }
+
+    /// The stamp is `frontmatter::parse` then `frontmatter::write`: the parsed block equals the
+    /// input's plus the key, and the body is untouched. The block's text is re-serialised, so the
+    /// assertion is on the parse, never on bytes of the block.
+    #[test]
+    fn declaration_stamped_parses_to_the_same_frontmatter_plus_the_key() {
+        let content = "---\n# a comment\nkind: tracker\nstatus: open\nentry_prefix: F\n\
+                       entry_high_water_F: 3\n---\n\n# Body\n\n```\n---\nnot: frontmatter\n---\n```\n\n\n";
+        let stamped = declaration_stamped(content, "docs/augmentations/docs-a.yaml").unwrap();
+        let (before, body_before) = crate::librarian::frontmatter::parse(content).unwrap();
+        let (after, body_after) = crate::librarian::frontmatter::parse(&stamped).unwrap();
+        let mut want = before.unwrap();
+        want.extra.insert(
+            "expects_augmentation".to_owned(),
+            serde_json::Value::String("docs/augmentations/docs-a.yaml".to_owned()),
+        );
+        assert_eq!(after.unwrap(), want);
+        assert_eq!(body_after, body_before, "the body is byte for byte");
+        assert!(stamped.ends_with(body_before));
+        // No block, or one that does not parse: an error, never a document with a second block.
+        assert!(declaration_stamped("# no frontmatter\n", "x.yaml").is_err());
+        assert!(declaration_stamped("---\nkind: [unclosed\n---\n\nbody\n", "x.yaml").is_err());
     }
 
     #[test]

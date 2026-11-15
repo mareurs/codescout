@@ -2157,17 +2157,9 @@ fn stamp_augmentation_declaration(
     let content = crate::librarian::read_door::ReadDoor::new(roots.to_vec())
         .text_for_write(artifact)
         .map_err(crate::librarian::read_door::ReadError::into_anyhow)?;
-    let (fm, body) = crate::librarian::frontmatter::parse(&content)?;
-    let mut fm = fm.ok_or_else(|| anyhow::anyhow!("no frontmatter block"))?;
-    fm.extra.insert(
-        "expects_augmentation".to_string(),
-        Value::String(sidecar_rel.to_string()),
-    );
-    crate::librarian::util::write_catalogued_file(
-        roots,
-        artifact,
-        crate::librarian::frontmatter::write(&fm, body),
-    )?;
+    let stamped =
+        crate::librarian::augmentation_sidecar::declaration_stamped(&content, sidecar_rel)?;
+    crate::librarian::util::write_catalogued_file(roots, artifact, stamped)?;
     Ok(())
 }
 
