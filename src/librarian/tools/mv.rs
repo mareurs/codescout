@@ -151,6 +151,15 @@ pub(crate) fn preflight(args: &Value) -> Result<()> {
     parse_args(args.clone()).map(|_| ())
 }
 
+/// The refusal for a destination that holds something. One text for both places that can find it:
+/// the existence check before the move, and the no-clobber publish when a file appears between
+/// that check and the rename.
+fn destination_occupied(new_rel_path: &str) -> anyhow::Error {
+    super::LibrarianRecoverableError::new(format!(
+        "destination '{new_rel_path}' already exists — choose a different path or delete it first"
+    ))
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a = parse_args(args)?;
 
@@ -313,10 +322,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
                     ),
                 ));
             }
-            return Err(super::LibrarianRecoverableError::new(format!(
-                "destination '{}' already exists — choose a different path or delete it first",
-                a.new_rel_path
-            )));
+            return Err(destination_occupied(&a.new_rel_path));
         }
 
         // The content is read BEFORE anything moves, and a file that cannot be read as text is
@@ -369,7 +375,22 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             std::fs::create_dir_all(parent)?;
         }
 
-        std::fs::rename(&old_full, &new_full)?;
+        // Published without replacing: `std::fs::rename` replaces whatever is at the destination,
+        // and a file can appear there after the `exists` check above (a concurrent `doc(create)`
+        // or a hand-made file). `rename_no_clobber` links, then removes the old name, so an
+        // occupied destination is refused with the file still at the source, the row untouched
+        // and nothing re-keyed. A failed removal of the old name takes the link back, so the file
+        // is never at both paths; that error propagates as the rename's did.
+        // Windows: the link step is `CreateHardLinkW`; whether it links a symlink source itself
+        // or follows it is unverified (the Unix `linkat` does not follow).
+        if let Err(e) = crate::util::fs::rename_no_clobber(&old_full, &new_full) {
+            if e.kind() == std::io::ErrorKind::AlreadyExists
+                && std::fs::symlink_metadata(&new_full).is_ok()
+            {
+                return Err(destination_occupied(&a.new_rel_path));
+            }
+            return Err(e.into());
+        }
 
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -2572,6 +2593,206 @@ mod tests {
             !err.contains("recorded path"),
             "and must not be reported as a half-completed move — the source file is still \
              exactly where the catalog says it is: {err}"
+        );
+    }
+    /// The catalog row of `id` as the three fields a refused move must leave alone.
+    fn row_fields(ctx: &ToolContext, id: &str) -> (String, std::path::PathBuf, String) {
+        let cat = ctx.catalog.lock();
+        let row = artifact::get(&cat, id).unwrap().expect("the row exists");
+        (row.id, row.abs_path, row.file_sha256)
+    }
+
+    /// The destination is free when `call` checks it, and a file appears there before the
+    /// publish. `std::fs::rename` replaced it silently (the occupant's bytes were lost and the
+    /// catalog re-keyed onto them); the no-clobber publish refuses with the SAME plain text the
+    /// check gives, and changes nothing. The occupant is planted through the seam, because a file
+    /// that is already there before the call is refused by the old check and passes unfixed.
+    #[tokio::test]
+    async fn a_file_planted_after_the_existence_check_is_refused_and_nothing_moves() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        let src = tmp.path().join("docs/trackers/foo.md");
+        let dst = tmp.path().join("docs/archive/foo.md");
+        let src_bytes = std::fs::read(&src).unwrap();
+        let before = row_fields(&ctx, "aabbccdd11223344");
+        assert!(!dst.exists(), "precondition: the destination is free");
+
+        // The hook runs under the catalog lock `call` holds, so it touches the file system only.
+        let _planted = crate::util::fs::set_before_publish(|p| {
+            std::fs::write(p, "RACER").unwrap();
+        });
+        let err = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .expect_err("a move must not replace a file that appeared after the check");
+
+        assert!(
+            err.downcast_ref::<crate::librarian::tools::LibrarianRecoverableError>()
+                .is_some(),
+            "the refusal is recoverable, as the check's is: {err:#}"
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains("destination 'docs/archive/foo.md' already exists")
+                && text.contains("choose a different path or delete it first"),
+            "the plain occupied-destination refusal: {text}"
+        );
+        assert!(
+            !text.contains("recorded path"),
+            "the source still exists, so this is not a half-completed move: {text}"
+        );
+        assert_eq!(
+            std::fs::read(&dst).unwrap(),
+            b"RACER",
+            "the occupant is untouched"
+        );
+        assert_eq!(
+            std::fs::read(&src).unwrap(),
+            src_bytes,
+            "the source stays in place"
+        );
+        let mut left: Vec<_> = std::fs::read_dir(dst.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            vec!["foo.md"],
+            "no staging or link residue beside the occupant"
+        );
+        assert_eq!(
+            row_fields(&ctx, "aabbccdd11223344"),
+            before,
+            "the row is untouched"
+        );
+        let cat = ctx.catalog.lock();
+        assert!(
+            artifact::get(&cat, &crate::librarian::ids::artifact_id_from_abs(&dst))
+                .unwrap()
+                .is_none(),
+            "nothing was re-keyed onto the destination"
+        );
+    }
+
+    /// Moving a link moves the LINK: the target keeps its bytes and the link keeps its target.
+    /// (`hard_link` on Linux does not follow a link at the source; this pins that.)
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn moving_a_symlink_moves_the_link_and_not_its_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        let target = tmp.path().join("docs/real.md");
+        let content = "---\nid: 0123456789abcdef\nkind: tracker\n---\n# Real\n";
+        std::fs::write(&target, content).unwrap();
+        let link = tmp.path().join("docs/trackers/link.md");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let id = crate::librarian::ids::artifact_id_from_abs(&link);
+        {
+            let cat = ctx.catalog.lock();
+            let mut row = artifact::get(&cat, "aabbccdd11223344").unwrap().unwrap();
+            row.id = id.clone();
+            row.abs_path = link.clone();
+            artifact::upsert(&cat, &row).unwrap();
+        }
+
+        mv::call(
+            &ctx,
+            serde_json::json!({ "id": id, "new_rel_path": "docs/archive/link.md" }),
+        )
+        .await
+        .expect("an absolute in-repo link moves");
+
+        let moved = tmp.path().join("docs/archive/link.md");
+        assert!(
+            std::fs::symlink_metadata(&moved)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "what arrived is the link, not a copy of its target"
+        );
+        assert_eq!(std::fs::read_link(&moved).unwrap(), target);
+        assert!(
+            std::fs::symlink_metadata(&link).is_err(),
+            "the old name is gone"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            content,
+            "the target is untouched"
+        );
+    }
+
+    /// Makes a directory writable again on drop, so a failed assertion cannot leave a read-only
+    /// directory that the temp dir cannot remove.
+    #[cfg(unix)]
+    struct RestoreMode(std::path::PathBuf);
+
+    #[cfg(unix)]
+    impl Drop for RestoreMode {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    /// THE ROLLBACK. The source directory is read-only and the destination is writable, so the link
+    /// into the destination succeeds and removing the old name then fails with EACCES. The move
+    /// must fail with the file at ONE path (the source), no file at the destination, and the row
+    /// untouched. Without the rollback the file is left at both paths.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_source_that_cannot_be_unlinked_leaves_the_file_at_the_source_only() {
+        use std::os::unix::fs::PermissionsExt;
+        if crate::util::private_dir::effective_uid() == 0 {
+            return; // root ignores the mode bits, so the removal cannot be made to fail this way
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = mk_ctx(tmp.path());
+        let src_dir = tmp.path().join("docs/trackers");
+        let src = src_dir.join("foo.md");
+        let dst = tmp.path().join("docs/archive/foo.md");
+        let src_bytes = std::fs::read(&src).unwrap();
+        let before = row_fields(&ctx, "aabbccdd11223344");
+        std::fs::set_permissions(&src_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let _restore = RestoreMode(src_dir.clone());
+
+        let err = mv::call(
+            &ctx,
+            serde_json::json!({
+                "action": "move",
+                "id": "aabbccdd11223344",
+                "new_rel_path": "docs/archive/foo.md"
+            }),
+        )
+        .await
+        .expect_err("the old name cannot be removed, so the move fails");
+
+        assert!(
+            format!("{err:#}")
+                .to_lowercase()
+                .contains("permission denied"),
+            "the removal error is what comes back: {err:#}"
+        );
+        assert_eq!(
+            std::fs::read(&src).unwrap(),
+            src_bytes,
+            "the source is intact"
+        );
+        assert!(
+            std::fs::symlink_metadata(&dst).is_err(),
+            "no file may remain at the destination: the file is at one path"
+        );
+        assert_eq!(
+            row_fields(&ctx, "aabbccdd11223344"),
+            before,
+            "the row is untouched"
         );
     }
 
