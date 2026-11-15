@@ -223,10 +223,16 @@ pub fn record_facts(source: &str, record: &Record) -> Facts {
         closed_date: None,
         revisit_by: None,
     };
+    // A fenced block quotes text; what it quotes is not stated by the record.
+    let mut fence = FenceState::new();
     for (i, line) in body.lines().enumerate() {
         let number = record.lines.start() + i as u32;
+        let is_heading = number == record.heading_line;
+        if !is_heading && (fence.feed(line.trim_start()) || fence.in_fence()) {
+            continue;
+        }
         let label = label_re().captures(line).map(|c| c[1].to_string());
-        if number != record.heading_line && label.is_none() {
+        if !is_heading && label.is_none() {
             continue;
         }
         let dates = dates_in(line);
@@ -458,5 +464,53 @@ mod tests {
         assert_eq!(two.raw_status_body, None);
         assert!(two.stated_dates.is_empty());
         assert_eq!(two.closed_date, None);
+    }
+
+    // 1  # Log
+    // 2  ## F-8 — fenced
+    // 3  ```
+    // 4  **Status:** quoted
+    // 5  ```
+    // 6  **Status:** real
+    // 7  **Valid:** dated 2026-08-26
+    // 8  ```
+    // 9  **Valid:** dated 2026-05-18
+    // 10 ```
+    const FENCED_SRC: &str = "# Log\n## F-8 — fenced\n```\n**Status:** quoted\n```\n\
+    **Status:** real\n**Valid:** dated 2026-08-26\n```\n**Valid:** dated 2026-05-18\n```\n";
+
+    /// Breaks if labelled lines are read inside fenced blocks.
+    #[test]
+    fn facts_ignore_a_fenced_quote_of_a_date_line() {
+        let s = split(FENCED_SRC);
+        assert_eq!(s.records.len(), 1);
+        let f = record_facts(FENCED_SRC, &s.records[0]);
+        assert_eq!(f.stated_dates, vec![d(2026, 8, 26)]);
+    }
+
+    /// Breaks if a fenced status line, placed first, wins over the real one.
+    #[test]
+    fn facts_ignore_a_fenced_status_line_before_the_real_one() {
+        let s = split(FENCED_SRC);
+        let f = record_facts(FENCED_SRC, &s.records[0]);
+        assert_eq!(f.raw_status_body.as_deref(), Some("real"));
+    }
+
+    /// Breaks if `Date`, `Valid` or `Created` is dropped from the label list.
+    #[test]
+    fn facts_read_the_date_valid_and_created_labels() {
+        // 1 # Log
+        // 2 ## F-9 — labels
+        // 3 **Date:** 2026-01-11
+        // 4 **Valid:** dated 2026-02-12 — rest
+        // 5 **Created:** 2026-03-13
+        let text = "# Log\n## F-9 — labels\n**Date:** 2026-01-11\n\
+                **Valid:** dated 2026-02-12 — rest\n**Created:** 2026-03-13\n";
+        let s = split(text);
+        let f = record_facts(text, &s.records[0]);
+        assert_eq!(
+            f.stated_dates,
+            vec![d(2026, 1, 11), d(2026, 2, 12), d(2026, 3, 13)]
+        );
     }
 }
