@@ -7,7 +7,7 @@ title: 'Tracker migration (Plan L-E): an agent-run, user-approved move of flat t
 
 # Tracker migration (Plan L-E): an agent-run, user-approved move of flat trackers into lifecycle collections (design)
 
-**Status:** approved by the operator on 2026-11-15 ("it's ok, go"); the builder check's seven questions were settled as calls 8–15 on the same day. Brainstormed with the operator in a claude-plugins session (it built the session-start hot-view hook, `../claude-plugins` commits `f07a421`, `a39db8d`, `8c9ece2`). Parent spec: `docs/superpowers/specs/2026-11-11-tracker-lifecycle-design.md` (§ Migration, § Repo scope, § Consumers that read trackers today). This design **amends** that spec in one place (§ Amendment to the parent spec). Owner of the lifecycle line: memory `lifecycle-session-state`; this design was written outside that line and must be announced to it before a plan is written.
+**Status:** v2, 2026-11-15. v1 (`02a19eca8`) was approved by the operator ("it's ok, go") after a builder check (calls 8–15). The lifecycle line's independent Opus review (`docs/research/2026-11-15-plan-le-design-review.md`, `4e086aea7`) found v1 not ready for a plan: 2 Critical, 9 Important, 11 Minor. v2 settles every Critical and Important finding and the Minors that change behaviour; § Review findings and how v2 settles them maps each one. None of the operator's four decisions (§ Intent) changed. Parent spec: `docs/superpowers/specs/2026-11-11-tracker-lifecycle-design.md` (§ Migration, § Repo scope, § Consumers that read trackers today), amended by this design (§ Amendment to the parent spec). Work-stream log for the migration: the stream collection `context-migration` (`docs/trackers/streams/context-migration/`). The code lands on `experiments` directly, with `./scripts/gate.sh` green on the exact tree before the fast-forward (operator, relayed by the lifecycle line 2026-11-15).
 
 ## Intent
 
@@ -18,47 +18,55 @@ Every flat tracker under `docs/trackers/` must become a lifecycle collection (pa
 3. **What the user approves:** one mapping per tracker (folder, key, schema, the status-word table with record counts, `hot_cap`), then the verification report and the diff. Not each record.
 4. **Who writes the files:** a codescout command writes the collection from the approved mapping. Record text never passes through the model.
 
-## Measurements (2026-11-15, `integration/identity-lifecycle-20261114`)
+## Measurements (2026-11-15)
 
 | Fact | Number |
 |---|---|
 | Flat trackers in codescout | 81 files, 83,510 lines |
 | Of those, with `PREFIX-N` definition headings | 55; the other 26 have none (handoffs, snapshots, policies, worklists, writer outputs) |
 | Trackers that keep status in `**Status:**` body lines | 47 |
-| Trackers that keep status in an index-table column | 35 (column position differs per tracker) |
-| Status vocabulary | free text: `bug-fix-session-log` uses `fixed-verified` 119, `open` 59, `mitigated` 32, …; `observer-blindness` uses sentences ("wrong instrument — three claims survived …") |
+| Trackers with a status column in an index table | 23 to 43 by method (an exact `Status` header cell: 23); column position differs per tracker |
+| Status vocabulary | free text: `bug-fix-session-log` index column `fixed-verified` 121, `open` 62, `mitigated` 33; `observer-blindness` uses sentences ("wrong instrument — three claims survived …") |
+| `bug-fix-session-log` | 399 definition headings, 344 `**Status:**` lines, 3 index rows with no heading |
+| Record headings that are not definitions | e.g. `## R-56b` and `## R-59b` (`archive/reconnaissance-patterns-archived-entries.md:332,346`), `### T-15a`, `### TU-11a`, `## F-3a (deferral)` |
+| A token repeated over headings of one file | `prompt-hamsa-audit-log.md`: `A-38` on 11 headings (one `##`, the rest `###` subsections) |
+| Markdown files that name `observer-blindness.md` | 58, of them 54 inside inline code; `bug-fix-session-log.md`: 119 |
+| Sidecars in `docs/augmentations/` named for flat trackers | 24 |
 | Legacy top-level `docs/trackers/archive/` | 66 flat files |
 | Existing tracker folders | `bistriceanu/`, `ecc-integration/`, `effort-steering/`, `frictions/`, `issue-clusters/`, `mechanisms/`, `temp/` |
-| Flat trackers in `../claude-plugins` | 27 |
-| Collections that exist in either repo | 0 |
+| Flat trackers in `../claude-plugins` | 26, plus `INDEX.md` |
+| Collections that exist | 1: `streams/context-migration/` (created 2026-11-15 for this work) |
 
 The free-text status is why a fixed rule set cannot map records: a record's status class decides whether its file goes into `archive/` or stays live, and a wrong guess moves it silently.
 
 ## Goals
 
-- **M1.** Every record of a migrated tracker is carried into exactly one entry file, with its `PREFIX-N` heading kept (parent § Legacy tokens). Its body is byte for byte the source section after one stated, pure transform: the citation rewrite of § Citations inside records. Nothing is shortened unless the approved mapping says so.
+- **M1.** Every record of a migrated tracker is carried into exactly one entry file, with its heading kept (parent § Legacy tokens). Its body is the source section after one stated, pure transform (§ Citations inside records). Nothing is shortened unless the approved mapping says so.
+- **M1a.** M1 is proven by a check that does not depend on the splitter: every line of each source is accounted for exactly once (§ What check proves, the partition).
 - **M2.** The user approves each tracker's mapping before anything is written, and the verification report after.
-- **M3.** A deterministic check proves M1 and the lifecycle rules after every tracker; a migration whose check is not clean is not committed.
+- **M3.** A deterministic check proves M1, M1a and the lifecycle rules after every tracker; a migration whose check is not clean is not committed.
 - **M4.** The same skill and commands work in any repo that runs codescout.
-- **M5.** Each new collection declares `hot_cap` and `stale_after`, or the mapping records why it has none (claude-plugins session log F-2), so the session-start hot view has data.
+- **M5.** Each new collection declares `hot_cap` and `stale_after`, or the mapping records why it has none, so the session-start hot view has data.
 - **M6.** One tracker at a time (strangler). The repo stays usable between trackers; a flat tracker keeps working in legacy mode until it moves.
 
 ## Non-goals
 
 - Switching code consumers (parent § Consumers: `operator_rules`, `pre-commit-ledger-counts.py`, `scripts/measure/*`, the tc-suites pins, `legibility_scan`, `audit_doc_refs`). Each is its own plan. The migration refuses a tracker that code still reads (§ Preconditions).
-- Running the codescout migration itself. L-E builds the tools; running them over codescout's 81 trackers is the follow-up work the tools make possible.
+- Running the codescout migration itself. L-E builds the tools; running them is the follow-up the tools make possible.
 - The doctor wiring of `lifecycle_findings`, `doc(move)` D3 rules, and the removal of `append_entry`.
-- The `get_guide` `tracker-conventions` rewrite (parent § `get_guide`), and the reconnaissance and tracker-hygiene skill changes (parent § Hygiene skill, § Reconnaissance skill).
+- The `get_guide` `tracker-conventions` rewrite, and the reconnaissance and tracker-hygiene skill changes (parent § Hygiene skill, § Reconnaissance skill). They gate some trackers (§ Preconditions).
+- Rewriting path mentions of a tracker (§ Path mentions).
 
 ## Anti-goals
 
 The design fails, even if it works, if:
 
-- A record is lost, or its body text changes, and no check reports it.
+- A record is lost, duplicated, or its body text changes, and no check reports it.
 - The model retypes record text.
 - A collection's lifecycle or schema is declared in two places that persist (the mapping file is input, never committed).
 - An open record lands in `archive/`, or a terminal one stays live, because a status word was guessed.
-- A migrated open record looks fresher than it is (parent anti-goal: a bulk change must not make stale records look fresh).
+- A migrated record looks fresher than it is, or a migrated overdue record looks in good standing.
+- A failed run, or its restore, destroys another session's uncommitted work.
 - The migration writes a commit, or pushes.
 
 ## Approaches
@@ -72,7 +80,7 @@ Considered for the overall shape:
 Considered for who writes the entry files, within approach 2:
 
 1. **A codescout command writes from the approved mapping (chosen).** Record text is copied by code; the agent's job is the mapping.
-2. **The agent calls `doc(create)` per record.** Rejected: `bug-fix-session-log` alone has 398 records, and every body would pass through the model, which can change a word with no error.
+2. **The agent calls `doc(create)` per record.** Rejected: `bug-fix-session-log` alone has 399 records, and every body would pass through the model, which can change a word with no error.
 3. **A plugin script writes the files.** Rejected: it would copy the Rust frontmatter and schema rules into another language; the two copies drift, and the checks then reject what the script writes.
 
 ## Design
@@ -81,149 +89,230 @@ Considered for who writes the entry files, within approach 2:
 
 | Part | Repo | Reuses |
 |---|---|---|
-| `inventory` command | codescout | link_scan definition-heading shape; `cutover/code_refs.rs` (`CodeRefs`) for code readers of a path |
-| `apply` command | codescout | `lifecycle::collection::collection_readme`, `lifecycle::write::new_entry` (and the `today` parameter), `archive_rel_path`, `identity::grammar::extract_spanned`, `util::write_catalogued_file` |
-| `check` command | codescout | `lifecycle::collection::load_collection`, `lifecycle::checks` (`lifecycle_findings`), `lifecycle::hot_view` |
+| `inventory` command | codescout | `link_scan::extract::entry_sections` and `def_re` for definition headings; `cutover/code_refs.rs` (`CodeRefs`) plus a plain `git grep -F` for readers |
+| `apply` command | codescout | `lifecycle::collection::collection_readme`; a date-explicit entry renderer split out of `lifecycle::write::new_entry` (§ Dates); `lifecycle::naming::{entry_stem, archive_rel_path}`; `identity::grammar::extract_spanned`; `util::write_catalogued_file`; `cli::write_lock` |
+| `check` command | codescout | `lifecycle::collection::load_collection_dir`; `lifecycle::checks::check` over the loaded collection's tree; `lifecycle::hot_view` |
 | Skill `migrating-trackers` | claude-plugins (`codescout-companion/skills/`) | the three commands, `doc`, git |
 
-The commands are CLI subcommands (like `cutover` and `hot-view`), not MCP tools: they are run by the agent through `run_command`, they add nothing to the advertised tool surface (`TOOL_SURFACE_CHAR_BUDGET`), and the operator can run them by hand. The names are the builder's (§ Left to the builder); this document calls them `inventory`, `apply` and `check`.
+The commands are CLI subcommands (like `cutover` and `hot-view`), not MCP tools: the advertised tool surface has 0 headroom (`TOOL_SURFACE_CHAR_BUDGET` 57_664), the agent runs them through `run_command`, and the operator can run them by hand. The names are the builder's; this document calls them `inventory`, `apply` and `check`.
+
+**Catalog stance.** The commands write files only, through `write_catalogued_file` (a guarded atomic single-file write that records no catalog or audit row). The catalog learns the new files by reindex or the file watcher, and the derived catalog after identity Plan E. A new entry or readme carries no `id:`.
+
+**Binary.** The skill finds the binary as the session-start hook does (`resolveCodescoutBinary`: `codescout` on `PATH`, then the MCP-configured command) and probes it with the `trackers` help command. A non-zero exit or empty output means "this codescout has no tracker migration": the skill stops and says which build is needed.
 
 ### The per-tracker loop (the skill)
 
-1. **Pick.** The skill lists flat trackers with their record counts and code readers, and proposes an order: trackers no code reads, smallest first. The user may reorder.
-2. **Inventory.** `inventory <tracker>` prints, as JSON and as a short text report:
-   - every record: its token, heading level, title, line range, its raw status value and where it came from (`**Status:**` line, index column by header name, or none), and any date the record states;
-   - the distinct raw status values with counts;
-   - the non-record sections (preamble, index tables, template, status vocabulary, free prose);
-   - every citation of the tracker in the repo, by form;
-   - every code file that names the tracker's path (from `CodeRefs`).
-3. **Propose.** The agent drafts a mapping file (§ The mapping file) and shows the user one screen: target folder and key, the schema, the status-word table (raw value → declared status → class, with counts), any per-record overrides, which non-record sections go to the readme and which are dropped, `hot_cap` and `stale_after`, and anything the agent is unsure about.
+1. **Pick.** The skill lists flat trackers with their record counts and readers, and proposes an order: trackers that no code reads and no skill writes, smallest first. The user may reorder.
+2. **Inventory.** `inventory <source>…` prints, as JSON and as a short text report:
+   - every record: its token, heading line and level, title, line range, its raw status value and where it came from (`**Status:**` line, an index column by header name, or none), and every date the record states;
+   - every heading that looks like a record but is not a definition (a token-shaped string `[A-Z]{1,4}-\d+[a-z]?` in the heading): a **possible record**;
+   - every token defined on more than one heading, and whether the repeats nest inside the first (§ What a record is);
+   - the distinct raw status values with counts, and the count of records with no status;
+   - index rows with no heading, and records with no index row;
+   - status disagreements between the body and the index;
+   - the non-record sections, by line range;
+   - every mention of each source outside the source: `[[key…]]` citations, path mentions (with the file, line, and whether inline code holds it), and its frontmatter `id:` written in prose;
+   - every non-markdown file that names a source (`CodeRefs`, plus a plain `git grep -F <stem>` over every tracked file, JSON and YAML included; the difference is listed);
+   - the sidecar `docs/augmentations/docs-trackers-<stem>.yaml` if one exists, with its prompt text.
+3. **Propose.** The agent drafts a mapping file and shows the user one screen: target, schema, the status-word table (raw value → declared status → class, with counts), `status_none`, overrides, each possible record and how it is handled, each non-record section and where it goes, the classified code mentions, the sidecar's fate, `hot_cap` and `stale_after`, and anything the agent is unsure about.
 4. **Approve.** The user approves or edits. Nothing is written before this.
-5. **Apply.** `apply <mapping>` writes the collection, deletes the flat file and rewrites citations (§ What apply writes). It refuses rather than guesses.
-6. **Check.** `check <key> --source <tracker path>` (§ What check proves). Not clean → the skill stops, shows the findings, and the user decides: fix the mapping and re-apply, or restore with `git checkout` / `git clean` of the named paths.
-7. **Review.** The skill shows the check report and `git diff --stat`, plus the readme and two sample entries. The user approves.
-8. **Commit.** By pathspec, on the user's word (shared-checkout rule, `docs/conventions/shared-checkout-commit-sequence.md`). The skill never pushes.
+5. **Apply.** `apply <mapping>` writes the collection, deletes the sources and the sidecar, and rewrites citations. It prints the exact list of files it wrote and deleted. It refuses rather than guesses.
+6. **Check.** `check <mapping>`. Not clean → the skill stops, shows the findings, and the user decides: fix the mapping and re-apply (§ Re-runs), or restore exactly the files apply listed.
+7. **Review.** The skill shows the check report (with its review items), `git diff --stat`, the readme and two sample entries. The user approves.
+8. **Commit.** On the user's word, by exact file names from apply's list: stage those names (never a directory: the commit guard refuses `git add <dir>` followed by a pathspec commit), read `git diff --cached --name-only` in a separate call, then `git commit -m … -- <the same names>`. The commit message carries a one-line summary of the overrides and drops. The skill never pushes.
 
-Non-record trackers (the 26 with no tokens) go through the same loop with a different proposal: move out of `docs/trackers/` (a snapshot becomes a report, a policy goes to the repo's conventions, by `doc(move)`), become a collection whose entries are its `##` sections (`key_style: name`), or become one entry of an existing collection (a handoff into a `temp/` stream). The legacy `docs/trackers/archive/` files and the existing folders (`frictions/` with its 16 `FR-N` defined in its index, `issue-clusters/`, …) go through the loop too (parent § Migration steps 5 and 6).
+**Day one.** With `stale_after` set, almost every old open record is stale after migration. That is honest: the record has not been re-confirmed since its last status. The skill says so in step 7, and a `doc(update)` that re-confirms a status clears it.
+
+### What a record is
+
+- **A record** is a section under a definition heading (`def_re`: `TOKEN — title`, `[A-Z]{1,3}-\d+`), or a heading the mapping names a record (`records_extra`, § The mapping file), such as `## R-56b — Hit: …`.
+- **Its extent** starts at its heading and ends before the earlier of: the next heading of the same or higher level, or the next record heading of any level whose token differs. The same-or-higher bound keeps the last record from absorbing trailing `## Template` or `## Summary` sections (the 12.1% error measured at `link_scan/extract.rs:26-33`). The record-heading bound stops a parent from copying a nested child.
+- **A repeated token.** A definition heading whose token equals the token of the record that encloses it is a subsection of that record and stays inside it (`prompt-hamsa-audit-log` `A-38`). Any other repeat is a refusal that names both lines.
+- **Non-record sections** are every other line range: the frontmatter, the preamble, index tables, the template, the status vocabulary, free prose. The partition (§ What check proves) covers them too.
+- **A possible record** blocks apply until the mapping names it a record (`records_extra`) or confirms it as a non-record section (`sections`, with `confirm = true`).
+
+### Source kinds
+
+| `source_kind` | A record is | Used for |
+|---|---|---|
+| `file` | a record per § What a record is | the 55 trackers with `PREFIX-N` records |
+| `sections` | every heading of the given `level` (e.g. 2), with the same extent rule; the key comes from the heading (`key_style: name`) | a non-record tracker the user wants split (`sdd-ruling-log.md`) |
+| `whole` | the whole file, one record | a handoff that becomes one entry of an existing stream |
+| `files` | each markdown file of a folder | `issue-clusters/` (one file per cluster) |
+
+- A `files` entry keeps its key (the lowercase stem); the file is written with the lowercase name, so no citation changes. Its old frontmatter is replaced by entry frontmatter; old keys map through `columns` or are listed as dropped.
+- **Manual, through the skill:** folders whose records are table rows with separate evidence files (`frictions/`, 16 `FR-N` in `index.md`), and folders with non-markdown files (`effort-steering/`, `bistriceanu/`, `mechanisms/`). The skill migrates them with `doc(create)` and `doc(move)` after the user approves, and runs `check` for its structural items.
+- **Move out of `docs/trackers/`:** a snapshot becomes a report, a policy goes to the repo's conventions. The skill uses `doc(move)`; the file moves intact, so no record check applies.
 
 ### The mapping file
 
 A TOML file the agent writes outside the tracked tree (the skill picks the path; the builder may fix a default under `.codescout/`). It is input to one `apply` run and is never committed. Content:
 
-- `sources`: one or more repo-relative paths that fold into this collection (a live tracker plus its split archive files, such as `reconnaissance-patterns.md` and `archive/reconnaissance-patterns-archived-entries.md`). Each source has a `source_kind`: `file` (records are definition-heading sections) or `files` (a folder whose markdown files are one record each, such as `issue-clusters/`). A token defined in two sources is a refusal.
-- `target`: lifecycle folder, collection key, and `archived = true|false`. The key defaults to the stem of the first source, so `observer-blindness.md` becomes `ledgers/observer-blindness/` (parent D1). `archived = true` writes the collection straight into `<lifecycle>/archive/<key>/`: for a stream whose records are all terminal, and for the legacy top-level archive files (parent § Migration step 5).
-- `schema`: every parent § Collection schema key the collection declares, plus `hot_cap` and `stale_after` (`lifecycle::schema`, `KEY_HOT_CAP`, `KEY_STALE_AFTER`) or `hot_view_none = "<reason>"`.
-- `readme_body`: the prose the readme carries (purpose, admission rules, standing instructions; the `## Entry template` section). The agent drafts it from the tracker's preamble; the user approves it.
+- `sources`: one or more repo-relative paths, each with its `source_kind` (and `level` for `sections`). They fold into one collection (a live tracker plus its split archive files). A token defined in two sources is a refusal.
+- `target`: lifecycle folder, collection key, `archived = true|false`, `existing = true|false`.
+  - The key defaults to the stem of the first source (parent D1: `observer-blindness.md` → `ledgers/observer-blindness/`).
+  - `archived = true` writes the collection into `<lifecycle>/archive/<key>/`: for a stream whose records are all terminal, and for the legacy top-level archive files.
+  - `existing = true` adds entries to a collection that exists (one entry of an existing stream; late records, § Re-runs). The schema then comes from that readme, and `schema` must be absent.
+- `schema`: every parent § Collection schema key, plus `hot_cap` and `stale_after`, or `hot_view_none = "<reason>"`.
+- `readme_body`: the readme prose (purpose, admission rules, standing instructions, `## Entry template`). The agent drafts it from the tracker's preamble and the sidecar's prompt; the user approves it.
 - `entry_kind`: one kind, or a rule by token prefix (`F` → `friction`, `W` → `win`).
 - `status_source`: `body_label`, `index_column = "<header>"`, or `constant = "<status>"`.
-- `status_map`: raw value → declared status. **It must cover every distinct raw value the inventory reported**; apply refuses an unmapped value and names it.
-- `columns`: index-table header → declared field name, or `created`, or `title_alias`. Optional (§ Index rows).
-- `overrides`: token → status (or `created`, `closed`, `revisit_by`) for single records.
-- `sections`: each non-record section by heading → `readme` or `drop`. Dropping is allowed only for non-record sections, and each drop is listed to the user. A record can never be dropped (M1). An index table whose rows are carried (§ Index rows) is dropped as a table, not as data.
-- `code_mentions`: each code file the inventory found naming a source path, classified `reader`, `comment` or `fixture` by the agent and approved by the user (§ Preconditions).
-- `shorten`: empty by default. A record listed here is carried with the replacement body the mapping gives; the check then reports it as shortened, not as equal.
+- `status_map`: raw value → declared status. **It must cover every distinct raw value the inventory reported.**
+- `status_none`: the declared status of a record with no raw value. Required when the inventory reports any.
+- `columns`: index header → declared field name, `created`, or `title_alias`. Optional.
+- `row_title_column`: the index header whose cell titles a row-only record (§ Index rows). Required when the inventory reports any.
+- `records_extra`: possible records the user names records, by heading line, each with its token text (`R-56b`).
+- `overrides`: token → status, `created`, `closed` or `revisit_by` for single records.
+- `sections`: each non-record section by its first line → `readme` or `drop`; a possible record also needs `confirm = true`.
+- `code_mentions`: each non-markdown file that names a source, classified `reader`, `comment` or `fixture`, approved by the user.
+- `sidecar`: `retire` (delete it; its prompt has gone into `readme_body`) or `keep = "<reason>"`.
+- `shorten`: empty by default. A record listed here is carried with the replacement body the mapping gives; the check reports it as shortened.
 
 ### What apply writes
 
-- The readme from `collection_readme` (re-read through `schema::parse`).
-- One entry per record, rendered by the same rules as `new_entry`: frontmatter from the schema and the record's mapped status, body = the record's section text unchanged, with its definition heading as the first heading. Terminal entries go to the collection's `archive/` (`archive_rel_path`); others stay live.
-- Dates (§ Dates).
-- The citation rewrite of § Citations inside records: inside the carried bodies and the readme always, and across every other markdown file of the repo when the key changes. The identity session agreed its cutover emits `[[entry-key]]` for tokens that become entries (memory `tracker-lifecycle-parked-items`); the builder confirms which forms exist at build time.
-- The `**Index row:**` line of § Index rows.
-- The deletion of every source file (parent call 1: a kept file would be a second definer of its key and tokens).
-- Every write through `write_catalogued_file`. No commit, no push.
-- **Idempotence by content:** a re-run over the same mapping writes nothing when every target file already holds the text it would write, and reports `already applied`. A target file that exists with other text is a refusal naming it.
+- The readme from `collection_readme` (re-read through `schema::parse`), unless `existing`.
+- One entry per record, from the date-explicit renderer (§ Dates): frontmatter from the schema and the record's mapped status; body = the record's section after § Citations inside records, plus the `**Index row:**` line where one exists (§ Index rows). Terminal entries go to the collection's `archive/`; others stay live. The stem is built from `created`.
+- **Every entry key is checked against the repo's key space** before anything is written (a dated stem can collide with `docs/issues/<date>-<slug>` or another tracker). A collision is a refusal naming both; an override `slug` resolves it.
+- The citation rewrite (§ Citations inside records): in the carried bodies and the readme always; across every other markdown file only when the key changes.
+- The deletion of every source file and, when `sidecar = retire`, the sidecar.
+- Every write through `write_catalogued_file`, under the project write lock (`cli::write_lock`, as `cutover export` takes it). No commit, no push.
+- Its output lists every file written and deleted (JSON), so the skill stages and restores by exact names.
+
+### Re-runs and late records
+
+- `apply` re-derives everything from the sources **at `HEAD`**, because it deleted them from the tree.
+- **Idempotence by content:** a target file that already holds the text apply would write is left alone and reported `already applied`; a target that exists with other text is a refusal naming it.
+- **The clean-tree precondition accepts a previous run:** an uncommitted change under `docs/trackers/` is allowed only on a path the current plan writes or deletes. Any other dirty path there is a refusal.
+- **Late records.** A worktree branch that appended to the flat file after the migration merges with a modify/delete conflict. The skill resolves it by keeping the merged flat file, running `inventory` on it, and running `apply` with `existing = true`: it writes entries only for tokens the collection lacks, refuses a token whose text differs from its entry, and deletes the file again.
 
 ### Dates
 
-The parent spec forbids staleness from git dates, but a migrated record needs `created`, `status_since` and (if terminal) `closed`, and the flat trackers hold no such fields.
+The flat trackers hold no `created`, `status_since` or `closed`, and the parent spec forbids staleness from git commit dates. Each migrated record still needs them.
 
-- `created`: a date the record states (heading, index row, `**Date:**`, a dated `**Valid:**`), else the earliest `git blame` date of the record's lines. A later bulk sweep cannot make this date younger.
-- `status_since`: a date the record states for its status, else `created`. This errs toward **stale**: an old open record surfaces in the hot view and `revisit_due` / `stale_after` instead of hiding. (Migration day would make every open record look fresh, which is an anti-goal.)
-- `closed` (terminal only): a date the record states, else the latest `git blame` date of the record's lines. It only orders archived history, so an inflated date costs little.
-- `revisit_by` (blocked or deferred classes): from the record, else from `overrides`; apply refuses a blocked or deferred record without one. `new_entry`'s past-date refusal (`RevisitPast`) is relative to its `today` argument; apply must pass the real date for that comparison, so a past `revisit_by` is refused and the user sets a new one.
+- **The renderer.** `new_entry` uses one `today` for `created`, `status_since`, `closed`, the dated stem and the past-`revisit_by` refusal (`write.rs:429-516`). The migration needs a renderer that takes explicit `EntryDates { created, status_since, closed }` and a separate `now`. `new_entry` becomes a caller of it with all three dates equal to `today`, so its behaviour does not change.
+- `created`: the **minimum** of every date the record states (heading, index row, `**Date:**`, `**Valid:** dated`, a dated status note) and the earliest `git blame` date of its lines. A re-stamped `**Valid:**` cannot make a record younger, and neither can a bulk sweep.
+- `status_since`: a date the record states for its current status, else `created`. This errs toward stale.
+- `closed` (terminal only): a date the record states for its close, else the latest `git blame` date of its lines. It may be a bulk-sweep date; it only orders archived history and can add `cited_target_closed` review noise (§ What check proves item 8).
+- `revisit_by` (blocked or deferred): from the record or `overrides`, **carried unchanged even when it is past**, so the hot view shows the record as revisit due. Only a missing `revisit_by` is a refusal. The past-date refusal stays a rule for new writes.
+- **Date order.** Apply refuses, and check re-verifies: `status_since < created`, `closed < created`, `closed` on a non-terminal record, and any date after `now`.
+- Blame refuses a shallow clone (`git rev-parse --is-shallow-repository`), where every line would carry the boundary date.
 - Every date the command derives, rather than reads, is listed in the check report.
 
 ### Citations inside records
 
-A bare token such as `R-34` resolves only inside its own document (`identity/grammar.rs`, `identity/index.rs` `resolve`, the `Bare` arm). Once a tracker is split, each record is its own document, so a bare `R-34` in record `R-91` would stop resolving. Measured roughly: about 791 such mentions in `reconnaissance-patterns`, 897 in `bug-fix-session-log`, 179 in `observer-blindness`.
+A bare token such as `R-34` resolves only inside its own document. Once a tracker is split, each record is its own document, so a bare `R-34` in record `R-91` would stop resolving.
 
-- `apply` rewrites, in every carried record body and in the readme body, each bare token **that one of the sources defines** to `[[<key>:TOKEN]]`. A bare token no source defines is left alone: it did not resolve before either.
-- When the key changes, `[[old-key:TOKEN]]` and `[[old-key]]` become `[[<key>:TOKEN]]` and `[[<key>]]` inside the bodies and across every other markdown file of the repo. When the key is reused (the default), outside citations stay as they are and resolve by v5 ownership.
-- The rewrite is one pure function, `rewrite_record_citations(text, defined_tokens, old_key, new_key) -> String`, built on `identity::grammar::extract_spanned` and the bare-token scanner. It skips code spans and fences as the grammar already does.
-- `check` applies the same function to each source section at `HEAD` and compares the result with the entry body byte for byte. So M1 stays provable, and the only difference allowed is the one the function produces.
+- `apply` rewrites, in each carried body and the readme body, each bare token **that one of the sources defines** to `[[<key>:TOKEN]]`. A bare token no source defines is left alone: it did not resolve before either.
+- **Not rewritten:** a token inside code spans or fences (as the grammar already skips), inside the text of an ordinary link (`[see F-1](b.md)`; rewriting it would nest a wiki link inside a link), and inside a URL word (`grammar::in_url_word`). Each skip is counted in the report.
+- When the key changes, `[[old-key:TOKEN]]` and `[[old-key]]` become `[[<key>:TOKEN]]` and `[[<key>]]` in the bodies and across every other markdown file. When the key is reused (the default), outside citations stay and resolve by v5 ownership.
+- The rewrite is one pure function, `rewrite_record_citations(text, defined_tokens, old_key, new_key) -> String`, on `identity::grammar::extract_spanned`. `check` applies the same function to each source section at `HEAD` and compares.
 
 ### Index rows
 
-Some index tables carry data the body lacks (in `bug-fix-session-log`: Date, Severity, Category, a summary title; in its Wins index: Impact, Pattern, Counterfactual).
+- Each mapped column (`columns`) becomes that frontmatter value: a declared field, `created` (one of the dates of § Dates), or `title_alias`.
+- Every record with an index row also gets the row carried **verbatim, exempt from the citation rewrite**, as its last body line `**Index row:** <the row>`. It is a historical copy of the old index, so no index data is lost even for columns nobody mapped.
+- A **row-only record** (an index row with no heading; 3 in `bug-fix-session-log`) becomes an entry whose body is a synthesised heading `## <TOKEN> — <cell of row_title_column>` and the row line. So the token is defined again and `[[<key>:TOKEN]]` resolves. It is listed in the check report.
+- A record with no index row is carried without the line and is listed.
+- A status disagreement between body and index is listed in the inventory and shown in the proposal; `status_source` decides, `overrides` fixes single records.
 
-- Each column the mapping maps (`columns`) becomes that frontmatter value of the entry: a declared field, `created`, or `title_alias` (kept as a declared field when the summary differs from the heading).
-- Every record with an index row also gets the original row carried verbatim, as the last body line `**Index row:** <the row>`. So no index data is lost, even for columns nobody mapped. `check` expects that line exactly.
-- A record with a heading and no index row is carried without the line and is listed in the check report. An index row with no heading is a record too: it becomes an entry whose body is only the row line, and it is listed.
-- When the status comes from one place but the other place disagrees (the body says `validated`, the index says `fixed-verified`: about 91 of 201 F-records in `bug-fix-session-log` by a rough comparison), the inventory lists each disagreement, and the proposal shows them to the user. The mapping's `status_source` decides; `overrides` fixes single records.
+### Path mentions
 
-### Folders and finished streams
+A path mention of a tracker (`docs/trackers/observer-blindness.md`, a relative link to it, its frontmatter id in prose) is **lint, not an edge** (identity v5: "paths and 16-hex ids are lint, never edges"). The migration does not rewrite them, and they do not block the check.
 
-- A folder with one markdown file per record (`issue-clusters/`) uses `source_kind = "files"`: each file becomes an entry, its body unchanged after the citation rewrite, its own frontmatter replaced by the entry frontmatter (the old frontmatter keys go to `columns`-style mapping or are listed as dropped).
-- A folder whose records are table rows with separate evidence files (`frictions/`, 16 `FR-N` in `index.md`) and a folder with non-markdown files (`effort-steering/migration-manifest.json`) are outside the commands. The skill migrates them by hand with `doc(create)` and `doc(move)`, after the user approves, and runs `check` for the structural part (items 3 to 5). The skill lists each such folder as manual.
-- A stream whose records are all terminal is written with `archived = true`. Otherwise `stream_all_terminal` would fire on it the day it is written.
+- Most of them sit in inline code (54 of 58 for `observer-blindness.md`), which the identity cutover counts and never edits (`cutover/rewrite.rs:572-573`), and in frozen files (`CLAUDE.md`, `.codescout/memories/*.md`).
+- The inventory lists them; the check counts them as review material (item 8). The agent may offer to edit prose mentions in the same commit, with the user's approval, but never in frozen files.
+- A `[[old-key…]]` citation is different: it is an edge, so a key change must leave none (check item 6).
 
 ### What check proves
 
-`check --mapping <file>` (or `--key <key> --source <path>…` for a run without the mapping) loads the collection from its directory with `load_collection_dir`, so an archived collection loads too, and compares it with the sources **at `HEAD`** (apply deleted them from the tree). It reports:
+`check <mapping>` loads the collection from its directory with `load_collection_dir` (so an archived or existing collection loads too) and compares it with the sources **at `HEAD`**. It normalises line endings first: both sides are read as lines (`\r` stripped), and leading and trailing blank lines of a body are ignored, matching `frontmatter::render_body`. Blocking items:
 
-1. every source token is the first heading of exactly one entry, and no entry has a token the sources lack;
-2. each entry body equals `rewrite_record_citations` of its source section, plus the `**Index row:**` line where one exists, byte for byte, except the records listed under `shorten`;
-3. every status is declared, every terminal entry is in `archive/` (or the collection is archived) and every other one is live;
-4. the collection loads and these findings are empty for it: `entry_invalid`, `collection_invalid`, `orphan_entry`;
-5. the hot view renders (exit 0) when `hot_cap` is declared and the collection is live, so a collection with problems is not shown as `0 hot` (claude-plugins session log F-6);
-6. when the key changed, no `[[old-key…]]` citation is left in the repo; and no source path is left in a markdown file;
-7. for review, not blocking: the time-based findings (`revisit_due`, `cited_target_closed`, `ledger_quiet`, `stream_all_terminal`, `terminal_in_live_dir`), the derived dates, the dropped non-record sections, records without an index row, and status disagreements.
+1. **The partition.** Every line of every source belongs to exactly one of: a carried record, a readme section, a dropped section, or the replaced frontmatter. No line is in two, none in zero. This does not rely on the splitter: it is computed from the line ranges apply used, checked against the source's line count, and it catches a missed record, a duplicated subsection and a lost tail.
+2. Every record token (definitions, `records_extra`, row-only records) is the first heading of exactly one entry, and no entry has a token the sources lack.
+3. Each entry body equals `rewrite_record_citations` of its source range, plus the `**Index row:**` line where one exists, except the records listed under `shorten`.
+4. Every status is declared; every terminal entry is in `archive/` (or the collection is archived) and every other one is live; date order holds (§ Dates).
+5. The collection loads, and `lifecycle::checks::check` over its tree reports none of `entry_invalid`, `collection_invalid`, `orphan_entry` for it.
+6. When the key changed, no `[[old-key…]]` citation is left in the repo; when `sidecar = retire`, the sidecar is gone.
+7. The hot view renders (exit 0) when `hot_cap` is declared and the collection is live, so a collection with problems is not shown as `0 hot`.
 
-Exit 0 only when 1–6 hold. The skill treats any other exit as "not clean" and shows item 7 to the user every time. The time-based checks are working as designed when they fire on old records; they are review material, not migration errors.
+For review, not blocking:
+
+8. The time-based findings (`revisit_due`, `cited_target_closed`, `ledger_quiet`, `stream_all_terminal`, `terminal_in_live_dir`), path mentions by file, derived dates, dropped sections, skipped rewrites, row-only records, records without an index row, and status disagreements.
+
+Exit 0 only when 1–7 hold. The skill treats any other exit as "not clean" and shows item 8 every time.
 
 ### Preconditions (apply refuses, naming the cause)
 
-- The repo's identity cutover is done (parent § Migration step 1). The builder picks the test; the cutover's own "a plan of `HEAD` writes nothing" is the first candidate.
-- Every code file that names a source path (`CodeRefs`) is listed in `code_mentions`. A file classified `reader` is a refusal until that consumer's own plan has switched it (then the file no longer names the path). A `comment` or `fixture` mention does not block: the skill shows it to the user, who may have the agent edit it in the same commit. A rough count found 38 of codescout's flat trackers named under `src/`, `scripts/` or `tests/`, mostly in comments and fixtures.
-- The tracker is not the hygiene log while the session-start banner in `../claude-plugins` still reads its frontmatter cadence (`next-sweep-due`, `sweep-interval-days`); the parent spec moves those fields to the hygiene collection's readme, and the banner must follow first.
-- The target key is free in the repo, except for the stem of a source this run deletes (key reuse is the default, parent D1).
-- The working tree has no uncommitted change under `docs/trackers/` (so a failed run can be restored with git).
+- **Catalog facts.** The identity cutover has moved the sources' catalog-only facts (events, observations, manual links, augmentation params) into files: a cutover plan scoped to the source paths writes nothing (parent § Migration step 1). A text test cannot see those facts, so it does not replace this. On a machine with no old catalog the refusal says so, and the skill asks the user whether the repo ever had one.
+- **Readers.** Every non-markdown file that names a source is listed in `code_mentions`. A `reader` is a refusal until that consumer's own plan has switched it. A `comment` or `fixture` does not block; the skill may edit it in the same commit with the user's approval.
+- **Writers (skill-side).** The skill refuses a tracker that an installed skill or hook still writes by path: every `*-session-log` and `reconnaissance-patterns` (the reconnaissance skill copies the template to `docs/trackers/<topic>-session-log.md` and appends to `reconnaissance-patterns.md`), and `tracker-hygiene-log` (the tracker-hygiene skill and the session-start banner). They wait for the parent § Reconnaissance skill and § Hygiene skill changes. The codescout commands stay generic; the list lives in the skill, next to the skills it names.
+- **Keys.** The target key and every entry key are free in the repo, except the stems of sources this run deletes.
+- **Clean tree.** No uncommitted change under `docs/trackers/` except on paths the current plan writes or deletes (§ Re-runs), and no uncommitted change in any other file apply would rewrite (so a restore of apply's list cannot destroy another session's work).
+- **Not shallow** (§ Dates).
 
 ### Repo scope
 
-The skill and commands assume nothing about codescout's own trackers. A repo with no `PREFIX-N` ledgers (most of the ~35 on this machine) uses the non-record proposals only. Legacy mode is unchanged: a flat tracker keeps working with `append_entry` until its turn.
+The skill and commands assume nothing about codescout's own trackers. A repo with no `PREFIX-N` ledgers (most of the ~35 on this machine) uses the `sections`, `whole` and move-out outcomes. Legacy mode is unchanged: a flat tracker keeps working with `append_entry` until its turn.
 
 ## Amendment to the parent spec
 
-Parent G8 ("every repo can migrate with one server command") and § Repo scope ("a migration command converts one repo") become: **every repo migrates with one skill that drives three CLI commands, one tracker at a time, with the user's approval per tracker.** § Migration step 4 is unchanged in content (every record carried, citations rewritten, consumers switched, file deleted); it is now executed per tracker by the skill. The non-goal "deciding, per existing tracker, which content is worth carrying" stays: the decision is the user's, made in the loop. The parent's status line and G8 must be edited when this design is approved.
+Parent G8 and § Repo scope ("a migration command converts one repo") become: **every repo migrates with one skill that drives three CLI commands, one tracker at a time, with the user's approval per tracker.** § Migration step 4 is unchanged in content (every record carried, citations rewritten, consumers switched, file deleted); it is executed per tracker by the skill. The non-goal "deciding, per existing tracker, which content is worth carrying" stays: the decision is the user's, made in the loop. The parent's other mentions of "the migration command" (§ Tools, § Migration step 2, § `get_guide`, § What is left to the builder) read as this skill and its commands.
+
+## Review findings and how v2 settles them
+
+| Finding (review `4e086aea7`) | v2 |
+|---|---|
+| C1 path mentions block check item 6 | § Path mentions: lint, review item 8; item 6 keeps only `[[old-key…]]` and the sidecar |
+| C2 the proof shares the splitter | M1a; check item 1 (partition); possible records; § What a record is (extent, repeated token) |
+| I1 `new_entry` has one `today`; no date rules | § Dates: `EntryDates` renderer, `created` = minimum, stem from `created`, date-order rules in apply and check |
+| I2 past `revisit_by` refused | carried unchanged; only a missing one refuses |
+| I3 readers and writers missed | `git grep -F` beside `CodeRefs`, JSON and YAML included; skill-side writer precondition |
+| I4 no lock, re-run vs clean tree, restore, late records | write lock; § Re-runs; clean-tree rule names exact paths and other files apply rewrites |
+| I5 non-record trackers | `sections` and `whole` source kinds; the partition covers them |
+| I6 sidecars, catalog facts | `sidecar` in the mapping; inventory reads it; catalog-facts precondition kept |
+| I7 no status, row-only, row rewrite | `status_none`; synthesised heading via `row_title_column`; row line verbatim and exempt |
+| I8 parent amendment incomplete | parent § Repo scope gets a pointer; § Amendment names the other four mentions |
+| I9 link text, URLs, binary | § Citations inside records (skips); § Parts (binary and probe) |
+| M-1, M-2 module names | § Parts names `lifecycle::checks::check` and `load_collection_dir` |
+| M-3 catalog stance | § Parts, catalog stance |
+| M-4 normalisation | § What check proves, first paragraph |
+| M-5 entry-key collisions | § What apply writes |
+| M-6 `closed` noise | § Dates, accepted as review noise |
+| M-7 shallow clone | § Dates, § Preconditions |
+| M-8 day-one staleness | § The per-tracker loop, day one |
+| M-9 `IC-*` stems | § Source kinds: key kept, file name lowercased |
+| M-10 `bistriceanu/`, `mechanisms/` | § Source kinds, manual |
+| M-11 measurements | § Measurements corrected |
 
 ## What is left to the builder
 
 - The command names and flags (`codescout trackers inventory|apply|check` is one shape; `migrate` is close to the existing `migrate-memories`).
 - The mapping file's exact TOML layout and default location.
 - How a raw status value is normalised before lookup (trim, case, the text before ` — `), as long as the inventory reports the same normalised values the map must cover.
-- The `git blame` options for § Dates (`-M`, `-C`, `-w`), and whether blame reads the file at `HEAD`.
-- The JSON shape of the inventory and check reports.
-- Test design. Minimum: one test per anti-goal (a lost record fails the check; a changed body byte fails it; an unmapped status value is refused; a terminal record never lands live; a migrated open record keeps a historical `status_since`; apply leaves no commit).
+- The `git blame` options (`-M`, `-C`, `-w`); blame reads `HEAD`.
+- How the cutover plan is scoped to the source paths.
+- The JSON shape of the reports.
+- Test design. Minimum: one test per anti-goal, plus: a record with a non-`def_re` heading is never silently dropped (the partition fails); a repeated token nests or is refused; a re-run after a partial apply completes; a JSON reader blocks; a past `revisit_by` is carried; a re-stamped `**Valid:**` does not make `created` younger; a token inside link text is not rewritten.
 
 ## Calls I made (review these)
 
 1. The commands are CLI subcommands, not MCP tools: no tool-surface cost, and the operator can run them by hand.
-2. The mapping file is never committed; the readme is the only lasting declaration.
-3. `status_since` defaults to `created`, not to migration day, so the migration errs toward showing records as stale.
+2. The mapping file is never committed; the readme is the only lasting declaration. The commit message carries a one-line summary of overrides and drops.
+3. `status_since` defaults to `created`, so the migration errs toward stale.
 4. `closed` defaults to the latest blame date of the record's lines.
-5. A non-record section may be dropped with the user's approval; a record may not.
+5. A non-record section may be dropped with the user's approval; a record may not; a possible record needs an explicit decision.
 6. The skill lives in codescout-companion, next to `tracker-hygiene` and `reconnaissance`.
-7. The hygiene log waits for the claude-plugins banner to read the readme.
-
-After the builder check (2026-11-15):
-
-8. Bare tokens a source defines are rewritten to `[[<key>:TOKEN]]` inside the records; "byte for byte" means after that one pure rewrite, which `check` re-applies to the source.
-9. The collection reuses the tracker's key by default, so outside citations need no rewrite.
-10. Only the structural findings (`entry_invalid`, `collection_invalid`, `orphan_entry`) block the check; the time-based ones are shown for review.
-11. A finished stream and the legacy archive files are written straight into `<lifecycle>/archive/<key>/`; `check` loads by directory.
-12. Several sources may fold into one collection; a token defined twice is a refusal.
-13. Every index row is carried verbatim as the entry's last line `**Index row:** …`; mapped columns also become frontmatter values.
-14. A code mention blocks only when the user approves it as a `reader`; comments and fixtures are shown, not blocking.
-15. Folders of one file per record are a second source kind; table-row folders (`frictions/`) and folders with non-markdown files are migrated by hand through the skill.
+7. Trackers that an installed skill or hook writes wait for that skill's change; the list lives in the skill.
+8. Bare tokens a source defines are rewritten to `[[<key>:TOKEN]]` inside the records, except in code, link text and URLs; check re-applies the same function.
+9. The collection reuses the tracker's key by default, so outside `[[…]]` citations need no rewrite.
+10. Only structural findings block; time-based ones are review material.
+11. A finished stream and the legacy archive files are written straight into `<lifecycle>/archive/<key>/`.
+12. Several sources may fold into one collection; a token defined in two sources is refused; a repeated token in one source nests when it repeats its enclosing record's token, else is refused.
+13. Every index row is carried verbatim, exempt from the rewrite; row-only records get a synthesised heading.
+14. A code mention blocks only when the user approves it as a `reader`.
+15. `files`, `sections` and `whole` are source kinds; table-row folders and folders with non-markdown files are manual.
+16. Path mentions are lint: not rewritten, not blocking (review finding C1, option a).
+17. The partition check is the M1 proof for every source kind.
+18. A past `revisit_by` is carried unchanged.
+19. `created` is the minimum of stated dates and the earliest blame date.
+20. The catalog-facts precondition stays; the text inventory is added beside it, not instead of it.

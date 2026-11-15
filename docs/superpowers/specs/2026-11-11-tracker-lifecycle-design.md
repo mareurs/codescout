@@ -408,6 +408,12 @@ template.
 
 ## Repo scope
 
+> **Amended 2026-11-15** by `docs/superpowers/specs/2026-11-15-tracker-migration-design.md`
+> (§ Amendment to the parent spec): the migration is one skill that drives three CLI commands,
+> one tracker at a time, with the user's approval per tracker. Every mention of "the migration
+> command" in this spec (below, § Tools, § Migration step 2, § `get_guide`, § What is left to
+> the builder) reads as that skill and its commands.
+
 The new layout is the model for every repo that runs codescout (option a):
 
 - **A migration command** converts one repo: it creates the collections, writes the entries,
