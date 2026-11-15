@@ -150,11 +150,11 @@ impl Tool for CreateFile {
         if overwrite {
             crate::util::fs::write_utf8(&resolved, content)?;
         } else if let Err(e) = crate::util::fs::write_new_utf8(&resolved, content) {
-            // The path was free at the check above. `AlreadyExists` from `write_new_utf8` means
-            // exactly "something is at the path now" (a creator that raced this call, or a
-            // dangling symlink the check above cannot see), and the publish did not replace it.
-            // `symlink_metadata` confirms that before the refusal: any other failure is the
-            // write's own error and reaches the caller as one.
+            // The path was free at the check above. `write_new_utf8` returns `AlreadyExists` only
+            // when the path was occupied (a creator that raced this call, or a dangling symlink the
+            // check above cannot see), and the publish did not replace it. The `symlink_metadata`
+            // re-check therefore only catches an occupant that vanished again; in that case the
+            // write's own error is returned.
             if e.kind() == std::io::ErrorKind::AlreadyExists
                 && std::fs::symlink_metadata(&resolved).is_ok()
             {

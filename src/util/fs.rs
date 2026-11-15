@@ -583,12 +583,19 @@ fn run_before_publish(to: &Path) {
 ///   file at both paths.
 /// - When the link succeeds and the removal of `from` fails, `to` is removed again so that the
 ///   file is at one path, and the removal error is returned. If that rollback fails too, the
-///   error names both paths and says the file is at both.
+///   error names both paths and says the file is at both. So the file is at one path unless the
+///   rollback also fails (the error then says so) or the process dies between the link and the
+///   remove.
 /// - **Fallback.** When the link fails for any other reason (a file system without hard links,
-///   such as FAT; a `protected_hardlinks` `EPERM`), this falls back to [`rename_refusing_occupied`]
-///   and logs one `tracing::warn!`. That is the old check-then-rename race, so no file system
-///   gets worse; every other error (read-only directory, `ENOSPC`, `EXDEV`, `EMLINK`) then
-///   reaches `rename`, which fails or succeeds as it always did.
+///   such as FAT; a `protected_hardlinks` `EPERM`), this falls back to [`rename_refusing_occupied`]:
+///   check-then-rename, the old race, so no file system gets worse. It logs one
+///   `tracing::warn!` only when that fallback published (returned `Ok`); every other error
+///   (read-only directory, `ENOSPC`, `EXDEV`, `EMLINK`) then reaches `rename`, which fails or
+///   succeeds as it always did, and logs nothing.
+///
+/// **Callers' contract.** A caller maps `AlreadyExists` to its own "path exists" refusal only
+/// when `std::fs::symlink_metadata(path).is_ok()` still holds; every other error is the write's
+/// own error.
 pub fn rename_no_clobber(from: &Path, to: &Path) -> std::io::Result<()> {
     rename_no_clobber_with(from, to, &mut |from, to| std::fs::hard_link(from, to))
 }
@@ -606,13 +613,16 @@ fn rename_no_clobber_with(
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(e),
         Err(e) => {
-            tracing::warn!(
-                error = %e,
-                to = %to.display(),
-                "hard_link failed; the no-clobber publish falls back to check-then-rename, \
-                 which a concurrent creator can race"
-            );
-            return rename_refusing_occupied(from, to);
+            let published = rename_refusing_occupied(from, to);
+            if published.is_ok() {
+                tracing::warn!(
+                    error = %e,
+                    to = %to.display(),
+                    "hard_link failed; the no-clobber publish fell back to check-then-rename, \
+                     which a concurrent creator can race"
+                );
+            }
+            return published;
         }
     }
     let Err(remove_err) = std::fs::remove_file(from) else {
@@ -656,7 +666,9 @@ fn rename_refusing_occupied(from: &Path, to: &Path) -> std::io::Result<()> {
 /// **`AlreadyExists` means exactly one thing: `path` is occupied** (a file, a directory, a
 /// symlink, even a dangling one). Any other `AlreadyExists` is re-kinded to
 /// `ErrorKind::Other` with context: an ancestor that is a regular file (`create_dir_all`), and
-/// every staging name taken (`create_staging_file`).
+/// every staging name taken (`create_staging_file`). A caller maps `AlreadyExists` to its own
+/// "path exists" refusal only when `std::fs::symlink_metadata(path).is_ok()` still holds; every
+/// other error is the write's own error.
 ///
 /// **Order.** (1) If `symlink_metadata(path)` succeeds, `AlreadyExists`, before anything else:
 /// a create can never replace, so its "before" is "absent", and `check_write` would otherwise

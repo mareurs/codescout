@@ -235,7 +235,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // renamed into the repository. The leaf may be a link (a rename moves the link itself),
         // so the source is checked through its parent. Both before anything is created. Both go
         // through the SAME decision `doc(update)` and `doc(delete)` make (`util::door_root`): the
-        // id repair that follows the rename writes through that door, so a destination it would
+        // id repair that follows the move writes through that door, so a destination it would
         // refuse must be refused HERE, while nothing has moved. (Judged against the managed root
         // alone, a destination below a nested repository's link back into the superproject passed
         // here, the file was renamed, and the repair was then refused: a half-done move.)
@@ -248,7 +248,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             )?;
         }
         // A link whose target does not exist cannot be moved: the id repair that follows the
-        // rename reads through it and fails with ENOENT, after the link has already moved and
+        // move reads through it and fails with ENOENT, after the link has already moved and
         // before the catalog row has. Refused up front, for relative and absolute targets alike.
         if std::fs::read_link(&old_full).is_ok() && std::fs::metadata(&old_full).is_err() {
             return Err(super::LibrarianRecoverableError::with_hint(
@@ -263,7 +263,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // RELATIVELY resolves against the new directory. It still means the same file when both
         // directories reach the target the same way (`a/x.md -> ../real/x.md` moved to `b/x.md`),
         // and dangles, or silently names ANOTHER file, when they do not (the id repair's read then
-        // failed with ENOENT after the rename, leaving the move half done). The first version
+        // failed with ENOENT after the move, leaving the move half done). The first version
         // refused any relative link whose directory changed, which also refused the former; this
         // compares where the target lands from each directory.
         if old_full.parent() != new_full.parent() {
@@ -364,7 +364,7 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
             )?;
         }
 
-        // A rename carries the file's bytes to the destination without passing through
+        // A move carries the file's bytes to the destination without passing through
         // `atomic_write`, so the guard on codescout's own config files has to be asked here
         // too: otherwise a markdown file holding `[security] profile = "root"` could be moved
         // onto `.codescout/project.toml` (measured: it landed).
@@ -380,7 +380,10 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // or a hand-made file). `rename_no_clobber` links, then removes the old name, so an
         // occupied destination is refused with the file still at the source, the row untouched
         // and nothing re-keyed. A failed removal of the old name takes the link back, so the file
-        // is never at both paths; that error propagates as the rename's did.
+        // is at one path unless that rollback fails too (the error then says so) or the process
+        // dies between the link and the remove; that error propagates as the move's did. On a
+        // file system without hard links `rename_no_clobber` falls back to check-then-rename,
+        // which a concurrent creator can race.
         // Windows: the link step is `CreateHardLinkW`; whether it links a symlink source itself
         // or follows it is unverified (the Unix `linkat` does not follow).
         if let Err(e) = crate::util::fs::rename_no_clobber(&old_full, &new_full) {
@@ -416,12 +419,12 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         // writes custom keys but never `id`), so a later repair pass has no route to
         // the file. BL-23.
         // BEST-EFFORT, as the function's doc always said, and now actually so: the content was read
-        // before the rename, so what can still fail here is the WRITE (a read-only file, a full
+        // before the move, so what can still fail here is the WRITE (a read-only file, a full
         // disk, the door refusing a path that changed under us). That must not leave the file moved
         // and the row not, so a failure is reported (`id_repair_error`) and the move completes with
         // the file's real, unrepaired content; `doctor` reports the stale `id:` as
-        // `frontmatter_id_mismatch`. It used to be returned as an error after the rename.
-        // `Some(content_before.clone())` saves a second read: a rename does not change the bytes,
+        // `frontmatter_id_mismatch`. It used to be returned as an error after the move.
+        // `Some(content_before.clone())` saves a second read: a move does not change the bytes,
         // so passing `None` (re-read from the new path) gives the same answer unless something
         // writes the file in between. A mutant of that argument is equivalent for that reason.
         let (content, id_repair_error) =
@@ -2603,10 +2606,13 @@ mod tests {
     }
 
     /// The destination is free when `call` checks it, and a file appears there before the
-    /// publish. `std::fs::rename` replaced it silently (the occupant's bytes were lost and the
-    /// catalog re-keyed onto them); the no-clobber publish refuses with the SAME plain text the
-    /// check gives, and changes nothing. The occupant is planted through the seam, because a file
-    /// that is already there before the call is refused by the old check and passes unfixed.
+    /// publish. The seam fires only inside `rename_no_clobber_with`, so what this test detects is
+    /// a move that does NOT publish through `rename_no_clobber`: such a move replaces the occupant
+    /// silently (its bytes are lost and the catalog re-keys onto them), where the no-clobber
+    /// publish refuses with the SAME plain text the check gives and changes nothing. The
+    /// no-clobber guarantee itself is pinned by `util::fs::no_clobber_tests`. The occupant is
+    /// planted through the seam, because a file that is already there before the call is refused
+    /// by the old check and passes unfixed.
     #[tokio::test]
     async fn a_file_planted_after_the_existence_check_is_refused_and_nothing_moves() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2798,9 +2804,9 @@ mod tests {
 
     /// Regression: `docs/issues/archive/2026-09-15-a-half-completed-move-is-refused-with-a-remedy-that-deletes-the-artifact.md`
     ///
-    /// `mv` renames the file before re-keying the catalog. When a later step fails, the
+    /// `mv` moves the file before re-keying the catalog. When a later step fails, the
     /// artifact is at the destination and the row still names the old path. The retry then
-    /// never reaches the rename: the destination-exists guard refuses first, and its remedy
+    /// never reaches the move: the destination-exists guard refuses first, and its remedy
     /// — *"choose a different path or delete it first"* — names the artifact's **only**
     /// surviving copy. Following it is data loss.
     ///
@@ -2809,7 +2815,7 @@ mod tests {
     /// path does not** is a resumed move, not an occupied path.
     ///
     /// LOAD-BEARING: the ABORT trigger must fire on `artifact` INSERT, which is the write
-    /// `mv` makes AFTER the rename. Move it to a table this path does not write and the
+    /// `mv` makes AFTER the move. Move it to a table this path does not write and the
     /// move succeeds, leaving no half-completed state for the second call to meet — every
     /// assertion below then passes while testing nothing.
     #[tokio::test]

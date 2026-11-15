@@ -4020,9 +4020,13 @@ mod no_clobber_create_tests {
         );
     }
 
-    /// The same, for a `project.toml` that holds a `[security]` table. Onboarding's own content has
-    /// none, so a guard that compared it with the file on disk would refuse with
-    /// `PermissionDenied`; the call must instead succeed and leave their table as written.
+    /// The same, for a `project.toml` that holds a `[security]` table. The occupant appears at
+    /// the publish step, after `check_write` has already run, so this test does not exercise the
+    /// `AlreadyExists` pre-check of `write_new_utf8` (that pre-check is pinned by
+    /// `util::fs::no_clobber_tests::an_occupied_protected_path_gives_already_exists_not_permission_denied`).
+    /// Onboarding's own content has none, so a guard that compared it with the file on disk would
+    /// refuse with `PermissionDenied`; the call must instead succeed and leave their table as
+    /// written.
     #[tokio::test]
     async fn a_project_toml_with_a_security_table_that_appears_in_the_window_is_kept_and_the_call_succeeds(
     ) {
