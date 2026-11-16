@@ -18,6 +18,7 @@ pub mod doc_event;
 pub mod doc_refresh;
 pub mod hot_view;
 pub mod key_gate;
+pub mod trackers;
 
 pub mod doctor;
 pub mod write_lock;

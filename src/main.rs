@@ -284,6 +284,14 @@ enum Commands {
     /// existing `derived.db` the same way: it can belong to another repository.
     Cutover(codescout::cli::cutover::CutoverArgs),
 
+    /// Move a flat tracker into a lifecycle collection, one tracker at a time. `trackers
+    /// inventory <path>...` reads the sources at `HEAD` and prints their records, sections,
+    /// possible records, status values, index rows, and every file that names a source
+    /// (`--json` for the full report). It writes nothing. `apply` and `check` are not built yet.
+    /// Exits 0 on success, 2 and prints one line with the reason when it cannot run (no git
+    /// repository, a source that is not in `HEAD`).
+    Trackers(codescout::cli::trackers::TrackersArgs),
+
     /// Read-only query: which active constitution rules apply to a given
     /// path. Used by codescout-companion's PreToolUse hook — not meant for
     /// interactive use. Always exits 0; prints `[]` on any internal error.
@@ -584,6 +592,9 @@ async fn main() -> Result<()> {
         }
         Commands::Cutover(args) => {
             codescout::cli::cutover::run(args).await?;
+        }
+        Commands::Trackers(args) => {
+            codescout::cli::trackers::run(args).await?;
         }
         Commands::ConstitutionCheck(args) => {
             codescout::cli::constitution_check::run(args).await;
