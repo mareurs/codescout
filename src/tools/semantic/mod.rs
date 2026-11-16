@@ -8,5 +8,6 @@ pub use semantic_search::SemanticSearch;
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
+// The fixture's `[embeddings] url` needs the HTTP embed transport; the lean lane has none.
+#[cfg(all(test, feature = "remote-embed"))]
 mod worktree_store_tests;
