@@ -5,14 +5,15 @@
 //! added it, changed it or renamed it. The rows are keyed by the document's path in the indexed
 //! commit, however the path was spelled further back. The tables are not part of the derived
 //! answer about a tree (two commits of one tree have different histories), so a rebuild rewrites
-//! them with [`write`] only when [`reusable`] says the stored ones were walked from another
-//! commit, another parse version or another shallow state.
+//! them with [`write`] only when [`reusable`] says the stored ones were walked from the same
+//! commit with the same parse version in a repository that is not shallow. [`settle`] makes that
+//! decision again inside the write transaction.
 //!
 //! The rules the walk follows, where the data leaves a choice:
 //!
 //! - A commit's deltas are a set. No path's fate depends on the order the diff lists them in: the
 //!   hits are decided against the tracked paths as they stood before the commit, and only then are
-//!   the tracked paths updated, removals before insertions.
+//!   the tracked paths updated.
 //! - A document is tracked only while it is a regular file (mode 100644 or 100755) with a `.md`
 //!   name, the population the commit scan indexes. A `.md` symlink has no rows. A path that was a
 //!   symlink and became a regular file has its `added` row at the commit where it did: git lists
@@ -21,13 +22,23 @@
 //!   paths and in the rows. Two entries of one tree that spell alike are one path, and the first
 //!   delta in git's path order decides the row. The `status` of such a path is `None`: the blob
 //!   lookup by the lossy spelling finds nothing.
+//! - `diff_trees` returns paths with `\` replaced by `/`, so the tracked paths are keyed by that
+//!   spelling, and a row keeps the raw name as its `rel_path`. The `status` of a name with a `\`
+//!   is `None`, as for a lossy one. Two different raw names with one such spelling (`a\b.md` and
+//!   `a/b.md`) cannot be told apart in a delta: neither is tracked, and neither has rows.
+//! - A blob that is absent from the object database (a blobless clone) gives `status` `None`. A
+//!   similarity rename whose blobs are absent fails the walk: git needs both blobs to score it.
+//!   An exact rename needs none.
 //! - Only the first parent is followed. At a shallow boundary libgit2 reports no parent, so the
 //!   boundary commit is diffed against the empty tree and every path still tracked is `added`
-//!   there. Any other git error fails the build.
+//!   there. The stored history of a shallow repository is never reused: its depth can grow with
+//!   no change of commit (`git fetch --deepen`), and a walk of it is bounded. Any other git error
+//!   fails the build.
 //! - The time is the committer's, in seconds, and the author is the name alone: no clock is read
 //!   and no email is stored.
+//! - `PARSER_VERSION` is also the version of these rules: see its doc.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use anyhow::Context;
@@ -80,9 +91,10 @@ struct Hit {
 /// Walk the first-parent line of `commit`, from the commit itself (position 0) to the root or the
 /// shallow boundary, and return the history of every regular-file `.md` document it holds.
 pub(super) fn walk(repo: &git2::Repository, commit: &git2::Commit) -> anyhow::Result<History> {
-    // Path in the commit being read -> path in the indexed commit.
-    let mut tracked: HashMap<String, String> = HashMap::new();
-    collect_documents(repo, &commit.tree()?, "", &mut tracked)?;
+    // Path as `diff_trees` spells it in the commit being read -> path in the indexed commit.
+    let mut documents: BTreeSet<String> = BTreeSet::new();
+    collect_documents(repo, &commit.tree()?, "", &mut documents)?;
+    let mut tracked = track(&documents);
 
     let mut rows: Vec<HistoryRow> = Vec::new();
     let mut current = commit.clone();
@@ -146,8 +158,9 @@ pub(super) fn walk(repo: &git2::Repository, commit: &git2::Commit) -> anyhow::Re
                     })?,
                 });
             }
-            // Removals first, then insertions: a path one rename frees and another takes keeps
-            // the document that was tracked there before this commit.
+            // Removals first, then insertions. The two sets are disjoint (a rename's source is
+            // absent from this commit's tree and a hit path is present in it), so the order of
+            // the two loops is not observable.
             for hit in hits.values() {
                 if hit.kind != "modified" {
                     tracked.remove(&hit.path);
@@ -177,12 +190,13 @@ pub(super) fn walk(repo: &git2::Repository, commit: &git2::Commit) -> anyhow::Re
     })
 }
 
-/// Every regular-file `.md` entry of `tree`, as `path -> path`, the path spelled lossily.
+/// Every regular-file `.md` entry of `tree`, the path spelled lossily (U+FFFD for a byte that is
+/// not UTF-8).
 fn collect_documents(
     repo: &git2::Repository,
     tree: &git2::Tree,
     prefix: &str,
-    out: &mut HashMap<String, String>,
+    out: &mut BTreeSet<String>,
 ) -> anyhow::Result<()> {
     for entry in tree.iter() {
         let name = String::from_utf8_lossy(entry.name_bytes());
@@ -197,12 +211,33 @@ fn collect_documents(
             Some(git2::ObjectType::Blob)
                 if name.ends_with(".md") && REGULAR_FILE_MODES.contains(&entry.filemode()) =>
             {
-                out.insert(path.clone(), path);
+                out.insert(path);
             }
             _ => {}
         }
     }
     Ok(())
+}
+
+/// The path as `diff_trees` returns it.
+fn diff_spelling(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// The tracked paths of the indexed commit: `diff_trees`'s spelling of each document -> the
+/// document's own path. A spelling that two different paths share names neither of them.
+fn track(documents: &BTreeSet<String>) -> HashMap<String, String> {
+    let mut by_spelling: HashMap<String, Option<&String>> = HashMap::new();
+    for path in documents {
+        by_spelling
+            .entry(diff_spelling(path))
+            .and_modify(|holder| *holder = None)
+            .or_insert(Some(path));
+    }
+    by_spelling
+        .into_iter()
+        .filter_map(|(spelling, holder)| holder.map(|path| (spelling, path.clone())))
+        .collect()
 }
 
 /// The frontmatter `status` of the regular file at `path` in `tree`. `None` when there is no such
@@ -223,7 +258,13 @@ fn status_at(
     {
         return Ok(None);
     }
-    let blob = repo.find_blob(entry.id())?;
+    // A blob the object database lacks (a blobless clone) is no status, as an unknown path is.
+    // A blob the object database lacks (a blobless clone) is no status, as an unknown path is.
+    let blob = match repo.find_blob(entry.id()) {
+        Ok(blob) => blob,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
     let Ok(text) = std::str::from_utf8(blob.content()) else {
         return Ok(None);
     };
@@ -233,21 +274,21 @@ fn status_at(
     })
 }
 
-/// Whether the stored history was walked from `commit`, with this build's parse version, in a
-/// repository of the same shallow state.
+/// Whether the stored history was walked from `commit` with this build's parse version, in a
+/// repository that is not shallow. A shallow repository never reuses: its depth can change with
+/// no change of commit, and a shallow walk is bounded.
 pub(super) fn reusable(
     conn: &Connection,
     repo: &git2::Repository,
     commit: &git2::Commit,
 ) -> rusqlite::Result<bool> {
+    if repo.is_shallow() {
+        return Ok(false);
+    }
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM history_meta \
-         WHERE commit_sha = ?1 AND parser_version = ?2 AND shallow = ?3)",
-        params![
-            commit.id().to_string(),
-            PARSER_VERSION,
-            i64::from(repo.is_shallow())
-        ],
+         WHERE commit_sha = ?1 AND parser_version = ?2 AND shallow = 0)",
+        params![commit.id().to_string(), PARSER_VERSION],
         |r| r.get(0),
     )
 }
@@ -281,6 +322,28 @@ pub(super) fn write(tx: &Connection, history: &History) -> rusqlite::Result<()> 
         ])?;
     }
     Ok(())
+}
+
+/// Finish the history inside the write transaction. With a walk in hand it is written. Without
+/// one the caller skipped the walk because [`reusable`] said yes before the transaction opened;
+/// another writer may have stored another commit's history since, so the check is made again
+/// here, under the write lock, and a history that is no longer reusable is dropped (the next
+/// update walks) rather than left beside a `checkout` it does not belong to.
+pub(super) fn settle(
+    tx: &Connection,
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    walked: Option<&History>,
+) -> rusqlite::Result<()> {
+    match walked {
+        Some(history) => write(tx, history),
+        None if reusable(tx, repo, commit)? => Ok(()),
+        None => {
+            tx.execute("DELETE FROM doc_history", [])?;
+            tx.execute("DELETE FROM history_meta", [])?;
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -834,5 +897,211 @@ mod tests {
         )
         .unwrap();
         assert_eq!(total_rows(&built), 2);
+    }
+
+    /// Point `refs/heads/main` of `origin` at `tip` and make it HEAD, so a clone checks it out.
+    fn publish(origin: &git2::Repository, tip: git2::Oid) {
+        origin
+            .reference("refs/heads/main", tip, true, "tip")
+            .unwrap();
+        origin.set_head("refs/heads/main").unwrap();
+    }
+
+    /// A blobless clone (`--filter=blob:none`): the checkout fetches the tip's blobs, the older
+    /// ones stay on the remote, and libgit2 does not fetch them lazily.
+    fn blobless_clone(parent: &Path, origin_path: &Path, clone_path: &Path) {
+        git(origin_path, &["config", "uploadpack.allowFilter", "true"]);
+        let url = format!("file://{}", origin_path.display());
+        git(
+            parent,
+            &[
+                "clone",
+                "--quiet",
+                "--filter=blob:none",
+                &url,
+                clone_path.to_str().unwrap(),
+            ],
+        );
+    }
+
+    /// The oid of `path` in `commit`'s tree.
+    fn blob_id(repo: &git2::Repository, commit: git2::Oid, path: &str) -> git2::Oid {
+        let tree = repo.find_commit(commit).unwrap().tree().unwrap();
+        tree.get_path(Path::new(path)).unwrap().id()
+    }
+
+    // mutation: a missing blob fails the walk again (the `find_blob` NotFound arm is an error).
+    #[test]
+    fn a_blobless_clone_builds_and_a_missing_blob_gives_no_status() {
+        let parent = tempfile::tempdir().unwrap();
+        let origin_path = parent.path().join("origin");
+        let clone_path = parent.path().join("clone");
+        let origin = git2::Repository::init(&origin_path).unwrap();
+        let (draft, active) = (doc("draft", BODY), doc("active", BODY));
+        let ids = chain(
+            &origin,
+            &[
+                (&[("a.md", FILE, draft.as_bytes())], 1_700_000_000),
+                (&[("a.md", FILE, active.as_bytes())], 1_700_000_100),
+            ],
+        );
+        publish(&origin, ids[1]);
+        let old_blob = blob_id(&origin, ids[0], "a.md");
+        blobless_clone(parent.path(), &origin_path, &clone_path);
+
+        let clone = git2::Repository::open(&clone_path).unwrap();
+        assert!(
+            clone.find_blob(old_blob).is_err(),
+            "the clone lacks the old blob: the test would be vacuous otherwise"
+        );
+        let tip = clone.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(tip.id(), ids[1]);
+
+        let mut conn = open_in_memory().unwrap();
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&clone, &tip, Path::new("/fixture/root")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            rows_of(&conn, "a.md"),
+            [
+                row(0, ids[1], "modified", Some("active"), 1_700_000_100),
+                row(1, ids[0], "added", None, 1_700_000_000),
+            ]
+        );
+    }
+
+    // Measured, and kept as a known limit (module doc): git needs both blobs to score a
+    // similarity rename, so the walk of a blobless clone fails where the rename's source blob is
+    // absent.
+    #[test]
+    fn a_similarity_rename_whose_blobs_are_absent_fails_the_walk() {
+        let parent = tempfile::tempdir().unwrap();
+        let origin_path = parent.path().join("origin");
+        let clone_path = parent.path().join("clone");
+        let origin = git2::Repository::init(&origin_path).unwrap();
+        let before = doc("draft", BODY);
+        let after = doc(
+            "draft",
+            &format!("{BODY}\nOne more line, so it is not an exact copy."),
+        );
+        let ids = chain(
+            &origin,
+            &[
+                (&[("a.md", FILE, before.as_bytes())], 1_700_000_000),
+                (&[("b.md", FILE, after.as_bytes())], 1_700_000_100),
+            ],
+        );
+        publish(&origin, ids[1]);
+        let old_blob = blob_id(&origin, ids[0], "a.md");
+        blobless_clone(parent.path(), &origin_path, &clone_path);
+
+        let clone = git2::Repository::open(&clone_path).unwrap();
+        assert!(
+            clone.find_blob(old_blob).is_err(),
+            "the source blob is absent"
+        );
+        let tip = clone.head().unwrap().peel_to_commit().unwrap();
+        let outcome = walk(&clone, &tip);
+        let message = format!("{:#}", outcome.err().expect("the walk fails"));
+        assert!(
+            message.contains("diffing") && message.contains("code=NotFound"),
+            "the failure is the diff's: {message}"
+        );
+    }
+
+    // mutation: key `tracked` by the raw name (no `\` -> `/`), or let the first raw name win a
+    // collision.
+    #[test]
+    fn a_backslash_name_is_tracked_by_the_spelling_diff_trees_returns() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let (v0, v1) = (doc("draft", BODY), doc("active", BODY));
+        let (t0, t1) = (1_700_000_000, 1_700_000_100);
+        // Alone: the document `a\b.md` has its history under its raw name, with no status (the
+        // blob lookup by the normalised spelling finds nothing).
+        let ids = chain(
+            &repo,
+            &[
+                (&[("a\\b.md", FILE, v0.as_bytes())], t0),
+                (&[("a\\b.md", FILE, v1.as_bytes())], t1),
+            ],
+        );
+        let conn = stored(&repo, ids[1]);
+        assert_eq!(
+            rows_of(&conn, "a\\b.md"),
+            [
+                row(0, ids[1], "modified", None, t1),
+                row(1, ids[0], "added", None, t0),
+            ]
+        );
+        assert_eq!(rows_of(&conn, "a/b.md"), []);
+
+        // Beside a real `a/b.md`: one edit to `a\b.md` alone is not a change of `a/b.md`. The two
+        // names have one normalised spelling, so the walk cannot tell whose delta it is and
+        // gives neither a row.
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let other: &[u8] = b"# The real a/b\n";
+        let ids = chain(
+            &repo,
+            &[
+                (
+                    &[("a\\b.md", FILE, v0.as_bytes()), ("a/b.md", FILE, other)],
+                    t0,
+                ),
+                (
+                    &[("a\\b.md", FILE, v1.as_bytes()), ("a/b.md", FILE, other)],
+                    t1,
+                ),
+            ],
+        );
+        let conn = stored(&repo, ids[1]);
+        assert_eq!(rows_of(&conn, "a/b.md"), [], "no false modified row");
+        assert_eq!(rows_of(&conn, "a\\b.md"), []);
+        assert_eq!(total_rows(&conn), 0);
+    }
+
+    // mutation: skip the re-check (`settle` keeps whatever is stored when no walk was made).
+    #[test]
+    fn a_history_that_stopped_being_reusable_before_the_write_is_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let ids = chain(
+            &repo,
+            &[
+                (&[("a.md", FILE, b"# A\n")], 1_700_000_000),
+                (
+                    &[("a.md", FILE, b"# A\n"), ("b.md", FILE, b"# B\n")],
+                    1_700_000_100,
+                ),
+            ],
+        );
+        let at = |i: usize| repo.find_commit(ids[i]).unwrap();
+        let conn = stored(&repo, ids[0]);
+        let (rows, metas): (i64, i64) = (
+            total_rows(&conn),
+            conn.query_row("SELECT count(*) FROM history_meta", [], |r| r.get(0))
+                .unwrap(),
+        );
+        assert_eq!((rows, metas), (1, 1));
+
+        // Reusable for the commit it was walked from: kept.
+        settle(&conn, &repo, &at(0), None).unwrap();
+        assert_eq!(total_rows(&conn), 1);
+        // Another writer stored another commit's history between the check and the write: the
+        // caller skipped its walk on a stale check, so the stored history is dropped, and the
+        // next update walks.
+        settle(&conn, &repo, &at(1), None).unwrap();
+        assert_eq!(total_rows(&conn), 0);
+        let metas: i64 = conn
+            .query_row("SELECT count(*) FROM history_meta", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(metas, 0);
+        // With a walk in hand, it is written whatever was there.
+        let walked = walk(&repo, &at(1)).unwrap();
+        settle(&conn, &repo, &at(1), Some(&walked)).unwrap();
+        assert_eq!(total_rows(&conn), 2);
     }
 }

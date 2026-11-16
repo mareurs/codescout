@@ -57,6 +57,10 @@ use crate::librarian::tools::link_scan::extract::entry_sections;
 ///
 /// Bump it whenever the parse of some text changes. The test
 /// `the_parse_of_a_pinned_corpus_is_tied_to_parser_version` fails when it should have been.
+///
+/// It is also the key of the git-history cache (`history_meta.parser_version`): a change to a
+/// rule of the history walk, or to `RENAME_THRESHOLD` or `RENAME_LIMIT` of `git::diff_trees`,
+/// leaves history walked under the old rule in place at the same commit unless it is bumped.
 pub const PARSER_VERSION: &str = "2";
 
 /// The chunk grain, fixed: 2048 characters (512 tokens), the old indexer's `CHUNK_CHARS`. It is
@@ -408,9 +412,10 @@ pub(super) fn rebuild_from(
             .execute(params![rel_path, reason])?;
     }
     incremental::sync_cache(&tx, &parsed).context("writing the parse cache")?;
-    if let Some(walked) = &walked {
-        history::write(&tx, walked).context("writing the git history")?;
-    }
+    // Under the write lock the reuse is checked again: another writer may have stored another
+    // commit's history since the check above.
+    history::settle(&tx, input.repo, input.commit, walked.as_ref())
+        .context("writing the git history")?;
     tx.commit()?;
     Ok(report)
 }

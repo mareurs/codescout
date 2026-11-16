@@ -1226,6 +1226,100 @@ mod tests {
         assert_eq!(count(&conn, "doc_history"), 2);
     }
 
+    // mutation: compare only the commit and the parse version (no shallow guard): a shallow
+    // repository reuses a history that `git fetch --deepen` has made stale.
+    #[test]
+    fn a_shallow_repository_never_reuses_its_history_and_a_deepened_one_is_walked_again() {
+        use crate::librarian::derived::testkit::git;
+        let parent = tempfile::tempdir().unwrap();
+        let (origin_path, clone_path) = (parent.path().join("origin"), parent.path().join("clone"));
+        let origin = git2::Repository::init(&origin_path).unwrap();
+        let mut ids: Vec<git2::Oid> = Vec::new();
+        let files: [&[(&str, &str)]; 3] = [
+            &[("a.md", "# A\n")],
+            &[("a.md", "# A\n"), ("b.md", "# B\n")],
+            &[("a.md", "# A\n"), ("b.md", "# B\n"), ("c.md", "# C\n")],
+        ];
+        for (i, snapshot) in files.iter().enumerate() {
+            let parent_commit = ids.last().map(|id| origin.find_commit(*id).unwrap());
+            let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
+            ids.push(commit_files(
+                &origin,
+                &bytes(snapshot),
+                &parents,
+                &format!("c{i}"),
+            ));
+        }
+        origin
+            .reference("refs/heads/main", ids[2], true, "tip")
+            .unwrap();
+        origin.set_head("refs/heads/main").unwrap();
+        let url = format!("file://{}", origin_path.display());
+        git(
+            parent.path(),
+            &[
+                "clone",
+                "--quiet",
+                "--depth",
+                "1",
+                &url,
+                clone_path.to_str().unwrap(),
+            ],
+        );
+
+        let positions = |conn: &Connection| -> Vec<(String, i64)> {
+            conn.prepare("SELECT rel_path, walk_pos FROM doc_history ORDER BY rel_path")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let update_clone = |conn: &mut Connection| {
+            let clone = git2::Repository::open(&clone_path).unwrap();
+            assert!(clone.is_shallow());
+            let tip = clone.head().unwrap().peel_to_commit().unwrap();
+            let input = BuildInput::from_commit(&clone, &tip, Path::new(ROOT)).unwrap();
+            update(conn, &input, &tip).unwrap();
+        };
+
+        let mut conn = open_in_memory().unwrap();
+        {
+            let clone = git2::Repository::open(&clone_path).unwrap();
+            let tip = clone.head().unwrap().peel_to_commit().unwrap();
+            let input = BuildInput::from_commit(&clone, &tip, Path::new(ROOT)).unwrap();
+            build_full(&mut conn, &input).unwrap();
+        }
+        let at_boundary = vec![
+            ("a.md".to_owned(), 0),
+            ("b.md".to_owned(), 0),
+            ("c.md".to_owned(), 0),
+        ];
+        assert_eq!(positions(&conn), at_boundary);
+
+        // A shallow repository's history is bounded, so it is walked again rather than trusted.
+        plant_sentinel(&conn);
+        update_clone(&mut conn);
+        assert_eq!(
+            history_authors(&conn),
+            ["Test"],
+            "a shallow repository walks again"
+        );
+
+        // After a deepening fetch the commit, the parser and `is_shallow` are all unchanged, and
+        // the history is not: the next update must see the new depth.
+        git(&clone_path, &["fetch", "--quiet", "--deepen=1"]);
+        update_clone(&mut conn);
+        assert_eq!(
+            positions(&conn),
+            vec![
+                ("a.md".to_owned(), 1),
+                ("b.md".to_owned(), 1),
+                ("c.md".to_owned(), 0)
+            ]
+        );
+    }
+
     #[test]
     fn a_changed_rules_blob_invalidates_the_cache() {
         let active = "[[rule]]\nglob = \"docs/**/*.md\"\nkind = \"spec\"\nstatus = \"active\"\n";
