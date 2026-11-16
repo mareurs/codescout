@@ -21,6 +21,7 @@
 //! - `checkout`: one row; `rules_source` is always `committed+builtin`, because
 //!   `BuildInput::from_commit` is the only way outside `derived` to build an input.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Context;
@@ -41,6 +42,7 @@ use crate::librarian::identity::key::{key_of, KeyError};
 use crate::librarian::identity::key_space::{KeySpace, KEY_SPACE_FILE_REL};
 use crate::librarian::identity::repo_name::{self, RepoName, REPO_FILE_REL};
 use crate::librarian::indexer::first_h1;
+use crate::librarian::lifecycle::relations::{rel_of_label, relation_labels};
 use crate::librarian::tools::link_scan::extract::entry_sections;
 
 /// Names the version of the parse logic: [`parse_document`] and everything it calls
@@ -452,6 +454,9 @@ pub struct ParsedDocument {
     pub chunks: Vec<ChunkRow>,
     /// The event sections, in document order.
     pub events: Vec<DerivedEventRow>,
+    /// Line (whole document) -> canonical `rel` of the relation paragraph the line lies in, for
+    /// every such line outside every event section; see `relation_rels`.
+    pub relation_rels: BTreeMap<u32, String>,
 }
 
 /// Parse one document: a pure function of its path, its text and the rules.
@@ -486,7 +491,10 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
             chunk
         })
         .collect();
-    let events = parse_event_sections_spanned(text)
+    let spanned = parse_event_sections_spanned(text);
+    let spans: Vec<EventSpan> = spanned.iter().map(|(_, span)| *span).collect();
+    let relation_rels = relation_rels(text, &spans);
+    let events = spanned
         .into_iter()
         .map(|(event, span)| event_row(event, span))
         .collect();
@@ -497,7 +505,25 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
         citations,
         chunks,
         events,
+        relation_rels,
     }
+}
+
+/// The canonical `rel` of each line of a relation paragraph in `text`, outside every event
+/// section in `spans` (E2-R4, E2-R5). The paragraph rule is that of `relation_labels`; a line inside an
+/// event section is that event's own text, so its `**Mutates:**` line is no relation of the
+/// document (the event's `mutates` column holds it). Which of a line's citations take the rel is
+/// decided by the edge insert in [`store_document`], not here.
+fn relation_rels(text: &str, spans: &[EventSpan]) -> BTreeMap<u32, String> {
+    relation_labels(text)
+        .into_iter()
+        .filter(|(line, _)| {
+            !spans
+                .iter()
+                .any(|span| (span.heading_line..=span.end_line).contains(line))
+        })
+        .map(|(line, label)| (line, rel_of_label(&label)))
+        .collect()
 }
 
 /// The row of one event section. The source and the payload are stored as `serde_json::to_string`
@@ -699,9 +725,17 @@ fn store_document(
             continue;
         };
         let (target_repo, target_key, target_token) = edge_target(&citation.reference);
+        // Only a `File` or `Entry` citation is a relation; a bare or malformed token on a
+        // labelled line is not (the reader `lifecycle::relations` makes the same cut).
+        let rel = match citation.reference {
+            Reference::File { .. } | Reference::Entry { .. } => {
+                parsed.relation_rels.get(&citation.line)
+            }
+            Reference::Bare { .. } | Reference::Malformed { .. } => None,
+        };
         conn.prepare_cached(
             "INSERT INTO edge (src_rel_path, ord, line, kind, target_repo, target_key, \
-             target_token, dst_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             target_token, dst_key, rel) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?
         .execute(params![
             doc.rel_path,
@@ -711,7 +745,8 @@ fn store_document(
             target_repo,
             target_key,
             target_token,
-            edge_dst_key(&resolution)
+            edge_dst_key(&resolution),
+            rel
         ])?;
         report.edges += 1;
     }
@@ -1539,6 +1574,73 @@ mod tests {
         );
     }
 
+    /// `(kind, target_key, rel)` of a document's edges, by `ord`.
+    type RelRow = (String, Option<String>, Option<String>);
+
+    fn rel_rows(conn: &Connection, src: &str) -> Vec<RelRow> {
+        conn.prepare("SELECT kind, target_key, rel FROM edge WHERE src_rel_path = ?1 ORDER BY ord")
+            .unwrap()
+            .query_map([src], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn rel_row(kind: &str, key: Option<&str>, rel: Option<&str>) -> RelRow {
+        (
+            kind.to_owned(),
+            key.map(str::to_owned),
+            rel.map(str::to_owned),
+        )
+    }
+
+    // mutation: give every citation on a labelled line the rel (no `File`/`Entry` check).
+    #[test]
+    fn a_relation_paragraph_gives_its_citations_the_canonical_rel() {
+        let a = "# A\n\n## F-1 — e\n\n**Depends on:** [[b]] [[b:B-1]] F-1 [[Bad Target]]\n[[c]]\n\nProse [[d]].\n";
+        let (_dir, repo) = fixture(&[
+            ("docs/a.md", a),
+            ("docs/b.md", "# B\n\n## B-1 — x\n"),
+            ("docs/c.md", "# C\n"),
+            ("docs/d.md", "# D\n"),
+        ]);
+
+        let (conn, _) = built(&repo);
+
+        assert_eq!(
+            rel_rows(&conn, "docs/a.md"),
+            [
+                rel_row("file", Some("b"), Some("depends_on")),
+                rel_row("entry", Some("b"), Some("depends_on")),
+                rel_row("local", None, None),
+                rel_row("malformed", Some("Bad Target"), None),
+                rel_row("file", Some("c"), Some("depends_on")),
+                rel_row("file", Some("d"), None),
+            ]
+        );
+    }
+
+    // mutation: skip the span filter (keep every line `relation_labels` names).
+    #[test]
+    fn an_events_mutates_line_has_no_rel_and_a_relations_mutates_line_does() {
+        let event = event_text("n-1", "note", &["[[b]]"], serde_json::json!({"text": "x"}));
+        let doc = format!(
+            "# A\n\n## Relations\n\n**Mutates:** [[b]]\n\n## Events\n\n{}",
+            section(&event)
+        );
+        let (_dir, repo) = fixture(&[("docs/a.md", &doc), ("docs/b.md", "# B\n")]);
+
+        let (conn, _) = built(&repo);
+
+        assert_eq!(
+            rel_rows(&conn, "docs/a.md"),
+            [
+                rel_row("file", Some("b"), Some("mutates")),
+                rel_row("file", Some("b"), None),
+            ]
+        );
+    }
+
     #[test]
     fn chunk_ids_are_deterministic() {
         let long = format!(
@@ -2092,6 +2194,11 @@ mod tests {
                  [[trackers:T-1]], [[bug-log:B-1]], [[dup1]], [[dup1:D-1]], [[Bad_Name]]\n",
             ),
             text("docs/b.md", "# B\n"),
+            // A two-line relation paragraph: both citations take the canonical rel `depends_on`.
+            text(
+                "docs/rel.md",
+                "# Rel\n\n**Depends on:** [[b]]\n  and [[a:F-1]]\n",
+            ),
             text(
                 "docs/notes.md",
                 &format!(
@@ -2148,6 +2255,10 @@ mod tests {
         let kinds: std::collections::BTreeSet<&str> =
             dump["edge"].iter().map(|row| row[3].as_str()).collect();
         assert!(kinds.len() >= 4, "edge kinds: {kinds:?}");
+        assert!(
+            dump["edge"].iter().any(|row| row[8] != "N"),
+            "no edge of the corpus carries a rel"
+        );
         assert!(
             dump["chunk"].iter().any(|row| row[2] != "I:0"),
             "no document has a second chunk"

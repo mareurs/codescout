@@ -92,6 +92,9 @@ struct CitationJson {
 #[derive(Serialize, Deserialize)]
 struct FactsJson {
     events: Vec<EventJson>,
+    /// `(line, rel)` of each line of a relation paragraph outside every event section, by line
+    /// ([`ParsedDocument::relation_rels`]). A pair, since JSON object keys are strings.
+    relation_rels: Vec<(u32, String)>,
 }
 
 /// An event section as the cache holds it: [`DerivedEventRow`] field for field. Every key is
@@ -281,7 +284,14 @@ pub(super) fn encode(products: &ParsedDocument) -> serde_json::Result<Stored> {
         entries_json: serde_json::to_string(&entries)?,
         citations_json: serde_json::to_string(&citations)?,
         chunks_json: serde_json::to_string(&chunks)?,
-        facts_json: serde_json::to_string(&FactsJson { events })?,
+        facts_json: serde_json::to_string(&FactsJson {
+            events,
+            relation_rels: products
+                .relation_rels
+                .iter()
+                .map(|(line, rel)| (*line, rel.clone()))
+                .collect(),
+        })?,
     })
 }
 
@@ -293,7 +303,10 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
     let entries: Vec<EntryJson> = serde_json::from_str(&stored.entries_json).ok()?;
     let citations: Vec<CitationJson> = serde_json::from_str(&stored.citations_json).ok()?;
     let chunks: Vec<ChunkJson> = serde_json::from_str(&stored.chunks_json).ok()?;
-    let FactsJson { events } = serde_json::from_str(&stored.facts_json).ok()?;
+    let FactsJson {
+        events,
+        relation_rels,
+    } = serde_json::from_str(&stored.facts_json).ok()?;
     let repo_of = |repo: Option<String>| match repo {
         None => Some(None),
         Some(name) => RepoName::parse(&name).ok().map(Some),
@@ -375,6 +388,7 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
                 payload_json: e.payload_json,
             })
             .collect(),
+        relation_rels: relation_rels.into_iter().collect(),
     })
 }
 
@@ -1438,6 +1452,52 @@ mod tests {
         assert_eq!(parsed, strings(&["docs/notes.md"]));
         assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
     }
+    /// A cache row written before relation labels were cached has no `relation_rels` key: it must not
+    /// read back as "no relation lines" (E2-R3: the task that adds a fact does not bump
+    /// `PARSER_VERSION`, so a miss is all that keeps an old test database honest).
+    // mutation: `#[serde(default)]` on `FactsJson::relation_rels`.
+    #[test]
+    fn a_cache_row_without_the_relation_rels_fact_is_a_miss() {
+        let h = history(&[&[
+            REPO_TOML,
+            ("docs/a.md", "# A\n\n**Depends on:** [[b]]\n"),
+            ("docs/b.md", "# B\n"),
+        ]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let text: String = conn
+            .query_row(
+                "SELECT facts_json FROM parse_cache WHERE rel_path = 'docs/a.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let mut facts: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            facts["relation_rels"],
+            serde_json::json!([[3, "depends_on"]]),
+            "the fixture's facts hold its relation line: {text}"
+        );
+        facts.as_object_mut().unwrap().remove("relation_rels");
+        conn.execute(
+            "UPDATE parse_cache SET facts_json = ?1 WHERE rel_path = 'docs/a.md'",
+            [facts.to_string()],
+        )
+        .unwrap();
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/a.md"]));
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
+        let rewritten: String = conn
+            .query_row(
+                "SELECT facts_json FROM parse_cache WHERE rel_path = 'docs/a.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rewritten, text, "the miss rewrote the row");
+    }
 
     /// Every key of a cached event is required, the nullable ones included: a row with one key
     /// removed does not read back as a row with that field `None`, it is a miss (the rule on
@@ -1601,6 +1661,13 @@ mod tests {
                 "docs/specs/bare.md",
                 "# Bare\n\nThe decision in R-43 settles this, and so does R-44.\n".to_owned(),
             ),
+            // A two-line relation paragraph: the parse stores its rel for both lines. (The
+            // `**Mutates:**` lines of the events in `docs/notes.md` are in event sections, which
+            // take no rel.)
+            (
+                "docs/rel.md",
+                "# Rel\n\n**Depends on:** [[one]]\n  and [[two:F-2]]\n".to_owned(),
+            ),
             // Event sections under `## Events`, one per payload form: a note's blockquote and a
             // verdict's fenced payload. The parse stores them as events, with whole-document lines.
             (
@@ -1708,10 +1775,40 @@ mod tests {
         }
     }
 
+    /// The corpus must keep a relation paragraph, and event sections that carry `**Mutates:**` lines
+    /// that take no rel: the digest and the round-trip test cover `relation_rels` only if some pinned
+    /// text has them.
+    #[test]
+    fn the_pinned_corpus_has_a_relation_paragraph_and_events_that_take_no_rel() {
+        let rules = corpus_rules();
+        let parse = |name: &str| {
+            let (rel_path, text) = corpus()
+                .into_iter()
+                .find(|(rel_path, _)| *rel_path == name)
+                .unwrap();
+            parse_document(rel_path, &text, &rules)
+        };
+        let rel = parse("docs/rel.md");
+        assert_eq!(
+            rel.relation_rels.into_iter().collect::<Vec<_>>(),
+            [(3, "depends_on".to_owned()), (4, "depends_on".to_owned())]
+        );
+        let notes = parse("docs/notes.md");
+        assert!(
+            notes.events.iter().any(|e| !e.mutates.is_empty()),
+            "an event of the corpus mutates something"
+        );
+        assert!(
+            notes.relation_rels.is_empty(),
+            "a line inside an event section takes no rel: {:?}",
+            notes.relation_rels
+        );
+    }
+
     /// The pinned digest of the corpus's parse. When this fails, the parse of some text changed
     /// (or the shape the cache stores did): bump `PARSER_VERSION`, so that no cached row from
     /// the old logic is read, and then set this to the new digest.
-    const CORPUS_DIGEST: &str = "f09b66f6dc76c48924e830c88d54ea48fa070ae2bd045ea04d882fc0d12c713b";
+    const CORPUS_DIGEST: &str = "87312ac4583343ccd9b33537e54f60adc6a3e92b847f2f5314a11e8e65b03803";
 
     #[test]
     fn the_parse_of_a_pinned_corpus_is_tied_to_parser_version() {

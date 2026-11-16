@@ -134,6 +134,16 @@ mod tests {
         );
     }
 
+    // mutation: `rel_of_label` keeps the case of the label's letters.
+    #[test]
+    fn every_spelling_of_one_label_has_one_canonical_rel() {
+        use crate::librarian::lifecycle::relations::rel_of_label;
+        for rel in ["depends_on", "depends-on", "Depends On", "__depends--on "] {
+            let label = label_for_rel(rel).unwrap();
+            assert_eq!(rel_of_label(&label), "depends_on", "{rel:?}");
+        }
+    }
+
     #[test]
     fn a_rel_with_a_digit_is_not_a_label() {
         let why = label_for_rel("depends2").unwrap_err();

@@ -14,7 +14,7 @@
 //! - Every `File` or `Entry` citation in that paragraph is a `Relation` with the paragraph's
 //!   label and its own line. `Bare` and `Malformed` citations are dropped.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -60,12 +60,13 @@ fn is_bold_field_label(line: &str) -> bool {
     line.strip_prefix("**").is_some_and(|r| r.contains(":**"))
 }
 
-/// Every `File` or `Entry` citation in `doc` that lies in the paragraph of a declaring line,
-/// labelled with that line's label. Bare tokens and malformed targets are not relations.
-pub fn relations(doc: &str) -> Vec<Relation> {
-    // Line -> label of the paragraph that line belongs to. `extract` numbers lines over the whole
-    // text, frontmatter included, counting `\n`; so does `str::lines` (it also drops a `\r`).
-    let mut labels: HashMap<u32, String> = HashMap::new();
+/// The label of every line that lies in the paragraph of a declaring line, keyed by 1-indexed line:
+/// the paragraph rule in the module doc, with no regard to what the lines hold. [`relations`] keeps
+/// the `File` and `Entry` citations on these lines.
+pub fn relation_labels(doc: &str) -> BTreeMap<u32, String> {
+    // `extract` numbers lines over the whole text, frontmatter included, counting `\n`; so does
+    // `str::lines` (it also drops a `\r`).
+    let mut labels: BTreeMap<u32, String> = BTreeMap::new();
     let mut current: Option<String> = None;
     // CommonMark fence rules, the same tracker `statements.rs` uses for the same field.
     let mut fence = FenceState::new();
@@ -97,6 +98,25 @@ pub fn relations(doc: &str) -> Vec<Relation> {
             current = Some(label);
         }
     }
+    labels
+}
+
+/// The canonical `rel` of a relation label: its words (split on whitespace) in ASCII lowercase,
+/// joined with `_`. `Depends on` gives `depends_on`. The inverse direction of
+/// `link_text::label_for_rel`, which reads every spelling of a rel (`depends-on`, `Depends On`)
+/// and gives one label, so every spelling lands on one stored value.
+pub fn rel_of_label(label: &str) -> String {
+    label
+        .split_whitespace()
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+/// Every `File` or `Entry` citation in `doc` that lies in the paragraph of a declaring line,
+/// labelled with that line's label. Bare tokens and malformed targets are not relations.
+pub fn relations(doc: &str) -> Vec<Relation> {
+    let labels = relation_labels(doc);
     extract(doc)
         .into_iter()
         .filter(|c| {
@@ -131,6 +151,22 @@ mod tests {
         assert_eq!(rs[0].label, "Rests on");
         assert_eq!(rs[2].label, "Promoted to");
         assert_eq!(rs[2].line, 7);
+    }
+
+    // mutation: `rel_of_label` joins the words with a space instead of `_`.
+    #[test]
+    fn rel_of_label_is_snake_case_of_the_words() {
+        assert_eq!(rel_of_label("Depends on"), "depends_on");
+        assert_eq!(rel_of_label("Rests  on"), "rests_on");
+        assert_eq!(rel_of_label("Supersedes"), "supersedes");
+    }
+
+    #[test]
+    fn relation_labels_name_every_line_of_each_paragraph() {
+        let doc = "**Rests on:** [[a]]\n  wrapped\n\nprose\n**Blocks:** [[b]]\n";
+        let labels = relation_labels(doc);
+        let got: Vec<(u32, &str)> = labels.iter().map(|(n, l)| (*n, l.as_str())).collect();
+        assert_eq!(got, [(1, "Rests on"), (2, "Rests on"), (5, "Blocks")]);
     }
 
     #[test]
