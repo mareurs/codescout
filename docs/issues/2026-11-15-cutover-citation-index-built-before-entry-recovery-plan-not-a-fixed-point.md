@@ -44,7 +44,7 @@ Stage order in `plan_export`: `plan_file_renames`, `plan_skipped_events`, `plan_
 
 ## Evidence
 
-Review: `.superpowers/sdd/2026-11-14-artifact-identity-plan-d-cutover-tool/final-rereview.md` (git-ignored, in the cutover worktree), finding C1-a.
+Review: `.superpowers/sdd/2026-11-14-artifact-identity-plan-d-cutover-tool/final-rereview.md` (git-ignored, local to this machine; in the main checkout's `.superpowers/sdd/` since 2026-11-16), finding C1-a.
 
 ## Hypotheses tried
 

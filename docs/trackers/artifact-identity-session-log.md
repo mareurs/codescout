@@ -9,7 +9,7 @@ topic: artifact identity refactor
 entry_prefix:
 - F
 - W
-entry_high_water_F: 29
+entry_high_water_F: 30
 entry_high_water_W: 13
 ---
 # Session Log — Artifact Identity (internal uid, portable key)
@@ -129,6 +129,7 @@ entry_high_water_W: 13
 | F-27 | 2026-11-14 | med | plan-prose | open | **Plan D's plan of the committed export misreports exported observations and renamed documents as unrecoverable** — `splice_event` refuses the duplicate id; old `rel_path`s miss HEAD; the e2e checks writes, not the tally |
 | F-28 | 2026-11-14 | med | plan-prose | open | **Plan D's citation rewrite can write the wrong bytes or guess** — lowercase-only qualifier regex vs its own `My_Notes:F-2` test; merged Text runs across escapes; tokens inside URLs; history maps a deleted file's id by key equality |
 | F-29 | 2026-11-14 | low | plan-prose | open | **Plan D: nine smaller drifts between its text and the code** — a byte-for-byte stamp test vs `frontmatter::write`; fence length; a refusal with no command; two dry runs reading two catalogs; no side-file re-check; report overwritten |
+| F-30 | 2026-11-14 | high | review-gap | fixed-verified | **Plan D Task 1: the side-file refusal misses a symlinked catalog path, so an immutable open reads stale rows silently** — SQLite keeps `-wal` beside the symlink target; measured 0 rows read vs 1 held |
 
 ## Wins Index
 
@@ -1273,6 +1274,20 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 **Counterfactual:** without the population check, the first `cutover export --apply` on this repository renames `src/prompts/workspace_onboarding_prompt.md` and the two `render_prompt.md` files. The build then fails on `include_str!`, the GitHub issue templates stop working, and the mdBook SUMMARY links break. The fixture-only Task 8 test passes throughout.
 
 **Status:** validated
+
+## F-30 — Plan D Task 1: the side-file refusal misses a symlinked catalog path, so an immutable open reads stale rows silently
+
+**Valid:** dated 2026-11-14
+
+**Observed:** Plan D Task 1 (`5ed828ae8`, worktree `cutover-tool-20261114`) builds the side-file refusal that the immutable open's safety rests on (Global Constraints, W-13). `side_files_present(path)` (`src/librarian/derived/diff.rs:459`) and `has_side_file` (`src/cli/derive_shadow.rs:122`) build `<path>-wal` from the path as given. SQLite resolves a symlinked database path and keeps the `-wal`/`-shm` beside the TARGET. Measured with SQLite 3.54.1 (python, scratchpad): a holder opened `link/catalog.db` (a symlink to `real/catalog.db`) with `wal_autocheckpoint=0` and inserted 1 row; `real/` held `catalog.db-wal` and `-shm`, `link/` held only the link; the side-file test on the link path answered false; an `immutable=1` open through the link read 0 rows while the holder read 1. No error.
+
+**Cost:** a catalog path that is a symlink (an `LIBRARIAN_DB` value, or a symlinked `catalog.db`) passes the refusal while a server runs, and the cutover (and derive-shadow) read stale rows silently. `file_stamp` (D-R8 re-check) does not see it: the main file does not change while the rows sit in the `-wal`.
+
+**Fix:** canonicalize the path (`std::fs::canonicalize`) before `side_files_present` and before building the URL, in `open_old_immutable` and in derive-shadow's `open_old`; add a test with a symlinked catalog and a live holder.
+
+**Status:** fixed-verified — fixed in D task 1 fix round 1 (`b77e49679`, on `integration/identity-lifecycle-20261114`; the scoped Opus re-review found it addressed). Verified 2026-11-16: `open_old` in `src/cli/derive_shadow.rs` canonicalizes the path before the side-file check and the URL. Reaches `experiments` with the next integration merge.
+
+**Also seen in the same review:** the refusal's remedy (`sqlite3 <file> 'PRAGMA wal_checkpoint(TRUNCATE)'`) leaves a zero-length `-journal` in place (measured: WAL and rollback databases both keep `c.db-journal`), so a leftover empty journal refuses forever.
 
 ## Template for new entries
 

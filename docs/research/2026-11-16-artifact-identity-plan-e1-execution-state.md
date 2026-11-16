@@ -14,7 +14,7 @@ tags:
 
 # Plan E1 — execution state, rulings, deferred findings and what to do next
 
-Written 2026-11-16. The SDD ledger lives in the git-ignored directory `.superpowers/sdd/2026-11-15-artifact-identity-plan-e1-storage-location/` of the worktree `.worktrees/e1-storage-location-20261115` and dies with it. Related: plan `docs/superpowers/plans/2026-11-15-artifact-identity-plan-e1-storage-location.md` (`1acdb2caa8b83767`, rulings E1-R1..R12), plan review `e88898c6b6c948a4`, scout `02d716631c64e393` (Plan E decomposition E1..E8 and the controller rulings Q1-Q8 in its section (e)).
+Written 2026-11-16. The SDD ledger lives in the git-ignored directory `.superpowers/sdd/2026-11-15-artifact-identity-plan-e1-storage-location/` of the main checkout. It moved there on 2026-11-16 from the worktree `.worktrees/e1-storage-location-20261115`, so removing that worktree does not remove it. The directory stays git-ignored and local to this machine. Related: plan `docs/superpowers/plans/2026-11-15-artifact-identity-plan-e1-storage-location.md` (`1acdb2caa8b83767`, rulings E1-R1..R12), plan review `e88898c6b6c948a4`, scout `02d716631c64e393` (Plan E decomposition E1..E8 and the controller rulings Q1-Q8 in its section (e)).
 
 ## Where the work is
 

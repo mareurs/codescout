@@ -14,7 +14,7 @@ tags:
 
 # Plan D — execution state, rulings, deferred findings and what to do next
 
-Written 2026-11-15. The SDD ledger lives in the git-ignored directory `.superpowers/sdd/2026-11-14-artifact-identity-plan-d-cutover-tool/` of the worktree `.worktrees/cutover-tool-20261114` and dies with it. It holds 50 `Ruling:` lines. This document holds the ones that matter. Related: plan `docs/superpowers/plans/2026-11-14-artifact-identity-plan-d-cutover-tool.md` (D-R1..D-R30), scout `489339eef5f9e93b`, bug `28c8a999b2f3132b` (C1-a), bug file for `rel_path_for` (committed `95fb4042a`).
+Written 2026-11-15. The SDD ledger lives in the git-ignored directory `.superpowers/sdd/2026-11-14-artifact-identity-plan-d-cutover-tool/` of the main checkout. It moved there on 2026-11-16 from the worktree `.worktrees/cutover-tool-20261114`, so removing that worktree does not remove it. The directory stays git-ignored and local to this machine. It holds 50 `Ruling:` lines. This document holds the ones that matter. Related: plan `docs/superpowers/plans/2026-11-14-artifact-identity-plan-d-cutover-tool.md` (D-R1..D-R30), scout `489339eef5f9e93b`, bug `28c8a999b2f3132b` (C1-a), bug file for `rel_path_for` (committed `95fb4042a`).
 
 ## Where the work is
 
