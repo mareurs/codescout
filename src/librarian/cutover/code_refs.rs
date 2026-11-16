@@ -134,11 +134,11 @@ fn is_markdown(path: &str) -> bool {
 /// The extensions (ASCII case ignored) of blobs that hold data or logs: eval manifests, evidence
 /// records, lists and tables name documents as values, and no program reads the document at the
 /// path they hold.
-const DATA_EXTENSIONS: [&str; 5] = ["jsonl", "txt", "json", "csv", "log"];
+pub(crate) const DATA_EXTENSIONS: [&str; 5] = ["jsonl", "txt", "json", "csv", "log"];
 
 /// The audit trail of the catalog: tracked records of past calls, each naming the document a call
 /// touched.
-const AUDIT_DIR: &str = ".codescout/audit/";
+pub(crate) const AUDIT_DIR: &str = ".codescout/audit/";
 
 /// Whether the blob at `path` counts as code for D-R26: a source or configuration file (`.rs`,
 /// `.py`, `.sh`, `.toml`, `.yaml` and every other extension), which a program reads or runs, so a

@@ -15,9 +15,10 @@ use clap::{Args, Subcommand};
 
 use crate::librarian::augmentation_sidecar::rel_path_for;
 use crate::librarian::current_project::lookup_git_root;
-use crate::librarian::cutover::code_refs::{CodeRefs, LINK_MODE};
+use crate::librarian::cutover::code_refs::{CodeRefs, AUDIT_DIR, DATA_EXTENSIONS, LINK_MODE};
 use crate::librarian::derived::build::key_space_from_commit;
 use crate::librarian::derived::scan::{blob_text, open_commit, scan_commit, Skip};
+use crate::librarian::identity::key_space::KeySpace;
 use crate::librarian::tracker_migration::inventory::{
     build_inventory, merge_code_hits, Inventory, SidecarInfo,
 };
@@ -192,8 +193,9 @@ fn inventory_run(req: &InventoryRequest, cwd: &Path) -> Result<Inventory> {
         }
         let text = match file.text {
             Ok(text) => Some(text),
-            // The key space decides what is catalogued, not what can name a source.
-            Err(Skip::OutsideKeySpace) => blob_text(&repo, &commit, &file.rel_path)?,
+            // The key space decides what is catalogued, not what can name a source. A file
+            // that cannot be read (a symlink, not UTF-8) is skipped, as it is inside the space.
+            Err(Skip::OutsideKeySpace) => blob_text(&repo, &commit, &file.rel_path).ok().flatten(),
             Err(Skip::NotUtf8 | Skip::Symlink) => None,
         };
         if let Some(text) = text {
@@ -212,26 +214,35 @@ fn inventory_run(req: &InventoryRequest, cwd: &Path) -> Result<Inventory> {
             }
         }
     }
-    let grep_hits = grep_commit(&repo, &commit, &needles)?;
+    let grep_hits = grep_commit(&repo, &commit, &space, &needles)?;
     let code_hits = merge_code_hits(&refs_hits, &grep_hits);
 
-    let mut sidecar = None;
+    // The inventory holds one sidecar: a second one is a stop, never a silent drop.
+    let mut sidecar: Option<(&str, SidecarInfo)> = None;
     for (path, _, _) in &sources {
         let rel = rel_path_for(Path::new(""), Path::new(path));
         if let Some(text) = blob_text(&repo, &commit, &rel)? {
-            sidecar = Some(SidecarInfo {
+            if let Some((first, _)) = &sidecar {
+                bail!(
+                    "sources {first} and {path} both have a sidecar; fold sources that have a \
+                     sidecar one at a time."
+                );
+            }
+            let info = SidecarInfo {
                 prompt: prompt_of(&text),
                 path: rel,
-            });
-            break;
+            };
+            sidecar = Some((path.as_str(), info));
         }
     }
+    let sidecar = sidecar.map(|(_, info)| info);
 
     let status = match req.status_column {
         Some(header) => StatusSource::IndexColumn(header.to_string()),
         None => StatusSource::BodyLabel,
     };
-    let frozen = |file: &str| code_refs.frozen(file).is_some();
+    // Spec § Path mentions: `CLAUDE.md` is frozen even when no code names it.
+    let frozen = |file: &str| code_refs.frozen(file).is_some() || file_name(file) == "CLAUDE.md";
     Ok(build_inventory(
         &sources,
         &status,
@@ -328,9 +339,14 @@ fn markdown_files_in(
 /// included. Like git, it compares bytes (a blob need not be UTF-8), excludes paths ending in
 /// `.md` (case-sensitive, as git's pathspec), and skips a binary blob (a NUL byte in its first
 /// 8000 bytes). A symlink and a submodule are not searched.
+///
+/// It also skips what names documents as data, as [`CodeRefs`] does ([`is_grep_data`]): the
+/// audit trail, a path outside the key space, and a data or log file other than JSON. A JSON
+/// file stays, because a program can read a tracker path from it.
 fn grep_commit(
     repo: &git2::Repository,
     commit: &git2::Commit,
+    space: &KeySpace,
     needles: &BTreeSet<String>,
 ) -> Result<Vec<(String, u32)>> {
     let needles: Vec<&[u8]> = needles
@@ -353,7 +369,7 @@ fn grep_commit(
                 return git2::TreeWalkResult::Ok;
             };
             let path = format!("{dir}{name}");
-            if path.ends_with(".md") {
+            if path.ends_with(".md") || is_grep_data(&path, space) {
                 return git2::TreeWalkResult::Ok;
             }
             let blob = match repo.find_blob(entry.id()) {
@@ -382,6 +398,17 @@ fn grep_commit(
     }
     walked?;
     Ok(hits)
+}
+
+/// Whether the grep skips `path` as data: it lies under [`AUDIT_DIR`], the key space excludes
+/// it, or its extension (ASCII case ignored) is in [`DATA_EXTENSIONS`] and is not `json`.
+fn is_grep_data(path: &str, space: &KeySpace) -> bool {
+    let name = file_name(path);
+    let data = name.rsplit_once('.').is_some_and(|(_, ext)| {
+        !ext.eq_ignore_ascii_case("json")
+            && DATA_EXTENSIONS.iter().any(|d| ext.eq_ignore_ascii_case(d))
+    });
+    data || path.starts_with(AUDIT_DIR) || space.is_outside(path)
 }
 
 /// The `prompt` of a sidecar's YAML text; `None` when it has none or does not parse.
@@ -552,7 +579,7 @@ pub async fn run(args: TrackersArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::librarian::derived::testkit::{repo_with, FILE};
+    use crate::librarian::derived::testkit::{repo_with, FILE, LINK};
     use serde_json::{json, Value};
 
     struct Fixture {
@@ -604,6 +631,12 @@ mod tests {
     /// (configuration) name the tracker path, so `CodeRefs` and `git grep` both find them;
     /// `scripts/x.json` names it too, but `CodeRefs` reads JSON as data, so only `git grep`
     /// finds it (line 2).
+    ///
+    /// The key space excludes `.codescout/memories`. Files that name the tracker but are no
+    /// hit for either search: an audit record, a `.log` and a `.txt` data file, and a YAML
+    /// file in the excluded folder. Markdown that mentions it: `docs/notes.md` (prose),
+    /// `CLAUDE.md` at the root (no code names it) and `.codescout/memories/m.md` (excluded
+    /// from the key space, under a dot directory).
     fn readers_repo() -> Fixture {
         repo(&[
             ("docs/trackers/obs-log.md", TRACKER),
@@ -614,16 +647,162 @@ mod tests {
                 "{\n  \"log\": \"docs/trackers/obs-log.md\"\n}\n",
             ),
             ("docs/notes.md", "See docs/trackers/obs-log.md.\n"),
-            // Under a dot directory: `CodeRefs::frozen` freezes it.
+            (
+                "CLAUDE.md",
+                "Read docs/trackers/obs-log.md before you start.\n",
+            ),
+            (
+                ".codescout/key-space.toml",
+                "exclude = [\".codescout/memories\"]\n",
+            ),
+            // Under a dot directory: `CodeRefs::frozen` freezes it. Outside the key space.
             (
                 ".codescout/memories/m.md",
                 "Read docs/trackers/obs-log.md.\n",
             ),
             (
+                ".codescout/memories/index.yaml",
+                "log: docs/trackers/obs-log.md\n",
+            ),
+            (
+                ".codescout/audit/x.jsonl",
+                "{\"path\": \"docs/trackers/obs-log.md\"}\n",
+            ),
+            ("docs/evals/data/y.log", "read docs/trackers/obs-log.md\n"),
+            ("z.txt", "obs-log\n"),
+            (
                 "docs/augmentations/docs-trackers-obs-log.yaml",
                 "prompt: Keep it short.\n",
             ),
         ])
+    }
+
+    /// The JSON of an inventory run of `docs/trackers/obs-log.md` in `f`, which must exit 0.
+    fn inventory_json(f: &Fixture) -> Value {
+        let out = inventory(f, &["docs/trackers/obs-log.md"], "file", true);
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        serde_json::from_str(out.stdout.trim()).unwrap()
+    }
+
+    /// The path mention of `file` in `v`, which must be listed.
+    fn path_hit<'a>(v: &'a Value, file: &str) -> &'a Value {
+        v["mentions"]["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["file"] == file)
+            .unwrap_or_else(|| panic!("no path mention of {file} in {}", v["mentions"]["paths"]))
+    }
+
+    /// Spec § Path mentions names `CLAUDE.md` as frozen, and `CodeRefs::frozen` freezes it
+    /// only when code names it. Breaks if the CLI's frozen test drops the `CLAUDE.md` rule,
+    /// or freezes every file (`docs/notes.md` must stay not frozen).
+    #[test]
+    fn claude_md_is_frozen_and_a_docs_note_is_not() {
+        let v = inventory_json(&readers_repo());
+        assert_eq!(path_hit(&v, "CLAUDE.md")["frozen"], true);
+        assert_eq!(path_hit(&v, "docs/notes.md")["frozen"], false);
+    }
+
+    /// A markdown file the key space excludes can still name a source. Breaks if the CLI
+    /// drops markdown outside the key space (the `OutsideKeySpace` arm returns nothing): the
+    /// memory's path mention would vanish.
+    #[test]
+    fn markdown_outside_the_key_space_still_names_a_source() {
+        let v = inventory_json(&readers_repo());
+        assert_eq!(
+            path_hit(&v, ".codescout/memories/m.md"),
+            &json!({"file": ".codescout/memories/m.md", "line": 1, "in_code": false, "frozen": true})
+        );
+    }
+
+    /// A symlinked or non-UTF-8 markdown file outside the key space is skipped, as the same
+    /// file inside it is. Breaks if reading it is an error that stops the run (exit 2).
+    #[test]
+    fn an_unreadable_markdown_file_outside_the_key_space_does_not_stop_the_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        repo_with(
+            &root,
+            &[
+                ("docs/trackers/obs-log.md", FILE, TRACKER.as_bytes()),
+                (
+                    ".codescout/key-space.toml",
+                    FILE,
+                    b"exclude = [\"notes\"]\n",
+                ),
+                ("notes/bad.md", FILE, b"docs/trackers/obs-log.md \xff\xfe\n"),
+                ("notes/link.md", LINK, b"../docs/trackers/obs-log.md"),
+                ("notes/ok.md", FILE, b"See docs/trackers/obs-log.md.\n"),
+            ],
+        );
+        let f = Fixture { _dir: dir, root };
+        let v = inventory_json(&f);
+        let files: Vec<&str> = v["mentions"]["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["file"].as_str().unwrap())
+            .collect();
+        assert_eq!(files, ["notes/ok.md"]);
+    }
+
+    /// The grep skips the audit trail, data files other than JSON (`jsonl`, `txt`, `csv`,
+    /// `log`) and paths outside the key space; JSON and YAML readers stay. Breaks if any of
+    /// `.codescout/audit/x.jsonl`, `docs/evals/data/y.log`, `z.txt` or
+    /// `.codescout/memories/index.yaml` is a hit, or if `scripts/x.json` is no longer a
+    /// grep-only hit.
+    #[test]
+    fn the_grep_skips_audit_data_and_excluded_files_but_keeps_json() {
+        let v = inventory_json(&readers_repo());
+        assert_eq!(
+            v["mentions"]["code"],
+            json!([
+                {"file": "config/x.yaml", "line": 1, "origin": "code_refs"},
+                {"file": "scripts/read.py", "line": 1, "origin": "code_refs"},
+                {"file": "scripts/x.json", "line": 2, "origin": "grep"}
+            ])
+        );
+    }
+
+    /// Two sources that each have a sidecar stop the run: the inventory holds one sidecar,
+    /// and a second one must not be dropped without a word. One source with a sidecar beside
+    /// one without is reported as before. Breaks if the run keeps the first sidecar and goes
+    /// on, or if the reason does not name both sources.
+    #[test]
+    fn a_second_source_with_a_sidecar_exits_2_naming_both() {
+        let f = repo(&[
+            ("docs/trackers/a.md", TRACKER),
+            ("docs/trackers/b.md", TRACKER),
+            ("docs/trackers/c.md", TRACKER),
+            ("docs/augmentations/docs-trackers-a.yaml", "prompt: A.\n"),
+            ("docs/augmentations/docs-trackers-b.yaml", "prompt: B.\n"),
+        ]);
+        let out = inventory(
+            &f,
+            &["docs/trackers/a.md", "docs/trackers/b.md"],
+            "file",
+            false,
+        );
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert_eq!(
+            out.stdout,
+            "The command did not run: sources docs/trackers/a.md and docs/trackers/b.md both \
+         have a sidecar; fold sources that have a sidecar one at a time.\n"
+        );
+
+        let out = inventory(
+            &f,
+            &["docs/trackers/c.md", "docs/trackers/a.md"],
+            "file",
+            true,
+        );
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        let v: Value = serde_json::from_str(out.stdout.trim()).unwrap();
+        assert_eq!(
+            v["sidecar"],
+            json!({"path": "docs/augmentations/docs-trackers-a.yaml", "prompt": "A."})
+        );
     }
 
     /// Breaks if: the JSON reader is dropped (the grep is not run, or it skips JSON); a hit
@@ -658,6 +837,7 @@ mod tests {
             v["mentions"]["paths"],
             json!([
                 {"file": ".codescout/memories/m.md", "line": 1, "in_code": false, "frozen": true},
+                {"file": "CLAUDE.md", "line": 1, "in_code": false, "frozen": true},
                 {"file": "docs/notes.md", "line": 1, "in_code": false, "frozen": false}
             ])
         );

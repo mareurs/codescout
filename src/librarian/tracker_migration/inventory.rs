@@ -652,7 +652,7 @@ mod tests {
     // 11 | F-2 | open | second again |   28 | ID | Status |
     // 12                                 29 |----|--------|
     // 13 ## F-1 — first (2026-08-01)     30 | F-3 | open |
-    // 14 **Status:** Open — still seen   31 | F-1 | fixed |
+    // 14 **Status:** Open — still seen   31 | F-1 | wontfix |
     // 15 **Valid:** dated 2026-08-03     32
     // 16                                 33 ## R-56b — a hit
     // 17 ## F-2 — second                 34 text
@@ -666,7 +666,7 @@ mod tests {
     ## F-3 — third\nbody with no status, seen 2026-09-09\n\n\
     ## F-4 — fourth\n- **Status:** Fixed (by hand)\n\n\
     ## Old index\n\n| ID | Status |\n|----|--------|\n\
-    | F-3 | open |\n| F-1 | fixed |\n\n\
+    | F-3 | open |\n| F-1 | wontfix |\n\n\
     ## R-56b — a hit\ntext\n";
 
     fn inventory_of(text: &str, kind: SourceKind, status: StatusSource) -> Inventory {
@@ -744,12 +744,15 @@ mod tests {
         assert_eq!(inv.sources, vec![expected]);
     }
 
-    /// With an index column as the status source, the status comes from the record's first
-    /// row and the origin names the column. Breaks if the body is read instead (`F-1` would
-    /// be `open`, `F-4` would be `fixed`), if the origin is not `index:<header>`, or if a
-    /// record with no row is not counted as having no status.
+    /// A token with several index rows takes its FIRST row, in source order, for both the
+    /// index-column status and the disagreement check. `F-1` has `fixed` in the first table
+    /// (line 8) and `wontfix` in the second (line 31). Breaks if the last row wins (`F-1`
+    /// would be `wontfix`, the status values `open (2), wontfix (1)`, the disagreement index
+    /// `wontfix`), if the body is read instead (`F-1` would be `open`, `F-4` `fixed`), if the
+    /// origin is not `index:<header>`, or if a record with no row is not counted as having
+    /// no status.
     #[test]
-    fn an_index_column_status_comes_from_the_first_row() {
+    fn the_first_index_row_of_a_token_wins_for_status_and_disagreement() {
         let inv = inventory_of(
             LOG,
             SourceKind::File,
@@ -777,7 +780,14 @@ mod tests {
             BTreeMap::from([("fixed".to_string(), 1), ("open".to_string(), 2)])
         );
         assert_eq!(src.no_status, vec!["F-4".to_string()]);
-        assert_eq!(src.disagreements.len(), 1, "{:?}", src.disagreements);
+        assert_eq!(
+            src.disagreements,
+            vec![Disagreement {
+                token: "F-1".into(),
+                body: "open".into(),
+                index: "fixed".into(),
+            }]
+        );
     }
 
     /// A record with no token is named by its title in `no_status`, and has no index row to
