@@ -1265,7 +1265,7 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Status:** mitigated
 
-**Sweep 2026-11-16:** All four findings are fixed (`0f80a8a6f`, `c14fe1820`): an uppercase qualifier is reported, escapes and URLs are never rewritten, and history binds an id only to its own path. One case still guesses: an id whose rename destination was later deleted and reused maps to the new file (T4-M10, `head_path` in `src/librarian/cutover/history.rs`). The sweep found it by reading the code and did not run it. Only the final review's park list names it, and no `Ruling:` line does.
+**Sweep 2026-11-16:** All four findings are fixed (`0f80a8a6f`, `c14fe1820`): an uppercase qualifier is reported, escapes and URLs are never rewritten, and history binds an id only to its own path. One case still guesses: an id whose rename destination was later deleted and reused maps to the new file (T4-M10, `head_path` in `src/librarian/cutover/history.rs`). The sweep found it by reading the code and did not run it. Only the final review's park list names it, and no `Ruling:` line does. Filed as bug `056847ab0ed7d3e9` on 2026-11-16.
 
 **Rests on:** D-R7 ("ambiguous ... reported, never guessed") and spec § The citation grammar.
 
@@ -1291,7 +1291,7 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Status:** mitigated
 
-**Sweep 2026-11-16:** All nine drifts are fixed in code and tests (`b8c897911`, `b77e49679`, `5ed828ae8`, `6ba948ecd`). One parked race remains: two worktrees that export at the same time can replace one report (M57, a Task 8 Ruling).
+**Sweep 2026-11-16:** All nine drifts are fixed in code and tests (`b8c897911`, `b77e49679`, `5ed828ae8`, `6ba948ecd`). One parked race remains: two worktrees that export at the same time can replace one report (M57, a Task 8 Ruling). Filed as bug `4f4b90618909a5e2` on 2026-11-16.
 
 **Rests on:** Plan D Global Constraints (no absolute path, STE refusals) and D-R1 (one text format per writer).
 
