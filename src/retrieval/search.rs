@@ -594,6 +594,7 @@ mod dim_guard_tests {
                 // Inert: this fixture injects `code_store` directly, so nothing
                 // ever resolves a path under this.
                 sqlite_dir: std::path::PathBuf::from("/unused-in-tests/sqlite"),
+                code_sqlite_dir: std::path::PathBuf::from("/unused-in-tests/sqlite"),
             },
             lite: false,
         }

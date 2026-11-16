@@ -586,6 +586,25 @@ pub(crate) fn written_by_report(
     }))
 }
 
+/// The id the chunk store and the index lock are keyed by for `root`.
+///
+/// For a regular checkout that is the project's own name. A linked worktree is
+/// different: `index(action="build")` routes it to `sync_worktree`, which writes its
+/// chunks, and takes its index lock, under the delta id `<main>@<worktree>` — never
+/// under the worktree's own `project.toml` name. Asking the store for that name reads
+/// an empty file and reports `indexed: false` after a successful build. The ids come
+/// from `worktree_ids`, the one derivation the build and the search side also use.
+/// codescout#34.
+fn store_project_id(project_id: String, root: Option<&std::path::Path>) -> String {
+    let Some(root) = root else {
+        return project_id;
+    };
+    match crate::prompts::detect_worktree_info(root).and_then(|info| info.main_repo) {
+        Some(main_repo) => crate::retrieval::sync::worktree_ids(&main_repo, root).1,
+        None => project_id,
+    }
+}
+
 #[async_trait::async_trait]
 impl Tool for IndexStatus {
     fn name(&self) -> &str {
@@ -616,6 +635,10 @@ impl Tool for IndexStatus {
             .agent
             .project_root_for(ctx.workspace_override.as_deref())
             .await;
+        // On a linked worktree the store holds the delta under another id; see
+        // `store_project_id`. Everything below — the stats query, the lock peek and
+        // the reported `project_id` — is about that same store.
+        let project_id = store_project_id(project_id, root.as_deref());
         // Captured inside the arm below, because `client` is dropped with it and the
         // model-mismatch check further down needs the CONFIGURED model to compare the
         // stored one against. Taken from `client.config` rather than the project config,

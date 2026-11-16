@@ -71,6 +71,32 @@ pub(crate) fn resolve_sqlite_dir(raw: Option<String>, root: Option<&Path>) -> Re
     };
     Ok(base.join(".codescout").join("embeddings"))
 }
+/// Directory of the sqlite-vec store that holds a project's CODE chunks.
+///
+/// Same precedence as [`resolve_sqlite_dir`] (an explicit value first), except that a
+/// linked worktree resolves to the MAIN checkout's directory.
+///
+/// Why: `sync_worktree`, `query_overlay` and `project_has_chunks` each take ONE store and
+/// expect main's chunks and the worktree's delta (`<main>@<worktree>`) to be in it. Under a
+/// worktree-rooted directory the store holds only the delta, so `sync_worktree` reads an
+/// empty `chunk_refs(main)`, and `semantic_search` finds main "never indexed" and skips it.
+/// Qdrant has no such problem: one collection holds every project. codescout#34.
+///
+/// Deliberately NOT applied to [`RetrievalConfig::sqlite_dir`], which also locates the
+/// semantic MEMORY store. Memories are keyed by the worktree's own project name and should
+/// keep dying with the worktree, like every other per-root store (see
+/// [`resolve_sqlite_dir`]).
+///
+/// Cost: a removed worktree leaves its `<main>_<worktree>.db` delta file behind in main's
+/// directory — nothing deletes it.
+pub(crate) fn resolve_code_sqlite_dir(raw: Option<String>, root: Option<&Path>) -> Result<PathBuf> {
+    let base = root.map(|r| {
+        crate::prompts::detect_worktree_info(r)
+            .and_then(|info| info.main_repo)
+            .unwrap_or_else(|| r.to_path_buf())
+    });
+    resolve_sqlite_dir(raw, base.as_deref())
+}
 
 /// Sparse-embedder fallback: the **host** port `docker-compose.yml` publishes for
 /// the sparse service (`127.0.0.1:48084:80`).
@@ -181,6 +207,10 @@ pub struct RetrievalConfig {
     /// Inert on the Qdrant backend — `VectorBackend::resolve` picks the store, and
     /// only `SqliteVec` reads this.
     pub sqlite_dir: PathBuf,
+    /// Directory of the sqlite-vec store holding CODE chunks. Equals [`Self::sqlite_dir`]
+    /// except in a linked worktree, where it is the main checkout's — see
+    /// [`resolve_code_sqlite_dir`]. Read by `RetrievalClient::from_env`.
+    pub code_sqlite_dir: PathBuf,
 }
 
 impl RetrievalConfig {
@@ -241,6 +271,8 @@ impl RetrievalConfig {
         // on the wire and the value the warning is about cannot diverge.
         let dense_model_name_override = env.model_name.clone();
         let (embedder_url, model, api_key, model_dim) = resolve_embed_fields_with(env, root)?;
+        // Read ONCE: both directories derive from the same operator override.
+        let sqlite_dir_raw = std::env::var("CODESCOUT_SQLITE_DIR").ok();
         Ok(Self {
             qdrant_url: std::env::var("CODESCOUT_QDRANT_URL")
                 .unwrap_or_else(|_| "http://127.0.0.1:6334".into()),
@@ -273,7 +305,8 @@ impl RetrievalConfig {
             rerank: parse_rerank_opt_in(std::env::var("CODESCOUT_RERANK").ok().as_deref()),
             collection_prefix: std::env::var("CODESCOUT_QDRANT_COLLECTION_PREFIX")
                 .unwrap_or_default(),
-            sqlite_dir: resolve_sqlite_dir(std::env::var("CODESCOUT_SQLITE_DIR").ok(), root)?,
+            sqlite_dir: resolve_sqlite_dir(sqlite_dir_raw.clone(), root)?,
+            code_sqlite_dir: resolve_code_sqlite_dir(sqlite_dir_raw, root)?,
         })
     }
 }
@@ -866,6 +899,64 @@ mod sqlite_dir_tests {
     fn the_default_is_under_the_project_root() {
         let got = resolve_sqlite_dir(None, Some(std::path::Path::new("/w/proj"))).unwrap();
         assert_eq!(got, PathBuf::from("/w/proj/.codescout/embeddings"));
+    }
+    /// `<tmp>/main` with a linked worktree `<tmp>/wt`, git-named `feat`.
+    fn linked_worktree() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        let wt = dir.path().join("wt");
+        let meta = main.join(".git").join("worktrees").join("feat");
+        std::fs::create_dir_all(&meta).unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", meta.display())).unwrap();
+        (dir, main, wt)
+    }
+
+    /// codescout#34. `sync_worktree`, `query_overlay` and `project_has_chunks` all take ONE
+    /// store and expect main's chunks and the worktree's delta in it. A worktree-rooted store
+    /// holds only the delta, so main is invisible: status says "not indexed" and the search
+    /// skips main.
+    ///
+    /// Would fail if: the code store of a linked worktree keeps resolving under the worktree
+    /// root.
+    #[test]
+    fn a_linked_worktrees_code_store_is_the_main_checkouts() {
+        let (_dir, main, wt) = linked_worktree();
+        let got = super::resolve_code_sqlite_dir(None, Some(&wt)).unwrap();
+        assert_eq!(
+            got,
+            main.join(".codescout").join("embeddings"),
+            "a worktree must read main's chunks from main's store"
+        );
+    }
+
+    /// The operator override is the only way to put stores elsewhere entirely; a worktree
+    /// must not defeat it.
+    #[test]
+    fn an_explicit_dir_still_wins_for_a_linked_worktree() {
+        let (_dir, _main, wt) = linked_worktree();
+        let got =
+            super::resolve_code_sqlite_dir(Some("/tmp/elsewhere".to_string()), Some(&wt)).unwrap();
+        assert_eq!(got, PathBuf::from("/tmp/elsewhere"));
+    }
+
+    /// Guard against over-redirecting: a regular checkout (`.git` is a directory) keeps its
+    /// own store.
+    #[test]
+    fn a_plain_checkout_keeps_its_own_code_store() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let got = super::resolve_code_sqlite_dir(None, Some(dir.path())).unwrap();
+        assert_eq!(got, dir.path().join(".codescout").join("embeddings"));
+    }
+
+    /// The memory store keeps the per-root rule: it is keyed by the worktree's own project
+    /// name, and it must die with the worktree like every other per-root store.
+    #[test]
+    fn a_linked_worktrees_memory_store_stays_under_its_own_root() {
+        let (_dir, _main, wt) = linked_worktree();
+        let got = resolve_sqlite_dir(None, Some(&wt)).unwrap();
+        assert_eq!(got, wt.join(".codescout").join("embeddings"));
     }
 
     #[test]

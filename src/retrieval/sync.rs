@@ -3326,6 +3326,7 @@ mod tests {
                 // ever resolves a path under this. Mirrors the `unused.invalid`
                 // idiom above — a value that fails loudly if it is ever read.
                 sqlite_dir: std::path::PathBuf::from("/unused-in-tests/sqlite"),
+                code_sqlite_dir: std::path::PathBuf::from("/unused-in-tests/sqlite"),
             },
             lite: false,
         }
@@ -3436,6 +3437,7 @@ mod tests {
                 // ever resolves a path under this. Mirrors the `unused.invalid`
                 // idiom above — a value that fails loudly if it is ever read.
                 sqlite_dir: std::path::PathBuf::from("/unused-in-tests/sqlite"),
+                code_sqlite_dir: std::path::PathBuf::from("/unused-in-tests/sqlite"),
             },
             lite: false,
         }

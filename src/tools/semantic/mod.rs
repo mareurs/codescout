@@ -8,3 +8,5 @@ pub use semantic_search::SemanticSearch;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod worktree_store_tests;

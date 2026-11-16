@@ -357,7 +357,7 @@ impl RetrievalClient {
         let code_store: Arc<dyn CodeVectorStore> = match backend {
             VectorBackend::SqliteVec => {
                 Arc::new(crate::retrieval::sqlite_code_store::SqliteVecCodeStore::at(
-                    config.sqlite_dir.clone(),
+                    config.code_sqlite_dir.clone(),
                 ))
             }
             VectorBackend::Qdrant => Self::qdrant_code_store(&config).await?,
