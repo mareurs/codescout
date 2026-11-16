@@ -42,7 +42,9 @@ use crate::librarian::identity::key::{key_of, KeyError};
 use crate::librarian::identity::key_space::{KeySpace, KEY_SPACE_FILE_REL};
 use crate::librarian::identity::repo_name::{self, RepoName, REPO_FILE_REL};
 use crate::librarian::indexer::first_h1;
+use crate::librarian::lifecycle::entry::parse_entry;
 use crate::librarian::lifecycle::relations::{rel_of_label, relation_labels};
+use crate::librarian::statements::Validity;
 use crate::librarian::tools::link_scan::extract::entry_sections;
 
 /// Names the version of the parse logic: [`parse_document`] and everything it calls
@@ -349,15 +351,21 @@ pub(super) fn rebuild_from(
         changes,
         ..BuildReport::default()
     };
+    let mut document_problems: Vec<ProblemRow> = Vec::new();
     for (doc, parsed) in documents.iter().zip(&parsed) {
         store_document(&tx, doc, &parsed.products, &index, &mut report)
             .with_context(|| format!("storing {}", doc.rel_path))?;
+        document_problems.extend(entry_problem(doc, &parsed.products));
     }
     for problem in index.problems() {
-        let (kind, key, rel_paths) = problem_row(problem);
-        tx.prepare_cached("INSERT INTO problem (kind, \"key\", rel_paths) VALUES (?1, ?2, ?3)")?
-            .execute(params![kind, key, json_array(&rel_paths)])?;
-        report.problems += 1;
+        insert_problem(&tx, &mut report, problem_row(problem))?;
+    }
+    // The problems that one document alone decides (not the key index): one list, sorted by
+    // `(kind, key, rel_paths)` so that the order does not depend on the scan, stored after the
+    // index's own rows. A later source of such a problem pushes its rows onto this list.
+    document_problems.sort();
+    for problem in document_problems {
+        insert_problem(&tx, &mut report, problem)?;
     }
     for (rel_path, reason) in &skipped {
         // `OR IGNORE`: the same pair twice is one row, and only a stored row is counted.
@@ -457,6 +465,73 @@ pub struct ParsedDocument {
     /// Line (whole document) -> canonical `rel` of the relation paragraph the line lies in, for
     /// every such line outside every event section; see `relation_rels`.
     pub relation_rels: BTreeMap<u32, String>,
+    /// Whether the document is an entry document, and the fields its `entry_doc` row holds.
+    pub entry_doc: EntryDoc,
+}
+
+/// The columns of an `entry_doc` row, as stored. Dates are `%Y-%m-%d`; `valid` is the text of the
+/// validity class (`invariant`, `dated <d>` or `conditional — <c>`); `fields_json` is the JSON
+/// object of every frontmatter key that is not an entry key (top-level keys sorted; a nested
+/// object keeps the order written) (E2-R8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryDocRow {
+    pub entry_kind: String,
+    pub status_since: String,
+    pub created: String,
+    pub closed: Option<String>,
+    pub revisit_by: Option<String>,
+    pub valid: Option<String>,
+    pub fields_json: String,
+}
+
+/// What a document's frontmatter says about being an entry document. It is one when the
+/// frontmatter parses and has a non-null `entry_kind`; it then either reads as an entry
+/// ([`EntryDoc::Parsed`], one `entry_doc` row) or does not ([`EntryDoc::Unparsed`], an
+/// `entry_unparsed` problem row and no `entry_doc` row).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryDoc {
+    NotAnEntry,
+    Unparsed,
+    Parsed(EntryDocRow),
+}
+
+/// The [`EntryDoc`] of a document's frontmatter (`None`: no frontmatter, or one that did not
+/// parse). A ledger has no `entry_kind`, so it is no entry document whatever its `status`.
+fn entry_doc_of(fm: Option<&Frontmatter>) -> EntryDoc {
+    let Some(fm) = fm else {
+        return EntryDoc::NotAnEntry;
+    };
+    if matches!(
+        fm.extra.get("entry_kind"),
+        None | Some(serde_json::Value::Null)
+    ) {
+        return EntryDoc::NotAnEntry;
+    }
+    let Ok(meta) = parse_entry(fm) else {
+        return EntryDoc::Unparsed;
+    };
+    let date = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+    EntryDoc::Parsed(EntryDocRow {
+        entry_kind: meta.entry_kind,
+        status_since: date(meta.status_since),
+        created: date(meta.created),
+        closed: meta.closed.map(date),
+        revisit_by: meta.revisit_by.map(date),
+        valid: meta.valid.as_ref().map(validity_text),
+        // `Value::Object` of the sorted fields: the JSON `serde_json::to_string(&meta.fields)`
+        // writes, without a `Result` that cannot be an `Err` for string keys.
+        fields_json: serde_json::Value::Object(meta.fields.into_iter().collect()).to_string(),
+    })
+}
+
+/// The text of a validity class, in the form `**Valid:**` takes. (`tools/context.rs` renders the
+/// same three forms inline, in a match that also handles a parse error.)
+fn validity_text(valid: &Validity) -> String {
+    match valid {
+        Validity::Invariant => "invariant".to_owned(),
+        Validity::Dated(d) => format!("dated {d}"),
+        Validity::Conditional { condition } => format!("conditional — {condition}"),
+    }
 }
 
 /// Parse one document: a pure function of its path, its text and the rules.
@@ -498,6 +573,7 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
         .into_iter()
         .map(|(event, span)| event_row(event, span))
         .collect();
+    let entry_doc = entry_doc_of(fm.as_ref());
     ParsedDocument {
         metadata,
         parse_note,
@@ -506,6 +582,7 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
         chunks,
         events,
         relation_rels,
+        entry_doc,
     }
 }
 
@@ -719,6 +796,23 @@ fn store_document(
         ])?;
     }
 
+    if let EntryDoc::Parsed(row) = &parsed.entry_doc {
+        conn.prepare_cached(
+            "INSERT INTO entry_doc (rel_path, entry_kind, status_since, created, closed, \
+             revisit_by, valid, fields_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?
+        .execute(params![
+            doc.rel_path,
+            row.entry_kind,
+            row.status_since,
+            row.created,
+            row.closed,
+            row.revisit_by,
+            row.valid,
+            row.fields_json,
+        ])?;
+    }
+
     for (ord, citation) in parsed.citations.iter().enumerate() {
         let resolution = index.resolve(&doc.rel_path, &citation.reference);
         let Some(kind) = edge_kind(&resolution) else {
@@ -826,8 +920,11 @@ fn edge_target(reference: &Reference) -> (Option<&str>, Option<&str>, Option<&st
     }
 }
 
-/// `(kind, key, rel_paths)` of a `problem` row.
-fn problem_row(problem: &IndexProblem) -> (&'static str, Option<String>, Vec<String>) {
+/// `(kind, key, rel_paths)` of a `problem` row, before it is stored.
+type ProblemRow = (&'static str, Option<String>, Vec<String>);
+
+/// The `problem` row of an index problem.
+fn problem_row(problem: &IndexProblem) -> ProblemRow {
     match problem {
         IndexProblem::InvalidKey(KeyError::NotMarkdown(rel_path)) => {
             ("invalid_key", None, vec![rel_path.clone()])
@@ -841,6 +938,27 @@ fn problem_row(problem: &IndexProblem) -> (&'static str, Option<String>, Vec<Str
             rel_paths.clone(),
         ),
     }
+}
+
+/// Store one `problem` row and count it: every stored row is counted, whatever decided it.
+fn insert_problem(
+    conn: &Connection,
+    report: &mut BuildReport,
+    (kind, key, rel_paths): ProblemRow,
+) -> rusqlite::Result<()> {
+    conn.prepare_cached("INSERT INTO problem (kind, \"key\", rel_paths) VALUES (?1, ?2, ?3)")?
+        .execute(params![kind, key, json_array(&rel_paths)])?;
+    report.problems += 1;
+    Ok(())
+}
+
+/// The problem row of an entry document that does not read as an entry (`entry_unparsed`): its
+/// key (NULL when the path has none) and its path.
+fn entry_problem(doc: &Document, parsed: &ParsedDocument) -> Option<ProblemRow> {
+    (parsed.entry_doc == EntryDoc::Unparsed).then(|| {
+        let key = key_of(&doc.rel_path).ok().map(|k| k.as_str().to_owned());
+        ("entry_unparsed", key, vec![doc.rel_path.clone()])
+    })
 }
 
 /// A compact JSON array of strings: `["a","b"]`.
@@ -1640,6 +1758,251 @@ mod tests {
             ]
         );
     }
+    /// `(rel_path, entry_kind, status_since, created, closed, revisit_by, valid, fields_json)` of
+    /// every `entry_doc` row, by path.
+    type EntryDocCells = (
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    );
+
+    fn entry_doc_rows(conn: &Connection) -> Vec<EntryDocCells> {
+        conn.prepare(
+            "SELECT rel_path, entry_kind, status_since, created, closed, revisit_by, valid, \
+             fields_json FROM entry_doc ORDER BY rel_path",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    /// An entry document's text: the frontmatter lines between the fences, then a title.
+    fn entry_text(frontmatter: &str) -> String {
+        format!("---\n{frontmatter}---\n# X\n")
+    }
+
+    // mutation: `fields_json` from the whole `extra` (the reserved keys are not left out).
+    #[test]
+    fn an_entry_document_stores_its_entry_fields() {
+        let text = entry_text(
+            "entry_kind: finding\ntitle: X\nstatus: open\nstatus_since: 2026-11-01\n\
+             created: 2026-10-30\nrevisit_by: 2026-12-01\nvalid: dated 2026-11-01\n\
+             severity: high\ntags: [a]\n",
+        );
+        let (_dir, repo) = fixture(&[("docs/x.md", &text)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(
+            entry_doc_rows(&conn),
+            [(
+                "docs/x.md".to_owned(),
+                "finding".to_owned(),
+                "2026-11-01".to_owned(),
+                "2026-10-30".to_owned(),
+                None,
+                Some("2026-12-01".to_owned()),
+                Some("dated 2026-11-01".to_owned()),
+                r#"{"severity":"high"}"#.to_owned(),
+            )]
+        );
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: render a `Validity` by its `Debug` form, or drop the condition of `conditional`.
+    #[test]
+    fn valid_is_stored_as_the_text_of_its_class_and_closed_as_a_date() {
+        let base = "entry_kind: finding\ntitle: X\nstatus: done\nstatus_since: 2026-11-01\n\
+                    created: 2026-10-30\n";
+        let invariant = entry_text(&format!("{base}closed: 2026-11-02\nvalid: invariant\n"));
+        let conditional = entry_text(&format!("{base}valid: conditional — the plan edit lands\n"));
+        let none = entry_text(base);
+        let (_dir, repo) = fixture(&[
+            ("docs/a.md", &invariant),
+            ("docs/b.md", &conditional),
+            ("docs/c.md", &none),
+        ]);
+
+        let (conn, _) = built(&repo);
+
+        let got: Vec<(String, Option<String>, Option<String>)> = entry_doc_rows(&conn)
+            .into_iter()
+            .map(|r| (r.0, r.4, r.6))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    "docs/a.md".to_owned(),
+                    Some("2026-11-02".to_owned()),
+                    Some("invariant".to_owned())
+                ),
+                (
+                    "docs/b.md".to_owned(),
+                    None,
+                    Some("conditional — the plan edit lands".to_owned())
+                ),
+                ("docs/c.md".to_owned(), None, None),
+            ]
+        );
+    }
+
+    // mutation: store a row with an empty `created` (the date of a failed parse defaulted).
+    #[test]
+    fn an_entry_document_that_does_not_parse_is_a_problem_and_no_row() {
+        let text =
+            entry_text("entry_kind: finding\ntitle: X\nstatus: open\nstatus_since: 2026-11-01\n");
+        let (_dir, repo) = fixture(&[("docs/x.md", &text)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(count(&conn, "entry_doc"), 0, "{:?}", entry_doc_rows(&conn));
+        assert_eq!(
+            problem_rows(&conn),
+            [(
+                "entry_unparsed".to_owned(),
+                Some("x".to_owned()),
+                r#"["docs/x.md"]"#.to_owned()
+            )]
+        );
+        assert_eq!(report.problems, 1);
+    }
+
+    // mutation: the key of the problem row is the file stem, or the row is left out for a path
+    // that has no key.
+    #[test]
+    fn an_unparsed_entry_document_at_a_path_with_no_key_has_a_null_key() {
+        let text = entry_text("entry_kind: finding\ntitle: X\n");
+        let (_dir, repo) = fixture(&[("docs/Bad_Name.md", &text)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(
+            problem_rows(&conn),
+            [
+                (
+                    "entry_unparsed".to_owned(),
+                    None,
+                    r#"["docs/Bad_Name.md"]"#.to_owned()
+                ),
+                (
+                    "invalid_key".to_owned(),
+                    Some("bad_name".to_owned()),
+                    r#"["docs/Bad_Name.md"]"#.to_owned()
+                ),
+            ]
+        );
+        assert_eq!(report.problems, 2);
+    }
+
+    // mutation: detect an entry document by `status` instead of `entry_kind`.
+    #[test]
+    fn a_ledger_is_not_an_entry_document() {
+        let ledger = "---\nkind: tracker\nstatus: active\ntitle: L\n---\n# L\n\n## F-1 — x\n";
+        let (_dir, repo) = fixture(&[("docs/l.md", ledger)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(count(&conn, "entry_doc"), 0);
+        assert_eq!(problem_rows(&conn), []);
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: test for the key (`contains_key`) and not for a value that is not null; or read
+    // an entry document out of a frontmatter block that does not parse.
+    #[test]
+    fn a_null_entry_kind_or_a_broken_frontmatter_is_not_an_entry_document() {
+        let null_kind = entry_text("entry_kind:\ntitle: X\nstatus: open\n");
+        let broken = "---\nentry_kind: [unterminated\n---\n# Broken\n";
+        let (_dir, repo) = fixture(&[("docs/n.md", &null_kind), ("docs/b.md", broken)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(count(&conn, "entry_doc"), 0);
+        assert_eq!(problem_rows(&conn), []);
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: drop `entry_doc` from `DERIVED_TABLES`.
+    #[test]
+    fn a_rebuild_replaces_the_entry_doc_rows() {
+        let text = entry_text(
+            "entry_kind: finding\ntitle: X\nstatus: open\nstatus_since: 2026-11-01\n\
+             created: 2026-10-30\n",
+        );
+        let (_dir, repo) = fixture(&[("docs/d.md", &text)]);
+        let (mut conn, _) = built(&repo);
+        assert_eq!(count(&conn, "entry_doc"), 1);
+        let parent = open_commit(&repo, "HEAD").unwrap();
+        let second = crate::librarian::derived::testkit::commit_files(
+            &repo,
+            &[("docs/d.md", b"# D\n".as_slice())],
+            &[&parent],
+            "no longer an entry",
+        );
+        let commit = open_commit(&repo, &second.to_string()).unwrap();
+
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            count(&conn, "entry_doc"),
+            0,
+            "a stale entry_doc row survived"
+        );
+    }
+
+    // mutation: insert the document problems in scan order (no sort), or before the index's own
+    // problem rows.
+    #[test]
+    fn document_problem_rows_follow_the_index_rows_sorted_by_kind_key_and_path() {
+        let unparsed = entry_text("entry_kind: finding\n");
+        let (_dir, repo) = fixture(&[
+            ("docs/c.md", &unparsed),
+            ("x/b.md", &unparsed),
+            ("docs/Bad_Name.md", "# Bad\n"),
+        ]);
+
+        let (conn, report) = built(&repo);
+
+        let in_order: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT kind, \"key\" FROM problem ORDER BY rowid")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            in_order,
+            [
+                ("invalid_key".to_owned(), Some("bad_name".to_owned())),
+                ("entry_unparsed".to_owned(), Some("b".to_owned())),
+                ("entry_unparsed".to_owned(), Some("c".to_owned())),
+            ]
+        );
+        assert_eq!(report.problems, 3);
+    }
 
     #[test]
     fn chunk_ids_are_deterministic() {
@@ -2194,6 +2557,21 @@ mod tests {
                  [[trackers:T-1]], [[bug-log:B-1]], [[dup1]], [[dup1:D-1]], [[Bad_Name]]\n",
             ),
             text("docs/b.md", "# B\n"),
+            // An entry document, and two that carry an `entry_kind` and do not read as an entry
+            // (no `created`): the two problem rows are stored sorted, whatever the scan order.
+            text(
+                "docs/entry-ok.md",
+                "---\nentry_kind: finding\ntitle: Ok\nstatus: open\nstatus_since: 2026-11-01\n\
+                 created: 2026-10-30\nvalid: invariant\nseverity: high\n---\n# Ok\n",
+            ),
+            text(
+                "docs/entry-bad-b.md",
+                "---\nentry_kind: finding\ntitle: B\nstatus: open\nstatus_since: 2026-11-01\n---\n# B\n",
+            ),
+            text(
+                "docs/entry-bad-a.md",
+                "---\nentry_kind: finding\ntitle: A\nstatus: open\nstatus_since: 2026-11-01\n---\n# A\n",
+            ),
             // A two-line relation paragraph: both citations take the canonical rel `depends_on`.
             text(
                 "docs/rel.md",
@@ -2248,7 +2626,15 @@ mod tests {
     /// rows, the edges cover several kinds, and a document has more than one chunk.
     fn assert_corpus_is_not_vacuous(dump: &std::collections::BTreeMap<String, Vec<Vec<String>>>) {
         for table in [
-            "checkout", "document", "entry", "edge", "chunk", "problem", "skipped", "event",
+            "checkout",
+            "document",
+            "entry",
+            "edge",
+            "chunk",
+            "problem",
+            "skipped",
+            "event",
+            "entry_doc",
         ] {
             assert!(!dump[table].is_empty(), "the corpus gives {table} no rows");
         }
@@ -2532,6 +2918,14 @@ mod tests {
                 "duplicate_key".to_owned(),
                 Some(format!("dup{i}")),
                 format!(r#"["x/dup{i}.md","y/dup{i}.md"]"#),
+            ));
+        }
+        // Then the documents' own problems, sorted by key: the unparsed entry documents.
+        for stem in ["a", "b"] {
+            expected_problems.push((
+                "entry_unparsed".to_owned(),
+                Some(format!("entry-bad-{stem}")),
+                format!(r#"["docs/entry-bad-{stem}.md"]"#),
             ));
         }
         for (name, conn, report) in &builds {
