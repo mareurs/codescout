@@ -54,11 +54,19 @@ pub fn diff_tree_to_tree(
 
 /// Diff two trees, returning a list of changed files. `from = None` is the empty tree, so every
 /// file of `to` is `Added`. `pathspec`, when given, narrows both sides to the paths it matches (a
-/// git pathspec such as `*.md`, which also matches nested paths); a rename is still seen when
-/// both of its paths match.
+/// git pathspec such as `*.md`, which also matches nested paths).
 ///
-/// Renames are detected with the options set below (renames on, copies off). A Typechange delta
-/// is not reported: it is dropped like every status [`DiffStatus`] has no variant for.
+/// Renames are detected with the options set below (renames on, copies off), and with a pathspec
+/// only among the paths it matches: the halves of a rename that leaves or enters the pathspec are
+/// not paired with each other, but each can pair with another path inside it. So the result can
+/// differ from the full diff: `docs/a.md` to `docs/a.txt` and `notes/n.txt` to `notes/n.md`, with
+/// one content, are two renames without a pathspec, and with `*.md` one `Renamed` that takes
+/// `notes/n.md` from `docs/a.md`. A caller that needs the true pairing diffs without a pathspec
+/// and filters the entries.
+///
+/// A file that becomes a symlink, or the reverse, is not reported as a type change (that delta is
+/// not requested): the path comes back twice, as `Deleted` and then `Added`. The match below
+/// would drop a Typechange delta, but none is produced.
 pub fn diff_trees(
     repo: &git2::Repository,
     from: Option<&git2::Tree>,
@@ -101,9 +109,10 @@ pub fn diff_trees(
                 };
                 DiffStatus::Renamed { old_path: old }
             }
-            // Silently drops Typechange/Copied/Untracked/Ignored/Conflicted.
-            // Fine for indexing cache-invalidation; if a future caller surfaces
-            // "what changed" to an LLM, extend this match.
+            // Silently drops Copied/Untracked/Ignored/Conflicted (and Typechange, which
+            // `INCLUDE_TYPECHANGE` unset never produces: a file<->symlink change is a Deleted
+            // plus an Added for the one path). Fine for indexing cache-invalidation; if a
+            // future caller surfaces "what changed" to an LLM, extend this match.
             _ => continue,
         };
         let path = match delta.new_file().path().or_else(|| delta.old_file().path()) {
@@ -258,5 +267,99 @@ mod tests {
         // Without a pathspec the same pair also reports the edited source file.
         let all = diff_trees(&repo, Some(&from), &to, None).unwrap();
         assert!(all.iter().any(|e| e.path == "src/x.rs"), "{all:?}");
+    }
+
+    /// `docs/t.md` as a regular file, then as a symlink, as two trees of one repo.
+    fn file_and_link_trees(repo: &git2::Repository) -> (git2::Oid, git2::Oid) {
+        use crate::librarian::derived::testkit::{tree_of, FILE, LINK};
+        (
+            tree_of(repo, &[("docs/t.md", FILE, b"# T\n")]),
+            tree_of(repo, &[("docs/t.md", LINK, b"elsewhere")]),
+        )
+    }
+
+    /// `(path, status)` of every entry, in the order `diff_trees` gave them.
+    fn listed(entries: &[DiffEntry]) -> Vec<(&str, &'static str)> {
+        entries
+            .iter()
+            .map(|e| {
+                let status = match e.status {
+                    DiffStatus::Added => "added",
+                    DiffStatus::Modified => "modified",
+                    DiffStatus::Deleted => "deleted",
+                    DiffStatus::Renamed { .. } => "renamed",
+                };
+                (e.path.as_str(), status)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn diff_trees_reports_a_file_that_became_a_symlink_as_two_entries() {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let (file, link) = file_and_link_trees(&repo);
+        let (file, link) = (repo.find_tree(file).unwrap(), repo.find_tree(link).unwrap());
+        let entries = diff_trees(&repo, Some(&file), &link, None).unwrap();
+        // One path, two entries: the old object is deleted, then the new one is added.
+        assert_eq!(
+            listed(&entries),
+            [("docs/t.md", "deleted"), ("docs/t.md", "added")]
+        );
+    }
+
+    #[test]
+    fn diff_trees_reports_a_symlink_that_became_a_file_as_two_entries() {
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let (file, link) = file_and_link_trees(&repo);
+        let (file, link) = (repo.find_tree(file).unwrap(), repo.find_tree(link).unwrap());
+        let entries = diff_trees(&repo, Some(&link), &file, None).unwrap();
+        assert_eq!(
+            listed(&entries),
+            [("docs/t.md", "deleted"), ("docs/t.md", "added")]
+        );
+    }
+
+    #[test]
+    fn diff_trees_pairs_renames_only_inside_its_pathspec() {
+        use crate::librarian::derived::testkit::{tree_of, FILE};
+        let dir = tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let body: &[u8] = b"# Title\n\nA body long enough that a rename is certain.\n";
+        // Two renames with one content: `docs/a.md` leaves the pathspec, `notes/n.txt` enters it.
+        let before = repo
+            .find_tree(tree_of(
+                &repo,
+                &[("docs/a.md", FILE, body), ("notes/n.txt", FILE, body)],
+            ))
+            .unwrap();
+        let after = repo
+            .find_tree(tree_of(
+                &repo,
+                &[("docs/a.txt", FILE, body), ("notes/n.md", FILE, body)],
+            ))
+            .unwrap();
+
+        // Without a pathspec each file is paired with its own new name.
+        let full = diff_trees(&repo, Some(&before), &after, None).unwrap();
+        assert_eq!(
+            listed(&full),
+            [("docs/a.txt", "renamed"), ("notes/n.md", "renamed")]
+        );
+        assert!(
+            matches!(&full[0].status, DiffStatus::Renamed { old_path } if old_path == "docs/a.md")
+        );
+        assert!(
+            matches!(&full[1].status, DiffStatus::Renamed { old_path } if old_path == "notes/n.txt")
+        );
+
+        // With `*.md` only `docs/a.md` (deleted) and `notes/n.md` (added) are compared, so they
+        // are paired with each other: a rename the full diff does not report.
+        let narrowed = diff_trees(&repo, Some(&before), &after, Some("*.md")).unwrap();
+        assert_eq!(listed(&narrowed), [("notes/n.md", "renamed")]);
+        assert!(
+            matches!(&narrowed[0].status, DiffStatus::Renamed { old_path } if old_path == "docs/a.md")
+        );
     }
 }

@@ -45,7 +45,7 @@ pub(crate) fn repo_with_commit(
 }
 
 /// The tree holding `entries` (`path`, `mode`, `bytes`), written to `repo`'s object database.
-fn tree_of(repo: &git2::Repository, entries: &[(&str, u32, &[u8])]) -> git2::Oid {
+pub(crate) fn tree_of(repo: &git2::Repository, entries: &[(&str, u32, &[u8])]) -> git2::Oid {
     // The repository's own index, used only to assemble a tree: it is never written to disk.
     let mut index = repo.index().unwrap();
     index.clear().unwrap();
