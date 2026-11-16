@@ -1,15 +1,15 @@
 ---
 id: '3c5fa35d9d2754a7'
 kind: bug
-status: zombie
+status: open
 title: 'BUG: three tools::grep "outside a git repo" tests failed once in the gate''s default lane and passed on re-run'
 tags:
 - cluster/unclassified
-last_observed: 2026-09-24
+last_observed: 2026-11-16
 opened: 2026-09-24
 owner: marius
 reopen_trigger: 'Any of a_gitignore_outside_a_git_repo_is_not_applied, include_hidden_suppresses_the_warning_even_on_a_zero or widening_outside_a_git_repo_stays_bare fails again in tools::grep; triage per § Zombie 2026-11-02 (named ancestor = environment fault; bare left: 0 right: 1 = premise held, check CWD-changing tests).'
-severity: low
+severity: medium
 ---
 
 # BUG: three `tools::grep` "outside a git repo" tests failed once in the gate's default lane and passed on re-run
@@ -95,6 +95,27 @@ Status is now `zombie`: not observed since 2026-09-24 (`last_observed`), root ca
 **Reopen when** any of the three tests (`a_gitignore_outside_a_git_repo_is_not_applied`, `include_hidden_suppresses_the_warning_even_on_a_zero`, `widening_outside_a_git_repo_stays_bare`) fails again. Then follow § Resume:
 - If the panic names an ancestor, it is an environment fault. Find out what created that `.git` or `.jj`, and when. Record `TMPDIR` for the gate run and `ls -a` of every ancestor of it, `.ignore` included.
 - If the old `left: 0 right: 1` appears instead, the no-marker premise held and the cause is something else. Check whether a CWD-changing test ran at that moment. A `--test-threads=1` re-run that passes would point at parallelism.
+
+
+## Recurrence 2026-11-16 — two empty `.git` directories in the temp roots broke about 50 tests, and the guard named the cause
+
+**Observed.** A full `./scripts/gate.sh` on the branch `feat/tracker-migration` (merge commit `6ebe4091b`, library tests in the DEFAULT lane) exited 1 with about 50 failing library tests. The first gate on the previous tree (`e40bf7d61`, minutes earlier) was green on every lane. The guard added by `1e67e8a3` fired as designed: the failing grep test panicked with "this test needs a directory with no `.git` or `.jj` above it, but `/tmp` holds one (the tempdir is `/tmp/codescout-gate-tmp.MTkEkI/…`)". Per the reopen trigger above, a named ancestor means an environment fault, not a code regression.
+
+**Cause, measured.** Two empty directories were present: `/tmp/.git` and `/home/marius/.cache/cc-tmp/.git`. Both had a modification time of 2026-11-16 10:38:54, 1 ms apart, so one process made both. Both were empty (`total 0`). The creator was not found. At that time several peer sessions were live, and one session had a subagent running cargo tests. Nothing proves which of them made the directories.
+
+**Wider than grep.** The 2026-09-24 record named three `tools::grep` tests. This run failed far more, because many tests assume a temp directory outside any repository, or assert on the read door's refusal text. Failing groups: `tools::grep` (3), `tools::onboarding` (6), `librarian::read_door` (2 plus `read_door_site_table`), `librarian::tools::link_dir_tests` (6), `librarian::indexer` (2), `librarian::identity::{key_space,repo_name}` (2), `librarian::lifecycle::collection` (1), `librarian::tools::{artifact,event_create,link,reindex}` (8), `server::guide_hint_tests` (7), `librarian::current_project`, `librarian::catalog::{augmentation,dual_write}`, and `cli::trackers::tests::a_project_that_is_not_a_git_repository_exits_2`. Only the grep tests name the ancestor. The others fail with unrelated messages (for example "the git repository cannot be opened", or an unexpected `leaf.md`), so a reader cannot see the cause from them.
+
+**Reproduced, then cleared.** With `/tmp/.git` removed, the `cli::trackers` test and `read_door::tests::with_no_root_to_name_a_spelling_through_any_link_is_refused` still failed under `scripts/with-slot.sh`, because that run's `TMPDIR` is `~/.cache/cc-tmp`. After removing `~/.cache/cc-tmp/.git` too, both passed. The directories were removed with `rmdir`, which refuses a non-empty directory. A second full gate was started after that.
+
+**What this adds to the record.** The root cause is still the same class: a `.git` made by a process outside the test binary, in an ancestor of the temp root. New facts: it happens in BOTH `/tmp` and `$TMPDIR` at once; it is a directory, empty, not a repository; and the damage is a whole-suite red, not three tests.
+
+**Open follow-ups (not done).**
+- `scripts/gate.sh` should check the ancestors of every temp root it will use for `.git`/`.jj` before it starts a lane, and stop with one line naming the path. Today only three grep tests say it, minutes into a lane, and about 40 other failures hide it.
+- The other tests that need "no git above" should use `tempdir_with_no_git_above()` or fail with the same message.
+- Find the creator. Candidates not yet checked: a hook or script that runs `mkdir -p .git` in a temp root, or a test helper in another repository on this machine. A watcher on `/tmp` and `$TMPDIR` for `.git` creation (inotify) would name the process.
+
+
+**Update 2026-11-16, later (L-E2 gate runs).** The pair came back at 11:03:06, 11:31:30, 11:45:24, 11:53:17 and 12:01:22 (always both dirs, always the same nanosecond, always empty). Two gate runs on `1c7801dc2` were red with the same ~50-test signature. A polling watcher (`ps` snapshot at first appearance) saw the 12:01:22 pair appear during the gate's compile phase, before any test process ran, beside unrelated `uv … mcpo … codescout start --diagnostic` launches that were 1 s old. Creators ruled out by experiment (the dirs absent before, still absent after): the Python light lane alone (3 m 14 s), `scripts/session_context.py`, `cargo fmt -- --check`, a trivial background `run_command` job and its wake hook, `tests/test-skill-call-legality.sh`, and the L-E2 skill test. The creator is still unknown. Workaround that made the gate green (`FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0`, run 3 on the same tree, the dirs present throughout): `CODESCOUT_GATE_TMPFS_BASE=/dev/shm ./scripts/gate.sh`, which puts the nextest `TMPDIR` under `/dev/shm`, whose ancestors cannot hold a stray `.git`. This is a supported knob (`scripts/gate.sh:180`), not a fix: `scripts/with-slot.sh` still uses `TMPDIR=~/.cache/cc-tmp`. A gate preflight, or `/dev/shm` as the default base, would remove the hazard for the gate.
 
 ## Symptom (Effect)
 
