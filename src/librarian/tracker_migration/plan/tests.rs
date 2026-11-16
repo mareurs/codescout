@@ -236,7 +236,7 @@ fn a_terminal_record_goes_to_archive() {
     assert!(!p
         .writes
         .contains_key("docs/trackers/ledgers/x/2026-08-02-second-thing.md"));
-    assert!(fm(&p.writes[F1_PATH]).extra.get("closed").is_none());
+    assert!(!fm(&p.writes[F1_PATH]).extra.contains_key("closed"));
 }
 
 /// Breaks if `archived` is ignored, or a terminal entry gets a second `archive/` level.
