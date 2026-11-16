@@ -15,6 +15,7 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Deserializer};
 
 use super::inventory::{Inventory, SourceInventory};
+use crate::librarian::identity::key::Key;
 use crate::librarian::lifecycle::layout::Lifecycle;
 
 /// The values of `sources[].kind`.
@@ -213,6 +214,15 @@ pub fn parse_mapping(text: &str) -> Result<Mapping, Vec<String>> {
             "target.lifecycle \"{}\" is not a lifecycle folder. Use ledgers, streams or temp.",
             m.target.lifecycle
         ));
+    }
+    // The key becomes a folder name: a path or a non-key would write outside the collection.
+    if let Some(key) = &m.target.key {
+        if Key::parse(key).is_err() {
+            problems.push(format!(
+                "target.key \"{key}\" is not a collection key. Use lowercase letters and digits, \
+                 with one hyphen between runs, and not 16 hex digits."
+            ));
+        }
     }
     for s in &m.sections {
         if s.to != "readme" && s.to != "drop" {
@@ -940,6 +950,32 @@ F-2 = "A short body."
         );
         let none = format!("sources = []\n{none}");
         assert_eq!(parse_err(&none), vec!["sources is empty".to_string()]);
+    }
+
+    /// `target.key` becomes a folder name (`docs/trackers/<lifecycle>/<key>`), so it must be a
+    /// collection key: a path (`../../notes`, `a/b`), an upper-case letter or an empty key is
+    /// refused with one line naming `target.key` and the rule; `good-key` parses. Breaks if
+    /// the key is not checked, or is checked with a looser rule than `Key::parse`.
+    #[test]
+    fn target_key_must_be_a_collection_key() {
+        let with_key = |key: &str| {
+            BASE.replace(
+                "lifecycle = \"ledgers\"\n",
+                &format!("lifecycle = \"ledgers\"\nkey = \"{key}\"\n"),
+            )
+        };
+        for key in ["../../notes", "a/b", "Upper", ""] {
+            assert_eq!(
+                parse_err(&with_key(key)),
+                vec![format!(
+                    "target.key \"{key}\" is not a collection key. Use lowercase letters and \
+                     digits, with one hyphen between runs, and not 16 hex digits."
+                )],
+                "{key}"
+            );
+        }
+        let m = parse_mapping(&with_key("good-key")).expect("good-key parses");
+        assert_eq!(m.target.key.as_deref(), Some("good-key"));
     }
 
     // ── mapping_problems ──────────────────────────────────────────────────
