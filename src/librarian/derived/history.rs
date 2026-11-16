@@ -306,7 +306,6 @@ fn status_at(
         return Ok(None);
     }
     // A blob the object database lacks (a blobless clone) is no status, as an unknown path is.
-    // A blob the object database lacks (a blobless clone) is no status, as an unknown path is.
     let blob = match repo.find_blob(entry.id()) {
         Ok(blob) => blob,
         Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(None),

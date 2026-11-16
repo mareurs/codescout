@@ -1,9 +1,17 @@
 //! A full rebuild of the derived index from one commit.
 //!
-//! [`build_full`] reads a commit's tree through `git2` (never the working tree, and no path from
-//! the file system), then rewrites every derived table in one transaction. Every input is a
-//! committed blob: the markdown files, `.codescout/repo.toml`, `.codescout/librarian.toml` and
-//! `.codescout/key-space.toml`. Two clones at one commit therefore give one answer.
+//! [`build_full`] reads a commit through `git2` (never the working tree, and no path from the file
+//! system), then rewrites every derived table in one transaction. The inputs are git objects:
+//!
+//! - the commit's committed blobs: the markdown files, `.codescout/repo.toml`,
+//!   `.codescout/librarian.toml` and `.codescout/key-space.toml`;
+//! - the augmentation sidecars, committed blobs of the same tree that a document's
+//!   `expects_augmentation:` names;
+//! - the commit graph: the first-parent history walk (`super::history`) reads earlier commits,
+//!   their trees and the blobs it needs.
+//!
+//! Two clones at one commit therefore give one answer. The working tree is read only by
+//! [`update_with_working_tree`](super::worktree::update_with_working_tree).
 //!
 //! What the tables hold, where the plan left a choice:
 //!
@@ -14,15 +22,37 @@
 //!   `target_key` and `target_token` are what the citation says as written; a malformed target's
 //!   raw text is kept in `target_key`, so a reader must filter on `kind != 'malformed'` before it
 //!   treats `target_key` as a key. `dst_key` is the key of the document a `file` or `entry`
-//!   citation resolved to (NULL for every other kind).
+//!   citation resolved to (NULL for every other kind). `rel` is the canonical relation of a `File`
+//!   or `Entry` citation on a line of a relation paragraph (`**Depends on:** [[b]]` gives
+//!   `depends_on`); it is NULL for every other citation, for a bare or malformed citation on such
+//!   a line, and for a line inside an event section (from its heading to its last line,
+//!   inclusive), which is the event's own text.
 //! - `problem`: `invalid_key` (`key` is the key the path gave, when it gave one, and `rel_paths`
-//!   the one path) and `duplicate_key` (`rel_paths` every holder, sorted).
+//!   the one path) and `duplicate_key` (`rel_paths` every holder, sorted), and the document
+//!   problems, each with the document's key (NULL when its path gives none) and the document's
+//!   path first in `rel_paths`: `entry_unparsed` (an entry document that does not parse as one),
+//!   `augmentation_unparseable` (an `expects_augmentation:` that does not parse), and
+//!   `sidecar_missing` and `sidecar_invalid` (a declared sidecar the commit does not hold, or one
+//!   that is refused or does not read; the sidecar's path follows the document's).
+//! - `event`: one row per event section (a `###` heading followed by an event comment that reads
+//!   back), with its span: `heading_line` to `end_line`, inclusive.
+//! - `entry_doc`: one row per entry document (a frontmatter with an `entry_kind` that is present
+//!   and not null) that parses as one; one that does not is an `entry_unparsed` problem instead.
+//! - `augmentation`: one row per document whose `expects_augmentation:` gives one: the sidecar's
+//!   path as read and the shape it holds (NULL columns for a bare `true`).
 //! - `skipped`: one row per `(rel_path, reason)`; a repeated pair is stored once.
 //! - `checkout`: one row; `rules_source` is always `committed+builtin`, because
 //!   `BuildInput::from_commit` is the only way outside `derived` to build an input.
+//! - `doc_history` and `history_meta`: the history walk of the commit, and what it was walked
+//!   from (`super::history`).
 //! - `worktree_layer`: empty after every build of a commit alone;
 //!   [`update_with_working_tree`](super::worktree::update_with_working_tree) writes one row per
 //!   working-tree markdown file it laid over `HEAD`.
+//!
+//! Every stored path but `checkout.root` (the root the caller names) is relative to the
+//! repository, with one exception: a sidecar path refused lexically (an absolute path or a `..`
+//! segment) is stored in its `sidecar_invalid` problem row as the declaration spelled it, so that
+//! row can hold an absolute path written in the committed text.
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path};
@@ -54,10 +84,14 @@ use crate::librarian::statements::Validity;
 use crate::librarian::tools::doctor::{parse_declaration, Declaration};
 use crate::librarian::tools::link_scan::extract::entry_sections;
 
-/// Names the version of the parse logic: [`parse_document`] and everything it calls
-/// (frontmatter, entry sections, the citation grammar, chunking, metadata derivation) and the
-/// shape the parse cache stores. It is part of the parse cache's key, so a cached row from another
-/// version is never read.
+/// Names the version of the parse logic: [`parse_document`] and everything it calls (frontmatter,
+/// entry sections, the citation grammar, chunking, metadata derivation, event sections
+/// (`parse_event_sections_spanned`), the relation paragraphs (`lifecycle::relations`'s
+/// `relation_labels` and `rel_of_label`), the entry document (`lifecycle::entry::parse_entry` and
+/// the text of its `Validity`), and the augmentation declaration
+/// (`tools::doctor::parse_declaration`)) and the shape the parse cache stores. It is part of the
+/// parse cache's key, so a cached row from another version is never read. A change to any of
+/// those functions that changes what they give for some text changes cached facts.
 ///
 /// Bump it whenever the parse of some text changes. The test
 /// `the_parse_of_a_pinned_corpus_is_tied_to_parser_version` fails when it should have been.

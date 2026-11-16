@@ -301,8 +301,9 @@ pub(crate) struct Built {
 }
 
 /// Commit `files` (`path`, text) into a temp repo and run the full build over that commit: the
-/// commit oracle. The derived index reads commits only, so what an uncommitted working tree holds
-/// is invisible to it.
+/// commit oracle. `build_full` reads the commit only (its tree and its history), so what an
+/// uncommitted working tree holds is invisible to it; only `update_with_working_tree` reads the
+/// working tree.
 pub(crate) fn build_files(files: &[(&str, &str)]) -> Built {
     use super::build::{build_full, BuildInput};
     use super::scan::open_commit;
