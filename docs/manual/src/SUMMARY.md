@@ -66,6 +66,7 @@
   - [Statement Validity](concepts/statement-validity.md)
   - [artifact (action="graft")](concepts/artifact-graft.md)
   - [Constitution Trackers](concepts/constitution-trackers.md)
+  - [Tracker Migration](concepts/tracker-migration.md)
 - [LSP Idle TTL](concepts/lsp-idle-ttl.md)
 
 - [Memory](concepts/memory.md)
