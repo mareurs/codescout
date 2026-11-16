@@ -6,6 +6,7 @@ use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::dual_write::{TwinWhat, TwinWrite};
 use crate::librarian::catalog::link_text::{label_for_rel, splice_relation};
 use crate::librarian::catalog::{artifact, links, Catalog};
+use crate::librarian::lifecycle::relations::rel_of_label;
 
 #[derive(Deserialize)]
 struct Args {
@@ -146,7 +147,9 @@ fn note_destination_change(e: anyhow::Error, dst_label: &str) -> anyhow::Error {
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a = parse_args(args)?;
     let now = chrono::Utc::now().timestamp_millis();
-    let superseding = a.rel == "supersedes";
+    // Any spelling the label reader takes as `Supersedes` is the same fact as the text line it
+    // writes, so it moves the destination's status and its row stores the canonical rel.
+    let superseding = label_for_rel(&a.rel).is_ok_and(|label| rel_of_label(&label) == "supersedes");
 
     // The catalog lock is SCOPED here rather than held across the body, because
     // `write_field_to_frontmatter` below acquires it itself and `parking_lot::Mutex` is
@@ -264,7 +267,11 @@ pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
         let row = links::LinkRow {
             src_id: src_id.clone(),
             dst_id: a.dst_id.clone(),
-            rel: a.rel.clone(),
+            rel: if superseding {
+                "supersedes".to_string()
+            } else {
+                a.rel.clone()
+            },
             created_at: now,
         };
         if let Err(e) = links::insert_with(&tx, &row) {
@@ -568,6 +575,39 @@ mod tests {
             on_disk.contains("status: superseded"),
             "dst frontmatter must record the transition the catalog recorded; got:\n{on_disk}"
         );
+    }
+    /// A `supersedes` link in any spelling the label reader accepts is the same fact: the
+    /// destination's frontmatter moves to `superseded` and the row stores the canonical rel.
+    // mutation: `superseding` compares `a.rel == "supersedes"` (the exact spelling), or the row keeps
+    // the spelling the caller passed.
+    #[tokio::test]
+    async fn a_supersedes_rel_in_any_spelling_marks_the_destination_superseded() {
+        for spelling in ["Supersedes", "SUPERSEDES"] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let ctx = mk_ctx_rooted(tmp.path().to_path_buf());
+            let src = mk_file_artifact(&ctx, "src.md").await;
+            let dst = mk_file_artifact(&ctx, "dst.md").await;
+
+            call(&ctx, json!({"src_id": src, "dst_id": dst, "rel": spelling}))
+                .await
+                .unwrap();
+
+            let abs = artifact::get(&ctx.catalog.lock(), &dst)
+                .unwrap()
+                .unwrap()
+                .abs_path;
+            let on_disk = std::fs::read_to_string(&abs).unwrap();
+            assert!(
+                on_disk.contains("status: superseded"),
+                "{spelling}: dst frontmatter must say superseded; got:\n{on_disk}"
+            );
+            assert_eq!(
+                rel_rows(&ctx, "supersedes"),
+                1,
+                "{spelling}: the row stores the canonical rel"
+            );
+            assert_eq!(rel_rows(&ctx, spelling), 0, "{spelling}: not the spelling");
+        }
     }
 
     /// The transition is a side effect of a *different verb*, on a *second* artifact the
