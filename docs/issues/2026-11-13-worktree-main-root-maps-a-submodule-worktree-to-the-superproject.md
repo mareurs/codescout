@@ -63,7 +63,7 @@ None for the shared helper; the cite_text tests cover the workaround.
 
 ## Resume
 
-Fix together with Plan E's checkout-scoped storage, which depends on a correct main root.
+Plan E1 (layout C: `<git root>/.codescout/derived.db`, E1-R10) does not need a correct main root: it takes the nearest directory holding `.git` (`lookup_git_root`), so a linked worktree or a submodule has its own root and never calls `worktree_main_root`. The bug stays open for `CurrentProject::resolve` and any caller that still wants the main checkout root; fix it with whichever Plan E step first needs that root (none planned yet).
 
 ## References
 
