@@ -468,11 +468,12 @@ fn catalog_dir_is_the_checkouts(git_root: &Path, canonical_dir: &Path) -> bool {
 
 /// Refuse before anything is opened when a write of the new catalog could land outside the
 /// checkout or on a committed file (E1-R12): a link at `.codescout`, a `.codescout` that is not a
-/// directory or resolves to another directory, a link, a hard link or an uninspectable file at the
-/// catalog or one of its side files, or one of the four names in the git index (any stage). The
-/// ignore rules cannot see any of these: they match patterns only. A hard link is a name for a
-/// file that another path also names, so a write through it changes that other file (E1-R12 says
-/// "link"; a hard link is one).
+/// directory or resolves to another directory, a link, a directory, a hard link (on Unix) or an
+/// uninspectable file at the catalog or one of its side files, or one of the four names in the git
+/// index (any stage). The ignore rules cannot see any of these: they match patterns only. A hard
+/// link is a name for a file that another path also names, so a write through it changes that
+/// other file (E1-R12 says "link"; a hard link is one). On a platform without a link count, a hard
+/// link is not refused (see [`has_other_hard_links`]).
 fn refuse_unsafe_catalog_path(repo: &git2::Repository, git_root: &Path) -> Result<()> {
     let dir = git_root.join(".codescout");
     match std::fs::symlink_metadata(&dir) {
@@ -505,6 +506,10 @@ fn refuse_unsafe_catalog_path(repo: &git2::Repository, git_root: &Path) -> Resul
             Ok(meta) if meta.file_type().is_symlink() => bail!(
                 "{name} is a link, and build does not write through a link. Remove it, then run \
                  this again"
+            ),
+            Ok(meta) if meta.is_dir() => bail!(
+                "{name} is a directory, and build writes a file at that name. Remove the \
+                 directory, then run this again"
             ),
             Ok(meta) if has_other_hard_links(&meta) => bail!(
                 "{name} has more than one hard link, and build would write into the same file \
@@ -2319,5 +2324,190 @@ mod tests {
             .collect();
         assert_eq!(&CATALOG_NAMES[1..], sides.as_slice());
         assert_eq!(IGNORE_LINE, format!("/{DERIVED_CATALOG_REL}*"));
+    }
+
+    // mutation: change one character of the `.gitignore` line or of `IGNORE_LINE`.
+    #[test]
+    fn the_repositorys_gitignore_holds_the_ignore_line() {
+        let gitignore = include_str!("../../.gitignore");
+        assert!(
+            gitignore.lines().any(|line| line == IGNORE_LINE),
+            "the root .gitignore has no line equal to {IGNORE_LINE}: build refuses in this \
+             repository until git ignores the new catalog"
+        );
+    }
+
+    // mutation: run the refusals and `derived_catalog_in` on `loaded.start` instead of
+    // `loaded.git_root` (the nested link then refuses, or the build writes through it).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn build_from_a_project_below_the_git_root_builds_the_git_roots_catalog() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        assert!(
+            f.root.join(".codescout").is_dir(),
+            "the git root has its own .codescout"
+        );
+        let (_outside, outside) = outside_dir();
+        let sub = f.root.join("sub");
+        let nested = sub.join(".codescout");
+        std::fs::create_dir_all(&nested).unwrap();
+        // A dangling link in the nested `.codescout`: a write through it lands outside.
+        let target = outside.join("target.db");
+        std::os::unix::fs::symlink(&target, nested.join("derived.db")).unwrap();
+        let below = CommonArgs {
+            project: Some(sub.clone()),
+            ..args(&f)
+        };
+
+        let out = evaluate_build(&below, &f.root, None, None).await;
+        assert_eq!(out.code, 0, "{}", out.stdout);
+        no_absolute_path(&f, &out.stdout);
+        assert!(
+            f.root.join(DERIVED_CATALOG_REL).is_file(),
+            "the git root's catalog is built"
+        );
+        let recorded: String = derived(&f)
+            .query_row("SELECT root FROM checkout", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            recorded,
+            f.root.to_str().unwrap(),
+            "the catalog records the git root"
+        );
+        let in_nested: Vec<_> = std::fs::read_dir(&nested)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            in_nested,
+            vec!["derived.db"],
+            "the subdirectory gets no catalog"
+        );
+        assert_eq!(
+            std::fs::read_link(nested.join("derived.db")).unwrap(),
+            target,
+            "the nested link is left as it was"
+        );
+        assert_eq!(
+            std::fs::read_dir(&outside).unwrap().count(),
+            0,
+            "nothing is written outside the checkout"
+        );
+    }
+
+    // mutation: drop the `is_dir` arm for a catalog name (then tmpfs says "hard link" and btrfs
+    // says "writable").
+    #[tokio::test]
+    async fn build_refuses_a_catalog_name_that_is_a_directory_and_leaves_it_unchanged() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        for name in ["derived.db", "derived.db-wal"] {
+            let path = f.root.join(".codescout").join(name);
+            std::fs::create_dir_all(&path).unwrap();
+
+            let out = evaluate_build(&args(&f), &f.root, None, None).await;
+            assert_eq!(out.code, 2, "{name}: {}", out.stdout);
+            assert!(
+                out.stdout.contains(&format!(
+                    ".codescout/{name} is a directory, and build writes a file at that name. \
+                     Remove the directory, then run this again"
+                )),
+                "{name}: {}",
+                out.stdout
+            );
+            no_absolute_path(&f, &out.stdout);
+            assert!(path.is_dir(), "{name}: the directory stays");
+            assert_eq!(std::fs::read_dir(&path).unwrap().count(), 0, "{name}");
+            std::fs::remove_dir(&path).unwrap();
+            assert!(
+                !f.root.join(DERIVED_CATALOG_REL).exists(),
+                "{name}: no catalog is created"
+            );
+        }
+    }
+
+    // mutation: treat an error other than NotFound at `.codescout` as "absent".
+    #[cfg(unix)]
+    #[test]
+    fn a_codescout_that_cannot_be_inspected_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+        let f = fixture();
+        let repo = git2::Repository::open(&f.root).unwrap();
+        // A root that cannot be searched: its `.codescout` entry cannot be inspected.
+        let (_locked_dir, locked) = outside_dir();
+        let _restore = Restore(locked.clone());
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = std::fs::symlink_metadata(locked.join(".codescout"))
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
+        if !denied {
+            return; // running as root: a mode does not stop the stat
+        }
+
+        let err = refuse_unsafe_catalog_path(&repo, &locked).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            ".codescout in this checkout cannot be inspected: permission denied"
+        );
+    }
+
+    // mutation: check existence with `exists()`, which follows a link: a dangling link then
+    // counts as absent.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn export_refuses_a_dangling_link_at_the_new_catalog() {
+        let f = fixture();
+        let (_outside, outside) = outside_dir();
+        std::fs::create_dir_all(f.root.join(".codescout")).unwrap();
+        let target = outside.join("target.db");
+        std::os::unix::fs::symlink(&target, f.root.join(DERIVED_CATALOG_REL)).unwrap();
+        let c_before = read(&f, "c.md");
+
+        let out = evaluate_export(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout.contains(
+                "the new catalog (.codescout/derived.db) already exists in this checkout"
+            ),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+        assert_eq!(read(&f, "c.md"), c_before, "no file is written");
+        assert_eq!(report_files(&f), (vec![], vec![]), "no report is kept");
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+    }
+
+    // mutation: read a git error as "ignored" (`unwrap_or(true)`).
+    #[tokio::test]
+    async fn build_refuses_when_git_cannot_tell_whether_the_new_catalog_is_ignored() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        // libgit2 reads `core.ignorecase` for every ignore lookup and fails on a value that is
+        // not a boolean; opening the repository and reading the index do not fail on it.
+        git2::Repository::open(&f.root)
+            .unwrap()
+            .config()
+            .unwrap()
+            .set_str("core.ignorecase", "maybe")
+            .unwrap();
+
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout.contains(
+                "git cannot tell whether .codescout/derived.db is ignored in this checkout"
+            ),
+            "{}",
+            out.stdout
+        );
+        no_absolute_path(&f, &out.stdout);
+        assert!(!f.root.join(DERIVED_CATALOG_REL).exists());
     }
 }
