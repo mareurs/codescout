@@ -938,6 +938,7 @@ mod tests {
         let doc = splice_event(closed, &note("ev-1", "x")).unwrap();
         assert_eq!(ids(&doc), vec!["ev-1"]);
     }
+
     /// A span counts the lines of the whole document, frontmatter included, as `grammar::extract`
     /// numbers them: the heading line of a section is the 1-based index of its `###` line in
     /// `doc.lines()`, and its last line is the one before the next heading of level 3 or less.
@@ -987,5 +988,31 @@ mod tests {
         assert_eq!(spanned.len(), 1);
         assert_eq!(spanned[0].1.heading_line, 3);
         assert_eq!(spanned[0].1.end_line, doc.lines().count() as u32);
+    }
+
+    /// In a CRLF document a blockquote note payload keeps the `\r` of every line (plan M-6: the
+    /// parser does not strip it), while the spans count the same lines as in the LF document. A
+    /// fenced payload is not affected, because JSON takes `\r` as white space.
+    #[test]
+    fn a_crlf_blockquote_payload_keeps_a_carriage_return_per_line() {
+        let lf = format!(
+            "# Doc\n\n## Events\n\n{}{}",
+            render_event_section(&note("e-1", "a\n\nb")),
+            render_event_section(&EventText {
+                kind: "verdict".to_owned(),
+                payload: json!({"outcome": "go"}),
+                ..note("e-2", "unused")
+            })
+        );
+        let crlf = lf.replace('\n', "\r\n");
+
+        let from_lf = parse_event_sections_spanned(&lf);
+        let from_crlf = parse_event_sections_spanned(&crlf);
+
+        assert_eq!(from_lf[0].0.payload, json!({"text": "a\n\nb"}));
+        assert_eq!(from_crlf[0].0.payload, json!({"text": "a\r\n\r\nb\r"}));
+        assert_eq!(from_crlf[1].0.payload, from_lf[1].0.payload);
+        let spans = |v: &[(EventText, EventSpan)]| v.iter().map(|(_, s)| *s).collect::<Vec<_>>();
+        assert_eq!(spans(&from_crlf), spans(&from_lf));
     }
 }

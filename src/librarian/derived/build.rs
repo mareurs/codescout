@@ -423,7 +423,7 @@ pub struct EntryRow {
 /// written); `mutates` is a JSON array of the forms on the section's `**Mutates:**` line. Events
 /// are keyed by `(rel_path, heading_line)`, so two sections with one id are two rows (E2-R7).
 #[derive(Debug, Clone, PartialEq)]
-pub struct EventRow {
+pub struct DerivedEventRow {
     pub heading_line: u32,
     pub end_line: u32,
     pub event_id: String,
@@ -451,7 +451,7 @@ pub struct ParsedDocument {
     /// `chunk_id` is filled by [`chunk_id`]; `artifact_id` is the document's `rel_path`.
     pub chunks: Vec<ChunkRow>,
     /// The event sections, in document order.
-    pub events: Vec<EventRow>,
+    pub events: Vec<DerivedEventRow>,
 }
 
 /// Parse one document: a pure function of its path, its text and the rules.
@@ -503,8 +503,8 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
 /// The row of one event section. The source and the payload are stored as `serde_json::to_string`
 /// of the parsed values (key order as written, `preserve_order`), the `mutates` forms as a list
 /// that [`store_document`] writes as a JSON array (E2-R7).
-fn event_row(event: EventText, span: EventSpan) -> EventRow {
-    EventRow {
+fn event_row(event: EventText, span: EventSpan) -> DerivedEventRow {
+    DerivedEventRow {
         heading_line: span.heading_line,
         end_line: span.end_line,
         event_id: event.id,
@@ -816,6 +816,7 @@ fn json_array(items: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::catalog::event_text::{render_event_section, EventSource};
     use crate::librarian::derived::scan::open_commit;
     use crate::librarian::derived::schema::{dump_all, open as open_index, open_in_memory};
     use crate::librarian::derived::testkit::{
@@ -916,14 +917,10 @@ mod tests {
         assert_report_matches_tables(&conn, &report);
         (conn, report)
     }
+
     /// An event as a committed section, rendered by the writer.
-    fn event_text(
-        id: &str,
-        kind: &str,
-        mutates: &[&str],
-        payload: serde_json::Value,
-    ) -> crate::librarian::catalog::event_text::EventText {
-        crate::librarian::catalog::event_text::EventText {
+    fn event_text(id: &str, kind: &str, mutates: &[&str], payload: serde_json::Value) -> EventText {
+        EventText {
             id: id.to_owned(),
             kind: kind.to_owned(),
             created_at_ms: 1_794_637_800_000,
@@ -938,8 +935,8 @@ mod tests {
         }
     }
 
-    fn section(e: &crate::librarian::catalog::event_text::EventText) -> String {
-        crate::librarian::catalog::event_text::render_event_section(e)
+    fn section(e: &EventText) -> String {
+        render_event_section(e)
     }
 
     /// `(event_id, kind, created_at_ms, mutates, payload_json, heading_line, end_line)` of every
@@ -1032,7 +1029,7 @@ mod tests {
         full.head_commit = Some("h2".to_owned());
         full.parent = Some("p3".to_owned());
         full.resolves = Some("r4".to_owned());
-        full.source = Some(crate::librarian::catalog::event_text::EventSource {
+        full.source = Some(EventSource {
             kind: "url".to_owned(),
             uri: "https://example.invalid/x".to_owned(),
             payload: Some(serde_json::json!({"k": 1})),

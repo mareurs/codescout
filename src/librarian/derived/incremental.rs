@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::build::{
-    rebuild, BuildInput, BuildReport, ChangeCounts, DocMetadata, EntryRow, EventRow,
+    rebuild, BuildInput, BuildReport, ChangeCounts, DerivedEventRow, DocMetadata, EntryRow,
     ParsedDocument, Parser,
 };
 use crate::git::{diff_tree_to_tree, DiffStatus};
@@ -85,12 +85,18 @@ struct CitationJson {
 
 /// The facts of a parse that no column above holds. No field is an `Option` or carries a serde
 /// default, so a row written before a fact existed does not decode and is a cache miss (E2-R3).
+///
+/// The rule for a fact added later: its key must be required on decode (a cache row without it is
+/// a miss), because `PARSER_VERSION` is not bumped for it; otherwise bump `PARSER_VERSION`. A
+/// nullable field of a nested type takes [`required`], which serde's plain `Option` does not give.
 #[derive(Serialize, Deserialize)]
 struct FactsJson {
     events: Vec<EventJson>,
 }
 
-/// An event section as the cache holds it: [`EventRow`] field for field.
+/// An event section as the cache holds it: [`DerivedEventRow`] field for field. Every key is
+/// required on decode, the nullable ones included (an explicit `null` is a value, a missing key is
+/// a miss); a field added here follows the rule on [`FactsJson`].
 #[derive(Serialize, Deserialize)]
 struct EventJson {
     heading_line: u32,
@@ -98,14 +104,31 @@ struct EventJson {
     event_id: String,
     kind: String,
     created_at_ms: i64,
+    #[serde(deserialize_with = "required")]
     author: Option<String>,
+    #[serde(deserialize_with = "required")]
     anchor_commit: Option<String>,
+    #[serde(deserialize_with = "required")]
     head_commit: Option<String>,
+    #[serde(deserialize_with = "required")]
     parent: Option<String>,
+    #[serde(deserialize_with = "required")]
     resolves: Option<String>,
+    #[serde(deserialize_with = "required")]
     source_json: Option<String>,
     mutates: Vec<String>,
     payload_json: String,
+}
+
+/// `Option<T>` that must be present: serde reads a missing `Option` key as `None`, but a field
+/// with `deserialize_with` has no such default, so a missing key is an error and an explicit
+/// `null` is `None`.
+fn required<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
 }
 
 /// A chunk without its `artifact_id`, which is the document's own `rel_path`.
@@ -336,7 +359,7 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
             .collect(),
         events: events
             .into_iter()
-            .map(|e| EventRow {
+            .map(|e| DerivedEventRow {
                 heading_line: e.heading_line,
                 end_line: e.end_line,
                 event_id: e.event_id,
@@ -530,6 +553,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::librarian::catalog::event_text::{render_event_section, EventSource, EventText};
     use crate::librarian::classify::load_rules;
     use crate::librarian::derived::build::{
         build_full, parse_document, rules_from_commit, PARSER_VERSION,
@@ -1378,7 +1402,11 @@ mod tests {
     // mutation M4: `decode` ignores `facts_json` (reads no events from it, and no error).
     #[test]
     fn a_cache_row_without_the_events_fact_is_a_miss() {
-        let notes = notes_document(&[("n-1", "note", serde_json::json!({"text": "kept"}))]);
+        let notes = notes_document(&[sample_event(
+            "n-1",
+            "note",
+            serde_json::json!({"text": "kept"}),
+        )]);
         let h = history(&[&[REPO_TOML, ("docs/a.md", "# A\n"), ("docs/notes.md", &notes)]]);
         let mut conn = open_in_memory().unwrap();
         build_at(&mut conn, &h, 0);
@@ -1411,27 +1439,106 @@ mod tests {
         assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
     }
 
+    /// Every key of a cached event is required, the nullable ones included: a row with one key
+    /// removed does not read back as a row with that field `None`, it is a miss (the rule on
+    /// `FactsJson`: a field added later is required, or `PARSER_VERSION` is bumped). An explicit
+    /// `null` is a value and stays a hit.
+    // mutation: plain `Option` fields in `EventJson` (no `deserialize_with = "required"`).
+    #[test]
+    fn a_cache_row_with_an_event_key_removed_is_a_miss() {
+        let notes = notes_document(&[full_event("n-1")]);
+        let h = history(&[&[REPO_TOML, ("docs/a.md", "# A\n"), ("docs/notes.md", &notes)]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let facts = |conn: &Connection| -> serde_json::Value {
+            let text: String = conn
+                .query_row(
+                    "SELECT facts_json FROM parse_cache WHERE rel_path = 'docs/notes.md'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            serde_json::from_str(&text).unwrap()
+        };
+        let whole = facts(&conn);
+        let keys: Vec<String> = whole["events"][0]
+            .as_object()
+            .expect("the cached event is an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(keys.len(), 13, "every field of an event is a key: {keys:?}");
+        for key in &keys {
+            let mut cut = whole.clone();
+            cut["events"][0].as_object_mut().unwrap().remove(key);
+            conn.execute(
+                "UPDATE parse_cache SET facts_json = ?1 WHERE rel_path = 'docs/notes.md'",
+                [cut.to_string()],
+            )
+            .unwrap();
+
+            let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+            assert_eq!(parsed, strings(&["docs/notes.md"]), "without `{key}`");
+            assert_eq!(dump_all(&conn), fresh_dump(&h, 0), "without `{key}`");
+            assert_eq!(facts(&conn), whole, "the miss rewrote the row");
+        }
+        // An explicit null is a value, not a missing key.
+        let mut nulled = whole.clone();
+        nulled["events"][0]["parent"] = serde_json::Value::Null;
+        conn.execute(
+            "UPDATE parse_cache SET facts_json = ?1 WHERE rel_path = 'docs/notes.md'",
+            [nulled.to_string()],
+        )
+        .unwrap();
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+        assert!(parsed.is_empty(), "a null `parent` reads back: {parsed:?}");
+    }
+
     /// A document that holds `events` (id, kind, payload) as committed `###` sections under its
     /// `## Events` heading.
-    fn notes_document(events: &[(&str, &str, serde_json::Value)]) -> String {
-        use crate::librarian::catalog::event_text::{render_event_section, EventText};
+    fn notes_document(events: &[EventText]) -> String {
         let mut doc = "# Notes\n\n## Events\n\n".to_owned();
-        for (id, kind, payload) in events {
-            doc.push_str(&render_event_section(&EventText {
-                id: (*id).to_owned(),
-                kind: (*kind).to_owned(),
-                created_at_ms: 1_794_637_800_000,
-                author: Some("alice".to_owned()),
-                anchor_commit: None,
-                head_commit: None,
-                parent: None,
-                resolves: None,
-                source: None,
-                mutates: Vec::new(),
-                payload: payload.clone(),
-            }));
+        for event in events {
+            doc.push_str(&render_event_section(event));
         }
         doc
+    }
+
+    /// A note-shaped event with the required fields only.
+    fn sample_event(id: &str, kind: &str, payload: serde_json::Value) -> EventText {
+        EventText {
+            id: id.to_owned(),
+            kind: kind.to_owned(),
+            created_at_ms: 1_794_637_800_000,
+            author: Some("alice".to_owned()),
+            anchor_commit: None,
+            head_commit: None,
+            parent: None,
+            resolves: None,
+            source: None,
+            mutates: Vec::new(),
+            payload,
+        }
+    }
+
+    /// An event with every optional field set: a source with a payload, two `mutates` forms, and
+    /// the parent, resolves, anchor and head commits. A cache round trip that drops one of them is
+    /// seen only through this event.
+    fn full_event(id: &str) -> EventText {
+        EventText {
+            anchor_commit: Some("a1b2".to_owned()),
+            head_commit: Some("c3d4".to_owned()),
+            parent: Some("p-parent".to_owned()),
+            resolves: Some("r-resolved".to_owned()),
+            source: Some(EventSource {
+                kind: "url".to_owned(),
+                uri: "https://example.invalid/x".to_owned(),
+                payload: Some(serde_json::json!({"k": [1, 2], "z": null})),
+            }),
+            mutates: vec!["[[b]]".to_owned(), "[[b:F-1]]".to_owned()],
+            ..sample_event(id, "note", serde_json::json!({"text": "full"}))
+        }
     }
 
     /// A parse corpus that exercises every part of a `ParsedDocument`.
@@ -1499,12 +1606,13 @@ mod tests {
             (
                 "docs/notes.md",
                 notes_document(&[
-                    ("n-1", "note", serde_json::json!({"text": "first\nsecond"})),
-                    (
+                    sample_event("n-1", "note", serde_json::json!({"text": "first\nsecond"})),
+                    sample_event(
                         "v-1",
                         "verdict",
                         serde_json::json!({"outcome": "go", "score": 1.5}),
                     ),
+                    full_event("f-1"),
                 ]),
             ),
         ]
@@ -1562,8 +1670,9 @@ mod tests {
         );
     }
 
-    /// The corpus must keep event sections of both payload forms: the digest below covers `events`
-    /// only if some pinned text has them.
+    /// The corpus must keep event sections of both payload forms, and one event with every optional
+    /// field set: the digest below and the round-trip test cover `events` only if some pinned text
+    /// has them.
     #[test]
     fn the_pinned_corpus_has_events_of_both_payload_forms() {
         let rules = corpus_rules();
@@ -1581,15 +1690,28 @@ mod tests {
             payloads,
             [
                 r#"{"text":"first\nsecond"}"#,
-                r#"{"outcome":"go","score":1.5}"#
+                r#"{"outcome":"go","score":1.5}"#,
+                r#"{"text":"full"}"#
             ]
         );
+        let full = &parsed.events[2];
+        assert_eq!(full.mutates, ["[[b]]", "[[b:F-1]]"]);
+        for (name, field) in [
+            ("author", &full.author),
+            ("anchor_commit", &full.anchor_commit),
+            ("head_commit", &full.head_commit),
+            ("parent", &full.parent),
+            ("resolves", &full.resolves),
+            ("source_json", &full.source_json),
+        ] {
+            assert!(field.is_some(), "the corpus event leaves `{name}` empty");
+        }
     }
 
     /// The pinned digest of the corpus's parse. When this fails, the parse of some text changed
     /// (or the shape the cache stores did): bump `PARSER_VERSION`, so that no cached row from
     /// the old logic is read, and then set this to the new digest.
-    const CORPUS_DIGEST: &str = "66ea86e45fc774c157e4e778b5197d7d65ab3ddbd6491512893dfa4f30d88deb";
+    const CORPUS_DIGEST: &str = "f09b66f6dc76c48924e830c88d54ea48fa070ae2bd045ea04d882fc0d12c713b";
 
     #[test]
     fn the_parse_of_a_pinned_corpus_is_tied_to_parser_version() {
