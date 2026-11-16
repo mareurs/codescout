@@ -744,6 +744,40 @@ mod tests {
         format!("{:x}", Sha256::digest(bytes))
     }
 
+    // mutation: widen one field of `BuildInput` to `pub(crate)` or `pub`. The compile_fail doctest
+    // is outside the crate, so it cannot see a widening that stays inside the crate; this text
+    // check can. Every field must be private or `pub(super)`: the one way to make the input is
+    // `BuildInput::from_commit`, which takes the rules and the key space from the commit.
+    #[test]
+    fn every_field_of_build_input_stays_inside_derived() {
+        let source = include_str!("build.rs");
+        let start = source
+            .find("pub struct BuildInput<'a> {")
+            .expect("the struct BuildInput is in build.rs");
+        let body = &source[start..];
+        let body = &body[body.find('{').unwrap() + 1..body.find("\n}").unwrap()];
+        let fields: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("//") && !l.starts_with("#["))
+            .collect();
+        let names: Vec<&str> = fields
+            .iter()
+            .filter_map(|l| l.split(':').next()?.split_whitespace().last())
+            .collect();
+        // Non-vacuity: the scan found the fields, not an empty or a wrong span.
+        assert!(
+            names.contains(&"repo") && names.contains(&"space"),
+            "the scan of BuildInput found these fields: {names:?}"
+        );
+        for field in fields {
+            assert!(
+                field.starts_with("pub(super) ") || !field.starts_with("pub"),
+                "a field of BuildInput is visible outside `derived`: {field}"
+            );
+        }
+    }
+
     /// A one-commit repo holding `files` (path, text).
     fn fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, git2::Repository) {
         let dir = tempfile::tempdir().unwrap();
