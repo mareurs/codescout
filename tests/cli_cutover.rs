@@ -123,7 +123,11 @@ fn make_repo(root: &Path) {
     write(root, "docs/My_Notes.md", "# My notes\n\nSome text.\n");
     write(root, "docs/a/one.md", "# One\n\n## F-7 — seven\n\nx\n");
     write(root, "docs/b/two.md", "# Two\n\n## F-7 — seven\n\ny\n");
-    write(root, ".gitignore", "/.codescout/derived.db*\n");
+    write(
+        root,
+        ".gitignore",
+        "/.codescout/derived.db*\n/.codescout/write.lock*\n",
+    );
     write(root, "src/render_prompt.md", "# Prompt\n\nText.\n");
     write(
         root,
@@ -524,6 +528,11 @@ fn the_cutover_exports_every_class_and_leaves_the_old_catalog_unchanged() {
         git_stdout(&root, &["status", "--porcelain"]),
         "",
         "git ignores the built catalog and its side files"
+    );
+    assert_eq!(
+        git_stdout(&root, &["ls-files", ".codescout"]),
+        "",
+        "git tracks nothing in .codescout: the lock files and the catalog stay out"
     );
     assert_eq!(
         sha256_of(&db),

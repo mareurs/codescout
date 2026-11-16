@@ -5,13 +5,13 @@
 //! loads the rows under the repository, plans `HEAD`, checks that the catalog did not change while
 //! it was read, and prints the report. It writes nothing: not to the old catalog, not to the
 //! repository, not to a report file. `export` does the same, then (in D-R8 and D-R30's order)
-//! refuses when the new catalog
-//! (`.codescout/derived.db` in the checkout) exists or the project write lock is held, re-checks
-//! the old catalog, applies the plan to the working tree (`librarian::cutover::apply`), and keeps
-//! the report beside the old catalog. `build` writes the new catalog from `HEAD`, in the git root
-//! of the checkout it runs in; it refuses a link, a hard link, a tracked file, or a repository
-//! that does not ignore the file (E1-R1 to E1-R4, E1-R12). See `librarian::cutover` for the three
-//! subcommands and the rules every one of them follows.
+//! refuses when the new catalog (`.codescout/derived.db` in the checkout) exists or the project
+//! write lock is held, re-checks the old catalog, applies the plan to the working tree
+//! (`librarian::cutover::apply`), and keeps the report beside the old catalog. `build` writes the
+//! new catalog from `HEAD`, in the git root of the checkout it runs in; it refuses a link, a
+//! tracked file, a hard link (on Unix), or a repository that does not ignore the file (E1-R1 to
+//! E1-R4, E1-R12). See `librarian::cutover` for the three subcommands and the rules every one of
+//! them follows.
 //!
 //! Exit codes: `0` the run did what it was asked, whatever it found; `1` `cutover export` refused
 //! some files (or could not keep its report); `2` it did not run. Every reason is one line and

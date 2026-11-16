@@ -300,8 +300,9 @@ holds no build is built over too.
   A rule from any source that git reads, such as `core.excludesFile`, also counts.
 - `.codescout` in this checkout is a link, is not a directory, or resolves to another
   directory. `build` writes only inside the checkout. Replace it with a directory.
-- `.codescout/derived.db` or one of its side files is a link, or has more than one hard
-  link. A write through it would change another file. Remove it.
+- `.codescout/derived.db` or one of its side files is a link. On Unix, a file with more
+  than one hard link is refused too. A write through it would also change the file
+  under its other name. Remove it.
 - Git tracks `.codescout/derived.db` or one of its side files. `build` would
   overwrite a committed file. Run `git rm --cached <file>`, commit, then run `build`
   again.
@@ -344,7 +345,8 @@ local data directory. Every checkout shares it. An old codescout binary never op
 - a repository that does not ignore `.codescout/derived.db` and its side files
   (`build`);
 - a link at `.codescout`, a `.codescout` that is not a directory of this checkout,
-  or a link or a hard link at `.codescout/derived.db` or a side file (`build`);
+  or a link at `.codescout/derived.db` or a side file, or, on Unix, a hard link there
+  (`build`);
 - a `.codescout/derived.db` or a side file that git tracks (`build`);
 - a `.codescout/derived.db` that is not a new catalog, that a newer codescout made,
   or that cannot be created or opened (`build`);

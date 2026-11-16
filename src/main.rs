@@ -281,11 +281,12 @@ enum Commands {
     /// catalog that already exists or a project write lock that is held (or whose file cannot be
     /// opened); or, for `build`, an export that is not committed yet, a `HEAD` that moved after
     /// the plan, a repository that does not ignore `.codescout/derived.db` and its side files, a
-    /// link at `.codescout` or at one of those files, a file with more than one hard link, a
-    /// file that git tracks (run `git rm --cached` on it, then commit), a `.codescout` that is
-    /// not a directory of this checkout, a `.codescout/derived.db` that is not a new catalog or
-    /// was made by a newer codescout, or a checkout whose `.codescout` directory cannot be
-    /// written.
+    /// link at `.codescout` or at one of those files, on Unix a file with more than one hard
+    /// link, a file that git tracks (run `git rm --cached` on it, then commit), a `.codescout`
+    /// that is not a directory of this checkout, a `.codescout/derived.db` that is not a new
+    /// catalog or was made by a newer codescout, a checkout whose `.codescout` directory cannot
+    /// be written, or a `.codescout` file, a git index or an ignore rule that the tool cannot
+    /// inspect.
     Cutover(codescout::cli::cutover::CutoverArgs),
 
     /// Read-only query: which active constitution rules apply to a given
