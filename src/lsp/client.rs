@@ -76,6 +76,21 @@ fn uri_to_path(uri: &lsp_types::Uri) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(uri.path().as_str()))
 }
 
+/// Decode the answer to `textDocument/rename`. The protocol type is `Option<WorkspaceEdit>`,
+/// so `null` is a legal answer: the server has no edit to give yet. It becomes a
+/// `RecoverableError`, so sibling tool calls survive and the caller knows to ask again.
+fn decode_rename_answer(answer: Value) -> Result<lsp_types::WorkspaceEdit> {
+    if answer.is_null() {
+        return Err(RecoverableError::with_hint(
+            "the language server answered textDocument/rename with null: it returned no edit",
+            "The server may still be working through a recent change. Ask again in a moment. \
+             If it keeps answering null, check that the position is on the symbol to rename.",
+        )
+        .into());
+    }
+    Ok(serde_json::from_value(answer)?)
+}
+
 /// Convert a filesystem path to an LSP `file://` URI.
 ///
 /// Delegates to [`crate::util::file_address::FileAddress::as_lsp_uri`].
@@ -1840,7 +1855,7 @@ impl LspClient {
             .request("textDocument/rename", serde_json::to_value(params)?)
             .await?;
 
-        Ok(serde_json::from_value(result)?)
+        decode_rename_answer(result)
     }
 
     /// Send textDocument/didClose notification for a file.
@@ -3385,6 +3400,43 @@ struct Point {
         assert_eq!(back, file, "roundtrip should preserve the path");
     }
 
+    /// `textDocument/rename` may answer `null` (`Option<WorkspaceEdit>` in `lsp-types`). That is
+    /// a condition the caller can act on, not a decode failure.
+    #[test]
+    fn a_null_rename_answer_is_a_recoverable_error_that_names_the_method() {
+        let err = decode_rename_answer(Value::Null).expect_err("null is no edit");
+        assert!(
+            err.downcast_ref::<RecoverableError>().is_some(),
+            "must be a RecoverableError so sibling calls survive: {err:#}"
+        );
+        assert!(
+            err.to_string()
+                .contains("answered textDocument/rename with null"),
+            "got: {err}"
+        );
+        assert!(
+            !err.to_string().contains("invalid type"),
+            "must not be the serde message: {err}"
+        );
+    }
+
+    #[test]
+    fn a_real_rename_answer_still_decodes_to_the_edit() {
+        let answer = json!({
+            "changes": {
+                "file:///a.rs": [{
+                    "range": {
+                        "start": {"line": 0, "character": 7},
+                        "end": {"line": 0, "character": 15}
+                    },
+                    "newText": "renamed_fn"
+                }]
+            }
+        });
+        let edit = decode_rename_answer(answer).expect("a WorkspaceEdit decodes");
+        assert_eq!(edit.changes.expect("changes").len(), 1);
+    }
+
     #[tokio::test]
     async fn drop_kills_child_process() {
         if !rust_analyzer_available() {
@@ -4109,7 +4161,8 @@ struct Point {
                 Ok(edit) => return edit,
                 Err(e)
                     if e.to_string().contains("cancelled non-idempotent request")
-                        || e.to_string().contains("invalid type: null") =>
+                        || e.to_string()
+                            .contains("answered textDocument/rename with null") =>
                 {
                     assert!(
                         std::time::Instant::now() < deadline,
