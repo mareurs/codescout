@@ -7,7 +7,7 @@ use std::path::Path;
 use rusqlite::Connection;
 
 /// The schema version stored in `PRAGMA user_version`.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 /// The path of the derived catalog under the root of a checkout. A path relative to the root,
 /// so no text built from it names an absolute path.
 pub const DERIVED_CATALOG_REL: &str = ".codescout/derived.db";
@@ -21,10 +21,10 @@ pub fn derived_catalog_in(checkout_root: &Path) -> std::path::PathBuf {
 /// Milliseconds a connection waits on a lock held by another process.
 const BUSY_TIMEOUT_MS: i64 = 5000;
 
-/// Every table of schema version 1. All rows are deterministic: no default is a clock or a random
-/// value. Every table except `checkout` (one row) and `problem` (a rowid table) has a natural key
-/// naming its rows, not a generated id; `dump_all` sorts the rows of every table it dumps, so no
-/// dump depends on a rowid or an insert order.
+/// Every table of schema version 2. All rows are deterministic: no default is a clock or a random
+/// value. Every table except `checkout` (one row), `history_meta` (one row) and `problem` (a rowid
+/// table) has a natural key naming its rows, not a generated id; `dump_all` sorts the rows of every
+/// table it dumps, so no dump depends on a rowid or an insert order.
 ///
 /// `skipped` is keyed on `(rel_path, reason)`: a lossy `not_utf8` path (U+FFFD is valid UTF-8) can
 /// equal a real path's `rel_path`, so `rel_path` alone is not unique.
@@ -36,7 +36,14 @@ const BUSY_TIMEOUT_MS: i64 = 5000;
 /// entry cited through a folder index is the owned document that defines the token, not the key
 /// the citation named.
 ///
-/// `parse_cache.metadata_json` is the document's `kind`, `status`, `title`, ... as parsed.
+/// `edge.rel` is the canonical relation label of a citation written in a relation paragraph
+/// (NULL for any other citation). `event` holds one row per event section, `entry_doc` one per
+/// entry document, `augmentation` one per document that declares an augmentation, `doc_history`
+/// the commits that changed each document and `history_meta` what that history was walked from;
+/// `worktree_layer` records the working-tree files laid over a commit.
+///
+/// `parse_cache.metadata_json` is the document's `kind`, `status`, `title`, ... as parsed;
+/// `parse_cache.facts_json` holds the facts the parse reads beside them.
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE checkout (
     root         TEXT NOT NULL,
@@ -78,6 +85,7 @@ CREATE TABLE edge (
     target_key   TEXT,
     target_token TEXT,
     dst_key      TEXT,
+    rel          TEXT,
     PRIMARY KEY (src_rel_path, ord)
 ) WITHOUT ROWID;
 CREATE TABLE chunk (
@@ -112,9 +120,81 @@ CREATE TABLE parse_cache (
     entries_json   TEXT NOT NULL,
     citations_json TEXT NOT NULL,
     chunks_json    TEXT NOT NULL,
+    facts_json     TEXT NOT NULL,
     PRIMARY KEY (sha256, rel_path, rules_hash, parser_version)
 ) WITHOUT ROWID;
+CREATE TABLE event (
+    rel_path       TEXT NOT NULL,
+    heading_line   INTEGER NOT NULL,
+    end_line       INTEGER NOT NULL,
+    event_id       TEXT NOT NULL,
+    kind           TEXT NOT NULL,
+    created_at_ms  INTEGER NOT NULL,
+    author         TEXT,
+    anchor_commit  TEXT,
+    head_commit    TEXT,
+    parent         TEXT,
+    resolves       TEXT,
+    source_json    TEXT,
+    mutates        TEXT NOT NULL,
+    payload_json   TEXT NOT NULL,
+    PRIMARY KEY (rel_path, heading_line)
+) WITHOUT ROWID;
+CREATE TABLE entry_doc (
+    rel_path     TEXT NOT NULL PRIMARY KEY,
+    entry_kind   TEXT NOT NULL,
+    status_since TEXT NOT NULL,
+    created      TEXT NOT NULL,
+    closed       TEXT,
+    revisit_by   TEXT,
+    valid        TEXT,
+    fields_json  TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE augmentation (
+    rel_path         TEXT NOT NULL PRIMARY KEY,
+    sidecar_rel_path TEXT,
+    schema_version   INTEGER,
+    prompt           TEXT,
+    entry_collection TEXT,
+    params_schema    TEXT,
+    render_template  TEXT,
+    append_mode      INTEGER,
+    history_cap      INTEGER
+) WITHOUT ROWID;
+CREATE TABLE history_meta (
+    commit_sha     TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    shallow        INTEGER NOT NULL
+);
+CREATE TABLE doc_history (
+    rel_path     TEXT NOT NULL,
+    walk_pos     INTEGER NOT NULL,
+    commit_sha   TEXT NOT NULL,
+    committed_at INTEGER NOT NULL,
+    author       TEXT NOT NULL,
+    change_kind  TEXT NOT NULL,
+    status       TEXT,
+    PRIMARY KEY (rel_path, walk_pos)
+) WITHOUT ROWID;
+CREATE TABLE worktree_layer (
+    rel_path TEXT NOT NULL PRIMARY KEY,
+    state    TEXT NOT NULL,
+    sha256   TEXT
+) WITHOUT ROWID;
 "#;
+
+/// The tables of schema version 1, sorted: a file at `user_version` 1 with exactly these is a
+/// derived file this build can drop and rebuild.
+const V1_TABLES: [&str; 8] = [
+    "checkout",
+    "chunk",
+    "document",
+    "edge",
+    "entry",
+    "parse_cache",
+    "problem",
+    "skipped",
+];
 
 /// Columns the dump leaves out. The root is a path: two clones of one commit lie at different
 /// paths and must dump equal. The commit sha is not what two clones differ in (they share it); it
@@ -126,10 +206,17 @@ const DUMP_EXCLUDED_COLUMNS: [(&str, &str); 2] = [("checkout", "root"), ("checko
 #[cfg(test)]
 const DUMP_EXCLUDED_TABLE: &str = "parse_cache";
 
+/// The tables [`dump_tree`] leaves out beside `parse_cache`: what a commit's history says is not
+/// what its tree says.
+#[cfg(test)]
+const DUMP_TREE_EXCLUDED_TABLES: [&str; 2] = ["history_meta", "doc_history"];
+
 /// Open (creating the file and its parent directories) the derived index at `path`, with WAL, a
 /// busy timeout and foreign keys on, its schema applied when the file is new, refused when the
 /// file carries a newer `user_version`, and refused when it is another program's database
-/// (`user_version` 0 with a table in it).
+/// (`user_version` 0 with a table in it). A file at `user_version` 1 whose tables are exactly the
+/// eight of version 1 is emptied and rebuilt with the current schema (its rows are derived, and
+/// the next build fills them); any other older file is refused unchanged.
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|e| {
@@ -178,10 +265,12 @@ fn refuse_if_newer(found: i64) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// Apply the schema when `user_version` is 0; refuse a newer one; leave a current one alone.
+/// Apply the schema when `user_version` is 0; rebuild a version-1 file made of exactly the v1
+/// tables; refuse a newer one and any other older one (a negative version included); leave a
+/// current one alone.
 ///
 /// The check is repeated inside an immediate transaction, so two processes opening a new file
-/// cannot both create the tables.
+/// cannot both create the tables, and a rebuild is all or nothing.
 fn init_schema(conn: &Connection, path: Option<&Path>) -> rusqlite::Result<()> {
     let found = user_version(conn)?;
     refuse_if_newer(found)?;
@@ -195,8 +284,47 @@ fn init_schema(conn: &Connection, path: Option<&Path>) -> rusqlite::Result<()> {
         refuse_if_foreign(&tx, path)?;
         tx.execute_batch(SCHEMA_SQL)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    } else if found != SCHEMA_VERSION {
+        // Older than this build: only a file that is exactly the v1 tables is derived data this
+        // build may drop. Anything else is refused as "not a new catalog", never as "newer".
+        if found != 1 || table_set(&tx)? != V1_TABLES {
+            return Err(refuse_older(found, path));
+        }
+        for table in V1_TABLES {
+            tx.execute_batch(&format!("DROP TABLE \"{table}\";"))?;
+        }
+        tx.execute_batch(SCHEMA_SQL)?;
+        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     tx.commit()
+}
+
+/// The names of the file's tables, sorted, without SQLite's own.
+fn table_set(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    conn.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
+         ORDER BY name",
+    )?
+    .query_map([], |r| r.get(0))?
+    .collect()
+}
+
+/// The refusal of a file below this build's schema that the rebuild does not take. `SQLITE_NOTADB`,
+/// so `cutover::open_refusal` says the file is not a new catalog and never that it is newer.
+fn refuse_older(found: i64, path: Option<&Path>) -> rusqlite::Error {
+    // The path the caller gave, not `conn.path()`: SQLite resolves symlinks in the latter.
+    let name = path.map_or_else(
+        || "this in-memory database".to_owned(),
+        |p| p.display().to_string(),
+    );
+    failure(
+        rusqlite::ffi::SQLITE_NOTADB,
+        format!(
+            "{name} is not a derived index this build can rebuild: it has user_version {found}, \
+             below schema {SCHEMA_VERSION}, and only a version-1 file of exactly the version-1 \
+             tables is rebuilt; refusing to change it"
+        ),
+    )
 }
 
 /// `user_version` 0 is the state of every SQLite file, so a version-0 file that already holds a
@@ -243,6 +371,19 @@ pub fn open_in_memory() -> rusqlite::Result<Connection> {
 /// tests, not a production path.
 #[cfg(test)]
 pub(crate) fn dump_all(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> {
+    dump_tables(conn, &[])
+}
+
+/// [`dump_all`] without the history tables (`history_meta`, `doc_history`): the derived answer
+/// about a tree, which two commits of one tree share whatever their histories are (E2-R11).
+#[cfg(test)]
+pub(crate) fn dump_tree(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> {
+    dump_tables(conn, &DUMP_TREE_EXCLUDED_TABLES)
+}
+
+/// The dump of every table except `parse_cache` and the tables in `skip`.
+#[cfg(test)]
+fn dump_tables(conn: &Connection, skip: &[&str]) -> BTreeMap<String, Vec<Vec<String>>> {
     let tables: Vec<String> = conn
         .prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
@@ -251,7 +392,10 @@ pub(crate) fn dump_all(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>> 
         .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
         .expect("list the derived index's tables");
     let mut dump = BTreeMap::new();
-    for table in tables.into_iter().filter(|t| t != DUMP_EXCLUDED_TABLE) {
+    for table in tables
+        .into_iter()
+        .filter(|t| t != DUMP_EXCLUDED_TABLE && !skip.contains(&t.as_str()))
+    {
         let columns: Vec<String> = conn
             .prepare(&format!(
                 "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
@@ -306,6 +450,24 @@ fn render(value: rusqlite::types::ValueRef<'_>) -> String {
 mod tests {
     use super::*;
     use rusqlite::params;
+
+    /// Every table of schema version 2, sorted.
+    const V2_TABLES: [&str; 14] = [
+        "augmentation",
+        "checkout",
+        "chunk",
+        "doc_history",
+        "document",
+        "edge",
+        "entry",
+        "entry_doc",
+        "event",
+        "history_meta",
+        "parse_cache",
+        "problem",
+        "skipped",
+        "worktree_layer",
+    ];
 
     fn table_names(conn: &Connection) -> Vec<String> {
         let mut stmt = conn
@@ -376,19 +538,7 @@ mod tests {
 
         let conn = open(&path).unwrap();
         assert_eq!(user_version(&conn), SCHEMA_VERSION);
-        assert_eq!(
-            table_names(&conn),
-            [
-                "checkout",
-                "chunk",
-                "document",
-                "edge",
-                "entry",
-                "parse_cache",
-                "problem",
-                "skipped"
-            ]
-        );
+        assert_eq!(table_names(&conn), V2_TABLES);
         insert_document(&conn, "docs/a.md", "k-a");
         let before = master_snapshot(&conn);
         drop(conn);
@@ -464,6 +614,110 @@ mod tests {
         );
     }
 
+    /// A rollback-journal file at `user_version` `version` holding one `CREATE TABLE <name> (x)`
+    /// per table in `tables`: the bytes a refused `open` must leave alone.
+    fn older_file(path: &Path, version: i64, tables: &[&str]) {
+        let raw = Connection::open(path).unwrap();
+        for table in tables {
+            raw.execute_batch(&format!("CREATE TABLE {table} (x);"))
+                .unwrap();
+        }
+        raw.pragma_update(None, "user_version", version).unwrap();
+    }
+
+    fn column_names(conn: &Connection, table: &str) -> Vec<String> {
+        conn.prepare(&format!(
+            "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
+        ))
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+    }
+
+    // mutation: leave a version-1 file as today (the table list stays at eight).
+    #[test]
+    fn a_version_1_derived_index_is_emptied_and_gets_schema_2() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("derived.db");
+        older_file(&path, 1, &V1_TABLES);
+        {
+            let raw = Connection::open(&path).unwrap();
+            raw.execute_batch("INSERT INTO document VALUES ('docs/a.md');")
+                .unwrap();
+        }
+
+        let conn = open(&path).expect("a v1 file made of the v1 tables is rebuilt");
+        assert_eq!(user_version(&conn), 2);
+        assert_eq!(table_names(&conn), V2_TABLES);
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM document", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "a v1 file's rows are discarded");
+        assert!(
+            column_names(&conn, "edge").contains(&"rel".to_owned()),
+            "the rebuilt tables are the v2 ones"
+        );
+        drop(conn);
+
+        // A second open keeps what the rebuild made.
+        let conn = open(&path).unwrap();
+        assert_eq!(table_names(&conn), V2_TABLES);
+    }
+
+    // mutation: drop the table-set comparison (any version-1 file is rebuilt).
+    #[test]
+    fn an_older_derived_index_with_another_table_is_refused_and_left_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("derived.db");
+        let mut tables = V1_TABLES.to_vec();
+        tables.push("notes");
+        older_file(&path, 1, &tables);
+        let before = std::fs::read(&path).unwrap();
+
+        let err = open(&path).expect_err("an older file with another table is refused");
+        assert_eq!(
+            err.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::NotADatabase),
+            "{err}"
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains("user_version 1") && text.contains(&path.display().to_string()),
+            "the refusal names the version and the path as spelled: {text}"
+        );
+        assert!(
+            std::fs::read(&path).unwrap() == before,
+            "a refused open leaves the file byte-for-byte unchanged"
+        );
+    }
+
+    // mutation: refuse only versions 1 and 2 (a negative version falls through).
+    #[test]
+    fn a_negative_user_version_is_refused_and_left_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("derived.db");
+        older_file(&path, -1, &[]);
+        let before = std::fs::read(&path).unwrap();
+
+        let err = open(&path).expect_err("a negative version is refused");
+        assert_eq!(
+            err.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::NotADatabase),
+            "{err}"
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains("user_version -1") && text.contains(&path.display().to_string()),
+            "the refusal names the version and the path as spelled: {text}"
+        );
+        assert!(
+            std::fs::read(&path).unwrap() == before,
+            "a refused open leaves the file byte-for-byte unchanged"
+        );
+    }
+
     #[test]
     fn dump_all_is_sorted_and_stable_across_insert_order() {
         let fill = |conn: &Connection, reverse: bool| {
@@ -514,9 +768,37 @@ mod tests {
         let tables: Vec<&str> = a.keys().map(String::as_str).collect();
         assert_eq!(
             tables,
-            ["checkout", "chunk", "document", "edge", "entry", "problem", "skipped"]
+            [
+                "augmentation",
+                "checkout",
+                "chunk",
+                "doc_history",
+                "document",
+                "edge",
+                "entry",
+                "entry_doc",
+                "event",
+                "history_meta",
+                "problem",
+                "skipped",
+                "worktree_layer"
+            ]
         );
         assert!(a["checkout"].is_empty() && a["chunk"].is_empty());
+
+        // The tree dump is the same minus the two history tables, whatever they hold.
+        let tree = dump_tree(&forward);
+        let tree_tables: Vec<&str> = tree.keys().map(String::as_str).collect();
+        assert_eq!(
+            tree_tables,
+            tables
+                .iter()
+                .copied()
+                .filter(|t| *t != "history_meta" && *t != "doc_history")
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(tree["document"], a["document"]);
+        assert_eq!(tree["edge"], a["edge"]);
     }
 
     #[test]
@@ -564,10 +846,13 @@ mod tests {
                 "target_repo",
                 "target_key",
                 "target_token",
-                "dst_key"
+                "dst_key",
+                "rel"
             ]
         );
-        assert_eq!(columns.last().unwrap().1, 0, "dst_key may be NULL");
+        let dst_at = names.iter().position(|n| *n == "dst_key").unwrap();
+        assert_eq!(columns[dst_at].1, 0, "dst_key may be NULL");
+        assert_eq!(columns.last().unwrap().1, 0, "rel may be NULL");
 
         for (ord, dst) in [(0_i64, Some("dst-doc")), (1, None)] {
             conn.execute(
@@ -578,8 +863,12 @@ mod tests {
             .unwrap();
         }
         let dump = dump_all(&conn);
-        let last: Vec<&str> = dump["edge"].iter().map(|r| r[7].as_str()).collect();
-        assert_eq!(last, ["T:dst-doc", "N"]);
+        let dst: Vec<&str> = dump["edge"].iter().map(|r| r[dst_at].as_str()).collect();
+        assert_eq!(dst, ["T:dst-doc", "N"]);
+        assert!(
+            dump["edge"].iter().all(|r| r[8] == "N"),
+            "rel is NULL when no relation label gives it"
+        );
     }
 
     #[test]
@@ -786,7 +1075,7 @@ mod tests {
         }
         let conn = open(&emptied).unwrap();
         assert_eq!(user_version(&conn), SCHEMA_VERSION);
-        assert_eq!(table_names(&conn).len(), 8);
+        assert_eq!(table_names(&conn).len(), V2_TABLES.len());
     }
 
     // mutation: return the old directory (`root.join("derived.db")`).

@@ -1782,6 +1782,35 @@ mod tests {
         assert_eq!(std::fs::read(&foreign).unwrap(), before, "left as it was");
     }
 
+    // mutation: refuse with `SQLITE_SCHEMA` (the text says "newer").
+    #[tokio::test]
+    async fn build_refuses_an_older_catalog_it_cannot_rebuild_and_never_says_newer() {
+        let f = fixture();
+        exported_and_committed(&f).await;
+        let older = f.root.join(DERIVED_CATALOG_REL);
+        std::fs::create_dir_all(older.parent().unwrap()).unwrap();
+        {
+            let conn = rusqlite::Connection::open(&older).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE checkout (x); CREATE TABLE somebody_elses (x TEXT); \
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        }
+        let before = std::fs::read(&older).unwrap();
+        let out = evaluate_build(&args(&f), &f.root, None, None).await;
+        assert_eq!(out.code, 2, "{}", out.stdout);
+        assert!(
+            out.stdout
+                .contains(".codescout/derived.db is not a new catalog"),
+            "{}",
+            out.stdout
+        );
+        assert!(!out.stdout.contains("newer"), "{}", out.stdout);
+        no_absolute_path(&f, &out.stdout);
+        assert_eq!(std::fs::read(&older).unwrap(), before, "left as it was");
+    }
+
     /// A directory that the test owns and `build` has no business writing in.
     fn outside_dir() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();

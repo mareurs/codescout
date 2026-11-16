@@ -82,6 +82,11 @@ struct CitationJson {
     line: u32,
 }
 
+/// The facts of a parse that no column above holds. No field is an `Option` or carries a serde
+/// default, so a row written before a fact existed does not decode and is a cache miss (E2-R3).
+#[derive(Serialize, Deserialize)]
+struct FactsJson {}
+
 /// A chunk without its `artifact_id`, which is the document's own `rel_path`.
 #[derive(Serialize, Deserialize)]
 struct ChunkJson {
@@ -143,6 +148,7 @@ pub(super) struct Stored {
     pub(super) entries_json: String,
     pub(super) citations_json: String,
     pub(super) chunks_json: String,
+    pub(super) facts_json: String,
 }
 
 /// The cache row for `products`. A reader gets exactly `products` back from [`decode`].
@@ -212,6 +218,7 @@ pub(super) fn encode(products: &ParsedDocument) -> serde_json::Result<Stored> {
         entries_json: serde_json::to_string(&entries)?,
         citations_json: serde_json::to_string(&citations)?,
         chunks_json: serde_json::to_string(&chunks)?,
+        facts_json: serde_json::to_string(&FactsJson {})?,
     })
 }
 
@@ -223,6 +230,7 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
     let entries: Vec<EntryJson> = serde_json::from_str(&stored.entries_json).ok()?;
     let citations: Vec<CitationJson> = serde_json::from_str(&stored.citations_json).ok()?;
     let chunks: Vec<ChunkJson> = serde_json::from_str(&stored.chunks_json).ok()?;
+    let FactsJson {} = serde_json::from_str(&stored.facts_json).ok()?;
     let repo_of = |repo: Option<String>| match repo {
         None => Some(None),
         Some(name) => RepoName::parse(&name).ok().map(Some),
@@ -321,8 +329,8 @@ pub(super) fn rules_hash(rules: &[CompiledRule]) -> String {
 pub(super) fn load(conn: &Connection, key: &CacheKey) -> rusqlite::Result<Option<ParsedDocument>> {
     let stored = conn
         .prepare_cached(
-            "SELECT parse_note, metadata_json, entries_json, citations_json, chunks_json \
-             FROM parse_cache \
+            "SELECT parse_note, metadata_json, entries_json, citations_json, chunks_json, \
+             facts_json FROM parse_cache \
              WHERE sha256 = ?1 AND rel_path = ?2 AND rules_hash = ?3 AND parser_version = ?4",
         )?
         .query_row(
@@ -334,6 +342,7 @@ pub(super) fn load(conn: &Connection, key: &CacheKey) -> rusqlite::Result<Option
                     entries_json: r.get(2)?,
                     citations_json: r.get(3)?,
                     chunks_json: r.get(4)?,
+                    facts_json: r.get(5)?,
                 })
             },
         )
@@ -377,8 +386,8 @@ pub(super) fn sync_cache(tx: &Connection, parsed: &[Parsed]) -> anyhow::Result<(
         // `OR REPLACE`: a row that was there but did not read back is replaced by the new one.
         tx.prepare_cached(
             "INSERT OR REPLACE INTO parse_cache (sha256, rel_path, rules_hash, parser_version, \
-             parse_note, metadata_json, entries_json, citations_json, chunks_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             parse_note, metadata_json, entries_json, citations_json, chunks_json, facts_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )?
         .execute(params![
             key.sha256,
@@ -389,7 +398,8 @@ pub(super) fn sync_cache(tx: &Connection, parsed: &[Parsed]) -> anyhow::Result<(
             stored.metadata_json,
             stored.entries_json,
             stored.citations_json,
-            stored.chunks_json
+            stored.chunks_json,
+            stored.facts_json
         ])?;
     }
     Ok(())
@@ -1422,7 +1432,7 @@ mod tests {
     /// The pinned digest of the corpus's parse. When this fails, the parse of some text changed
     /// (or the shape the cache stores did): bump `PARSER_VERSION`, so that no cached row from
     /// the old logic is read, and then set this to the new digest.
-    const CORPUS_DIGEST: &str = "bab4fcc753c9e9275f19651b1b5f87e728ed77cf6bc1703522d83f61a0c01556";
+    const CORPUS_DIGEST: &str = "796df5b64bfd8ba4320368ca817ae47b539174f379a95cb441a82e779b43308b";
 
     #[test]
     fn the_parse_of_a_pinned_corpus_is_tied_to_parser_version() {
@@ -1438,6 +1448,7 @@ mod tests {
                 &stored.entries_json,
                 &stored.citations_json,
                 &stored.chunks_json,
+                &stored.facts_json,
             ] {
                 hasher.update(b"\n");
                 hasher.update(part.as_bytes());

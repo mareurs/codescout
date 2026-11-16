@@ -49,7 +49,7 @@ use crate::librarian::tools::link_scan::extract::entry_sections;
 ///
 /// Bump it whenever the parse of some text changes. The test
 /// `the_parse_of_a_pinned_corpus_is_tied_to_parser_version` fails when it should have been.
-pub const PARSER_VERSION: &str = "1";
+pub const PARSER_VERSION: &str = "2";
 
 /// The chunk grain, fixed: 2048 characters (512 tokens), the old indexer's `CHUNK_CHARS`. It is
 /// not read from `.codescout/project.toml`, which is not committed.
@@ -68,9 +68,20 @@ const RULES_SOURCE: &str = "committed+builtin";
 pub(super) const PARSE_NOTE_FRONTMATTER_ERROR: &str = "frontmatter_error";
 
 /// The tables a build rewrites. `parse_cache` is not here: it caches parse products and is no
-/// part of the answer.
-const DERIVED_TABLES: [&str; 7] = [
-    "checkout", "document", "entry", "edge", "chunk", "problem", "skipped",
+/// part of the answer. The history tables (`history_meta`, `doc_history`) are not here either:
+/// the history walk owns them.
+const DERIVED_TABLES: [&str; 11] = [
+    "checkout",
+    "document",
+    "entry",
+    "edge",
+    "chunk",
+    "problem",
+    "skipped",
+    "event",
+    "entry_doc",
+    "augmentation",
+    "worktree_layer",
 ];
 
 /// What one build reads: a commit of a repository, the rules, and the key space.
