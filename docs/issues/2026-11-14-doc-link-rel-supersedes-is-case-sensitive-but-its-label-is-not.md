@@ -1,16 +1,16 @@
 ---
 id: b2ec2d2e35fbbf30
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a doc(link) rel spelled `Supersedes` writes the backward Supersedes line but does not mark the destination superseded'
 owners:
 - marius
 tags:
 - cluster/unclassified
 - librarian
+closed: 2026-11-16
 opened: 2026-11-14
 severity: low
-unverified: Read from the code and the review, not reproduced.
 ---
 
 # BUG: a doc(link) rel spelled `Supersedes` writes the backward Supersedes line but does not mark the destination superseded
@@ -34,10 +34,18 @@ experiments at 5fc3680f4.
 The branch `superseding = a.rel == "supersedes"` is case-sensitive. The label mapping is not.
 
 ## Fix
-Either compare the rel case-insensitively (same normalisation as `label_for_rel`), or refuse a rel whose label is `Supersedes` unless it is exactly `supersedes`. Add a test for `Supersedes` and `SUPERSEDES`. Choose with the canonical rel rule (see bug `84e6e61e03beace6`).
+
+Fixed by Plan E2 Task 9. One predicate, `is_superseding(rel)` in `src/librarian/catalog/link_text.rs`, is `label_for_rel(rel).is_ok_and(|label| rel_of_label(&label) == "supersedes")`. `link::call` and `artifact::write_target_id` both use it, so every spelling (`Supersedes`, `SUPERSEDES`) marks the destination superseded and the result names the destination file. A superseding row stores the canonical `supersedes`. Tests: `a_supersedes_rel_in_any_spelling_marks_the_destination_superseded` (link.rs) and `an_update_that_changes_status_names_no_path_in_either_spelling` (artifact.rs, the `Supersedes`, `SUPERSEDES` and `Super sedes` cases). Canonical rel rule: E2-R4 (bug `84e6e61e03beace6`).
+
+## Fix provenance
+
+- **SHA:** `dfb931dbb` (`integration/identity-lifecycle-20261114`; reaches `experiments` with the next integration merge)
+- **patch-id:** `b2a26cd3773115a316877e85bb2cbb5b4577fe33`
+- Follow-up (one predicate for the result path): `0bcee8145`, patch-id `71f8ec31c88464337618d5aa460655f68b7cc4c9`; the predicate moved beside `label_for_rel` in the final wave (`1adf383b2`).
 
 ## Resume
-Open. Not started. Found by the Plan C2 whole-branch review (M-7).
+
+N/A. Fixed 2026-11-16 by Plan E2 Task 9; an older stored row with a variant spelling is not migrated (a repeated `Supersedes` link adds a second `supersedes` row: E2 execution state, known limits).
 
 ## References
 - `src/librarian/tools/link.rs` (`call`, the `superseding` flag)

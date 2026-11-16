@@ -1,16 +1,16 @@
 ---
 id: '133504302d03e590'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: a link added on a branch and on main merges as one row but two identical relation lines'
 owners:
 - marius
 tags:
 - cluster/unclassified
 - librarian
+closed: 2026-11-16
 opened: 2026-11-14
 severity: low
-unverified: 'Read from the review, not reproduced. Not established: the exact OR IGNORE statement in merge_worktree; read it before the fix.'
 ---
 
 # BUG: a link added on a branch and on main merges as one row but two identical relation lines
@@ -34,10 +34,17 @@ experiments at 5fc3680f4.
 `splice_relation` is idempotent only within one document state. The two branches each add the line to their own copy. The row merge does not know about the text.
 
 ## Fix
-Decide with the operator's choice on the link format (execution-state document, decision I-2): sorted insertion makes identical lines meet at one place and merge as one. Plan E removes the row merge, which leaves only the text rule.
+
+Fixed by Plan E2 Task 9. `splice_relation` (`src/librarian/catalog/link_text.rs`) now puts a new relation line before the first declaring line of the `## Relations` home whose text (trailing `\r` removed) is greater, with one blank line after it, and appends only when none is greater. Two branches that add the same line at the same place therefore produce identical text, and a three-way merge takes it once. Different lines at one place still conflict. Test: `the_same_link_added_on_two_branches_merges_as_one_line` (real `splice_relation` for ours and theirs, `git merge-file -p` exits 0; an always-append mutation conflicts). Guards: `a_line_takes_its_sorted_place_and_leaves_the_next_heading_alone`, `a_line_that_sorts_last_still_appends`, a CRLF case and a fenced-block case.
+
+## Fix provenance
+
+- **SHA:** `dfb931dbb` (`integration/identity-lifecycle-20261114`; reaches `experiments` with the next integration merge)
+- **patch-id:** `b2a26cd3773115a316877e85bb2cbb5b4577fe33`
 
 ## Resume
-Open. Not started. Found by the Plan C2 whole-branch review (M-9).
+
+N/A. Fixed 2026-11-16 by Plan E2 Task 9. The CRLF known limit: in a CRLF document whose greater line is the last line and has no terminator, the inserted line gets LF; the append path writes LF as before.
 
 ## References
 - `src/librarian/tools/merge_worktree.rs`
