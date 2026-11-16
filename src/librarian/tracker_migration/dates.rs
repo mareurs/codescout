@@ -22,7 +22,12 @@ pub fn blame_dates(
     commit: &git2::Commit,
     rel_path: &str,
 ) -> anyhow::Result<Vec<NaiveDate>> {
-    if repo.is_shallow() {
+    // `is_shallow` looks in the repository's own git dir. A linked worktree keeps `shallow` in
+    // the common dir, so check there too. `metadata` reads no file content.
+    let common_shallow = std::fs::metadata(repo.commondir().join("shallow"))
+        .map(|m| m.len() > 0)
+        .unwrap_or(false);
+    if repo.is_shallow() || common_shallow {
         anyhow::bail!("this clone is shallow; blame dates would be wrong");
     }
     let mut opts = git2::BlameOptions::new();
@@ -493,5 +498,51 @@ mod tests {
                 .contains("this clone is shallow; blame dates would be wrong"),
             "{err}"
         );
+    }
+    // Breaks if the shallow check looks only at the worktree's own git dir: git keeps `shallow`
+    // in the common dir, and libgit2 `is_shallow()` does not look there.
+    #[test]
+    fn blame_dates_refuses_a_linked_worktree_of_a_shallow_clone() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let c = commit_file(&repo, "a\n", utc(d(2026, 8, 1), 12, 0), 0, None);
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir.path().join("wt");
+        repo.worktree("wt", &wt_path, None).unwrap();
+        std::fs::write(repo.commondir().join("shallow"), format!("{}\n", c.id())).unwrap();
+        let wt_repo = git2::Repository::open(&wt_path).unwrap();
+        assert!(!wt_repo.is_shallow(), "libgit2 misses the common dir");
+        assert_ne!(wt_repo.path(), wt_repo.commondir());
+        let c = wt_repo.find_commit(c.id()).unwrap();
+        let err = blame_dates(&wt_repo, &c, "t.md").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "this clone is shallow; blame dates would be wrong"
+        );
+    }
+
+    // Breaks if the missing-closed error is dropped: a terminal record would get `closed: None`.
+    #[test]
+    fn a_terminal_record_with_no_closed_date_is_an_error() {
+        let f = facts();
+        let lines = 1..=2;
+        let mut inp = inputs(&f, &[], &lines, None);
+        inp.terminal = true;
+        inp.row_created = Some(d(2026, 8, 1)); // created is known; only closed is missing
+        let err = derive_dates(&inp, NOW()).unwrap_err();
+        assert_eq!(err.len(), 1, "{err:?}");
+        assert!(err[0].contains("overrides.T-1.closed"), "{err:?}");
+        assert!(!err[0].contains('/'), "{err:?}");
+
+        // Lines outside `blame` carry no date either.
+        let blame = [d(2026, 8, 3)];
+        let lines = 5..=9;
+        let mut inp = inputs(&f, &blame, &lines, None);
+        inp.terminal = true;
+        inp.row_created = Some(d(2026, 8, 1));
+        let err = derive_dates(&inp, NOW()).unwrap_err();
+        assert_eq!(err.len(), 1, "{err:?}");
+        assert!(err[0].contains("overrides.T-1.closed"), "{err:?}");
+        assert!(!err[0].contains('/'), "{err:?}");
     }
 }
