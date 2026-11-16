@@ -22,7 +22,7 @@
 //!   `BuildInput::from_commit` is the only way outside `derived` to build an input.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use anyhow::Context;
 use rusqlite::{params, Connection};
@@ -30,6 +30,7 @@ use sha2::{Digest, Sha256};
 
 use super::incremental::{self, CacheKey, Parsed};
 use super::scan::{blob_text, scan_commit, ScannedFile};
+use crate::librarian::augmentation_sidecar::{refuse_lexical_escape, AugmentationSidecar};
 use crate::librarian::catalog::chunk::{build_chunks, ChunkRow};
 use crate::librarian::catalog::event_text::{parse_event_sections_spanned, EventSpan, EventText};
 use crate::librarian::classify::{
@@ -45,6 +46,7 @@ use crate::librarian::indexer::first_h1;
 use crate::librarian::lifecycle::entry::parse_entry;
 use crate::librarian::lifecycle::relations::{rel_of_label, relation_labels};
 use crate::librarian::statements::Validity;
+use crate::librarian::tools::doctor::{parse_declaration, Declaration};
 use crate::librarian::tools::link_scan::extract::entry_sections;
 
 /// Names the version of the parse logic: [`parse_document`] and everything it calls
@@ -331,6 +333,24 @@ pub(super) fn rebuild_from(
         });
     }
 
+    // The sidecars are read here too, from the commit, before the write transaction opens: the
+    // shape is not cached (a sidecar is another blob, so an edit to it alone must be seen), and
+    // the problems this finds join the list the entry documents' problems are pushed onto below.
+    let mut document_problems: Vec<ProblemRow> = Vec::new();
+    let augmentations: Vec<Option<AugmentationRow>> = documents
+        .iter()
+        .zip(&parsed)
+        .map(|(doc, parsed)| {
+            read_augmentation(
+                input.repo,
+                input.commit,
+                doc,
+                &parsed.products.augmentation,
+                &mut document_problems,
+            )
+        })
+        .collect();
+
     let tx = conn.transaction()?;
     for table in DERIVED_TABLES {
         tx.execute(&format!("DELETE FROM {table}"), [])?;
@@ -351,10 +371,13 @@ pub(super) fn rebuild_from(
         changes,
         ..BuildReport::default()
     };
-    let mut document_problems: Vec<ProblemRow> = Vec::new();
-    for (doc, parsed) in documents.iter().zip(&parsed) {
+    for ((doc, parsed), augmentation) in documents.iter().zip(&parsed).zip(&augmentations) {
         store_document(&tx, doc, &parsed.products, &index, &mut report)
             .with_context(|| format!("storing {}", doc.rel_path))?;
+        if let Some(row) = augmentation {
+            store_augmentation(&tx, row)
+                .with_context(|| format!("storing the augmentation of {}", doc.rel_path))?;
+        }
         document_problems.extend(entry_problem(doc, &parsed.products));
     }
     for problem in index.problems() {
@@ -467,6 +490,35 @@ pub struct ParsedDocument {
     pub relation_rels: BTreeMap<u32, String>,
     /// Whether the document is an entry document, and the fields its `entry_doc` row holds.
     pub entry_doc: EntryDoc,
+    /// What the frontmatter's `expects_augmentation:` declares (E2-R9). The sidecar a declaration
+    /// names is not part of the parse: it is another blob, read from the commit by the build.
+    pub augmentation: AugmentationDecl,
+}
+/// What a document's `expects_augmentation:` frontmatter value says, as
+/// `tools::doctor::parse_declaration` reads it. `None` is no key, an explicit false, or a
+/// frontmatter that did not parse; `Unparseable` is a value that declares nothing readable, which
+/// is a reported problem (`augmentation_unparseable`), never `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AugmentationDecl {
+    None,
+    /// `sidecar` is the path as the author wrote it (trimmed); `None` for `true`.
+    Declared {
+        sidecar: Option<String>,
+    },
+    Unparseable,
+}
+
+/// The [`AugmentationDecl`] of a document's frontmatter (`None`: no frontmatter, or one that did
+/// not parse).
+fn augmentation_decl_of(fm: Option<&Frontmatter>) -> AugmentationDecl {
+    let declaration = fm
+        .and_then(|fm| fm.extra.get("expects_augmentation"))
+        .map(parse_declaration);
+    match declaration {
+        Option::None | Some(Declaration::Absent) => AugmentationDecl::None,
+        Some(Declaration::Declared { sidecar }) => AugmentationDecl::Declared { sidecar },
+        Some(Declaration::Unparseable) => AugmentationDecl::Unparseable,
+    }
 }
 
 /// The columns of an `entry_doc` row, as stored. Dates are `%Y-%m-%d`; `valid` is the text of the
@@ -574,6 +626,7 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
         .map(|(event, span)| event_row(event, span))
         .collect();
     let entry_doc = entry_doc_of(fm.as_ref());
+    let augmentation = augmentation_decl_of(fm.as_ref());
     ParsedDocument {
         metadata,
         parse_note,
@@ -583,6 +636,7 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
         events,
         relation_rels,
         entry_doc,
+        augmentation,
     }
 }
 
@@ -956,9 +1010,123 @@ fn insert_problem(
 /// key (NULL when the path has none) and its path.
 fn entry_problem(doc: &Document, parsed: &ParsedDocument) -> Option<ProblemRow> {
     (parsed.entry_doc == EntryDoc::Unparsed).then(|| {
-        let key = key_of(&doc.rel_path).ok().map(|k| k.as_str().to_owned());
-        ("entry_unparsed", key, vec![doc.rel_path.clone()])
+        (
+            "entry_unparsed",
+            problem_key(doc),
+            vec![doc.rel_path.clone()],
+        )
     })
+}
+
+/// The `key` of a problem row about a document: its key, NULL when its path has none.
+fn problem_key(doc: &Document) -> Option<String> {
+    key_of(&doc.rel_path).ok().map(|k| k.as_str().to_owned())
+}
+
+/// An `augmentation` row before it is stored: the document it belongs to, the path of the sidecar
+/// that was read (`None` for a bare `true` declaration), and the shape that sidecar held.
+struct AugmentationRow {
+    rel_path: String,
+    sidecar: Option<(String, AugmentationSidecar)>,
+}
+
+/// The `augmentation` row of a document, and the problem row when its declaration cannot give one
+/// (E2-R9). The sidecar is read from `commit`'s tree and from nowhere else.
+///
+/// - `Declared { sidecar: None }` is a row with the path alone.
+/// - A declared path is first judged by [`refuse_lexical_escape`], the rule the live reader
+///   applies: an absolute path or a `..` segment is `sidecar_invalid`, and nothing is read. (Its
+///   problem row names the path as declared: no path was looked up.)
+/// - Otherwise the path read is the declared one's `Normal` components joined with `/`, as the
+///   file system treats `docs/./a.yaml` (a tree lookup has no `.` entry). That path, not the
+///   declared spelling, goes in the row and in the problem rows. A path the commit does not hold is
+///   `sidecar_missing`; a link, a file that is not UTF-8 and a YAML error are `sidecar_invalid`.
+/// - `Unparseable` is `augmentation_unparseable`, naming the document alone.
+fn read_augmentation(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    doc: &Document,
+    decl: &AugmentationDecl,
+    problems: &mut Vec<ProblemRow>,
+) -> Option<AugmentationRow> {
+    let mut problem = |kind: &'static str, sidecar: Option<String>| {
+        let mut rel_paths = vec![doc.rel_path.clone()];
+        rel_paths.extend(sidecar);
+        problems.push((kind, problem_key(doc), rel_paths));
+    };
+    let declared = match decl {
+        AugmentationDecl::None => return None,
+        AugmentationDecl::Unparseable => {
+            problem("augmentation_unparseable", None);
+            return None;
+        }
+        AugmentationDecl::Declared { sidecar: None } => {
+            return Some(AugmentationRow {
+                rel_path: doc.rel_path.clone(),
+                sidecar: None,
+            })
+        }
+        AugmentationDecl::Declared {
+            sidecar: Some(declared),
+        } => declared,
+    };
+    if refuse_lexical_escape(declared, "read").is_err() {
+        problem("sidecar_invalid", Some(declared.clone()));
+        return None;
+    }
+    let read_path = Path::new(declared)
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    let shape = match blob_text(repo, commit, &read_path) {
+        Ok(Some(text)) => serde_yml::from_str::<AugmentationSidecar>(&text).ok(),
+        Ok(None) => {
+            problem("sidecar_missing", Some(read_path));
+            return None;
+        }
+        Err(_) => None,
+    };
+    let Some(shape) = shape else {
+        problem("sidecar_invalid", Some(read_path));
+        return None;
+    };
+    Some(AugmentationRow {
+        rel_path: doc.rel_path.clone(),
+        sidecar: Some((read_path, shape)),
+    })
+}
+
+/// Insert one `augmentation` row. `params_schema` is the JSON text of the sidecar's mapping (key
+/// order as written); `append_mode` is 0 or 1.
+fn store_augmentation(conn: &Connection, row: &AugmentationRow) -> anyhow::Result<()> {
+    let (path, shape) = match &row.sidecar {
+        Some((path, shape)) => (Some(path.as_str()), Some(shape)),
+        None => (None, None),
+    };
+    let params_schema = shape
+        .and_then(|s| s.params_schema.as_ref())
+        .map(serde_json::Value::to_string);
+    conn.prepare_cached(
+        "INSERT INTO augmentation (rel_path, sidecar_rel_path, schema_version, prompt, \
+         entry_collection, params_schema, render_template, append_mode, history_cap) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?
+    .execute(params![
+        row.rel_path,
+        path,
+        shape.map(|s| i64::from(s.schema_version)),
+        shape.map(|s| s.prompt.as_str()),
+        shape.and_then(|s| s.entry_collection.as_deref()),
+        params_schema,
+        shape.and_then(|s| s.render_template.as_deref()),
+        shape.map(|s| i64::from(s.append_mode)),
+        shape.and_then(|s| s.history_cap),
+    ])?;
+    Ok(())
 }
 
 /// A compact JSON array of strings: `["a","b"]`.
@@ -2003,6 +2171,355 @@ mod tests {
         );
         assert_eq!(report.problems, 3);
     }
+    /// `(rel_path, sidecar_rel_path, schema_version, prompt, entry_collection, params_schema,
+    /// render_template, append_mode, history_cap)` of every `augmentation` row, by path.
+    type AugmentationCells = (
+        String,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+    );
+
+    fn augmentation_rows(conn: &Connection) -> Vec<AugmentationCells> {
+        conn.prepare(
+            "SELECT rel_path, sidecar_rel_path, schema_version, prompt, entry_collection, \
+             params_schema, render_template, append_mode, history_cap FROM augmentation \
+             ORDER BY rel_path",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    /// A tracker's text whose frontmatter carries `expects_augmentation: <decl>`.
+    fn declaring(decl: &str) -> String {
+        format!("---\nkind: tracker\nstatus: active\nexpects_augmentation: {decl}\n---\n# T\n")
+    }
+
+    // mutation: read the default name `rel_path_for` gives instead of the declared path, with the
+    // sidecar committed under another name.
+    #[test]
+    fn a_declared_sidecar_gives_the_shape_row() {
+        let sidecar = "prompt: P\nentry_collection: rows\nappend_mode: true\nhistory_cap: 3\n\
+                       render_template: \"- {{a}}\"\nparams_schema:\n  type: object\n  required: [a]\n";
+        let (_dir, repo) = fixture(&[
+            ("docs/t.md", &declaring("docs/augmentations/t.yaml")),
+            ("docs/augmentations/t.yaml", sidecar),
+        ]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(
+            augmentation_rows(&conn),
+            [(
+                "docs/t.md".to_owned(),
+                Some("docs/augmentations/t.yaml".to_owned()),
+                Some(1),
+                Some("P".to_owned()),
+                Some("rows".to_owned()),
+                Some(r#"{"type":"object","required":["a"]}"#.to_owned()),
+                Some("- {{a}}".to_owned()),
+                Some(1),
+                Some(3),
+            )]
+        );
+        assert_eq!(problem_rows(&conn), []);
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: an absent `append_mode` stored as NULL, or an absent `schema_version` as 0.
+    #[test]
+    fn a_sidecar_with_only_a_prompt_takes_the_sidecar_defaults() {
+        let (_dir, repo) = fixture(&[
+            ("docs/t.md", &declaring("docs/augmentations/t.yaml")),
+            ("docs/augmentations/t.yaml", "prompt: only\n"),
+        ]);
+
+        let (conn, _) = built(&repo);
+
+        assert_eq!(
+            augmentation_rows(&conn),
+            [(
+                "docs/t.md".to_owned(),
+                Some("docs/augmentations/t.yaml".to_owned()),
+                Some(1),
+                Some("only".to_owned()),
+                None,
+                None,
+                None,
+                Some(0),
+                None,
+            )]
+        );
+    }
+
+    // mutation: map `Declared { sidecar: None }` to no row.
+    #[test]
+    fn a_true_declaration_is_augmented_without_a_shape() {
+        let (_dir, repo) = fixture(&[
+            ("docs/t.md", &declaring("true")),
+            // The default name `rel_path_for` gives: a `true` declaration must not go looking.
+            ("docs/augmentations/docs-t.yaml", "prompt: P\n"),
+        ]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(
+            augmentation_rows(&conn),
+            [(
+                "docs/t.md".to_owned(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None
+            )]
+        );
+        assert_eq!(problem_rows(&conn), []);
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: drop the `refuse_lexical_escape` call (the absolute case then gives a row).
+    #[test]
+    fn a_bad_sidecar_is_a_problem_and_no_shape() {
+        let good: &[u8] = b"prompt: P\n";
+        type Case<'a> = (
+            &'a str,
+            &'a str,
+            Vec<(&'a str, u32, &'a [u8])>,
+            &'a str,
+            &'a str,
+        );
+        let cases: Vec<Case> = vec![
+            (
+                "the file is not in the commit",
+                "docs/augmentations/t.yaml",
+                vec![],
+                "sidecar_missing",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "a `..` segment (the file it reaches is committed)",
+                "../x.yaml",
+                vec![("x.yaml", FILE, good)],
+                "sidecar_invalid",
+                r#"["docs/t.md","../x.yaml"]"#,
+            ),
+            (
+                "an absolute path (that file is committed)",
+                "/docs/augmentations/t.yaml",
+                vec![("docs/augmentations/t.yaml", FILE, good)],
+                "sidecar_invalid",
+                r#"["docs/t.md","/docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar is a link in the commit",
+                "docs/augmentations/t.yaml",
+                vec![
+                    ("docs/augmentations/t.yaml", LINK, b"real.yaml"),
+                    ("docs/augmentations/real.yaml", FILE, good),
+                ],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar's directory is a link in the commit",
+                "docs/augmentations/t.yaml",
+                vec![("docs/augmentations", LINK, b"../shared")],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar is not YAML",
+                "docs/augmentations/t.yaml",
+                vec![("docs/augmentations/t.yaml", FILE, b"prompt: [\n")],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar has no prompt",
+                "docs/augmentations/t.yaml",
+                vec![(
+                    "docs/augmentations/t.yaml",
+                    FILE,
+                    b"entry_collection: rows\n",
+                )],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar is not UTF-8",
+                "docs/augmentations/t.yaml",
+                vec![("docs/augmentations/t.yaml", FILE, &[0xff, 0xfe])],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+        ];
+        for (name, decl, files, kind, rel_paths) in cases {
+            let doc = declaring(decl);
+            let mut entries: Vec<(&str, u32, &[u8])> = vec![("docs/t.md", FILE, doc.as_bytes())];
+            entries.extend(files);
+            let dir = tempfile::tempdir().unwrap();
+            let repo = repo_with(dir.path(), &entries);
+
+            let (conn, report) = built(&repo);
+
+            assert_eq!(augmentation_rows(&conn), [], "{name}: no shape");
+            assert_eq!(
+                problem_rows(&conn),
+                [(kind.to_owned(), Some("t".to_owned()), rel_paths.to_owned())],
+                "{name}"
+            );
+            assert_eq!(report.problems, 1, "{name}");
+            assert_eq!(count(&conn, "document"), 1, "{name}: the document stays");
+        }
+    }
+
+    // mutation: pass the declared string to `blob_text` unchanged (a `.` component then names no
+    // tree entry); or record the declared string in the row and in the problem.
+    #[test]
+    fn a_dot_component_reads_like_the_live_reader() {
+        for decl in [
+            "docs/./augmentations/t.yaml",
+            "./docs/augmentations/t.yaml",
+            "docs//augmentations/t.yaml",
+        ] {
+            let (_dir, repo) = fixture(&[
+                ("docs/t.md", &declaring(decl)),
+                ("docs/augmentations/t.yaml", "prompt: P\n"),
+            ]);
+
+            let (conn, _) = built(&repo);
+
+            let rows = augmentation_rows(&conn);
+            assert_eq!(rows.len(), 1, "{decl}: {rows:?}");
+            assert_eq!(
+                rows[0].1.as_deref(),
+                Some("docs/augmentations/t.yaml"),
+                "{decl}: the row holds the path that was read"
+            );
+            assert_eq!(problem_rows(&conn), [], "{decl}");
+        }
+        // A missing file is named by the path that was looked up, not the declared spelling.
+        let (_dir, repo) = fixture(&[("docs/t.md", &declaring("docs/./augmentations/gone.yaml"))]);
+        let (conn, _) = built(&repo);
+        assert_eq!(
+            problem_rows(&conn),
+            [(
+                "sidecar_missing".to_owned(),
+                Some("t".to_owned()),
+                r#"["docs/t.md","docs/augmentations/gone.yaml"]"#.to_owned()
+            )]
+        );
+    }
+
+    // mutation: treat `Unparseable` as `None`, or `false` as a declaration.
+    #[test]
+    fn an_unparseable_declaration_is_a_problem_and_a_false_one_is_nothing() {
+        let broken = "---\nexpects_augmentation: [unterminated\n---\n# B\n".to_owned();
+        let cases: Vec<(&str, String, bool)> = vec![
+            ("a misspelt true", declaring("ture"), true),
+            ("a key with no value", declaring(""), true),
+            ("a mapping", declaring("{a: 1}"), true),
+            ("false", declaring("false"), false),
+            ("no", declaring("no"), false),
+            ("0", declaring("0"), false),
+            ("a frontmatter that does not parse", broken, false),
+        ];
+        for (name, doc, is_problem) in cases {
+            let (_dir, repo) = fixture(&[("docs/t.md", &doc)]);
+
+            let (conn, report) = built(&repo);
+
+            assert_eq!(augmentation_rows(&conn), [], "{name}: no row");
+            let expected: Vec<(String, Option<String>, String)> = if is_problem {
+                vec![(
+                    "augmentation_unparseable".to_owned(),
+                    Some("t".to_owned()),
+                    r#"["docs/t.md"]"#.to_owned(),
+                )]
+            } else {
+                vec![]
+            };
+            assert_eq!(problem_rows(&conn), expected, "{name}");
+            assert_eq!(report.problems, expected.len(), "{name}");
+        }
+    }
+
+    // mutation: drop `augmentation` from `DERIVED_TABLES`.
+    #[test]
+    fn a_rebuild_replaces_the_augmentation_rows() {
+        let (_dir, repo) = fixture(&[
+            ("docs/t.md", &declaring("docs/augmentations/t.yaml")),
+            ("docs/augmentations/t.yaml", "prompt: A\n"),
+        ]);
+        let (mut conn, _) = built(&repo);
+        assert_eq!(count(&conn, "augmentation"), 1);
+        let parent = open_commit(&repo, "HEAD").unwrap();
+        let edited = crate::librarian::derived::testkit::commit_files(
+            &repo,
+            &[
+                (
+                    "docs/t.md",
+                    declaring("docs/augmentations/t.yaml").as_bytes(),
+                ),
+                ("docs/augmentations/t.yaml", b"prompt: B\n".as_slice()),
+            ],
+            &[&parent],
+            "edit the sidecar",
+        );
+        let commit = open_commit(&repo, &edited.to_string()).unwrap();
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap(),
+        )
+        .unwrap();
+        let prompts: Vec<Option<String>> =
+            augmentation_rows(&conn).into_iter().map(|r| r.3).collect();
+        assert_eq!(prompts, [Some("B".to_owned())], "the old row survived");
+
+        let parent = commit;
+        let plain = crate::librarian::derived::testkit::commit_files(
+            &repo,
+            &[("docs/t.md", b"# T\n".as_slice())],
+            &[&parent],
+            "no longer augmented",
+        );
+        let commit = open_commit(&repo, &plain.to_string()).unwrap();
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            count(&conn, "augmentation"),
+            0,
+            "a stale augmentation row survived"
+        );
+    }
 
     #[test]
     fn chunk_ids_are_deterministic() {
@@ -2572,6 +3089,26 @@ mod tests {
                 "docs/entry-bad-a.md",
                 "---\nentry_kind: finding\ntitle: A\nstatus: open\nstatus_since: 2026-11-01\n---\n# A\n",
             ),
+            // Augmented trackers. One has its sidecar committed (`corpus.yaml`: no markdown, so no
+            // document of its own), one names a sidecar that is not committed (`sidecar_missing`),
+            // one declares nothing readable (`augmentation_unparseable`): with the entry problems,
+            // three kinds of document problem that sort by `(kind, key, rel_paths)`.
+            text(
+                "docs/aug-ok.md",
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/corpus.yaml\n---\n# Aug ok\n",
+            ),
+            text(
+                "docs/augmentations/corpus.yaml",
+                "prompt: P\nentry_collection: rows\nappend_mode: true\nhistory_cap: 3\n",
+            ),
+            text(
+                "docs/aug-gone.md",
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/gone.yaml\n---\n# Aug gone\n",
+            ),
+            text(
+                "docs/aug-bad.md",
+                "---\nkind: tracker\nexpects_augmentation: ture\n---\n# Aug bad\n",
+            ),
             // A two-line relation paragraph: both citations take the canonical rel `depends_on`.
             text(
                 "docs/rel.md",
@@ -2635,6 +3172,7 @@ mod tests {
             "skipped",
             "event",
             "entry_doc",
+            "augmentation",
         ] {
             assert!(!dump[table].is_empty(), "the corpus gives {table} no rows");
         }
@@ -2920,7 +3458,13 @@ mod tests {
                 format!(r#"["x/dup{i}.md","y/dup{i}.md"]"#),
             ));
         }
-        // Then the documents' own problems, sorted by key: the unparsed entry documents.
+        // Then the documents' own problems, sorted by kind, then key: the unreadable declaration,
+        // the unparsed entry documents, the sidecar that is not committed.
+        expected_problems.push((
+            "augmentation_unparseable".to_owned(),
+            Some("aug-bad".to_owned()),
+            r#"["docs/aug-bad.md"]"#.to_owned(),
+        ));
         for stem in ["a", "b"] {
             expected_problems.push((
                 "entry_unparsed".to_owned(),
@@ -2928,6 +3472,11 @@ mod tests {
                 format!(r#"["docs/entry-bad-{stem}.md"]"#),
             ));
         }
+        expected_problems.push((
+            "sidecar_missing".to_owned(),
+            Some("aug-gone".to_owned()),
+            r#"["docs/aug-gone.md","docs/augmentations/gone.yaml"]"#.to_owned(),
+        ));
         for (name, conn, report) in &builds {
             assert_eq!(report, first_report, "{name}: report");
             assert_eq!(dump_all(conn), expected_dump, "{name}: dump");
@@ -2975,6 +3524,8 @@ mod tests {
                 "# Staged, not committed\n\n## S-1 — staged\n",
             ),
             ("docs/staged-new.md", "# New and staged\n"),
+            // The sidecar of `docs/aug-ok.md`: the shape is read from the commit, not from here.
+            ("docs/augmentations/corpus.yaml", "prompt: working tree\n"),
         ];
         for (rel, body) in edits {
             std::fs::write(clone.join(rel), body).unwrap();
@@ -3003,6 +3554,7 @@ mod tests {
             " D docs/b.md",
             "M  docs/trackers/bug-log.md",
             "A  docs/staged-new.md",
+            " M docs/augmentations/corpus.yaml",
         ] {
             assert!(
                 status.lines().any(|l| l == line),

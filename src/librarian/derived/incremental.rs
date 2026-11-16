@@ -24,8 +24,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::build::{
-    rebuild, BuildInput, BuildReport, ChangeCounts, DerivedEventRow, DocMetadata, EntryDoc,
-    EntryDocRow, EntryRow, ParsedDocument, Parser,
+    rebuild, AugmentationDecl, BuildInput, BuildReport, ChangeCounts, DerivedEventRow, DocMetadata,
+    EntryDoc, EntryDocRow, EntryRow, ParsedDocument, Parser,
 };
 use crate::git::{diff_tree_to_tree, DiffStatus};
 use crate::librarian::catalog::chunk::ChunkRow;
@@ -97,6 +97,9 @@ struct FactsJson {
     relation_rels: Vec<(u32, String)>,
     /// [`ParsedDocument::entry_doc`]. A plain field with no default: a row without it is a miss.
     entry_doc: EntryDocJson,
+    /// [`ParsedDocument::augmentation`]. A plain field with no default: a row without it is a miss
+    /// (E2-R3). The sidecar's shape is not here: it is read from the commit on every build.
+    augmentation: AugmentationDeclJson,
 }
 
 /// [`EntryDoc`] as the cache holds it (externally tagged: `"NotAnEntry"`, `"Unparsed"`, or
@@ -123,6 +126,19 @@ struct EntryDocRowJson {
     #[serde(deserialize_with = "required")]
     valid: Option<String>,
     fields_json: String,
+}
+
+/// [`AugmentationDecl`] as the cache holds it (externally tagged: `"None"`, `"Unparseable"`, or
+/// `{"Declared": {"sidecar": ..}}`). The `sidecar` key is required on decode though it is nullable:
+/// a plain `Option` would read a row without it as a bare `true` declaration.
+#[derive(Serialize, Deserialize)]
+enum AugmentationDeclJson {
+    None,
+    Declared {
+        #[serde(deserialize_with = "required")]
+        sidecar: Option<String>,
+    },
+    Unparseable,
 }
 
 /// An event section as the cache holds it: [`DerivedEventRow`] field for field. Every key is
@@ -332,6 +348,13 @@ pub(super) fn encode(products: &ParsedDocument) -> serde_json::Result<Stored> {
                     fields_json: row.fields_json.clone(),
                 }),
             },
+            augmentation: match &products.augmentation {
+                AugmentationDecl::None => AugmentationDeclJson::None,
+                AugmentationDecl::Declared { sidecar } => AugmentationDeclJson::Declared {
+                    sidecar: sidecar.clone(),
+                },
+                AugmentationDecl::Unparseable => AugmentationDeclJson::Unparseable,
+            },
         })?,
     })
 }
@@ -348,6 +371,7 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
         events,
         relation_rels,
         entry_doc,
+        augmentation,
     } = serde_json::from_str(&stored.facts_json).ok()?;
     let repo_of = |repo: Option<String>| match repo {
         None => Some(None),
@@ -443,6 +467,11 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
                 valid: row.valid,
                 fields_json: row.fields_json,
             }),
+        },
+        augmentation: match augmentation {
+            AugmentationDeclJson::None => AugmentationDecl::None,
+            AugmentationDeclJson::Declared { sidecar } => AugmentationDecl::Declared { sidecar },
+            AugmentationDeclJson::Unparseable => AugmentationDecl::Unparseable,
         },
     })
 }
@@ -1683,6 +1712,132 @@ mod tests {
         assert_eq!(entry_doc("docs/entries/unparsed.md"), EntryDoc::Unparsed);
         assert_eq!(entry_doc("docs/specs/one.md"), EntryDoc::NotAnEntry);
     }
+    /// The corpus must keep one document of each augmentation form the cache holds: a sidecar
+    /// path, `true` with no path, a declaration that reads as none, and one that cannot be read.
+    #[test]
+    fn the_pinned_corpus_has_every_augmentation_form() {
+        let rules = corpus_rules();
+        let decl = |name: &str| parse_document(name, &corpus_text(name), &rules).augmentation;
+        assert_eq!(
+            decl("docs/aug/sidecar.md"),
+            AugmentationDecl::Declared {
+                sidecar: Some("docs/augmentations/t.yaml".to_owned())
+            }
+        );
+        assert_eq!(
+            decl("docs/aug/true.md"),
+            AugmentationDecl::Declared { sidecar: None }
+        );
+        assert_eq!(decl("docs/aug/false.md"), AugmentationDecl::None);
+        assert_eq!(
+            decl("docs/aug/unparseable.md"),
+            AugmentationDecl::Unparseable
+        );
+        assert_eq!(decl("docs/specs/one.md"), AugmentationDecl::None);
+    }
+
+    /// A cache row written before the declaration was cached has no `augmentation` key: it must not
+    /// read back as "declares nothing" (E2-R3: `PARSER_VERSION` is not bumped for a new fact).
+    // mutation: `#[serde(default)]` on `FactsJson::augmentation` (and `Default` on
+    // `AugmentationDeclJson`).
+    #[test]
+    fn a_cache_row_without_the_augmentation_fact_is_a_miss() {
+        let text = corpus_text("docs/aug/sidecar.md");
+        let h = history(&[&[
+            REPO_TOML,
+            ("docs/e.md", &text),
+            ("docs/augmentations/t.yaml", "prompt: P\n"),
+        ]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let whole = entry_facts(&conn);
+        assert_eq!(
+            whole["augmentation"],
+            serde_json::json!({"Declared": {"sidecar": "docs/augmentations/t.yaml"}}),
+            "the fixture's facts hold its declaration: {whole}"
+        );
+        let mut cut = whole.clone();
+        cut.as_object_mut().unwrap().remove("augmentation");
+        put_entry_facts(&conn, &cut);
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/e.md"]));
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
+        assert_eq!(count(&conn, "augmentation"), 1);
+        assert_eq!(entry_facts(&conn), whole, "the miss rewrote the row");
+    }
+
+    /// The `sidecar` key of a cached declaration is required, though it is nullable: a row with it
+    /// removed is a miss, a row with an explicit `null` is a hit.
+    // mutation: a plain `Option` for `sidecar` (no `deserialize_with = "required"`).
+    #[test]
+    fn a_cache_row_with_the_sidecar_key_removed_is_a_miss() {
+        let text = corpus_text("docs/aug/true.md");
+        let h = history(&[&[REPO_TOML, ("docs/e.md", &text)]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let whole = entry_facts(&conn);
+        assert_eq!(
+            whole["augmentation"],
+            serde_json::json!({"Declared": {"sidecar": null}}),
+            "{whole}"
+        );
+        let mut cut = whole.clone();
+        cut["augmentation"]["Declared"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sidecar");
+        put_entry_facts(&conn, &cut);
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/e.md"]));
+        assert_eq!(entry_facts(&conn), whole, "the miss rewrote the row");
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+        assert!(
+            parsed.is_empty(),
+            "an explicit `null` reads back: {parsed:?}"
+        );
+    }
+
+    /// The shape is not cached: the sidecar is read from the commit on every update, so an edit to
+    /// the sidecar alone (the document's own bytes unchanged, its parse a cache hit) changes it.
+    // mutation: keep the shape in `FactsJson` (the parse reads the sidecar, the cache holds it).
+    #[test]
+    fn a_sidecar_edit_alone_changes_the_shape_on_update() {
+        let doc = "---\nkind: tracker\nexpects_augmentation: docs/augmentations/t.yaml\n---\n# T\n";
+        let h = history(&[
+            &[
+                REPO_TOML,
+                ("docs/t.md", doc),
+                ("docs/augmentations/t.yaml", "prompt: A\n"),
+            ],
+            &[
+                REPO_TOML,
+                ("docs/t.md", doc),
+                ("docs/augmentations/t.yaml", "prompt: B\n"),
+            ],
+        ]);
+        let prompt = |conn: &Connection| -> String {
+            conn.query_row(
+                "SELECT prompt FROM augmentation WHERE rel_path = 'docs/t.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        assert_eq!(prompt(&conn), "A");
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 1, PARSER_VERSION);
+
+        assert!(parsed.is_empty(), "the document did not change: {parsed:?}");
+        assert_eq!(prompt(&conn), "B");
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 1));
+    }
 
     /// Every key of a cached event is required, the nullable ones included: a row with one key
     /// removed does not read back as a row with that field `None`, it is a miss (the rule on
@@ -1882,6 +2037,25 @@ mod tests {
                  ---\n# Unparsed\n"
                     .to_owned(),
             ),
+            // Augmentation declarations, one per form the cache holds: a sidecar path, `true` (no
+            // path), a declaration that reads as none (`false`), and one that cannot be read.
+            (
+                "docs/aug/sidecar.md",
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/t.yaml\n---\n# Sidecar\n"
+                    .to_owned(),
+            ),
+            (
+                "docs/aug/true.md",
+                "---\nkind: tracker\nexpects_augmentation: true\n---\n# True\n".to_owned(),
+            ),
+            (
+                "docs/aug/false.md",
+                "---\nkind: tracker\nexpects_augmentation: false\n---\n# False\n".to_owned(),
+            ),
+            (
+                "docs/aug/unparseable.md",
+                "---\nkind: tracker\nexpects_augmentation: ture\n---\n# Unparseable\n".to_owned(),
+            ),
             // Event sections under `## Events`, one per payload form: a note's blockquote and a
             // verdict's fenced payload. The parse stores them as events, with whole-document lines.
             (
@@ -2023,7 +2197,7 @@ mod tests {
     /// or the shape the cache stores did. A parse change bumps `PARSER_VERSION`; a fact added to
     /// the cache with a required key does not (E2-R3: a row without it is a miss). Either way, set
     /// this to the new digest, after reading what changed.
-    const CORPUS_DIGEST: &str = "d8acecda47bb7bd4d5a67bf1cb5024f76872ec2adcc79e2acd6ca92890be2862";
+    const CORPUS_DIGEST: &str = "65181156700ef001fe9b13ba229c825952931cf2d2d68b76e8219e96b462ce53";
 
     #[test]
     fn the_parse_of_a_pinned_corpus_is_tied_to_parser_version() {
