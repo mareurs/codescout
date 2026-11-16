@@ -26,6 +26,7 @@ use crate::librarian::current_project::lookup_git_root;
 use crate::librarian::cutover::code_refs::{CodeRefs, AUDIT_DIR, DATA_EXTENSIONS, LINK_MODE};
 use crate::librarian::cutover::plan::Status as CutoverStatus;
 use crate::librarian::derived::build::key_space_from_commit;
+use crate::librarian::derived::diff::NoOldRowsUnderRoot;
 use crate::librarian::derived::old_catalog::resolve_old_catalog;
 use crate::librarian::derived::scan::{blob_text, open_commit, scan_commit, Skip};
 use crate::librarian::frontmatter;
@@ -667,6 +668,12 @@ const NO_OLD_CATALOG: &str = "No old catalog is on this machine: LIBRARIAN_DB na
      the catalog facts of the sources are in files. If this repository never had an old \
      catalog, run this again with --no-old-catalog.";
 
+/// The refusal when the old catalog holds rows only for other repositories and
+/// `--no-old-catalog` is not given.
+const NO_OLD_ROWS: &str = "The old catalog on this machine has no rows for this repository. So \
+     apply cannot make sure that the catalog facts of the sources are in files. If this \
+     repository never had rows in the old catalog, run this again with --no-old-catalog.";
+
 /// The refusal for a shallow clone (spec § Dates).
 const SHALLOW: &str = "this clone is shallow, so blame dates would be wrong. Run git fetch \
      --unshallow, then run this again.";
@@ -1132,8 +1139,9 @@ fn first_heading_token(text: &str) -> Option<String> {
 /// Precondition (a): the identity cutover has nothing left to do for a source or its sidecar: a
 /// cutover plan of HEAD writes neither and moves no item of either (spec § Preconditions, plan
 /// P-R4). A plan that still rewrites an old citation form in a source refuses too: the
-/// cutover has not run there. With no old catalog on this machine it is a refusal unless
-/// `no_old_catalog`; when a catalog exists the check runs whatever the flag says.
+/// cutover has not run there. With no old catalog on this machine, or one whose rows all lie
+/// under other repositories, it is a refusal unless `no_old_catalog`; when a catalog has rows
+/// for this repository the check runs whatever the flag says.
 fn catalog_facts(
     head: &HeadView,
     start: &Path,
@@ -1156,7 +1164,18 @@ fn catalog_facts(
         old_root: Vec::new(),
         json: false,
     };
-    let loaded = load_and_plan(&args, cwd, env.librarian_db.clone(), env.data_dir.clone())?;
+    let loaded = match load_and_plan(&args, cwd, env.librarian_db.clone(), env.data_dir.clone()) {
+        Ok(loaded) => loaded,
+        // Rows only for other repositories: for this repository that is no old catalog.
+        Err(e) if e.downcast_ref::<NoOldRowsUnderRoot>().is_some() => {
+            return Ok(if no_old_catalog {
+                Vec::new()
+            } else {
+                vec![NO_OLD_ROWS.to_string()]
+            });
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mut watched: BTreeSet<String> = BTreeSet::new();
     for s in &head.sources {
         watched.insert(s.path.clone());

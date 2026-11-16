@@ -909,6 +909,35 @@ async fn apply_without_an_old_catalog_refuses_unless_the_flag_is_given() {
     assert_eq!(out.code, 0, "{}", out.stdout);
 }
 
+/// An old catalog whose rows all lie under another repository's root is "no old catalog" for
+/// this repository: a refusal that names `--no-old-catalog` (not the cutover's `--old-root`,
+/// which apply does not take), and with the flag apply runs. Breaks if `NoOldRowsUnderRoot`
+/// stops the run (exit 2), or if the flag is ignored because a catalog file exists.
+#[tokio::test]
+async fn an_old_catalog_with_rows_only_for_another_repository_counts_as_none() {
+    let w = x_repo();
+    let other = tempfile::tempdir().unwrap();
+    let other_root = std::fs::canonicalize(other.path()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let db = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("catalog.db");
+    old_catalog_file(&db, |cat| {
+        add_doc(cat, &other_root, "o1", "a.md");
+    });
+    let env = ApplyEnv {
+        librarian_db: Some(db.into()),
+        ..test_env()
+    };
+    let out = apply_with(&w, BASE, false, false, &env).await;
+    assert_eq!(out.code, 1, "{}", out.stdout);
+    assert_eq!(out.stdout, format!("{NO_OLD_ROWS}\n"));
+    assert!(!exists(&w, F1_PATH) && exists(&w, X));
+
+    let out = apply_with(&w, BASE, false, true, &env).await;
+    assert_eq!(out.code, 0, "{}", out.stdout);
+}
+
 /// An old catalog that still holds a fact of the source that the cutover writes into it (a
 /// note on a `single_writer` document is spliced into the file) is a refusal; one that holds
 /// only the document row is not. That source has no old link form (`[F-2](x.md)` is
