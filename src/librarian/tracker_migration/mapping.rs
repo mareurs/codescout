@@ -486,12 +486,15 @@ fn source_problems(m: &Mapping, src: &SourceInventory, reads_status: bool, out: 
 
     for s in &src.sections {
         if !in_extra(s.start) && section_spec(s.start).is_none() {
-            out.push(format!(
-                "section at line {} of {path} (\"{}\") has no sections entry",
-                s.start, s.first_line
-            ));
+            out.push(missing_section_message(path, s.start, &s.first_line));
         }
     }
+}
+
+/// The problem text for a section that has no `sections` entry. [`mapping_problems`] and the
+/// planner use the same words.
+pub(crate) fn missing_section_message(path: &str, start: u32, first_line: &str) -> String {
+    format!("section at line {start} of {path} (\"{first_line}\") has no sections entry")
 }
 
 /// The kind of an inventory source: its own `sources` entry, or `whole` for a file

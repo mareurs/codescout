@@ -7,5 +7,6 @@ pub mod dates;
 pub mod index_rows;
 pub mod inventory;
 pub mod mapping;
+pub mod plan;
 pub mod records;
 pub mod rewrite;
