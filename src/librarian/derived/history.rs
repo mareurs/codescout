@@ -1,13 +1,13 @@
 //! The first-parent git history of every markdown document of a commit (E2-R10, E2-R11).
 //!
 //! [`walk`] follows the first-parent line from the indexed commit back to the root (or to the
-//! boundary of a shallow clone) and records, for each document the commit holds, the commits that
-//! added it, changed it or renamed it. The rows are keyed by the document's path in the indexed
-//! commit, however the path was spelled further back. The tables are not part of the derived
-//! answer about a tree (two commits of one tree have different histories), so a rebuild rewrites
-//! them with [`write`] only when [`reusable`] says the stored ones were walked from the same
-//! commit with the same parse version in a repository that is not shallow. [`settle`] makes that
-//! decision again inside the write transaction.
+//! boundary of a shallow clone, or to the first object a partial clone lacks) and records, for
+//! each document the commit holds, the commits that added it, changed it or renamed it. The rows
+//! are keyed by the document's path in the indexed commit, however the path was spelled further
+//! back. The tables are not part of the derived answer about a tree (two commits of one tree have
+//! different histories), so a rebuild rewrites them with [`write`] only when [`reusable`] says
+//! the stored ones were walked from the same commit with the same parse version, and the walk was
+//! not bounded. [`settle`] makes that decision again inside the write transaction.
 //!
 //! The rules the walk follows, where the data leaves a choice:
 //!
@@ -26,14 +26,20 @@
 //!   spelling, and a row keeps the raw name as its `rel_path`. The `status` of a name with a `\`
 //!   is `None`, as for a lossy one. Two different raw names with one such spelling (`a\b.md` and
 //!   `a/b.md`) cannot be told apart in a delta: neither is tracked, and neither has rows.
-//! - A blob that is absent from the object database (a blobless clone) gives `status` `None`. A
-//!   similarity rename whose blobs are absent fails the walk: git needs both blobs to score it.
-//!   An exact rename needs none.
+//! - A blob that is absent from the object database (a blobless clone) gives `status` `None`.
+//! - An object the walk itself needs and the object database lacks (a partial clone: a commit's
+//!   tree or its parent's tree in a treeless clone, the parent commit, or a blob that git must
+//!   read to score a similarity rename in a blobless clone) is a boundary: the walk stops at the
+//!   commit it was reading, keeps the rows of the commits after it, and marks the history
+//!   `shallow`. The history is a display cache, and a partial clone must still build. libgit2
+//!   reports such a read as class `Odb`, code `NotFound`; any other error, a `NotFound` of
+//!   another class included, fails the build. An exact rename needs no blob.
 //! - Only the first parent is followed. At a shallow boundary libgit2 reports no parent, so the
 //!   boundary commit is diffed against the empty tree and every path still tracked is `added`
-//!   there. The stored history of a shallow repository is never reused: its depth can grow with
-//!   no change of commit (`git fetch --deepen`), and a walk of it is bounded. Any other git error
-//!   fails the build.
+//!   there.
+//! - `shallow` means the history is bounded: by a shallow clone's graft or by a partial clone's
+//!   absent object. A bounded history is never reused: a shallow clone's depth can grow with no
+//!   change of commit (`git fetch --deepen`), and a partial clone can fetch what it lacked.
 //! - The time is the committer's, in seconds, and the author is the name alone: no clock is read
 //!   and no email is stored.
 //! - `PARSER_VERSION` is also the version of these rules: see its doc.
@@ -88,8 +94,9 @@ struct Hit {
     from: Option<String>,
 }
 
-/// Walk the first-parent line of `commit`, from the commit itself (position 0) to the root or the
-/// shallow boundary, and return the history of every regular-file `.md` document it holds.
+/// Walk the first-parent line of `commit`, from the commit itself (position 0) to the root, the
+/// shallow boundary or the first object a partial clone lacks, and return the history of every
+/// regular-file `.md` document it holds. `shallow` is set when the walk was bounded.
 pub(super) fn walk(repo: &git2::Repository, commit: &git2::Commit) -> anyhow::Result<History> {
     // Path as `diff_trees` spells it in the commit being read -> path in the indexed commit.
     let mut documents: BTreeSet<String> = BTreeSet::new();
@@ -99,25 +106,49 @@ pub(super) fn walk(repo: &git2::Repository, commit: &git2::Commit) -> anyhow::Re
     let mut rows: Vec<HistoryRow> = Vec::new();
     let mut current = commit.clone();
     let mut pos: i64 = 0;
+    // Set when an object the walk needs is absent (a partial clone): the walk stops there.
+    let mut bounded = false;
     while !tracked.is_empty() {
-        let tree = current.tree()?;
+        let Some(tree) = present(current.tree())? else {
+            bounded = true;
+            break;
+        };
         // libgit2 applies a shallow graft when it parses a commit, so the boundary commit has no
         // parent here, as a root does.
         let parent = if current.parent_count() == 0 {
             None
         } else {
-            Some(
-                current
-                    .parent(0)
-                    .with_context(|| format!("reading the first parent of {}", current.id()))?,
-            )
+            let read = present(current.parent(0))
+                .with_context(|| format!("reading the first parent of {}", current.id()))?;
+            let Some(p) = read else {
+                bounded = true;
+                break;
+            };
+            Some(p)
         };
         let parent_tree = match &parent {
-            Some(p) => Some(p.tree()?),
+            Some(p) => {
+                let Some(t) = present(p.tree())? else {
+                    bounded = true;
+                    break;
+                };
+                Some(t)
+            }
             None => None,
         };
-        let deltas = diff_trees(repo, parent_tree.as_ref(), &tree, Some(PATHSPEC))
-            .with_context(|| format!("diffing {} against its first parent", current.id()))?;
+        let deltas = match diff_trees(repo, parent_tree.as_ref(), &tree, Some(PATHSPEC)) {
+            Ok(deltas) => deltas,
+            Err(e)
+                if e.downcast_ref::<git2::Error>()
+                    .is_some_and(is_absent_object) =>
+            {
+                bounded = true;
+                break;
+            }
+            Err(e) => {
+                return Err(e.context(format!("diffing {} against its first parent", current.id())))
+            }
+        };
 
         // The hits, against the tracked paths as they stood before this commit. Keyed by the
         // indexed path: one row per document per commit, whatever the delta order.
@@ -185,9 +216,25 @@ pub(super) fn walk(repo: &git2::Repository, commit: &git2::Commit) -> anyhow::Re
     Ok(History {
         commit_sha: commit.id().to_string(),
         parser_version: PARSER_VERSION.to_owned(),
-        shallow: repo.is_shallow(),
+        shallow: repo.is_shallow() || bounded,
         rows,
     })
+}
+/// Whether `e` says the object database lacks an object: a partial clone's absent commit, tree or
+/// blob. libgit2 reports each such read as class `Odb`, code `NotFound`. A path that a tree lacks
+/// is `NotFound` of another class (`Tree`), and is not this.
+fn is_absent_object(e: &git2::Error) -> bool {
+    e.code() == git2::ErrorCode::NotFound && e.class() == git2::ErrorClass::Odb
+}
+
+/// `Ok(None)` for an object the object database lacks ([`is_absent_object`]); any other error
+/// stays an error.
+fn present<T>(read: Result<T, git2::Error>) -> Result<Option<T>, git2::Error> {
+    match read {
+        Ok(value) => Ok(Some(value)),
+        Err(e) if is_absent_object(&e) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Every regular-file `.md` entry of `tree`, the path spelled lossily (U+FFFD for a byte that is
@@ -275,8 +322,9 @@ fn status_at(
 }
 
 /// Whether the stored history was walked from `commit` with this build's parse version, in a
-/// repository that is not shallow. A shallow repository never reuses: its depth can change with
-/// no change of commit, and a shallow walk is bounded.
+/// repository that is not shallow, and was not bounded (`shallow = 0`). A bounded history never
+/// reuses: a shallow clone's depth can change with no change of commit, and a partial clone can
+/// fetch what the walk lacked.
 pub(super) fn reusable(
     conn: &Connection,
     repo: &git2::Repository,
@@ -907,9 +955,9 @@ mod tests {
         origin.set_head("refs/heads/main").unwrap();
     }
 
-    /// A blobless clone (`--filter=blob:none`): the checkout fetches the tip's blobs, the older
-    /// ones stay on the remote, and libgit2 does not fetch them lazily.
-    fn blobless_clone(parent: &Path, origin_path: &Path, clone_path: &Path) {
+    /// A partial clone with `filter` (`blob:none` or `tree:0`): the checkout fetches the tip's
+    /// objects, the older ones stay on the remote, and libgit2 does not fetch them lazily.
+    fn partial_clone(parent: &Path, origin_path: &Path, clone_path: &Path, filter: &str) {
         git(origin_path, &["config", "uploadpack.allowFilter", "true"]);
         let url = format!("file://{}", origin_path.display());
         git(
@@ -917,11 +965,17 @@ mod tests {
             &[
                 "clone",
                 "--quiet",
-                "--filter=blob:none",
+                &format!("--filter={filter}"),
                 &url,
                 clone_path.to_str().unwrap(),
             ],
         );
+    }
+
+    /// The `shallow` flag of the stored history.
+    fn shallow_of(conn: &Connection) -> i64 {
+        conn.query_row("SELECT shallow FROM history_meta", [], |r| r.get(0))
+            .unwrap()
     }
 
     /// The oid of `path` in `commit`'s tree.
@@ -947,7 +1001,7 @@ mod tests {
         );
         publish(&origin, ids[1]);
         let old_blob = blob_id(&origin, ids[0], "a.md");
-        blobless_clone(parent.path(), &origin_path, &clone_path);
+        partial_clone(parent.path(), &origin_path, &clone_path, "blob:none");
 
         let clone = git2::Repository::open(&clone_path).unwrap();
         assert!(
@@ -972,11 +1026,13 @@ mod tests {
         );
     }
 
-    // Measured, and kept as a known limit (module doc): git needs both blobs to score a
-    // similarity rename, so the walk of a blobless clone fails where the rename's source blob is
-    // absent.
+    // git needs both blobs to score a similarity rename, so in a blobless clone the diff at the
+    // rename fails with an absent object: the walk stops there, keeps the rows of the commits
+    // after it, and marks the history bounded.
+    // mutations: an absent object is an error again (the build fails); the boundary does not set
+    // `shallow` (history_meta.shallow = 0).
     #[test]
-    fn a_similarity_rename_whose_blobs_are_absent_fails_the_walk() {
+    fn a_similarity_rename_whose_blobs_are_absent_bounds_the_history() {
         let parent = tempfile::tempdir().unwrap();
         let origin_path = parent.path().join("origin");
         let clone_path = parent.path().join("clone");
@@ -991,24 +1047,118 @@ mod tests {
             &[
                 (&[("a.md", FILE, before.as_bytes())], 1_700_000_000),
                 (&[("b.md", FILE, after.as_bytes())], 1_700_000_100),
+                (
+                    &[("b.md", FILE, after.as_bytes()), ("c.md", FILE, b"# C\n")],
+                    1_700_000_200,
+                ),
             ],
         );
-        publish(&origin, ids[1]);
+        publish(&origin, ids[2]);
         let old_blob = blob_id(&origin, ids[0], "a.md");
-        blobless_clone(parent.path(), &origin_path, &clone_path);
+        partial_clone(parent.path(), &origin_path, &clone_path, "blob:none");
 
         let clone = git2::Repository::open(&clone_path).unwrap();
         assert!(
             clone.find_blob(old_blob).is_err(),
             "the source blob is absent"
         );
-        let tip = clone.head().unwrap().peel_to_commit().unwrap();
-        let outcome = walk(&clone, &tip);
-        let message = format!("{:#}", outcome.err().expect("the walk fails"));
         assert!(
-            message.contains("diffing") && message.contains("code=NotFound"),
-            "the failure is the diff's: {message}"
+            !clone.is_shallow(),
+            "bounded by the absent blob, not a graft"
         );
+        let tip = clone.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(tip.id(), ids[2]);
+
+        let mut conn = open_in_memory().unwrap();
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&clone, &tip, Path::new("/fixture/root")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(shallow_of(&conn), 1);
+        // The commit after the rename was read; the rename and everything older were not.
+        assert_eq!(
+            rows_of(&conn, "c.md"),
+            [row(0, ids[2], "added", None, 1_700_000_200)]
+        );
+        assert_eq!(rows_of(&conn, "b.md"), []);
+        assert_eq!(total_rows(&conn), 1);
+        assert!(!reusable(&conn, &clone, &tip).unwrap());
+    }
+
+    // A treeless clone has the trees of its tip only, so the walk meets an absent tree at the
+    // first commit whose parent's tree the tip does not share. Here the parent of the tip has
+    // the tip's `sub/` subtree as its root tree (present), and the root commit's tree is absent.
+    // mutations: an absent object is an error again (the build fails); the boundary does not set
+    // `shallow` (history_meta.shallow = 0).
+    #[test]
+    fn a_treeless_clone_builds_with_the_history_bounded_at_the_first_absent_tree() {
+        let parent = tempfile::tempdir().unwrap();
+        let origin_path = parent.path().join("origin");
+        let clone_path = parent.path().join("clone");
+        let origin = git2::Repository::init(&origin_path).unwrap();
+        let (old, draft, active) = (
+            doc("old", "The root's own text."),
+            doc("draft", BODY),
+            doc("active", BODY),
+        );
+        let ids = chain(
+            &origin,
+            &[
+                (&[("a.md", FILE, old.as_bytes())], 1_700_000_000),
+                (&[("a.md", FILE, draft.as_bytes())], 1_700_000_100),
+                (
+                    &[
+                        ("a.md", FILE, active.as_bytes()),
+                        ("sub/a.md", FILE, draft.as_bytes()),
+                    ],
+                    1_700_000_200,
+                ),
+            ],
+        );
+        publish(&origin, ids[2]);
+        let tree_id = |i: usize| origin.find_commit(ids[i]).unwrap().tree_id();
+        let tip_tree = origin.find_commit(ids[2]).unwrap().tree().unwrap();
+        assert_eq!(
+            tip_tree.get_path(Path::new("sub")).unwrap().id(),
+            tree_id(1),
+            "the fixture: the tip's `sub/` is the parent's root tree"
+        );
+        partial_clone(parent.path(), &origin_path, &clone_path, "tree:0");
+
+        let clone = git2::Repository::open(&clone_path).unwrap();
+        assert!(
+            clone.find_tree(tree_id(1)).is_ok(),
+            "the parent's tree is present"
+        );
+        assert!(
+            clone.find_tree(tree_id(0)).is_err(),
+            "the root commit's tree is absent: the test would be vacuous otherwise"
+        );
+        assert!(clone.find_commit(ids[0]).is_ok(), "commits are all present");
+        assert!(
+            !clone.is_shallow(),
+            "bounded by the absent tree, not a graft"
+        );
+        let tip = clone.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(tip.id(), ids[2]);
+
+        let mut conn = open_in_memory().unwrap();
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&clone, &tip, Path::new("/fixture/root")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(shallow_of(&conn), 1);
+        assert_eq!(
+            rows_of(&conn, "a.md"),
+            [row(0, ids[2], "modified", Some("active"), 1_700_000_200)]
+        );
+        assert_eq!(
+            rows_of(&conn, "sub/a.md"),
+            [row(0, ids[2], "added", Some("draft"), 1_700_000_200)]
+        );
+        assert_eq!(total_rows(&conn), 2);
     }
 
     // mutation: key `tracked` by the raw name (no `\` -> `/`), or let the first raw name win a

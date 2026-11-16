@@ -41,6 +41,8 @@ const BUSY_TIMEOUT_MS: i64 = 5000;
 /// (NULL for any other citation). `event` holds one row per event section, `entry_doc` one per
 /// entry document, `augmentation` one per document that declares an augmentation, `doc_history`
 /// the commits that changed each document and `history_meta` what that history was walked from;
+/// `history_meta.shallow` is 1 when that history is bounded (a shallow clone, or a partial clone
+/// whose walk stopped at an object it lacks), and a bounded history is never reused;
 /// `worktree_layer` records the working-tree files laid over a commit.
 ///
 /// `parse_cache.metadata_json` is the document's `kind`, `status`, `title`, ... as parsed;
