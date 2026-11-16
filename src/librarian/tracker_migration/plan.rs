@@ -365,10 +365,19 @@ pub fn plan_migration(input: &MigrationInput) -> MigrationPlan {
         .existing
         .as_ref()
         .map_or(&[], |(_, _, entries)| entries.as_slice());
+    let ctx = EntryCtx {
+        m,
+        schema: schema.as_ref(),
+        template: template.as_deref(),
+        target_dir: &target_dir,
+        now: input.now,
+        key_paths: input.key_paths,
+        source_paths: &source_paths,
+        existing: existing_entries,
+    };
     for it in &items {
         let s = &sources[it.src];
         let n = it.name.as_str();
-        let ov = m.overrides.get(n);
         let row = it.row;
         if let Some(t) = &it.token {
             if row.is_none() {
@@ -419,142 +428,14 @@ pub fn plan_migration(input: &MigrationInput) -> MigrationPlan {
             None => expected_body(&s.text, &range, &defined, &old_key, &new_key),
         };
 
-        let entry: Option<String> = 'entry: {
-            if let Some(t) = &it.token {
-                let found = existing_entries
-                    .iter()
-                    .find(|e| e.token.as_deref() == Some(t.as_str()));
-                if let Some(e) = found {
-                    if same_body(&e.text, &body) {
-                        break 'entry Some(e.rel_path.clone());
-                    }
-                    problems.push(format!(
-                        "{t}: entry {} exists and its body is not the body of the record at line {} of {}. Make the two equal, or remove the entry.",
-                        e.rel_path, it.heading_line, s.path
-                    ));
-                    break 'entry None;
-                }
-            }
-            let status = match status_of(m, n, ov, &it.facts, row) {
-                Ok(status) => status,
-                Err(msg) => {
-                    problems.push(msg);
-                    break 'entry None;
-                }
-            };
-            let Some(schema) = &schema else {
-                break 'entry None;
-            };
-            // An undeclared status or kind is already a problem that names its mapping key.
-            let Some(class) = schema.statuses.get(&status).copied() else {
-                break 'entry None;
-            };
-            let Some(kind) = entry_kind_of(m, it, &mut problems) else {
-                break 'entry None;
-            };
-            if !schema.entry_kinds.contains(&kind) {
-                break 'entry None;
-            }
-            let fields = fields_of(m, schema, n, row, &mut problems);
-            let terminal = class == StatusClass::Terminal;
-            let inputs = DateInputs {
-                facts: &it.facts,
-                row_created: row_created(m, row),
-                blame: &s.blame,
-                lines: &it.lines,
-                terminal,
-                needs_revisit: class.needs_revisit(),
-                ov,
-                token: n,
-            };
-            let dates = match derive_dates(&inputs, input.now) {
-                Ok(dates) => dates,
-                Err(found) => {
-                    problems.extend(found);
-                    break 'entry None;
-                }
-            };
-            if !dates.derived.is_empty() {
-                review
-                    .derived_dates
-                    .push(format!("{n}: {}", dates.derived.join(", ")));
-            }
-            let fixed_stem = match ov.and_then(|o| o.slug.as_deref()) {
-                Some(slug) => match entry_stem(schema.key_style, dates.dates.created, slug) {
-                    Ok(key) => Some(key.as_str().to_string()),
-                    Err(_) => {
-                        problems.push(format!(
-                            "{n}: overrides.{n}.slug \"{slug}\" gives no valid file name. Set overrides.{n}.slug to lowercase letters and digits joined by single hyphens."
-                        ));
-                        break 'entry None;
-                    }
-                },
-                None => s.fixed_stem.clone(),
-            };
-            let new_entry = NewEntry {
-                entry_kind: &kind,
-                title: &it.title,
-                status: Some(&status),
-                tags: Vec::new(),
-                valid: None,
-                revisit_by: dates.revisit_by,
-                fields,
-                body: Some(&body),
-            };
-            let rules = RenderRules {
-                refuse_past_revisit: false,
-                fixed_stem,
-            };
-            let rendered = render_entry(
-                schema,
-                &target_dir,
-                template.as_deref(),
-                &new_entry,
-                &dates.dates,
-                input.now,
-                &rules,
-            );
-            let file = match rendered {
-                Ok(file) => file,
-                Err(found) => {
-                    problems.extend(found.iter().map(|p| write_problem_text(n, p)));
-                    break 'entry None;
-                }
-            };
-            let rel = if terminal {
-                match place(&file.rel_path) {
-                    Some(Ok(placement)) => archive_rel_path(&file.rel_path, &placement)
-                        .unwrap_or_else(|| file.rel_path.clone()),
-                    _ => {
-                        problems.push(format!(
-                            "{n}: the entry path {} is not in a collection. Check target.",
-                            file.rel_path
-                        ));
-                        break 'entry None;
-                    }
-                }
-            } else {
-                file.rel_path.clone()
-            };
-            let key = file.key.as_str();
-            if let Some(first) = planned_keys.insert(key.to_string(), n.to_string()) {
-                problems.push(format!(
-                    "{first} and {n} both get the key {key}. Set overrides.{n}.slug."
-                ));
-            }
-            for held in input.key_paths.get(key).into_iter().flatten() {
-                if *held != rel && !source_paths.contains(held.as_str()) {
-                    problems.push(format!(
-                        "{n}: the key {key} is already used by {held}. Set overrides.{n}.slug."
-                    ));
-                }
-            }
-            if short.is_some() {
-                shortened.insert(rel.clone());
-            }
-            writes.insert(rel.clone(), file.text);
-            Some(rel)
+        let mut out = EntryOut {
+            problems: &mut problems,
+            review: &mut review,
+            writes: &mut writes,
+            shortened: &mut shortened,
+            planned_keys: &mut planned_keys,
         };
+        let entry = plan_entry(&ctx, &mut out, it, s, &body, short.is_some());
         if let (Some(path), Owner::Record { entry, .. }) = (entry, &mut range.owner) {
             *entry = path;
         }
@@ -636,6 +517,173 @@ pub fn plan_migration(input: &MigrationInput) -> MigrationPlan {
         review,
         problems,
     }
+}
+/// What every entry of one plan reads.
+struct EntryCtx<'a> {
+    m: &'a Mapping,
+    schema: Option<&'a CollectionSchema>,
+    template: Option<&'a str>,
+    target_dir: &'a str,
+    now: NaiveDate,
+    key_paths: &'a BTreeMap<String, BTreeSet<String>>,
+    source_paths: &'a BTreeSet<&'a str>,
+    existing: &'a [ExistingEntry],
+}
+
+/// What the entries of one plan add to it.
+struct EntryOut<'a> {
+    problems: &'a mut Vec<String>,
+    review: &'a mut Review,
+    writes: &'a mut BTreeMap<String, String>,
+    shortened: &'a mut BTreeSet<String>,
+    planned_keys: &'a mut BTreeMap<String, String>,
+}
+
+/// Steps 3-5 for one record with its `body`: the existing entry it equals, or its status, dates,
+/// fields, key and place, rendered into `out.writes`. The path of its entry, or `None` when a
+/// problem stops it.
+fn plan_entry(
+    ctx: &EntryCtx,
+    out: &mut EntryOut,
+    it: &Item,
+    s: &SourceText,
+    body: &str,
+    short: bool,
+) -> Option<String> {
+    let m = ctx.m;
+    let n = it.name.as_str();
+    let ov = m.overrides.get(n);
+    let row = it.row;
+    let problems = &mut *out.problems;
+    if let Some(t) = &it.token {
+        let found = ctx
+            .existing
+            .iter()
+            .find(|e| e.token.as_deref() == Some(t.as_str()));
+        if let Some(e) = found {
+            if same_body(&e.text, body) {
+                return Some(e.rel_path.clone());
+            }
+            problems.push(format!(
+                "{t}: entry {} exists and its body is not the body of the record at line {} of {}. Make the two equal, or remove the entry.",
+                e.rel_path, it.heading_line, s.path
+            ));
+            return None;
+        }
+    }
+    let status = match status_of(m, n, ov, &it.facts, row) {
+        Ok(status) => status,
+        Err(msg) => {
+            problems.push(msg);
+            return None;
+        }
+    };
+    let schema = ctx.schema?;
+    // An undeclared status or kind is already a problem that names its mapping key.
+    let class = schema.statuses.get(&status).copied()?;
+    let kind = entry_kind_of(m, it, problems)?;
+    if !schema.entry_kinds.contains(&kind) {
+        return None;
+    }
+    let fields = fields_of(m, schema, n, row, problems);
+    let terminal = class == StatusClass::Terminal;
+    let inputs = DateInputs {
+        facts: &it.facts,
+        row_created: row_created(m, row),
+        blame: &s.blame,
+        lines: &it.lines,
+        terminal,
+        needs_revisit: class.needs_revisit(),
+        ov,
+        token: n,
+    };
+    let dates = match derive_dates(&inputs, ctx.now) {
+        Ok(dates) => dates,
+        Err(found) => {
+            problems.extend(found);
+            return None;
+        }
+    };
+    if !dates.derived.is_empty() {
+        out.review
+            .derived_dates
+            .push(format!("{n}: {}", dates.derived.join(", ")));
+    }
+    let fixed_stem = match ov.and_then(|o| o.slug.as_deref()) {
+        Some(slug) => match entry_stem(schema.key_style, dates.dates.created, slug) {
+            Ok(key) => Some(key.as_str().to_string()),
+            Err(_) => {
+                problems.push(format!(
+                    "{n}: overrides.{n}.slug \"{slug}\" gives no valid file name. Set overrides.{n}.slug to lowercase letters and digits joined by single hyphens."
+                ));
+                return None;
+            }
+        },
+        None => s.fixed_stem.clone(),
+    };
+    let new_entry = NewEntry {
+        entry_kind: &kind,
+        title: &it.title,
+        status: Some(&status),
+        tags: Vec::new(),
+        valid: None,
+        revisit_by: dates.revisit_by,
+        fields,
+        body: Some(body),
+    };
+    let rules = RenderRules {
+        refuse_past_revisit: false,
+        fixed_stem,
+    };
+    let rendered = render_entry(
+        schema,
+        ctx.target_dir,
+        ctx.template,
+        &new_entry,
+        &dates.dates,
+        ctx.now,
+        &rules,
+    );
+    let file = match rendered {
+        Ok(file) => file,
+        Err(found) => {
+            problems.extend(found.iter().map(|p| write_problem_text(n, p)));
+            return None;
+        }
+    };
+    let rel = if terminal {
+        match place(&file.rel_path) {
+            Some(Ok(placement)) => archive_rel_path(&file.rel_path, &placement)
+                .unwrap_or_else(|| file.rel_path.clone()),
+            _ => {
+                problems.push(format!(
+                    "{n}: the entry path {} is not in a collection. Check target.",
+                    file.rel_path
+                ));
+                return None;
+            }
+        }
+    } else {
+        file.rel_path.clone()
+    };
+    let key = file.key.as_str();
+    if let Some(first) = out.planned_keys.insert(key.to_string(), n.to_string()) {
+        problems.push(format!(
+            "{first} and {n} both get the key {key}. Set overrides.{n}.slug."
+        ));
+    }
+    for held in ctx.key_paths.get(key).into_iter().flatten() {
+        if *held != rel && !ctx.source_paths.contains(held.as_str()) {
+            problems.push(format!(
+                "{n}: the key {key} is already used by {held}. Set overrides.{n}.slug."
+            ));
+        }
+    }
+    if short {
+        out.shortened.insert(rel.clone());
+    }
+    out.writes.insert(rel.clone(), file.text);
+    Some(rel)
 }
 
 /// The body of the entry (or the readme part) that owns `r`: the source lines of `r` after the
