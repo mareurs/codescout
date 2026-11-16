@@ -465,6 +465,8 @@ pub fn plan_migration(input: &MigrationInput) -> MigrationPlan {
         sources,
         input.other_markdown,
         &ranges,
+        &rows,
+        &defined,
         &old_key,
         &new_key,
         &mut problems,
@@ -908,11 +910,19 @@ fn possible_problems(
 /// no rewrite of several old keys). A key equal to `old_key` or `new_key` still resolves. One
 /// problem per file, at its first such citation: a source whose carried lines (a record or a
 /// readme section) hold one, or another markdown file.
+///
+/// The index row of every carried record is scanned too, one problem per row: `expected_body`
+/// appends it verbatim, and its source line can lie in a dropped section, which the scan of
+/// carried lines does not read. Because the row is never rewritten, a row citation of `old_key`
+/// is also refused when the key changes.
+#[allow(clippy::too_many_arguments)]
 fn folded_key_problems(
     m: &Mapping,
     sources: &[SourceText],
     other_markdown: &BTreeMap<String, String>,
     ranges: &[(usize, OwnedRange)],
+    rows: &BTreeMap<String, (usize, &IndexRow)>,
+    defined: &BTreeSet<String>,
     old_key: &str,
     new_key: &str,
     problems: &mut Vec<String>,
@@ -924,6 +934,43 @@ fn folded_key_problems(
         .map(|s| path_stem(&s.path))
         .filter(|k| k != old_key && k != new_key)
         .collect();
+    let in_carried_lines = |i: usize, line: u32| {
+        ranges.iter().any(|(j, r)| {
+            *j == i
+                && matches!(r.owner, Owner::Record { .. } | Owner::Readme)
+                && r.lines.contains(&line)
+        })
+    };
+    for (i, row) in rows
+        .iter()
+        .filter(|(token, _)| defined.contains(*token))
+        .map(|(_, v)| *v)
+    {
+        let (path, line) = (&sources[i].path, row.line);
+        // A folded key on a carried line is already reported by the scan of that source.
+        let carried = in_carried_lines(i, line);
+        let found = extract(&row.raw).into_iter().find_map(|c| {
+            let key = match &c.reference {
+                Reference::Entry {
+                    repo: None, key, ..
+                }
+                | Reference::File { repo: None, key } => key.as_str(),
+                _ => return None,
+            };
+            if folded.contains(key) && !carried {
+                Some(format!(
+                    "{path} line {line} cites {key}, which this run deletes; that citation would stop resolving. Rewrite it first, or fold the sources one at a time."
+                ))
+            } else if old_key != new_key && key == old_key {
+                Some(format!(
+                    "{path} line {line} has an index row that cites {old_key}. The row is carried verbatim and the key changes to {new_key}, so that citation would stop resolving. Rewrite the citation first, or keep the key."
+                ))
+            } else {
+                None
+            }
+        });
+        problems.extend(found);
+    }
     if folded.is_empty() {
         return;
     }

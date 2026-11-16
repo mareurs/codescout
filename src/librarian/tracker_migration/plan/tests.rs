@@ -988,3 +988,111 @@ fn the_first_sources_key_is_still_rewritten_and_one_source_is_unchanged() {
     );
     no_problems(&p);
 }
+/// The index section (4-12) is dropped, so the row of F-1 (line 10) lives only in F-1's entry
+/// body, verbatim. Breaks if a folded-source citation in that row passes: in new mode, in
+/// existing mode (where every section is dropped), and in a row-only record's row (line 12).
+#[test]
+fn a_folded_source_citation_in_a_carried_index_row_is_refused() {
+    let row = TRACKER.replace("First, see F-2", "First, see [[x-archive:F-9]]");
+    let (mut m, mut sources) = folded();
+    m.sections[0].to = "drop".into();
+    sources[0] = source(X, &row);
+    let p = plan_with(&m, sources, &BTreeMap::new(), &BTreeMap::new(), None);
+    assert_eq!(
+        p.problems,
+        vec![format!(
+            "docs/trackers/x.md line 10 cites x-archive, {FOLDED}"
+        )]
+    );
+
+    let (_, mut sources) = folded();
+    sources[0] = source(X, &row);
+    let mut m = existing_mapping();
+    m.sources = folded().0.sources;
+    let schema = existing_schema();
+    let p = plan_with(
+        &m,
+        sources,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        Some((&schema, None, vec![])),
+    );
+    assert_eq!(
+        p.problems,
+        vec![format!(
+            "docs/trackers/x.md line 10 cites x-archive, {FOLDED}"
+        )]
+    );
+
+    let row3 = "| F-3 | open | Third | 2026-08-03 [[x-archive:F-9]] |";
+    let (mut m, mut sources) = folded();
+    m.sections[0].to = "drop".into();
+    m.row_title_column = Some("Title".into());
+    m.status_none = Some("open".into());
+    sources[0] = source(
+        X,
+        &TRACKER.replace(&format!("{F2_ROW}\n"), &format!("{F2_ROW}\n{row3}\n")),
+    );
+    let p = plan_with(&m, sources, &BTreeMap::new(), &BTreeMap::new(), None);
+    assert_eq!(
+        p.problems,
+        vec![format!(
+            "docs/trackers/x.md line 12 cites x-archive, {FOLDED}"
+        )]
+    );
+}
+
+/// With `target.key = "y"`, the row of F-1 (line 10) keeps `[[x:F-1]]` verbatim and nothing
+/// rewrites it. Breaks if that old-key citation in a row passes.
+#[test]
+fn an_old_key_citation_in_a_carried_index_row_is_refused() {
+    let mut m = mapping();
+    m.sections[0].to = "drop".into();
+    m.target.key = Some("y".into());
+    let text = TRACKER.replace("First, see F-2", "First, see [[x:F-1]]");
+    let p = plan(&m, &text);
+    assert_eq!(
+        p.problems,
+        vec!["docs/trackers/x.md line 10 has an index row that cites x. The row is carried verbatim and the key changes to y, so that citation would stop resolving. Rewrite the citation first, or keep the key."]
+    );
+}
+
+/// Breaks if a row citation that still resolves is refused: the first source's key when the key
+/// is kept, the new key, a foreign repo, or a citation inside a code span. A run with no such
+/// citation stays clean.
+#[test]
+fn a_row_citation_that_still_resolves_is_not_refused() {
+    let with_row = |cell: &str| TRACKER.replace("First, see F-2", cell);
+    let (mut m, mut sources) = folded();
+    m.sections[0].to = "drop".into();
+    sources[0] = source(X, &with_row("First, see [[x:F-1]]"));
+    no_problems(&plan_with(
+        &m,
+        sources,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        None,
+    ));
+
+    let (_, mut sources) = folded();
+    sources[0] = source(
+        X,
+        &with_row("First, see [[other/x-archive:F-9]] and `[[x-archive:F-9]]`"),
+    );
+    no_problems(&plan_with(
+        &m,
+        sources,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        None,
+    ));
+
+    let mut m = mapping();
+    m.sections[0].to = "drop".into();
+    m.target.key = Some("y".into());
+    no_problems(&plan(
+        &m,
+        &with_row("First, see [[y:F-1]], [[other/x:F-1]] and `[[x:F-1]]`"),
+    ));
+    no_problems(&plan(&m, TRACKER));
+}
