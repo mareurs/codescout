@@ -2051,4 +2051,56 @@ to = "readme"
             "token F-1 has two record headings in docs/trackers/x.md, at line 13 and at line 24. Keep one.",
         );
     }
+
+    /// F-2 gets F-1's title and date and stays live, so both render to
+    /// `docs/trackers/ledgers/x/2026-08-01-first-thing.md`. Breaks if the second record silently
+    /// overwrites the first in `writes`.
+    #[test]
+    fn two_records_with_one_key_are_refused() {
+        let text = TRACKER
+            .replace("## F-2 — Second thing", "## F-2 — First thing")
+            .replace(
+                "**Status:** fixed\n**Closed:** 2026-09-01\n",
+                "**Status:** open\n",
+            )
+            .replace(F2_ROW, "| F-2 | open | Second | 2026-08-01 |");
+        let p = plan(&mapping(), &text);
+        assert_eq!(
+            p.problems,
+            vec!["F-1 and F-2 both get the key 2026-08-01-first-thing. Set overrides.F-2.slug."]
+        );
+    }
+
+    /// A second index table (section 24, header 26) also lists F-2. Breaks if a row is taken
+    /// without `index_table`, or if `index_table` does not pick the row of its own table.
+    #[test]
+    fn a_token_in_two_index_tables_needs_index_table() {
+        let again = "| F-2 | fixed | Second again | 2026-08-02 |";
+        let text = format!(
+            "{TRACKER}\n## Archive index\n\n| ID | Status | Title | Opened |\n|---|---|---|---|\n{again}\n"
+        );
+        let mut m = mapping();
+        m.sections.push(SectionSpec {
+            source: X.into(),
+            start: 24,
+            to: "drop".into(),
+            confirm: false,
+        });
+        let p = plan(&m, &text);
+        assert_eq!(
+            p.problems,
+            vec!["token F-2 has rows in the index tables at line 8 of docs/trackers/x.md and line 26 of docs/trackers/x.md. Set index_table to the first line of the section that holds the table to use."]
+        );
+
+        for (start, row) in [(4, F2_ROW), (24, again)] {
+            m.index_table = Some(start);
+            let p = plan(&m, &text);
+            no_problems(&p);
+            let b = body(&p.writes[F2_PATH]);
+            assert!(
+                b.ends_with(&format!("\n\n**Index row:** {row}")),
+                "index_table {start}: {b}"
+            );
+        }
+    }
 }
