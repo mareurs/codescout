@@ -34,6 +34,8 @@ Plan E scout `02d716631c64e393` splits E into E1..E8 (storage location; derived 
 
 **E1 landed 2026-11-16** (integration `19e87e370` to `725eea39a`, gate green; subagent-driven; plan `1acdb2caa8b83767`, state doc `6ba1be1f51416c0e`): `BuildInput` only from a commit; the vector cache path named by `LibrarianEnv::machine_paths`; `cutover build` writes `<git root>/.codescout/derived.db` and refuses links, hard links on Unix, directories, tracked files and a repository that does not ignore it; the other-repository guard is deleted. Nothing in production reads `derived.db` (tripwire test). The E1 branch and worktree `.worktrees/e1-storage-location-20261115` and the SDD workspace are kept until the operator answers. Next: E2 plan (derived schema v2), then E3.
 
+**E2 in progress (2026-11-16, for resume):** plan `dc0d65557a9577ee` (10 tasks, Opus-reviewed, committed `def9c8c75`); branch `feat/e2-derived-schema-v2-20261116` in `.worktrees/e2-derived-schema-v2-20261116`, BASE `725eea39a`, HEAD `01cad96e9`; Task 1 complete, Task 2 fix committed with its scoped re-review running (Sonnet agent `aef58f96b3ba79745`), Tasks 3-9 not started. READ FIRST: `docs/research/2026-11-16-artifact-identity-plan-e2-execution-state.md` (id `82be9a55b2fe0746`: method, how to resume, the carried rulings, how to reach the lifecycle fork) and the ledger `progress.md` in the worktree's `.superpowers/sdd/2026-11-16-artifact-identity-plan-e2-derived-schema-v2/`. Integration is `725eea39a` (E1 landed); `experiments` is `def9c8c75`. Nothing is pushed.
+
 ## Rules that bite when resuming
 
 
