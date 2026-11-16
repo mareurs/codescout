@@ -303,12 +303,13 @@ fn init_schema(conn: &Connection, path: Option<&Path>) -> rusqlite::Result<()> {
 }
 
 /// Whether the file holds exactly the version-1 schema: every `sqlite_master` entry (SQLite's own
-/// `sqlite_%` entries aside) is one of the eight [`V1_TABLES`], each once. Version 1 made tables
-/// only, so a view, a trigger or an index is another program's object.
+/// `sqlite_` entries aside, the `_` escaped so that it is no wildcard) is one of the eight
+/// [`V1_TABLES`], each once. Version 1 made tables only, so a view, a trigger or an index is
+/// another program's object.
 fn is_exactly_version_1(conn: &Connection) -> rusqlite::Result<bool> {
     let entries: Vec<(String, String)> = conn
         .prepare(
-            "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' \
+            "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite\\_%' ESCAPE '\\' \
              ORDER BY name",
         )?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -397,8 +398,8 @@ pub(crate) fn dump_tree(conn: &Connection) -> BTreeMap<String, Vec<Vec<String>>>
 fn dump_tables(conn: &Connection, skip: &[&str]) -> BTreeMap<String, Vec<Vec<String>>> {
     let tables: Vec<String> = conn
         .prepare(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
-             ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type = 'table' \
+             AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name",
         )
         .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
         .expect("list the derived index's tables");
@@ -800,6 +801,27 @@ mod tests {
         let path = dir.path().join("derived.db");
         older_file(&path, -1, &V1_TABLES);
         assert_older_file_refused(&path, "version -1 over the v1 tables");
+    }
+    // mutation: either site's `NOT LIKE 'sqlite\_%' ESCAPE '\'` back to `NOT LIKE 'sqlite_%'`
+    // (`_` matches any character, so `sqliteab` passes for one of SQLite's own entries).
+    #[test]
+    fn a_table_named_sqliteab_is_another_programs_and_the_dump_shows_it() {
+        // The rebuild check: a v1 file holding it is refused, not rebuilt around it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("derived.db");
+        let mut tables = V1_TABLES.to_vec();
+        tables.push("sqliteab");
+        older_file(&path, 1, &tables);
+        assert_older_file_refused(&path, "a v1 file holding a table named sqliteab");
+
+        // The dump: every table except `parse_cache`, this one included.
+        let conn = open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE sqliteab (x); INSERT INTO sqliteab VALUES (1);")
+            .unwrap();
+        assert_eq!(
+            dump_all(&conn).get("sqliteab"),
+            Some(&vec![vec!["I:1".to_owned()]])
+        );
     }
 
     /// The DDL a real version-1 file was made with, as committed at 725eea39a.

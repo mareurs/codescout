@@ -1971,6 +1971,71 @@ mod tests {
             ]
         );
     }
+    // An event section's span runs to its last line inclusive (`end_line`), the end of the file
+    // included: a relation line there is the event's text and has no rel. The first relation line
+    // after the span (under the next heading) has its rel.
+    // mutation: the span filter's `heading_line..=end_line` to `heading_line..end_line`.
+    #[test]
+    fn a_relation_line_on_an_event_spans_last_line_has_no_rel_and_one_after_the_span_does() {
+        let event = event_text("n-1", "note", &[], serde_json::json!({"text": "x"}));
+        let at_eof = format!(
+            "# A\n\n## Events\n\n{}\n**Depends on:** [[c]]\n",
+            section(&event)
+        );
+        let before_heading = format!(
+            "# E\n\n## Events\n\n{}\n**Depends on:** [[c]]\n## Relations\n\n**Depends on:** [[c]]\n",
+            section(&event)
+        );
+        let (_dir, repo) = fixture(&[
+            ("docs/a.md", &at_eof),
+            ("docs/e.md", &before_heading),
+            ("docs/c.md", "# C\n"),
+        ]);
+
+        let (conn, _) = built(&repo);
+
+        // The fixture: in each document the in-span relation line is the span's last line.
+        let span_end = |rel_path: &str| -> i64 {
+            conn.query_row(
+                "SELECT end_line FROM event WHERE rel_path = ?1",
+                [rel_path],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let lines_of = |rel_path: &str| -> Vec<i64> {
+            conn.prepare("SELECT line FROM edge WHERE src_rel_path = ?1 ORDER BY ord")
+                .unwrap()
+                .query_map([rel_path], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let at_eof_lines = lines_of("docs/a.md");
+        assert_eq!(at_eof_lines, [at_eof.lines().count() as i64]);
+        assert_eq!(span_end("docs/a.md"), at_eof_lines[0]);
+        let e_lines = lines_of("docs/e.md");
+        assert_eq!(e_lines.len(), 2, "{e_lines:?}");
+        assert_eq!(span_end("docs/e.md"), e_lines[0]);
+        assert_eq!(
+            e_lines[1],
+            e_lines[0] + 3,
+            "heading, blank line, relation line"
+        );
+
+        assert_eq!(
+            rel_rows(&conn, "docs/a.md"),
+            [rel_row("file", Some("c"), None)]
+        );
+        assert_eq!(
+            rel_rows(&conn, "docs/e.md"),
+            [
+                rel_row("file", Some("c"), None),
+                rel_row("file", Some("c"), Some("depends_on")),
+            ]
+        );
+    }
+
     /// `(rel_path, entry_kind, status_since, created, closed, revisit_by, valid, fields_json)` of
     /// every `entry_doc` row, by path.
     type EntryDocCells = (
@@ -2097,6 +2162,37 @@ mod tests {
             )]
         );
         assert_eq!(report.problems, 1);
+    }
+    // An `entry_kind` that is present and not null makes an entry document, whatever its type; a
+    // value that is no string does not parse as one.
+    // mutation: detect an entry document with `as_str` only (`5` and `[a]` are then no entry
+    // document, and no problem row is written).
+    #[test]
+    fn a_non_string_entry_kind_is_an_unparsed_entry_document() {
+        let rest = "title: X\nstatus: open\nstatus_since: 2026-11-01\ncreated: 2026-10-30\n";
+        let number = entry_text(&format!("entry_kind: 5\n{rest}"));
+        let list = entry_text(&format!("entry_kind: [a]\n{rest}"));
+        let (_dir, repo) = fixture(&[("docs/n.md", &number), ("docs/l.md", &list)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(count(&conn, "entry_doc"), 0, "{:?}", entry_doc_rows(&conn));
+        assert_eq!(
+            problem_rows(&conn),
+            [
+                (
+                    "entry_unparsed".to_owned(),
+                    Some("l".to_owned()),
+                    r#"["docs/l.md"]"#.to_owned()
+                ),
+                (
+                    "entry_unparsed".to_owned(),
+                    Some("n".to_owned()),
+                    r#"["docs/n.md"]"#.to_owned()
+                ),
+            ]
+        );
+        assert_eq!(report.problems, 2);
     }
 
     // mutation: the key of the problem row is the file stem, or the row is left out for a path

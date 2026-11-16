@@ -9,7 +9,7 @@
 
 use crate::librarian::catalog::event_text::{home_lines, splice_under_home};
 use crate::librarian::frontmatter;
-use crate::librarian::lifecycle::relations::{relation_labels, relations};
+use crate::librarian::lifecycle::relations::{rel_of_label, relation_labels, relations};
 use anyhow::{bail, Result};
 
 /// The heading that is the home of every relation line of a document.
@@ -31,6 +31,14 @@ pub(crate) fn label_for_rel(rel: &str) -> Result<String, String> {
         first.make_ascii_uppercase();
     }
     valid_label(&label).map(|()| label)
+}
+/// Whether a link of `rel` is a `supersedes` link: any spelling the label reader takes as
+/// `Supersedes` (`supersedes`, `SUPERSEDES`, `Supersedes`) writes the destination's `status:
+/// superseded` and the row's canonical rel. One predicate for the write (`tools::link::call`) and
+/// for the path the write names (`artifact::write_target_id`), so the two never disagree on which
+/// file changed.
+pub(crate) fn is_superseding(rel: &str) -> bool {
+    label_for_rel(rel).is_ok_and(|label| rel_of_label(&label) == "supersedes")
 }
 
 /// `doc` with the line `**<label>:** <form>` added to its `## Relations` section, in text order:

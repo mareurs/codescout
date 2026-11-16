@@ -193,6 +193,11 @@ pub(crate) fn changed_markdown(
 /// - Otherwise the bytes come through the read door: their SHA-256, and their text, or a
 ///   `not_utf8` skip when they are not UTF-8. A file that is gone by now (`NotFound`) is a
 ///   deletion; any other failure, a refusal by the door included, fails the whole read.
+/// - The link check and the read are two steps. A file swapped for a link between them is read
+///   through the link as text when the link resolves inside the repository (the door judges the
+///   opened file's real location, so a link that leaves the repository is still refused).
+/// - A directory at a tracked `x.md` path is `Modified` in the status and is no regular file, so
+///   the door refuses it and the whole update fails.
 ///
 /// An error names the path relative to the repository and never the location the door judged.
 pub(crate) fn read_layer(
@@ -683,6 +688,31 @@ mod tests {
                 ),
             ]
         );
+
+        // The renamed document keeps the commit's citations, and `b.md` moved away under
+        // another key, so both citations of `b` now name nothing.
+        let unknown = |repo: Option<&str>| {
+            (
+                "unknown_key".to_owned(),
+                repo.map(str::to_owned),
+                Some("b".to_owned()),
+                None,
+            )
+        };
+        assert_eq!(
+            edges_from(&conn, "docs/renamed.md"),
+            [unknown(None), unknown(Some("home"))]
+        );
+        // The control: in the commit the same two citations resolve to `docs/b.md`.
+        let mut oracle = open_in_memory().unwrap();
+        full(&mut oracle, &c.path);
+        assert_eq!(
+            edges_from(&oracle, "docs/a.md")
+                .iter()
+                .map(|e| e.0.as_str())
+                .collect::<Vec<_>>(),
+            ["file", "file"]
+        );
     }
 
     // mutation: read a conflicted file like any other (the conflict markers become the text).
@@ -804,6 +834,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cached, 0);
+    }
+    // A tracked directory replaced on disk by a link to a directory outside the clone: libgit2
+    // stats the tracked path through the link and reports it modified, the path's own last
+    // component is no link, and the read door refuses the file (it resolves outside the root).
+    // mutations: read a refused path as gone instead of failing; read the bytes past the door
+    // (`std::fs::read`).
+    #[cfg(unix)]
+    #[test]
+    fn a_door_refusal_fails_the_update_names_no_absolute_path_and_changes_nothing() {
+        const MARKER: &str = "OUTSIDE-3c9";
+        let c = clone_of(&corpus());
+        let mut conn = open_in_memory().unwrap();
+        full(&mut conn, &c.path);
+        let before = dump_all(&conn);
+
+        let outside = c.parent.path().join("outside-trackers");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(
+            outside.join("bug-log.md"),
+            format!("# Not the repository's\n\n## B-1 — {MARKER}\n"),
+        )
+        .unwrap();
+        std::fs::remove_dir_all(c.path.join("docs/trackers")).unwrap();
+        std::os::unix::fs::symlink(&outside, c.path.join("docs/trackers")).unwrap();
+
+        // The fixture: the status reaches the tracked file through the link.
+        let repo = git2::Repository::open(&c.path).unwrap();
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let paths: Vec<(String, &str)> = changed_markdown(&repo, &commit)
+            .unwrap()
+            .into_iter()
+            .map(|p| (p.rel_path, p.state.as_str()))
+            .collect();
+        assert_eq!(paths, [("docs/trackers/bug-log.md".to_owned(), "modified")]);
+
+        let message = format!(
+            "{:#}",
+            update(&mut conn, &c.path).expect_err("a door refusal fails the update")
+        );
+        assert!(
+            message.contains("refused docs/trackers/bug-log.md"),
+            "{message}"
+        );
+        let absolute: Vec<&str> = message
+            .split_whitespace()
+            .filter(|word| {
+                word.trim_start_matches(['(', '`', '\'', '"'])
+                    .starts_with('/')
+            })
+            .collect();
+        assert!(absolute.is_empty(), "an absolute path: {message}");
+        assert!(!message.contains(MARKER), "{message}");
+        assert_eq!(dump_all(&conn), before, "a failed update changes nothing");
     }
 
     // mutation: strip `\r` before hashing, the two hashes then match.

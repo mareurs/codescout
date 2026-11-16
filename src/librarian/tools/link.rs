@@ -4,9 +4,8 @@ use serde_json::{json, Value};
 
 use super::{LibrarianRecoverableError, ToolContext};
 use crate::librarian::catalog::dual_write::{TwinWhat, TwinWrite};
-use crate::librarian::catalog::link_text::{label_for_rel, splice_relation};
+use crate::librarian::catalog::link_text::{is_superseding, label_for_rel, splice_relation};
 use crate::librarian::catalog::{artifact, links, Catalog};
-use crate::librarian::lifecycle::relations::rel_of_label;
 
 #[derive(Deserialize)]
 struct Args {
@@ -142,14 +141,6 @@ fn note_destination_change(e: anyhow::Error, dst_label: &str) -> anyhow::Error {
          write is idempotent."
     );
     crate::librarian::catalog::dual_write::with_sentence(e, &sentence)
-}
-
-/// Whether a link of `rel` is a `supersedes` link: any spelling the label reader takes as
-/// `Supersedes` (`supersedes`, `SUPERSEDES`, `Supersedes`) writes the destination's `status:
-/// superseded` and the row's canonical rel. One predicate for the write (`call`) and for the path
-/// the write names (`artifact::write_target_id`), so the two never disagree on which file changed.
-pub(crate) fn is_superseding(rel: &str) -> bool {
-    label_for_rel(rel).is_ok_and(|label| rel_of_label(&label) == "supersedes")
 }
 
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {

@@ -188,7 +188,7 @@ fn write_target_id(action: &str, args: &Value) -> Option<WriteTarget> {
             if args
                 .get("rel")
                 .and_then(Value::as_str)
-                .is_some_and(super::link::is_superseding) =>
+                .is_some_and(crate::librarian::catalog::link_text::is_superseding) =>
         {
             "dst_id"
         }
