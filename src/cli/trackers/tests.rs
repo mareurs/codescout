@@ -989,6 +989,51 @@ async fn apply_refuses_a_source_with_catalog_only_facts() {
     assert_eq!(out.stdout, line);
 }
 
+/// A fact the cutover cannot put in a file (a note event on a document without
+/// `single_writer`: a `Skipped` item, "no committed home yet") does not refuse, but the delete
+/// drops it, so `review.dropped` names it. With no such item, `review.dropped` holds no catalog
+/// line. Breaks if such items refuse, or are not listed, or are listed for a catalog that has
+/// none.
+#[tokio::test]
+async fn a_fact_the_cutover_cannot_home_is_listed_as_dropped() {
+    let no_link = X_TRACKER.replace("[F-2](x.md)", "F-2 again");
+    let with_catalog = |w: &Work, event: bool| {
+        let dir = tempfile::tempdir().unwrap();
+        let db = std::fs::canonicalize(dir.path())
+            .unwrap()
+            .join("catalog.db");
+        old_catalog_file(&db, |cat| {
+            add_doc(cat, &w.root, "x1", X);
+            if event {
+                add_event(cat, "e1", "x1", "note", r#"{"text": "hello"}"#);
+            }
+        });
+        let env = ApplyEnv {
+            librarian_db: Some(db.into()),
+            ..test_env()
+        };
+        (dir, env)
+    };
+
+    let w = work_repo(&[(X, &no_link)]);
+    let (_dir, env) = with_catalog(&w, true);
+    let out = apply_with(&w, BASE, true, false, &env).await;
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    assert_eq!(
+        json_of(&out)["review"]["dropped"],
+        json!([
+            "a note event on docs/trackers/x.md is not carried (no committed home yet: not a \
+             single-writer document)"
+        ])
+    );
+
+    let w = work_repo(&[(X, &no_link)]);
+    let (_dir, env) = with_catalog(&w, false);
+    let out = apply_with(&w, BASE, true, false, &env).await;
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    assert_eq!(json_of(&out)["review"]["dropped"], json!([]));
+}
+
 /// The repository after a first apply, committed on 2026-09-01.
 async fn migrated() -> Work {
     let w = x_repo();

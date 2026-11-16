@@ -24,7 +24,7 @@ use crate::cli::write_lock::{lock_root_for, take_at};
 use crate::librarian::augmentation_sidecar::rel_path_for;
 use crate::librarian::current_project::lookup_git_root;
 use crate::librarian::cutover::code_refs::{CodeRefs, AUDIT_DIR, DATA_EXTENSIONS, LINK_MODE};
-use crate::librarian::cutover::plan::Status as CutoverStatus;
+use crate::librarian::cutover::plan::{Class as CutoverClass, Status as CutoverStatus};
 use crate::librarian::derived::build::key_space_from_commit;
 use crate::librarian::derived::diff::NoOldRowsUnderRoot;
 use crate::librarian::derived::old_catalog::resolve_old_catalog;
@@ -740,7 +740,8 @@ async fn apply_run(req: &ApplyRequest<'_>, cwd: &Path, env: &ApplyEnv) -> Result
     let mut reasons = mapping_problems(&mapping, &head.inventory);
 
     // 3. Preconditions (a) catalog facts, (b) readers, (d) not shallow.
-    reasons.extend(catalog_facts(&head, &start, cwd, env, req.no_old_catalog)?);
+    let catalog = catalog_facts(&head, &start, cwd, env, req.no_old_catalog)?;
+    reasons.extend(catalog.refusals);
     reasons.extend(readers(&mapping, &head.inventory));
     if is_shallow(&repo) {
         reasons.push(SHALLOW.to_string());
@@ -748,7 +749,7 @@ async fn apply_run(req: &ApplyRequest<'_>, cwd: &Path, env: &ApplyEnv) -> Result
     }
 
     // 4-5. The plan from HEAD and its problems.
-    let plan = match plan_from_head(&repo, &commit, &git_root, &mapping, &head, env.now) {
+    let mut plan = match plan_from_head(&repo, &commit, &git_root, &mapping, &head, env.now) {
         Ok(plan) => plan,
         Err(Stop::Refused(more)) => {
             reasons.extend(more);
@@ -757,6 +758,8 @@ async fn apply_run(req: &ApplyRequest<'_>, cwd: &Path, env: &ApplyEnv) -> Result
         Err(stop) => return Err(stop),
     };
     reasons.extend(plan.problems.iter().cloned());
+    // The catalog facts the delete of a source drops are review material (fix I-3).
+    plan.review.dropped.extend(catalog.dropped);
 
     // 3(c) needs the plan's paths, and step 6 decides each path before anything is written.
     let dirty = dirty_paths(&git_root, &work.changed, &plan);
@@ -1136,27 +1139,41 @@ fn first_heading_token(text: &str) -> Option<String> {
         .map(|(token, _)| token)
 }
 
+/// What precondition (a) found: the refusals, and the catalog facts the delete drops.
+#[derive(Default)]
+struct CatalogCheck {
+    refusals: Vec<String>,
+    /// One line per cutover item (`Skipped` or `Unrecoverable`) of a source or its sidecar: a
+    /// fact no file will hold, which the delete of the source drops. Goes to `review.dropped`.
+    dropped: Vec<String>,
+}
+
 /// Precondition (a): the identity cutover has nothing left to do for a source or its sidecar: a
 /// cutover plan of HEAD writes neither and moves no item of either (spec § Preconditions, plan
 /// P-R4). A plan that still rewrites an old citation form in a source refuses too: the
-/// cutover has not run there. With no old catalog on this machine, or one whose rows all lie
-/// under other repositories, it is a refusal unless `no_old_catalog`; when a catalog has rows
-/// for this repository the check runs whatever the flag says.
+/// cutover has not run there. A `Skipped` or `Unrecoverable` item of a source or its sidecar
+/// does not refuse; it is listed in `dropped`. With no old catalog on this machine, or one
+/// whose rows all lie under other repositories, it is a refusal unless `no_old_catalog`; when a
+/// catalog has rows for this repository the check runs whatever the flag says.
 fn catalog_facts(
     head: &HeadView,
     start: &Path,
     cwd: &Path,
     env: &ApplyEnv,
     no_old_catalog: bool,
-) -> Result<Vec<String>, Stop> {
+) -> Result<CatalogCheck, Stop> {
+    let none = |refusal: &str| CatalogCheck {
+        refusals: if no_old_catalog {
+            Vec::new()
+        } else {
+            vec![refusal.to_string()]
+        },
+        dropped: Vec::new(),
+    };
     let found = resolve_old_catalog(None, env.librarian_db.clone(), env.data_dir.clone())
         .filter(|path| std::fs::metadata(path).is_ok());
     if found.is_none() {
-        return Ok(if no_old_catalog {
-            Vec::new()
-        } else {
-            vec![NO_OLD_CATALOG.to_string()]
-        });
+        return Ok(none(NO_OLD_CATALOG));
     }
     let args = CommonArgs {
         project: Some(start.to_path_buf()),
@@ -1168,11 +1185,7 @@ fn catalog_facts(
         Ok(loaded) => loaded,
         // Rows only for other repositories: for this repository that is no old catalog.
         Err(e) if e.downcast_ref::<NoOldRowsUnderRoot>().is_some() => {
-            return Ok(if no_old_catalog {
-                Vec::new()
-            } else {
-                vec![NO_OLD_ROWS.to_string()]
-            });
+            return Ok(none(NO_OLD_ROWS));
         }
         Err(e) => return Err(e.into()),
     };
@@ -1189,14 +1202,34 @@ fn catalog_facts(
             }
         }
     }
+    let mut dropped = Vec::new();
     for item in &loaded.plan.items {
-        if item.status == CutoverStatus::Moved {
-            if let Some(p) = item.path.as_ref().filter(|p| watched.contains(*p)) {
+        let Some(p) = item.path.as_ref().filter(|p| watched.contains(*p)) else {
+            continue;
+        };
+        match item.status {
+            CutoverStatus::Moved => {
                 hit.insert(p.clone());
             }
+            CutoverStatus::Skipped | CutoverStatus::Unrecoverable => {
+                let what = match (item.class, &item.detail) {
+                    (CutoverClass::Event, Some(kind)) => format!("{kind} event"),
+                    (class, _) => format!("{} item", class.label().replace('_', " ")),
+                };
+                let article = if what.starts_with(['a', 'e', 'i', 'o', 'u']) {
+                    "an"
+                } else {
+                    "a"
+                };
+                dropped.push(format!(
+                    "{article} {what} on {p} is not carried ({})",
+                    item.reason
+                ));
+            }
+            CutoverStatus::AlreadyExported => {}
         }
     }
-    Ok(hit
+    let refusals = hit
         .into_iter()
         .map(|p| {
             format!(
@@ -1205,7 +1238,8 @@ fn catalog_facts(
                  again."
             )
         })
-        .collect())
+        .collect();
+    Ok(CatalogCheck { refusals, dropped })
 }
 
 /// Precondition (b): each non-markdown file that names a source and is classed `reader`.
