@@ -2,6 +2,7 @@
 
 pub mod build;
 pub mod diff;
+mod history;
 pub mod incremental;
 pub mod old_catalog;
 pub mod scan;

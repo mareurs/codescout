@@ -28,6 +28,7 @@ use anyhow::Context;
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
+use super::history;
 use super::incremental::{self, CacheKey, Parsed};
 use super::scan::{blob_text, scan_commit, ScannedFile};
 use crate::librarian::augmentation_sidecar::{refuse_lexical_escape, AugmentationSidecar};
@@ -351,6 +352,16 @@ pub(super) fn rebuild_from(
         })
         .collect();
 
+    // The git history is walked here too, before the write transaction: a walk reads the object
+    // database and takes as long as the repository is deep. An update at the commit, parse
+    // version and shallow state the stored history was walked from keeps it; `build_full` never
+    // reuses anything.
+    let walked = if reuse_cache && history::reusable(conn, input.repo, input.commit)? {
+        None
+    } else {
+        Some(history::walk(input.repo, input.commit).context("walking the git history")?)
+    };
+
     let tx = conn.transaction()?;
     for table in DERIVED_TABLES {
         tx.execute(&format!("DELETE FROM {table}"), [])?;
@@ -397,6 +408,9 @@ pub(super) fn rebuild_from(
             .execute(params![rel_path, reason])?;
     }
     incremental::sync_cache(&tx, &parsed).context("writing the parse cache")?;
+    if let Some(walked) = &walked {
+        history::write(&tx, walked).context("writing the git history")?;
+    }
     tx.commit()?;
     Ok(report)
 }
@@ -1139,7 +1153,9 @@ mod tests {
     use super::*;
     use crate::librarian::catalog::event_text::{render_event_section, EventSource};
     use crate::librarian::derived::scan::open_commit;
-    use crate::librarian::derived::schema::{dump_all, open as open_index, open_in_memory};
+    use crate::librarian::derived::schema::{
+        dump_all, dump_tree, open as open_index, open_in_memory,
+    };
     use crate::librarian::derived::testkit::{
         clone_repo, git, repo_with, repo_with_commit, repo_with_raw_tree, FILE, LINK,
     };
@@ -3140,6 +3156,8 @@ mod tests {
             "event",
             "entry_doc",
             "augmentation",
+            "doc_history",
+            "history_meta",
         ] {
             assert!(!dump[table].is_empty(), "the corpus gives {table} no rows");
         }
@@ -3261,10 +3279,15 @@ mod tests {
 
         let (conn_a, report_a) = built(&repo_a);
         let (conn_b, report_b) = built(&repo_b);
-        let dump_a = dump_all(&conn_a);
-        assert_corpus_is_not_vacuous(&dump_a);
+        let (all_a, all_b) = (dump_all(&conn_a), dump_all(&conn_b));
+        assert_corpus_is_not_vacuous(&all_a);
         assert_eq!(report_a, report_b);
-        assert_eq!(dump_a, dump_all(&conn_b));
+        // The derived answer about the tree is one.
+        assert_eq!(dump_tree(&conn_a), dump_tree(&conn_b));
+        // The two commits have two histories, and the history tables are where that shows.
+        assert_ne!(all_a, all_b);
+        assert_ne!(all_a["history_meta"], all_b["history_meta"]);
+        assert_ne!(all_a["doc_history"], all_b["doc_history"]);
         // The commit id is excluded from the dump by design, and it is what differs.
         let sha_of = |conn: &Connection| -> String {
             conn.query_row("SELECT commit_sha FROM checkout", [], |r| r.get(0))
@@ -3618,6 +3641,30 @@ mod tests {
         println!("problems by kind: {problems:?}");
         println!("skipped by reason: {skipped:?}");
 
+        // The other tables E2 added, and the history walk on its own (a second walk, timed).
+        let rels =
+            grouped("SELECT coalesce(rel, '(none)'), count(*) FROM edge GROUP BY rel ORDER BY rel");
+        let started = std::time::Instant::now();
+        let walked = history::walk(&repo, &commit).unwrap();
+        let walk_ms = started.elapsed().as_millis();
+        println!(
+            "event {}, entry_doc {}, augmentation {}, doc_history {}",
+            count(&conn, "event"),
+            count(&conn, "entry_doc"),
+            count(&conn, "augmentation"),
+            count(&conn, "doc_history")
+        );
+        println!("edges by rel: {rels:?}");
+        println!("history walk: {walk_ms} ms, {} rows", walked.rows.len());
+        assert!(
+            count(&conn, "doc_history") > 0,
+            "no history row for any document of HEAD"
+        );
+        assert_eq!(
+            count(&conn, "doc_history"),
+            walked.rows.len(),
+            "the build stored the walk"
+        );
         assert!(report.documents > 0, "no document in HEAD's tree");
         assert_eq!(
             edges.iter().map(|(_, n)| n).sum::<usize>(),
@@ -3636,5 +3683,31 @@ mod tests {
                 "skip reason {reason}"
             );
         }
+    }
+
+    /// A measurement, not a regression test: the first-parent history walk of THIS checkout's
+    /// HEAD, timed and counted. Run it with
+    /// `cargo test --lib history_walk_of_this_repo -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement of this repository's HEAD: run with --ignored --nocapture"]
+    fn history_walk_of_this_repo() {
+        let repo = git2::Repository::discover(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let started = std::time::Instant::now();
+        let walked = history::walk(&repo, &commit).unwrap();
+        let walk_ms = started.elapsed().as_millis();
+        let paths: std::collections::BTreeSet<&str> =
+            walked.rows.iter().map(|r| r.rel_path.as_str()).collect();
+        let deepest = walked.rows.iter().map(|r| r.walk_pos).max();
+        println!(
+            "history walk of {}: {walk_ms} ms, {} rows, {} paths, deepest walk_pos {deepest:?}, \
+             shallow {}",
+            commit.id(),
+            walked.rows.len(),
+            paths.len(),
+            walked.shallow
+        );
+        assert!(!walked.rows.is_empty(), "no history row for any document");
+        assert_eq!(walked.shallow, repo.is_shallow());
     }
 }

@@ -1152,6 +1152,80 @@ mod tests {
         assert_eq!(dump_all(&conn), honest);
     }
 
+    /// The distinct authors `doc_history` holds: a marker the test plants and looks for.
+    fn history_authors(conn: &Connection) -> Vec<String> {
+        conn.prepare("SELECT DISTINCT author FROM doc_history ORDER BY author")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn plant_sentinel(conn: &Connection) {
+        conn.execute("UPDATE doc_history SET author = 'sentinel'", [])
+            .unwrap();
+        assert_eq!(history_authors(conn), ["sentinel"]);
+    }
+
+    fn history_meta_of(conn: &Connection) -> (String, String, i64) {
+        conn.query_row(
+            "SELECT commit_sha, parser_version, shallow FROM history_meta",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+    }
+
+    // mutation: compare the commit only (not the parser version, not the shallow state), or not
+    // even the commit.
+    #[test]
+    fn history_is_reused_only_at_the_same_commit_parser_and_shallow_state() {
+        let h = history(&[
+            &[("docs/a.md", "# A\n")],
+            &[("docs/a.md", "# A\n"), ("docs/b.md", "# B\n")],
+        ]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        assert_eq!(history_authors(&conn), ["Test"]);
+        assert_eq!(
+            history_meta_of(&conn),
+            (h.ids[0].to_string(), PARSER_VERSION.to_owned(), 0)
+        );
+
+        // An update at the same commit keeps the history it has.
+        plant_sentinel(&conn);
+        update_at(&mut conn, &h, 0, 0);
+        assert_eq!(history_authors(&conn), ["sentinel"], "same commit: reused");
+
+        // Another parse version in the record: walked again.
+        conn.execute("UPDATE history_meta SET parser_version = 'old'", [])
+            .unwrap();
+        update_at(&mut conn, &h, 0, 0);
+        assert_eq!(history_authors(&conn), ["Test"], "another parser version");
+        assert_eq!(history_meta_of(&conn).1, PARSER_VERSION);
+
+        // Another shallow state in the record (the repository is not shallow): walked again.
+        plant_sentinel(&conn);
+        conn.execute("UPDATE history_meta SET shallow = 1", [])
+            .unwrap();
+        update_at(&mut conn, &h, 0, 0);
+        assert_eq!(history_authors(&conn), ["Test"], "another shallow state");
+        assert_eq!(history_meta_of(&conn).2, 0);
+
+        // A full build never reuses it.
+        plant_sentinel(&conn);
+        build_at(&mut conn, &h, 0);
+        assert_eq!(history_authors(&conn), ["Test"], "build_full always walks");
+
+        // An update to the next commit walks again, and records that commit.
+        plant_sentinel(&conn);
+        update_at(&mut conn, &h, 0, 1);
+        assert_eq!(history_authors(&conn), ["Test"], "another commit");
+        assert_eq!(history_meta_of(&conn).0, h.ids[1].to_string());
+        assert_eq!(count(&conn, "doc_history"), 2);
+    }
+
     #[test]
     fn a_changed_rules_blob_invalidates_the_cache() {
         let active = "[[rule]]\nglob = \"docs/**/*.md\"\nkind = \"spec\"\nstatus = \"active\"\n";
