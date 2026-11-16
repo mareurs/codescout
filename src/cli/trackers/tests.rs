@@ -1134,9 +1134,52 @@ async fn apply_output_lists_exact_paths() {
             "Written: 3 files: {F1_PATH}, {F2_PATH}, {README}.\n\
              Deleted: 2 files: {SIDECAR}, {X}.\n\
              Already applied: 0 files.\n\
-             Review: 2 derived dates, 0 dropped sections, 1 record with skipped rewrites, \
+             Review: 2 derived dates, 0 dropped items, 1 record with skipped rewrites, \
              0 row-only records, 0 records with no index row, 0 status disagreements.\n"
         )
+    );
+}
+
+/// Final review C1: the text output of apply and check names every dropped item, so the
+/// operator sees a dropped frontmatter key without `--json`; the inventory text names the keys
+/// per source. Breaks if a text output only counts them.
+#[test]
+fn the_text_outputs_name_every_dropped_item() {
+    let line = "docs/trackers/ic/IC-1.md frontmatter owners: [\"marius\"]";
+    let review = Review {
+        dropped: vec![line.to_string()],
+        ..Review::default()
+    };
+    let done = Applied {
+        written: vec![],
+        deleted: vec![],
+        already_applied: vec![],
+        review: review.clone(),
+    };
+    let text = render_applied(&done, false);
+    assert!(text.contains("1 dropped item,"), "{text}");
+    assert!(text.contains(&format!("Dropped: {line}.\n")), "{text}");
+
+    let report = CheckReport {
+        blocking: vec![],
+        review,
+        shortened: vec![],
+    };
+    let text = render_checked(&report, false).stdout;
+    assert!(text.contains("1 dropped item,"), "{text}");
+    assert!(text.contains(&format!("Dropped: {line}.\n")), "{text}");
+
+    let f = repo(&[(
+        "docs/trackers/ic/IC-1.md",
+        "---\ntitle: one\nowners: [marius]\n---\n\n## IC-1 — one\n\nBody.\n",
+    )]);
+    let out = inventory(&f, &["docs/trackers/ic"], "files", false);
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    assert!(
+        out.stdout
+            .contains("- Frontmatter keys that no entry keeps: owners [\"marius\"].\n"),
+        "{}",
+        out.stdout
     );
 }
 

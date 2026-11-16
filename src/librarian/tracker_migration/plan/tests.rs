@@ -603,6 +603,40 @@ fn a_files_source_keeps_its_lowercase_stem() {
     );
 }
 
+/// Final review C1: the entry frontmatter replaces the source frontmatter. Breaks if a source
+/// key that no entry keeps is not listed in `review.dropped` with its value, or if `kind`,
+/// `status` or `title` (which the entry frontmatter replaces) is listed.
+#[test]
+fn source_frontmatter_keys_no_entry_keeps_are_listed_as_dropped() {
+    let mut m = mapping();
+    m.sources = vec![SourceSpec {
+        path: "docs/trackers/ic".into(),
+        kind: "files".into(),
+        level: None,
+    }];
+    m.sections.clear();
+    m.columns.clear();
+    let text = "---\nkind: tracker\nstatus: active\ntitle: 'cluster ten'\nowners:\n- marius\ntags:\n- defect-classes\n- blast-radius\ntopic: issue clusters\n---\n\n## IC-10 — Cluster ten\n\n**Status:** open\nBody.\n";
+    let mut s = source("docs/trackers/ic/IC-10.md", text);
+    s.kind = SourceKind::Whole;
+    s.fixed_stem = Some("ic-10".into());
+    let p = plan_with(&m, vec![s], &BTreeMap::new(), &BTreeMap::new(), None);
+    no_problems(&p);
+    assert_eq!(
+        p.review.dropped,
+        vec![
+            "docs/trackers/ic/IC-10.md frontmatter owners: [\"marius\"]",
+            "docs/trackers/ic/IC-10.md frontmatter tags: [\"defect-classes\",\"blast-radius\"]",
+            "docs/trackers/ic/IC-10.md frontmatter topic: \"issue clusters\"",
+        ]
+    );
+    // TRACKER's frontmatter holds only `title`, which the readme replaces.
+    assert_eq!(
+        plan(&mapping(), TRACKER).review.dropped,
+        Vec::<String>::new()
+    );
+}
+
 /// Breaks if a range is lost, doubled or given to the wrong owner, or if a section with no
 /// `sections` entry gets a default owner.
 #[test]

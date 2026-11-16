@@ -656,6 +656,7 @@ confirm = true
             no_row: vec![],
             duplicate_rows: vec![],
             disagreements: vec![],
+            dropped_frontmatter: vec![],
         }
     }
 
@@ -1360,6 +1361,7 @@ more\n";
             no_row: vec![],
             duplicate_rows: vec![],
             disagreements: vec![],
+            dropped_frontmatter: vec![],
         };
         let inv = Inventory {
             sources: vec![src],

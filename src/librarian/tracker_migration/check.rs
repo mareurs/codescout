@@ -15,6 +15,7 @@ use chrono::NaiveDate;
 use serde::Serialize;
 
 use super::index_rows::table_cells;
+use super::inventory::{dropped_frontmatter, dropped_frontmatter_line};
 use super::plan::{expected_body, MigrationPlan, OwnedRange, Owner, Review};
 use super::records::{heading_token, partition_problems, Lines, PartitionProblem};
 use crate::librarian::frontmatter;
@@ -198,6 +199,16 @@ pub fn check_migration(i: &CheckInput) -> CheckReport {
         .map(|p| CheckFinding::PlanProblem(p.clone()))
         .collect();
     let mut review = plan.review.clone();
+    // Item 8 (final review C1): the source frontmatter keys that no entry keeps, read from the
+    // sources at HEAD and not from the plan, so a planner that misses one does not hide it.
+    for (path, text) in i.sources {
+        for k in dropped_frontmatter(text) {
+            let line = dropped_frontmatter_line(path, &k);
+            if !review.dropped.contains(&line) {
+                review.dropped.push(line);
+            }
+        }
+    }
 
     partition_item(i, &mut blocking);
     let records = records_of(plan, &mut blocking);
@@ -919,6 +930,25 @@ Body three.
         assert_eq!(r.blocking, vec![], "{:#?}", r.blocking);
         assert!(r.shortened.is_empty());
         assert!(r.review.time_based.is_empty(), "{:?}", r.review.time_based);
+    }
+
+    /// Final review C1: the check lists the source frontmatter keys that no entry keeps from the
+    /// source at HEAD itself, as review material. Breaks if the check only copies the plan's
+    /// review (here empty of them), lists a key twice when the plan's review has it too, or
+    /// blocks on a dropped key.
+    #[test]
+    fn dropped_frontmatter_keys_come_from_the_source_at_head() {
+        let mut f = fx();
+        let source = f.sources[X].replace("title: X log\n", "owners: [marius]\n");
+        f.sources.insert(X.into(), source);
+        let owners = "docs/trackers/x.md frontmatter owners: [\"marius\"]";
+        f.plan.review.dropped = vec!["a dropped section".into()];
+        let r = run(&f);
+        assert_eq!(r.blocking, vec![], "{:#?}", r.blocking);
+        assert_eq!(r.review.dropped, vec!["a dropped section", owners]);
+
+        f.plan.review.dropped = vec![owners.into()];
+        assert_eq!(run(&f).review.dropped, vec![owners]);
     }
 
     /// (a) The planner wrote F-1 from a body that lacks line 16. The plan's `writes` hold that

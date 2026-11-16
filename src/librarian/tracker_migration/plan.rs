@@ -23,6 +23,7 @@ use super::dates::{derive_dates, DateInputs};
 use super::index_rows::{
     index_tables, normalise_status, record_facts, Facts, IndexRow, IndexTable,
 };
+use super::inventory::{dropped_frontmatter, dropped_frontmatter_line};
 use super::mapping::{
     missing_section_message, EntryKindRule, Mapping, Override, SectionSpec, SidecarSpec,
     StatusSource,
@@ -262,6 +263,10 @@ pub fn plan_migration(input: &MigrationInput) -> MigrationPlan {
         };
         if let Some(fm) = &sp.frontmatter {
             ranges.push(range(fm, Owner::Frontmatter));
+            // The entry frontmatter replaces it: list each key that no entry keeps (review C1).
+            for k in dropped_frontmatter(&s.text) {
+                review.dropped.push(dropped_frontmatter_line(&s.path, &k));
+            }
         }
         for x in &sp.sections {
             let Some(spec) = section_spec(m, &s.path, x.start) else {

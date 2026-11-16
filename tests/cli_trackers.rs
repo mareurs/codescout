@@ -1055,3 +1055,104 @@ fn a_rerun_after_an_interrupted_apply_completes() {
         assert!(listed.contains(p), "{p} not already applied: {out}");
     }
 }
+
+// ---- final review: a `files` source whose files carry frontmatter -------------------------
+
+/// Two cluster files with the frontmatter that every real `issue-clusters/IC-*.md` carries.
+const IC1_PATH: &str = "docs/trackers/clusters/IC-1-blast-radius.md";
+const IC1: &str = "\
+---
+kind: tracker
+status: active
+title: 'blast radius exceeds visibility'
+owners:
+- marius
+tags:
+- defect-classes
+- blast-radius
+topic: issue clusters
+---
+
+## IC-1 — blast radius exceeds visibility
+
+Body line one.
+";
+const IC2_PATH: &str = "docs/trackers/clusters/IC-2-gate.md";
+const IC2: &str = "\
+---
+kind: tracker
+status: active
+title: 'gate keyed on unobservable event'
+tags:
+- defect-classes
+---
+
+## IC-2 — gate keyed on unobservable event
+
+Body two.
+";
+
+const CLUSTERS_MAPPING: &str = r#"
+readme_body = "Issue clusters."
+entry_kind = "cluster"
+status_source = { constant = "open" }
+hot_view_none = "clusters are reference material"
+
+[[sources]]
+path = "docs/trackers/clusters"
+kind = "files"
+
+[target]
+lifecycle = "ledgers"
+
+[schema]
+entry_kinds = ["cluster"]
+initial_status = "open"
+
+[schema.statuses]
+open = "open"
+closed = "terminal"
+"#;
+
+/// Final review C1 (scenario A). The entry frontmatter replaces the source frontmatter, so
+/// inventory, apply and check each list every source key that no entry keeps, with its value,
+/// and the check stays clean. Breaks if a key is dropped silently on any of the three, or if
+/// `kind`, `status` or `title` is listed.
+#[test]
+fn a_files_source_lists_the_frontmatter_keys_it_drops() {
+    let r = repo(&[(IC1_PATH, IC1), (IC2_PATH, IC2)]);
+    let (code, inv) = trackers(
+        &r,
+        &["inventory", "docs/trackers/clusters", "--kind", "files"],
+    );
+    assert_eq!(code, 0, "inventory: {inv}");
+    assert_eq!(
+        inv["sources"][0]["dropped_frontmatter"],
+        json!([
+            {"key": "owners", "value": ["marius"]},
+            {"key": "tags", "value": ["defect-classes", "blast-radius"]},
+            {"key": "topic", "value": "issue clusters"},
+        ]),
+        "{inv}"
+    );
+    assert_eq!(
+        inv["sources"][1]["dropped_frontmatter"],
+        json!([{"key": "tags", "value": ["defect-classes"]}]),
+        "{inv}"
+    );
+
+    let dropped = [
+        format!("{IC1_PATH} frontmatter owners: [\"marius\"]"),
+        format!("{IC1_PATH} frontmatter tags: [\"defect-classes\",\"blast-radius\"]"),
+        format!("{IC1_PATH} frontmatter topic: \"issue clusters\""),
+        format!("{IC2_PATH} frontmatter tags: [\"defect-classes\"]"),
+    ];
+    let (code, out) = apply(&r, CLUSTERS_MAPPING);
+    assert_eq!(code, 0, "apply: {out}");
+    assert_eq!(strs(&out["review"]["dropped"]), dropped, "{out}");
+
+    let (code, out) = check(&r, CLUSTERS_MAPPING);
+    assert_eq!(code, 0, "check: {out}");
+    assert_eq!(out["clean"], json!(true), "{out}");
+    assert_eq!(strs(&out["review"]["dropped"]), dropped, "{out}");
+}

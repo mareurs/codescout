@@ -585,6 +585,13 @@ fn render_summary(inv: &Inventory) -> String {
             s.duplicate_rows.clone(),
         );
         line(
+            "Frontmatter keys that no entry keeps",
+            s.dropped_frontmatter
+                .iter()
+                .map(|k| format!("{} {}", k.key, k.value))
+                .collect(),
+        );
+        line(
             "The body and the index disagree on the status of",
             s.disagreements
                 .iter()
@@ -1546,7 +1553,7 @@ fn render_applied(done: &Applied, json: bool) -> String {
     out.push_str(&format!(
         "Review: {}, {}, {}, {}, {}, {}.\n",
         count(r.derived_dates.len(), "derived date", "derived dates"),
-        count(r.dropped.len(), "dropped section", "dropped sections"),
+        count(r.dropped.len(), "dropped item", "dropped items"),
         count(
             r.skipped_rewrites.len(),
             "record with skipped rewrites",
@@ -1564,6 +1571,7 @@ fn render_applied(done: &Applied, json: bool) -> String {
             "status disagreements"
         ),
     ));
+    out.push_str(&dropped_text(&r.dropped));
     let long = [&done.written, &done.deleted, &done.already_applied]
         .iter()
         .any(|l| l.len() > LISTED_IN_TEXT);
@@ -1572,6 +1580,17 @@ fn render_applied(done: &Applied, json: bool) -> String {
     }
     out
 }
+
+/// The text line that names every dropped item of a review (sections, catalog facts and source
+/// frontmatter keys), joined with `; ` because an item can hold commas; empty when none is.
+fn dropped_text(dropped: &[String]) -> String {
+    if dropped.is_empty() {
+        String::new()
+    } else {
+        format!("Dropped: {}.\n", dropped.join("; "))
+    }
+}
+
 /// The options of one `check` run.
 struct CheckRequest<'a> {
     mapping: &'a Path,
@@ -1831,7 +1850,7 @@ fn render_checked(report: &CheckReport, json: bool) -> Outcome {
             "files with path mentions"
         ),
         count(r.derived_dates.len(), "derived date", "derived dates"),
-        count(r.dropped.len(), "dropped section", "dropped sections"),
+        count(r.dropped.len(), "dropped item", "dropped items"),
         count(
             r.skipped_rewrites.len(),
             "record with skipped rewrites",
@@ -1854,6 +1873,7 @@ fn render_checked(report: &CheckReport, json: bool) -> Outcome {
             "shortened entries"
         ),
     ));
+    stdout.push_str(&dropped_text(&r.dropped));
     stdout.push_str("Use --json for every review line.\n");
     Outcome { code, stdout }
 }

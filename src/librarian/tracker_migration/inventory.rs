@@ -60,6 +60,8 @@ pub struct SourceInventory {
     pub duplicate_rows: Vec<String>,
     /// Records whose body status and index status differ.
     pub disagreements: Vec<Disagreement>,
+    /// The frontmatter keys of the source that no entry keeps: see [`dropped_frontmatter`].
+    pub dropped_frontmatter: Vec<DroppedKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -107,6 +109,13 @@ pub struct Disagreement {
     pub body: String,
     /// The status the index row states.
     pub index: String,
+}
+
+/// A frontmatter key of a source, with its value, that no entry of the migration keeps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DroppedKey {
+    pub key: String,
+    pub value: serde_json::Value,
 }
 
 /// Every mention of a source outside the sources.
@@ -318,7 +327,37 @@ fn source_inventory(
         no_row,
         duplicate_rows,
         disagreements,
+        dropped_frontmatter: dropped_frontmatter(text),
     }
+}
+
+/// The frontmatter keys of a source that no entry keeps, sorted by key, each with its value.
+///
+/// A migration replaces the source frontmatter with entry frontmatter, and an entry gets its own
+/// `kind`, `status` and `title`; every other key is lost with the source, so it is listed for
+/// the user (spec § Source kinds). A source with no frontmatter, or with frontmatter that does
+/// not parse (the split then owns those lines as a section), gives none.
+pub fn dropped_frontmatter(text: &str) -> Vec<DroppedKey> {
+    let Ok((Some(fm), _)) = frontmatter::parse(text) else {
+        return Vec::new();
+    };
+    let Ok(serde_json::Value::Object(map)) = serde_json::to_value(&fm) else {
+        return Vec::new();
+    };
+    let sorted: BTreeMap<String, serde_json::Value> = map.into_iter().collect();
+    sorted
+        .into_iter()
+        .filter(|(key, _)| !REPLACED_KEYS.contains(&key.as_str()))
+        .map(|(key, value)| DroppedKey { key, value })
+        .collect()
+}
+
+/// The frontmatter keys an entry replaces with its own: [`dropped_frontmatter`] skips them.
+const REPLACED_KEYS: [&str; 3] = ["kind", "status", "title"];
+
+/// The review line of one dropped frontmatter key: `<path> frontmatter <key>: <value as JSON>`.
+pub fn dropped_frontmatter_line(path: &str, k: &DroppedKey) -> String {
+    format!("{path} frontmatter {}: {}", k.key, k.value)
 }
 
 /// The citations, path mentions and id mentions of the sources in `other_markdown`; `code`
@@ -552,6 +591,10 @@ mod tests {
                     body: "open".into(),
                     index: "fixed".into(),
                 }],
+                dropped_frontmatter: vec![DroppedKey {
+                    key: "owners".into(),
+                    value: json!(["marius"]),
+                }],
             }],
             mentions: Mentions {
                 citations: vec![Hit {
@@ -597,7 +640,8 @@ mod tests {
                 "row_only": ["F-7"],
                 "no_row": [],
                 "duplicate_rows": [],
-                "disagreements": [{"token": "F-1", "body": "open", "index": "fixed"}]
+                "disagreements": [{"token": "F-1", "body": "open", "index": "fixed"}],
+                "dropped_frontmatter": [{"key": "owners", "value": ["marius"]}]
             }],
             "mentions": {
                 "citations": [{"file": "a.md", "line": 2, "text": "[[x:F-1]]"}],
@@ -740,6 +784,7 @@ mod tests {
                 body: "open".into(),
                 index: "fixed".into(),
             }],
+            dropped_frontmatter: vec![],
         };
         assert_eq!(inv.sources, vec![expected]);
     }
@@ -808,6 +853,31 @@ mod tests {
         assert_eq!(src.status_values, BTreeMap::from([("open".to_string(), 1)]));
         assert!(src.no_row.is_empty());
         assert_eq!(src.sections, vec![section(1, 2, "# Notes")]);
+    }
+
+    /// Final review C1: a migration replaces the source frontmatter with entry frontmatter, so
+    /// every key but `kind`, `status` and `title` is dropped and must be listed with its value.
+    /// Breaks if a key is missing, its value is not carried, or a replaced key is listed.
+    #[test]
+    fn frontmatter_keys_no_entry_keeps_are_listed() {
+        let text = "---\nkind: tracker\nstatus: active\ntitle: 'IC one'\nowners:\n- marius\ntags:\n- defect-classes\n- blast-radius\ntopic: issue clusters\nslug: cluster/one\n---\n\n## IC-1 — one\n\nBody.\n";
+        let constant = StatusSource::Constant("open".into());
+        let inv = inventory_of(text, SourceKind::Whole, constant);
+        let key = |k: &str, v: serde_json::Value| DroppedKey {
+            key: k.into(),
+            value: v,
+        };
+        assert_eq!(
+            inv.sources[0].dropped_frontmatter,
+            vec![
+                key("owners", json!(["marius"])),
+                key("slug", json!("cluster/one")),
+                key("tags", json!(["defect-classes", "blast-radius"])),
+                key("topic", json!("issue clusters")),
+            ]
+        );
+        let inv = inventory_of(LOG, SourceKind::File, StatusSource::BodyLabel);
+        assert_eq!(inv.sources[0].dropped_frontmatter, vec![]);
     }
 
     // `docs/notes/a.md`, numbered:
