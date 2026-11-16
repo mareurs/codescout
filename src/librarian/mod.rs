@@ -308,7 +308,8 @@ mod librarian_env_tests {
         assert!(LibrarianEnv::from_env().init_default_workspace);
         assert!(!LibrarianEnv::default().init_default_workspace);
     }
-    // mutation: take the cache from the data dir even when `db` has a parent; drop the `/tmp` fallback.
+    // mutation: take the cache from the data dir even when `db` has a parent; drop the `/tmp` fallback;
+    // make the catalog always `<dir>/catalog.db`.
     #[test]
     fn the_vector_cache_lives_in_the_machine_directory_whatever_catalog_is_opened() {
         let p = machine_paths(
@@ -328,6 +329,19 @@ mod librarian_env_tests {
             (
                 PathBuf::from("/d/librarian/catalog.db"),
                 PathBuf::from("/d/librarian/vector-cache.db")
+            )
+        );
+        // A `LIBRARIAN_DB` with another file name is the catalog as given, never
+        // `<dir>/catalog.db`: the live server opens this path.
+        let p = machine_paths(
+            Some(Path::new("/m/lib/other.db")),
+            Some(PathBuf::from("/d")),
+        );
+        assert_eq!(
+            (p.catalog, p.vector_cache),
+            (
+                PathBuf::from("/m/lib/other.db"),
+                PathBuf::from("/m/lib/vector-cache.db")
             )
         );
         assert_eq!(
