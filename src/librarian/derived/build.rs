@@ -1141,7 +1141,7 @@ mod tests {
     use crate::librarian::derived::scan::open_commit;
     use crate::librarian::derived::schema::{dump_all, open as open_index, open_in_memory};
     use crate::librarian::derived::testkit::{
-        repo_with, repo_with_commit, repo_with_raw_tree, FILE, LINK,
+        clone_repo, git, repo_with, repo_with_commit, repo_with_raw_tree, FILE, LINK,
     };
     use rusqlite::types::Value;
     use sha2::{Digest, Sha256};
@@ -2999,39 +2999,6 @@ mod tests {
     }
 
     // ---- Determinism: nothing a clone's path, name, identity or time can leak into a row ----
-
-    /// Run `git` in `dir` with the machine's own configuration out of the way, so that what a test
-    /// sees does not depend on the developer's git setup (nor on a hook that set `GIT_DIR`).
-    fn git(dir: &Path, args: &[&str]) -> String {
-        let out = std::process::Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .output()
-            .expect("run git");
-        assert!(
-            out.status.success(),
-            "git {args:?} in {}: {}",
-            dir.display(),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        String::from_utf8(out.stdout).unwrap()
-    }
-
-    /// `git clone` of `src` into `dst` over a `file://` URL: a second checkout of one repository,
-    /// with its own path, its own working tree and its own local config.
-    fn clone_repo(src: &Path, dst: &Path) {
-        let url = format!("file://{}", src.display());
-        git(
-            dst.parent().unwrap(),
-            &["clone", "--quiet", &url, dst.to_str().unwrap()],
-        );
-    }
 
     /// `(path, mode, bytes)` of a tree entry, owned.
     type Entry = (String, u32, Vec<u8>);

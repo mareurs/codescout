@@ -49,9 +49,27 @@ pub fn diff_tree_to_tree(
     let to_obj = repo.revparse_single(to_sha)?;
     let from_tree = from_obj.peel_to_commit()?.tree()?;
     let to_tree = to_obj.peel_to_commit()?.tree()?;
+    diff_trees(repo, Some(&from_tree), &to_tree, None)
+}
 
+/// Diff two trees, returning a list of changed files. `from = None` is the empty tree, so every
+/// file of `to` is `Added`. `pathspec`, when given, narrows both sides to the paths it matches (a
+/// git pathspec such as `*.md`, which also matches nested paths); a rename is still seen when
+/// both of its paths match.
+///
+/// Renames are detected with the options set below (renames on, copies off). A Typechange delta
+/// is not reported: it is dropped like every status [`DiffStatus`] has no variant for.
+pub fn diff_trees(
+    repo: &git2::Repository,
+    from: Option<&git2::Tree>,
+    to: &git2::Tree,
+    pathspec: Option<&str>,
+) -> Result<Vec<DiffEntry>> {
     let mut opts = git2::DiffOptions::new();
-    let mut diff = repo.diff_tree_to_tree(Some(&from_tree), Some(&to_tree), Some(&mut opts))?;
+    if let Some(spec) = pathspec {
+        opts.pathspec(spec);
+    }
+    let mut diff = repo.diff_tree_to_tree(from, Some(to), Some(&mut opts))?;
 
     // Every option that decides what is a rename is set here, so the answer depends on the two
     // trees alone. libgit2 reads `diff.renames` from the repo or global git config when the
@@ -183,5 +201,62 @@ mod tests {
         let c1 = commit_file(&repo, "a.rs", "fn a() {}", "init");
         let entries = diff_tree_to_tree(&repo, &c1.to_string(), &c1.to_string()).unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn diff_trees_from_nothing_lists_every_file_as_added() {
+        use crate::librarian::derived::testkit::{repo_with, FILE};
+        let dir = tempdir().unwrap();
+        let repo = repo_with(
+            dir.path(),
+            &[
+                ("docs/a.md", FILE, b"# A\n"),
+                ("src/x.rs", FILE, b"fn x() {}\n"),
+            ],
+        );
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let mut entries = diff_trees(&repo, None, &tree, None).unwrap();
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        let listed: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(listed, ["docs/a.md", "src/x.rs"]);
+        assert!(entries
+            .iter()
+            .all(|e| matches!(e.status, DiffStatus::Added)));
+    }
+
+    #[test]
+    fn diff_trees_keeps_to_its_pathspec_and_still_sees_a_rename() {
+        use crate::librarian::derived::testkit::{commit_files, repo_with, FILE};
+        let dir = tempdir().unwrap();
+        let body: &[u8] = b"# Title\n\nA body long enough that the rename is certain.\n";
+        let repo = repo_with(
+            dir.path(),
+            &[
+                ("docs/a.md", FILE, body),
+                ("src/x.rs", FILE, b"fn x() {}\n"),
+            ],
+        );
+        let first = repo.head().unwrap().peel_to_commit().unwrap();
+        let second = commit_files(
+            &repo,
+            &[("docs/b.md", body), ("src/x.rs", b"fn x() { 1 }\n")],
+            &[&first],
+            "rename and edit",
+        );
+        let from = first.tree().unwrap();
+        let to = repo.find_commit(second).unwrap().tree().unwrap();
+
+        let narrowed = diff_trees(&repo, Some(&from), &to, Some("*.md")).unwrap();
+        assert_eq!(narrowed.len(), 1, "{narrowed:?}");
+        assert_eq!(narrowed[0].path, "docs/b.md");
+        assert!(
+            matches!(&narrowed[0].status, DiffStatus::Renamed { old_path } if old_path == "docs/a.md"),
+            "{narrowed:?}"
+        );
+        assert!(narrowed.iter().all(|e| !e.path.ends_with(".rs")));
+
+        // Without a pathspec the same pair also reports the edited source file.
+        let all = diff_trees(&repo, Some(&from), &to, None).unwrap();
+        assert!(all.iter().any(|e| e.path == "src/x.rs"), "{all:?}");
     }
 }
