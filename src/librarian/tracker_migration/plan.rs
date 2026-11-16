@@ -755,7 +755,9 @@ fn no_facts() -> Facts {
 }
 
 /// The index row of each token. Two rows in one table are refused (`index_table` cannot pick
-/// between them); rows in two tables need `index_table` (plan P-R8).
+/// between them); rows in two tables need `index_table`, which names a table by its source and
+/// section start (a bare line names that line in every source). When it names no table of the
+/// token, or more than one, the token is refused: there is no silent winner (plan P-R8).
 fn choose_rows<'t>(
     m: &Mapping,
     sources: &[SourceText],
@@ -794,7 +796,11 @@ fn choose_rows<'t>(
             rows.clone()
         } else {
             rows.iter()
-                .filter(|(_, t, _)| Some(t.section_start) == m.index_table)
+                .filter(|(i, t, _)| {
+                    m.index_table
+                        .as_ref()
+                        .is_some_and(|spec| spec.names(&sources[*i].path, t.section_start))
+                })
                 .copied()
                 .collect()
         };
@@ -803,12 +809,19 @@ fn choose_rows<'t>(
                 out.insert(token.to_string(), (*i, *r));
             }
             _ => {
+                // The section start is what index_table names, not the table's first line.
                 let at: Vec<String> = rows
                     .iter()
-                    .map(|(i, t, _)| format!("line {} of {}", t.lines.start(), sources[*i].path))
+                    .map(|(i, t, _)| format!("line {} of {}", t.section_start, sources[*i].path))
                     .collect();
+                let one_source = rows.iter().all(|(i, _, _)| *i == rows[0].0);
+                let how = if one_source {
+                    "Set index_table to the first line of the section that holds the table to use."
+                } else {
+                    "Set index_table to { source = \"<path>\", start = <line> }: the source and the first line of the section that holds the table to use."
+                };
                 problems.push(format!(
-                    "token {token} has rows in the index tables at {}. Set index_table to the first line of the section that holds the table to use.",
+                    "token {token} has rows in the index tables of the sections at {}. {how}",
                     at.join(" and ")
                 ));
             }

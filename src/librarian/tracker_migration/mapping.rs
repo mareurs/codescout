@@ -43,7 +43,7 @@ pub struct Mapping {
     #[serde(default)]
     pub row_title_column: Option<String>,
     #[serde(default)]
-    pub index_table: Option<u32>,
+    pub index_table: Option<IndexTableSpec>,
     #[serde(default)]
     pub records_extra: Vec<ExtraRecordSpec>,
     #[serde(default)]
@@ -124,6 +124,51 @@ pub struct SectionSpec {
     /// The user confirms that a possible record in this section is not a record.
     #[serde(default)]
     pub confirm: bool,
+}
+
+/// `index_table = <line>`, or `index_table = { source = "<path>", start = <line> }`: the
+/// section whose index table gives the row of a token that has rows in several tables.
+///
+/// The bare line names the section that starts there in every source. It settles the tables of
+/// one source. When two sources each have a table at that line, it names both, and the planner
+/// refuses (plan P-R8: no silent winner); the table form names one of them.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum IndexTableSpec {
+    Line(u32),
+    At(IndexTableAt),
+}
+
+/// The table form of [`IndexTableSpec`].
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IndexTableAt {
+    pub source: String,
+    /// The first line of the section that holds the table.
+    pub start: u32,
+}
+
+impl IndexTableSpec {
+    /// Does it name the table in the section at `start` of `source`? The bare line names that
+    /// line in every source; the table form names one source.
+    pub fn names(&self, source: &str, start: u32) -> bool {
+        match self {
+            IndexTableSpec::Line(line) => *line == start,
+            IndexTableSpec::At(at) => at.source == source && at.start == start,
+        }
+    }
+}
+
+/// As the mapping writes it: `3`, or `{ source = "docs/trackers/x.md", start = 3 }`.
+impl std::fmt::Display for IndexTableSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IndexTableSpec::Line(line) => write!(f, "{line}"),
+            IndexTableSpec::At(at) => {
+                write!(f, "{{ source = \"{}\", start = {} }}", at.source, at.start)
+            }
+        }
+    }
 }
 
 /// `status_source = "body_label"`, `{ index_column = "<header>" }` or
@@ -328,6 +373,28 @@ pub fn mapping_problems(m: &Mapping, inv: &Inventory) -> Vec<String> {
         }
     }
 
+    // The table form of index_table names one source and one section: both must be there.
+    if let Some(spec @ IndexTableSpec::At(at)) = &m.index_table {
+        match inv.sources.iter().find(|s| s.path == at.source) {
+            None => out.push(format!(
+                "index_table names {}, which is not an inventory source",
+                at.source
+            )),
+            Some(src) => {
+                if !src
+                    .tables
+                    .iter()
+                    .any(|t| spec.names(&src.path, t.section_start))
+                {
+                    out.push(format!(
+                        "index_table {spec} is not the first line of a section with an index table in {}",
+                        src.path
+                    ));
+                }
+            }
+        }
+    }
+
     for src in &inv.sources {
         source_problems(m, src, reads_status, &mut out);
     }
@@ -385,15 +452,21 @@ fn source_problems(m: &Mapping, src: &SourceInventory, reads_status: bool, out: 
     }
 
     if !src.duplicate_rows.is_empty() {
-        match m.index_table {
-            None => out.push(format!(
+        let need = || {
+            format!(
                 "tokens with rows in two index tables of {path} need index_table: {}",
                 src.duplicate_rows.join(", ")
-            )),
-            Some(start) => {
-                if !src.tables.iter().any(|t| t.section_start == start) {
+            )
+        };
+        match &m.index_table {
+            None => out.push(need()),
+            // The table form names one source; `mapping_problems` checks the table it names.
+            Some(IndexTableSpec::At(at)) if at.source != path => out.push(need()),
+            Some(IndexTableSpec::At(_)) => {}
+            Some(spec @ IndexTableSpec::Line(_)) => {
+                if !src.tables.iter().any(|t| spec.names(path, t.section_start)) {
                     out.push(format!(
-                        "index_table {start} is not the first line of a section with an index table in {path}"
+                        "index_table {spec} is not the first line of a section with an index table in {path}"
                     ));
                 }
             }
@@ -806,7 +879,7 @@ F-2 = "A short body."
                 ("title".to_string(), "title_alias".to_string()),
             ]),
             row_title_column: Some("Title".into()),
-            index_table: Some(7),
+            index_table: Some(IndexTableSpec::Line(7)),
             records_extra: vec![ExtraRecordSpec {
                 source: X.into(),
                 line: 41,
@@ -1101,7 +1174,7 @@ F-2 = "A short body."
                     .to_string()
             ]
         );
-        m.index_table = Some(41);
+        m.index_table = Some(IndexTableSpec::Line(41));
         assert_eq!(
             mapping_problems(&m, &inv),
             vec![
@@ -1109,8 +1182,61 @@ F-2 = "A short body."
                     .to_string()
             ]
         );
-        m.index_table = Some(31);
+        m.index_table = Some(IndexTableSpec::Line(31));
         assert_eq!(mapping_problems(&m, &inv), Vec::<String>::new());
+    }
+
+    /// Final review I1: `index_table` is a bare line or a source and a line. Breaks if either
+    /// form stops parsing, if an unknown key in the table form is accepted, if the table form
+    /// settles the duplicates of a source it does not name, or if it may name a source or a
+    /// line that holds no index table.
+    #[test]
+    fn index_table_takes_a_line_or_a_source_and_a_line() {
+        let m = parse_mapping(&format!("index_table = 31\n{BASE}")).unwrap();
+        assert_eq!(m.index_table, Some(IndexTableSpec::Line(31)));
+        let at = |source: &str, start: u32| {
+            IndexTableSpec::At(IndexTableAt {
+                source: source.into(),
+                start,
+            })
+        };
+        let m = parse_mapping(&format!(
+            "index_table = {{ source = \"{X}\", start = 31 }}\n{BASE}"
+        ))
+        .unwrap();
+        assert_eq!(m.index_table, Some(at(X, 31)));
+        let text = format!("index_table = {{ source = \"{X}\", start = 31, line = 2 }}\n{BASE}");
+        assert_eq!(parse_err(&text).len(), 1);
+
+        let mut m = base_mapping();
+        let mut inv = base_inventory();
+        inv.sources[0].duplicate_rows = vec!["F-1".into()];
+        inv.sources[0].tables.push(TableRow {
+            section_start: 31,
+            header: vec!["id".into()],
+            rows: 1,
+        });
+        m.index_table = Some(at(X, 31));
+        assert_eq!(mapping_problems(&m, &inv), Vec::<String>::new());
+
+        m.index_table = Some(at("docs/trackers/y.md", 31));
+        assert_eq!(
+            mapping_problems(&m, &inv),
+            vec![
+                "index_table names docs/trackers/y.md, which is not an inventory source"
+                    .to_string(),
+                "tokens with rows in two index tables of docs/trackers/x.md need index_table: F-1"
+                    .to_string(),
+            ]
+        );
+
+        m.index_table = Some(at(X, 41));
+        assert_eq!(
+            mapping_problems(&m, &inv),
+            vec![format!(
+                "index_table {{ source = \"{X}\", start = 41 }} is not the first line of a section with an index table in {X}"
+            )]
+        );
     }
 
     /// Breaks when a possible in a section is settled by a sections entry without

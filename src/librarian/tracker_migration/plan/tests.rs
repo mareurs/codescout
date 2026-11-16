@@ -6,7 +6,8 @@ use crate::librarian::lifecycle::collection::collection_readme;
 use crate::librarian::lifecycle::layout::Lifecycle;
 use crate::librarian::lifecycle::schema::parse_schema;
 use crate::librarian::tracker_migration::mapping::{
-    parse_mapping, ExtraRecordSpec, Override, PossibleSpec, SectionSpec, SourceSpec, StatusSource,
+    parse_mapping, ExtraRecordSpec, IndexTableSpec, Override, PossibleSpec, SectionSpec,
+    SourceSpec, StatusSource,
 };
 use crate::librarian::tracker_migration::records::partition_problems;
 
@@ -913,17 +914,76 @@ fn a_token_in_two_index_tables_needs_index_table() {
     let p = plan(&m, &text);
     assert_eq!(
             p.problems,
-            vec!["token F-2 has rows in the index tables at line 8 of docs/trackers/x.md and line 26 of docs/trackers/x.md. Set index_table to the first line of the section that holds the table to use."]
+            vec!["token F-2 has rows in the index tables of the sections at line 4 of docs/trackers/x.md and line 24 of docs/trackers/x.md. Set index_table to the first line of the section that holds the table to use."]
         );
 
     for (start, row) in [(4, F2_ROW), (24, again)] {
-        m.index_table = Some(start);
+        m.index_table = Some(IndexTableSpec::Line(start));
         let p = plan(&m, &text);
         no_problems(&p);
         let b = body(&p.writes[F2_PATH]);
         assert!(
             b.ends_with(&format!("\n\n**Index row:** {row}")),
             "index_table {start}: {b}"
+        );
+    }
+}
+
+/// Final review I1 (scenario E): two folded sources whose index sections both start at line 3,
+/// and F-1 has a row in each. Breaks if the refusal names the table line instead of the section
+/// line, if the bare `index_table = 3` picks a silent winner (plan P-R8), or if the table form
+/// does not pick the row of the source it names.
+#[test]
+fn index_table_names_the_source_when_two_sources_hold_a_table_at_one_line() {
+    const REV: &str = "docs/trackers/rev.md";
+    const ARC: &str = "docs/trackers/rev-archive.md";
+    let rev = "# Rev\n\n## Index\n\n| ID | Status |\n|---|---|\n| F-1 | open |\n| F-2 | open |\n\n## F-2 — Two\n\n**Status:** open\nTwo.\n";
+    let arc = "# Rev archive\n\n## Index\n\n| ID | Status |\n|---|---|\n| F-1 | fixed |\n\n## F-1 — One\n\n**Status:** open\nOne.\n";
+    let mapping_with = |index_table: &str| {
+        let mut text = format!(
+            "{index_table}\nentry_kind = \"finding\"\nstatus_source = \"body_label\"\nhot_view_none = \"test\"\n"
+        );
+        for path in [REV, ARC] {
+            text.push_str(&format!(
+                "[[sources]]\npath = \"{path}\"\nkind = \"file\"\n"
+            ));
+        }
+        text.push_str("[target]\nlifecycle = \"ledgers\"\n[schema]\nentry_kinds = [\"finding\"]\ninitial_status = \"open\"\n[schema.statuses]\nopen = \"open\"\nfixed = \"terminal\"\n[status_map]\nopen = \"open\"\n");
+        for path in [REV, ARC] {
+            for start in [1, 3] {
+                text.push_str(&format!(
+                    "[[sections]]\nsource = \"{path}\"\nstart = {start}\nto = \"readme\"\n"
+                ));
+            }
+        }
+        parse_mapping(&text).expect("the mapping parses")
+    };
+    let run = |m: &Mapping| {
+        plan_with(
+            m,
+            vec![source(REV, rev), source(ARC, arc)],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+        )
+    };
+    let refusal = "token F-1 has rows in the index tables of the sections at line 3 of docs/trackers/rev.md and line 3 of docs/trackers/rev-archive.md. Set index_table to { source = \"<path>\", start = <line> }: the source and the first line of the section that holds the table to use.";
+    for index_table in ["", "index_table = 3"] {
+        let p = run(&mapping_with(index_table));
+        assert_eq!(p.problems, vec![refusal], "with {index_table:?}");
+    }
+    for (path, row) in [(REV, "| F-1 | open |"), (ARC, "| F-1 | fixed |")] {
+        let p = run(&mapping_with(&format!(
+            "index_table = {{ source = \"{path}\", start = 3 }}"
+        )));
+        no_problems(&p);
+        let Owner::Record { entry, .. } = &range_of(&p, "F-1").owner else {
+            unreachable!()
+        };
+        let b = body(&p.writes[entry]);
+        assert!(
+            b.ends_with(&format!("\n\n**Index row:** {row}")),
+            "{path}: {b}"
         );
     }
 }

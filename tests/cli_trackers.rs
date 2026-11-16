@@ -1156,3 +1156,123 @@ fn a_files_source_lists_the_frontmatter_keys_it_drops() {
     assert_eq!(out["clean"], json!(true), "{out}");
     assert_eq!(strs(&out["review"]["dropped"]), dropped, "{out}");
 }
+
+// ---- final review: two folded sources with an index section at the same line --------------
+
+const REV_PATH: &str = "docs/trackers/rev.md";
+const REV: &str = "\
+# Rev
+
+## Index
+
+| Token | Status |
+|---|---|
+| F-1 | open |
+| F-2 | open |
+
+## F-2 — Two
+
+**Status:** open
+Two.
+";
+const REV_ARCHIVE_PATH: &str = "docs/trackers/rev-archive.md";
+const REV_ARCHIVE: &str = "\
+# Rev archive
+
+## Index
+
+| Token | Status |
+|---|---|
+| F-1 | fixed |
+
+## F-1 — One
+
+**Status:** open
+One.
+";
+
+/// The scenario E mapping, with `{index_table}` in its first line.
+const REV_MAPPING: &str = r#"{index_table}
+entry_kind = "finding"
+status_source = "body_label"
+hot_view_none = "test"
+row_title_column = "Status"
+
+[[sources]]
+path = "docs/trackers/rev.md"
+kind = "file"
+
+[[sources]]
+path = "docs/trackers/rev-archive.md"
+kind = "file"
+
+[target]
+lifecycle = "ledgers"
+
+[schema]
+entry_kinds = ["finding"]
+initial_status = "open"
+
+[schema.statuses]
+open = "open"
+fixed = "terminal"
+
+[status_map]
+open = "open"
+
+[[sections]]
+source = "docs/trackers/rev.md"
+start = 1
+to = "readme"
+
+[[sections]]
+source = "docs/trackers/rev.md"
+start = 3
+to = "readme"
+
+[[sections]]
+source = "docs/trackers/rev-archive.md"
+start = 1
+to = "readme"
+
+[[sections]]
+source = "docs/trackers/rev-archive.md"
+start = 3
+to = "readme"
+"#;
+
+/// Final review I1 (scenario E). Both sources have `## Index` at line 3 and F-1 has a row in
+/// each. With no `index_table` or with the bare `3`, apply refuses and names the section line
+/// of each table; with the table form it picks the row of the named source, and check is clean.
+/// Breaks if no value settles the token, if the bare line picks a silent winner, or if the
+/// refusal names the line of the table header.
+#[test]
+fn index_table_can_name_one_of_two_sources_with_a_table_at_one_line() {
+    let r = repo(&[(REV_PATH, REV), (REV_ARCHIVE_PATH, REV_ARCHIVE)]);
+    for index_table in ["", "index_table = 3"] {
+        let (code, out) = apply(&r, &REV_MAPPING.replace("{index_table}", index_table));
+        assert_eq!(code, 1, "{index_table:?}: {out}");
+        assert!(
+            strs(&out["refused"]).contains(
+                &"token F-1 has rows in the index tables of the sections at line 3 of \
+                  docs/trackers/rev.md and line 3 of docs/trackers/rev-archive.md. Set \
+                  index_table to { source = \"<path>\", start = <line> }: the source and the \
+                  first line of the section that holds the table to use."
+                    .to_string()
+            ),
+            "{index_table:?}: {out}"
+        );
+    }
+    let mapping = REV_MAPPING.replace(
+        "{index_table}",
+        "index_table = { source = \"docs/trackers/rev-archive.md\", start = 3 }",
+    );
+    let (code, out) = apply(&r, &mapping);
+    assert_eq!(code, 0, "apply: {out}");
+    let one = read(&r, "docs/trackers/ledgers/rev/2026-08-10-one.md");
+    assert!(
+        one.contains("**Status:** open\nOne.\n\n**Index row:** | F-1 | fixed |"),
+        "{one}"
+    );
+    assert_clean(&r, &mapping);
+}
