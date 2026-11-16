@@ -34,6 +34,7 @@ use super::records::{
 use super::rewrite::rewrite_record_citations;
 use crate::librarian::augmentation_sidecar::rel_path_for;
 use crate::librarian::frontmatter;
+use crate::librarian::identity::grammar::{extract, Reference};
 use crate::librarian::lifecycle::collection::collection_readme;
 use crate::librarian::lifecycle::layout::{place, Lifecycle, ARCHIVE_DIR, TRACKERS_DIR};
 use crate::librarian::lifecycle::naming::{archive_rel_path, entry_stem};
@@ -578,6 +579,15 @@ pub fn plan_migration(input: &MigrationInput) -> MigrationPlan {
         writes.insert(readme_path.clone(), text);
         readme_path
     });
+    folded_key_problems(
+        m,
+        sources,
+        input.other_markdown,
+        &ranges,
+        &old_key,
+        &new_key,
+        &mut problems,
+    );
 
     // Step 7: a key change rewrites `[[old-key…]]` in every other file, and nothing else there.
     if old_key != new_key {
@@ -841,6 +851,67 @@ fn possible_problems(
                 "the possibles_inside entry at line {} of {} names no possible record",
                 k.line, k.source
             ));
+        }
+    }
+}
+
+/// Citations of the key of a folded source other than the first. The run deletes that source and
+/// rewrites only `old_key`, so such a citation would stop resolving: refuse it (operator ruling;
+/// no rewrite of several old keys). A key equal to `old_key` or `new_key` still resolves. One
+/// problem per file, at its first such citation: a source whose carried lines (a record or a
+/// readme section) hold one, or another markdown file.
+fn folded_key_problems(
+    m: &Mapping,
+    sources: &[SourceText],
+    other_markdown: &BTreeMap<String, String>,
+    ranges: &[(usize, OwnedRange)],
+    old_key: &str,
+    new_key: &str,
+    problems: &mut Vec<String>,
+) {
+    let folded: BTreeSet<String> = m
+        .sources
+        .iter()
+        .skip(1)
+        .map(|s| path_stem(&s.path))
+        .filter(|k| k != old_key && k != new_key)
+        .collect();
+    if folded.is_empty() {
+        return;
+    }
+    let first_hit = |text: &str, carried: &dyn Fn(u32) -> bool| -> Option<(u32, String)> {
+        extract(text).into_iter().find_map(|c| {
+            let key = match &c.reference {
+                Reference::Entry {
+                    repo: None, key, ..
+                }
+                | Reference::File { repo: None, key } => key.as_str(),
+                _ => return None,
+            };
+            (folded.contains(key) && carried(c.line)).then(|| (c.line, key.to_string()))
+        })
+    };
+    let mut push = |file: &str, hit: Option<(u32, String)>| {
+        if let Some((line, stem)) = hit {
+            problems.push(format!(
+                "{file} line {line} cites {stem}, which this run deletes; that citation would stop resolving. Rewrite it first, or fold the sources one at a time."
+            ));
+        }
+    };
+    for (i, s) in sources.iter().enumerate() {
+        let carried = |line: u32| {
+            ranges.iter().any(|(j, r)| {
+                *j == i
+                    && matches!(r.owner, Owner::Record { .. } | Owner::Readme)
+                    && r.lines.contains(&line)
+            })
+        };
+        push(&s.path, first_hit(&s.text, &carried));
+    }
+    let source_paths: BTreeSet<&str> = sources.iter().map(|s| s.path.as_str()).collect();
+    for (path, text) in other_markdown {
+        if !source_paths.contains(path.as_str()) {
+            push(path, first_hit(text, &|_| true));
         }
     }
 }
@@ -2102,5 +2173,100 @@ to = "readme"
                 "index_table {start}: {b}"
             );
         }
+    }
+
+    /// The mapping folds `x.md` and `x-archive.md`; F-9 is the archive's one record.
+    fn folded() -> (Mapping, Vec<SourceText>) {
+        let mut m = mapping();
+        m.sources.push(SourceSpec {
+            path: "docs/trackers/x-archive.md".into(),
+            kind: "file".into(),
+            level: None,
+        });
+        let archive = source(
+            "docs/trackers/x-archive.md",
+            "## F-9 — Old\n\n**Status:** open\n",
+        );
+        (m, vec![source(X, TRACKER), archive])
+    }
+
+    const FOLDED: &str = "which this run deletes; that citation would stop resolving. Rewrite it first, or fold the sources one at a time.";
+
+    /// Breaks if a citation of a non-first source's key (entry or file form) in another file
+    /// passes: that source is deleted and only the first key is rewritten.
+    #[test]
+    fn a_citation_of_a_folded_sources_key_in_another_file_is_refused() {
+        let (m, sources) = folded();
+        let other = BTreeMap::from([
+            (
+                "docs/x.md".to_string(),
+                "a\nb\nc\nSee [[x-archive:F-9]] and [[x-archive]].\n".to_string(),
+            ),
+            ("docs/y.md".to_string(), "[[x-archive]]\n".to_string()),
+        ]);
+        let p = plan_with(&m, sources, &other, &BTreeMap::new(), None);
+        assert_eq!(
+            p.problems,
+            vec![
+                format!("docs/x.md line 4 cites x-archive, {FOLDED}"),
+                format!("docs/y.md line 1 cites x-archive, {FOLDED}"),
+            ]
+        );
+    }
+
+    /// Breaks if the same citation inside a carried record body (line 22) or a readme section
+    /// (line 6) passes.
+    #[test]
+    fn a_citation_of_a_folded_sources_key_in_a_carried_body_is_refused() {
+        let (m, mut sources) = folded();
+        sources[0] = source(
+            X,
+            &TRACKER.replace("Body two.", "Body two, see [[x-archive:F-9]]."),
+        );
+        let p = plan_with(&m, sources, &BTreeMap::new(), &BTreeMap::new(), None);
+        assert_eq!(
+            p.problems,
+            vec![format!(
+                "docs/trackers/x.md line 22 cites x-archive, {FOLDED}"
+            )]
+        );
+
+        let (m, mut sources) = folded();
+        sources[0] = source(
+            X,
+            &TRACKER.replace("Preamble cites F-2.", "Preamble cites [[x-archive]]."),
+        );
+        let p = plan_with(&m, sources, &BTreeMap::new(), &BTreeMap::new(), None);
+        assert_eq!(
+            p.problems,
+            vec![format!(
+                "docs/trackers/x.md line 6 cites x-archive, {FOLDED}"
+            )]
+        );
+    }
+
+    /// Breaks if a citation of the FIRST source's key is refused instead of rewritten, or if a
+    /// single-source run refuses a key that no source of the run has.
+    #[test]
+    fn the_first_sources_key_is_still_rewritten_and_one_source_is_unchanged() {
+        let (mut m, sources) = folded();
+        m.target.key = Some("y".into());
+        let other = BTreeMap::from([("docs/notes.md".to_string(), "[[x:F-1]]\n".to_string())]);
+        let p = plan_with(&m, sources, &other, &BTreeMap::new(), None);
+        no_problems(&p);
+        assert_eq!(p.writes["docs/notes.md"], "[[y:F-1]]\n");
+
+        let other = BTreeMap::from([(
+            "docs/notes.md".to_string(),
+            "[[x-archive:F-9]]\n".to_string(),
+        )]);
+        let p = plan_with(
+            &mapping(),
+            vec![source(X, TRACKER)],
+            &other,
+            &BTreeMap::new(),
+            None,
+        );
+        no_problems(&p);
     }
 }
