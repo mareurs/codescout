@@ -3,11 +3,12 @@
 //! Spec: `docs/superpowers/specs/2026-11-15-tracker-migration-design.md`. Three subcommands:
 //! `inventory` (Task 6) prints what one or more tracker sources hold and who names them;
 //! `apply` (Task 9) writes the collection a mapping describes and deletes the sources, under the
-//! project write lock, refusing before its first write when a precondition fails; `check` comes
-//! in Task 10 and says "not built yet" until then. The tests are in `trackers/tests.rs`.
+//! project write lock, refusing before its first write when a precondition fails; `check`
+//! (Task 10) re-plans from HEAD with the same functions and proves that what apply wrote lost
+//! nothing, reading only. The tests are in `trackers/tests.rs`.
 //!
-//! Exit codes (P-R5): `0` done, `1` refused, `2` could not run. A `2` prints one line that names
-//! the reason and no absolute path.
+//! Exit codes (P-R5): `0` done or clean, `1` refused or not clean, `2` could not run. A `2`
+//! prints one line that names the reason and no absolute path.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -35,15 +36,19 @@ use crate::librarian::identity::key_space::KeySpace;
 use crate::librarian::lifecycle::collection::{
     load_collection, load_collection_dir, CollectionLoadError,
 };
+use crate::librarian::lifecycle::hot_view::hot_view;
 use crate::librarian::lifecycle::layout::{ARCHIVE_DIR, TRACKERS_DIR};
 use crate::librarian::lifecycle::schema::CollectionSchema;
 use crate::librarian::read_door::{ReadDoor, ReadError};
+use crate::librarian::tracker_migration::check::{
+    check_migration, CheckFinding, CheckInput, CheckReport,
+};
 use crate::librarian::tracker_migration::dates::blame_dates;
 use crate::librarian::tracker_migration::inventory::{
     build_inventory, merge_code_hits, Inventory, SidecarInfo,
 };
 use crate::librarian::tracker_migration::mapping::{
-    mapping_problems, parse_mapping, Mapping, MentionClass, StatusSource,
+    mapping_problems, parse_mapping, Mapping, MentionClass, SidecarSpec, StatusSource,
 };
 use crate::librarian::tracker_migration::plan::{
     plan_migration, ExistingEntry, MigrationInput, MigrationPlan, Review, SourceText,
@@ -103,7 +108,10 @@ pub enum TrackersAction {
         #[arg(long)]
         json: bool,
     },
-    /// Not built yet (Task 10).
+    /// Prove that the migration the mapping describes lost nothing. Re-plans from HEAD, reads
+    /// the collection folder and the working tree, and compares every entry body with its
+    /// source lines at HEAD. Writes nothing and takes no lock. Exit 0 clean, 1 not clean (one
+    /// line per blocking finding), 2 could not run.
     Check {
         /// The mapping file.
         mapping: PathBuf,
@@ -169,8 +177,17 @@ pub async fn evaluate(args: &TrackersArgs, cwd: &Path) -> Outcome {
             };
             apply_outcome(&request, cwd, &ApplyEnv::from_machine()).await
         }
-        TrackersAction::Check { json, .. } => {
-            did_not_run(*json, "codescout trackers check is not built yet")
+        TrackersAction::Check {
+            mapping,
+            project,
+            json,
+        } => {
+            let request = CheckRequest {
+                mapping,
+                project: project.as_deref(),
+                json: *json,
+            };
+            check_outcome(&request, cwd, ApplyEnv::from_machine().now)
         }
     }
 }
@@ -1554,6 +1571,291 @@ fn render_applied(done: &Applied, json: bool) -> String {
         out.push_str("Use --json for every path.\n");
     }
     out
+}
+/// The options of one `check` run.
+struct CheckRequest<'a> {
+    mapping: &'a Path,
+    project: Option<&'a Path>,
+    json: bool,
+}
+
+/// Run `check`: exit 0 when clean, 1 when not clean (one line per blocking finding), 2 when it
+/// could not run. A mapping or a source that apply would refuse is "not clean" too.
+fn check_outcome(req: &CheckRequest<'_>, cwd: &Path, today: NaiveDate) -> Outcome {
+    match check_run(req, cwd, today) {
+        Ok(report) => render_checked(&report, req.json),
+        Err(Stop::Refused(reasons)) => refused(req.json, &reasons),
+        Err(Stop::CouldNotRun(reason)) => did_not_run(req.json, &reason),
+    }
+}
+
+/// The steps of `check`. It re-plans from HEAD with the functions apply uses ([`read_head`],
+/// [`plan_from_head`]), reads the collection folder and the working tree through the read door,
+/// and hands every text to [`check_migration`]. It takes no lock and writes nothing.
+fn check_run(req: &CheckRequest<'_>, cwd: &Path, today: NaiveDate) -> Result<CheckReport, Stop> {
+    let (_, git_root) = project_roots(req.project, cwd)?;
+    let mapping = read_mapping(&cwd.join(req.mapping))?;
+    let repo = git2::Repository::open(&git_root)
+        .map_err(|_| anyhow!("the git repository cannot be opened"))?;
+    let commit =
+        open_commit(&repo, "HEAD").map_err(|_| anyhow!("the repository has no commit at HEAD"))?;
+    let work = worktree_changes(&git_root)?;
+    let head = read_head(&repo, &commit, &mapping, &work.untracked)?;
+    let mut plan = plan_from_head(&repo, &commit, &git_root, &mapping, &head, today)?;
+    let mut problems = mapping_problems(&mapping, &head.inventory);
+    problems.append(&mut plan.problems);
+    plan.problems = dedup(problems);
+    plan.review.path_mentions = path_mentions(&head.inventory);
+
+    let door = ReadDoor::new(vec![git_root.clone()]);
+    let sources: BTreeMap<String, String> = head
+        .sources
+        .iter()
+        .map(|s| (s.path.clone(), s.text.clone()))
+        .collect();
+    let mut collection_files = BTreeMap::new();
+    files_under(&git_root, &plan.target_dir, &door, &mut collection_files)?;
+    let unchanged_at_head: BTreeSet<String> = collection_files
+        .iter()
+        .filter(|(path, text)| {
+            blob_text(&repo, &commit, path)
+                .ok()
+                .flatten()
+                .is_some_and(|at_head| same_text(&at_head, text))
+        })
+        .map(|(path, _)| path.clone())
+        .collect();
+    let repo_markdown = if plan.old_key == plan.new_key {
+        BTreeMap::new()
+    } else {
+        working_markdown(&git_root, &head.tracked, &work.untracked, &door)?
+    };
+    let still_present = left_on_disk(&git_root, &mapping, &head);
+    let loaded = load_collection_dir(&git_root, &plan.target_dir).map_err(|e| e.to_string());
+    let hot = match &loaded {
+        Ok(l) if !l.node().archived && l.schema().hot_cap.is_some() => {
+            Some(hot_item(&git_root, l.key.as_str(), today))
+        }
+        _ => None,
+    };
+    let input = CheckInput {
+        plan: &plan,
+        sources: &sources,
+        collection_files: &collection_files,
+        repo_markdown: &repo_markdown,
+        still_present: &still_present,
+        unchanged_at_head: &unchanged_at_head,
+        loaded: loaded.as_ref().map_err(Clone::clone),
+        hot,
+        today,
+    };
+    Ok(check_migration(&input))
+}
+
+/// The path mentions of the sources, one line per file with its count (review material: a
+/// path is lint, never an edge).
+fn path_mentions(inv: &Inventory) -> Vec<String> {
+    let mut per_file: BTreeMap<&str, usize> = BTreeMap::new();
+    for hit in &inv.mentions.paths {
+        *per_file.entry(hit.file.as_str()).or_default() += 1;
+    }
+    per_file
+        .into_iter()
+        .map(|(file, n)| format!("{file}: {}", count(n, "path mention", "path mentions")))
+        .collect()
+}
+
+/// Every file below `dir` (repo-relative), read through the read door into `out`: a markdown
+/// file gets its text, any other file an empty text. A folder that is not there gives nothing; a
+/// linked folder is not entered. A file that cannot be read stops the run: a check without one
+/// of the collection's files would be a wrong check.
+fn files_under(
+    git_root: &Path,
+    dir: &str,
+    door: &ReadDoor,
+    out: &mut BTreeMap<String, String>,
+) -> Result<(), Stop> {
+    let read = match std::fs::read_dir(git_root.join(dir)) {
+        Ok(read) => read,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(Stop::CouldNotRun(format!(
+                "the folder {dir} cannot be read: {}",
+                e.kind()
+            )))
+        }
+    };
+    for entry in read {
+        let entry = entry.map_err(|e| {
+            Stop::CouldNotRun(format!("the folder {dir} cannot be read: {}", e.kind()))
+        })?;
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let rel = format!("{dir}/{name}");
+        let kind = entry
+            .file_type()
+            .map_err(|e| Stop::CouldNotRun(format!("{rel} cannot be inspected: {}", e.kind())))?;
+        if kind.is_dir() {
+            files_under(git_root, &rel, door, out)?;
+        } else if kind.is_symlink() && std::fs::metadata(entry.path()).is_ok_and(|m| m.is_dir()) {
+            // A linked folder is not entered: it may lead anywhere.
+        } else if rel.to_ascii_lowercase().ends_with(".md") {
+            let text = door
+                .text(&git_root.join(&rel))
+                .map_err(|_| Stop::CouldNotRun(format!("{rel} cannot be read")))?;
+            out.insert(rel, text);
+        } else {
+            out.insert(rel, String::new());
+        }
+    }
+    Ok(())
+}
+
+/// Every markdown file of the working tree (the tracked files of HEAD that are still there and
+/// every untracked file), path to text. A link is skipped: its target is a file of its own. A
+/// file that cannot be read stops the run, because an old-key citation in it would be missed.
+fn working_markdown(
+    git_root: &Path,
+    tracked: &BTreeSet<String>,
+    untracked: &[String],
+    door: &ReadDoor,
+) -> Result<BTreeMap<String, String>, Stop> {
+    let mut out = BTreeMap::new();
+    let paths = tracked.iter().chain(untracked);
+    for path in paths.filter(|p| p.to_ascii_lowercase().ends_with(".md")) {
+        let abs = git_root.join(path);
+        match std::fs::symlink_metadata(&abs) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Ok(meta) if meta.file_type().is_symlink() || meta.is_dir() => continue,
+            _ => {}
+        }
+        let text = door.text(&abs).map_err(|_| {
+            Stop::CouldNotRun(format!(
+                "{path} cannot be read, and check must search it for citations of the old key"
+            ))
+        })?;
+        out.insert(path.clone(), text);
+    }
+    Ok(out)
+}
+
+/// The sources, and with `sidecar = retire` their sidecars, that are still on disk. The paths
+/// come from the mapping and the sources at HEAD, not from the plan's deletes.
+fn left_on_disk(git_root: &Path, m: &Mapping, head: &HeadView) -> BTreeSet<String> {
+    let retire = matches!(m.sidecar, Some(SidecarSpec::Retire));
+    let mut out = BTreeSet::new();
+    for s in &head.sources {
+        let mut paths = vec![s.path.clone()];
+        if retire {
+            paths.push(rel_path_for(Path::new(""), Path::new(&s.path)));
+        }
+        for p in paths {
+            if std::fs::symlink_metadata(git_root.join(&p)).is_ok() {
+                out.insert(p);
+            }
+        }
+    }
+    out
+}
+
+/// Item 7: the live collection loads by its key (an ambiguous key fails here), its folder has
+/// no problems, and its hot view renders.
+fn hot_item(git_root: &Path, key: &str, today: NaiveDate) -> Result<(), String> {
+    let loaded = load_collection(git_root, key)
+        .map_err(|e| format!("the collection {key} does not load by its key: {e}"))?;
+    if !loaded.tree.problems.is_empty() {
+        let problems: Vec<String> = loaded
+            .tree
+            .problems
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        return Err(format!(
+            "the collection {key} has problems: {}",
+            problems.join(" | ")
+        ));
+    }
+    hot_view(&loaded, today)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// What `check --json` prints.
+#[derive(Serialize)]
+struct Checked<'a> {
+    clean: bool,
+    /// One line per blocking finding.
+    blocking: Vec<String>,
+    shortened: &'a [String],
+    review: &'a Review,
+}
+
+/// The outcome of a check that ran: exit 0 and "clean", or exit 1 and one line per blocking
+/// finding; then the review counts (text) or the whole review (JSON).
+fn render_checked(report: &CheckReport, json: bool) -> Outcome {
+    let blocking = dedup(report.blocking.iter().map(CheckFinding::text).collect());
+    let code = i32::from(!blocking.is_empty());
+    if json {
+        let out = Checked {
+            clean: blocking.is_empty(),
+            blocking,
+            shortened: &report.shortened,
+            review: &report.review,
+        };
+        let stdout = format!(
+            "{}\n",
+            serde_json::to_string(&out).unwrap_or_else(|_| "{}".to_string())
+        );
+        return Outcome { code, stdout };
+    }
+    let mut stdout = String::new();
+    if blocking.is_empty() {
+        stdout.push_str("Check: clean. Every blocking item holds.\n");
+    }
+    for line in &blocking {
+        stdout.push_str(line);
+        stdout.push('\n');
+    }
+    let r = &report.review;
+    stdout.push_str(&format!(
+        "Review: {}, {}, {}, {}, {}, {}, {}, {}, {}.\n",
+        count(
+            r.time_based.len(),
+            "time-based finding",
+            "time-based findings"
+        ),
+        count(
+            r.path_mentions.len(),
+            "file with path mentions",
+            "files with path mentions"
+        ),
+        count(r.derived_dates.len(), "derived date", "derived dates"),
+        count(r.dropped.len(), "dropped section", "dropped sections"),
+        count(
+            r.skipped_rewrites.len(),
+            "record with skipped rewrites",
+            "records with skipped rewrites"
+        ),
+        count(r.row_only.len(), "row-only record", "row-only records"),
+        count(
+            r.no_row.len(),
+            "record with no index row",
+            "records with no index row"
+        ),
+        count(
+            r.disagreements.len(),
+            "status disagreement",
+            "status disagreements"
+        ),
+        count(
+            report.shortened.len(),
+            "shortened entry",
+            "shortened entries"
+        ),
+    ));
+    stdout.push_str("Use --json for every review line.\n");
+    Outcome { code, stdout }
 }
 
 /// Evaluate with the current directory, print, and exit with the code when it is not `0`.

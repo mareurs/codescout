@@ -1304,3 +1304,184 @@ async fn apply_refuses_a_source_with_uncommitted_changes() {
     );
     assert_eq!(tree_files(&w), before);
 }
+// ---- check (Task 10) ----------------------------------------------------------------
+
+/// Write `mapping` to [`MAPPING`] and run check from the root, on the test date.
+fn run_check(w: &Work, mapping: &str, json: bool) -> Outcome {
+    write_files(&w.root, &[(MAPPING, mapping)]);
+    let path = PathBuf::from(MAPPING);
+    let req = CheckRequest {
+        mapping: &path,
+        project: None,
+        json,
+    };
+    check_outcome(&req, &w.root, test_env().now)
+}
+
+/// The text of each blocking finding of a `--json` check.
+fn blocking_of(out: &Outcome) -> Vec<String> {
+    json_of(out)["blocking"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no blocking list: {}", out.stdout))
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect()
+}
+
+/// After apply, check re-plans from HEAD and re-reads what apply wrote: clean, exit 0. F-1 is
+/// open since 2026-08-01 and the collection has `stale_after = 30d`, so the review lists a
+/// time-based finding, and the exit stays 0 (item 8 never blocks). Check writes nothing: the
+/// working tree and git status are the same before and after. Breaks if check re-plans from
+/// anything but HEAD (the sources are gone from the tree), takes a time-based finding as
+/// blocking, or writes a file.
+#[tokio::test]
+async fn check_passes_after_apply() {
+    let w = x_repo();
+    let out = run_apply(&w, BASE, true).await;
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    let files_before = tree_files(&w);
+    let status_before = git_changes(&w);
+    let out = run_check(&w, BASE, true);
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    no_root_in(&w, &out);
+    let v = json_of(&out);
+    assert_eq!(v["clean"], json!(true));
+    assert_eq!(v["blocking"], json!([]));
+    let time_based = v["review"]["time_based"].as_array().unwrap();
+    assert!(
+        time_based
+            .iter()
+            .any(|l| l.as_str().unwrap().contains("stale_after")),
+        "{time_based:?}"
+    );
+    assert_eq!(tree_files(&w), files_before);
+    assert_eq!(git_changes(&w), status_before);
+
+    let text = run_check(&w, BASE, false);
+    assert_eq!(text.code, 0, "{}", text.stdout);
+    assert!(text.stdout.starts_with("Check: clean."), "{}", text.stdout);
+    no_root_in(&w, &text);
+}
+
+/// The disk mutant: a line deleted from an entry apply wrote. Exit 1, one line that names the
+/// entry. Breaks if check compares with the plan's texts instead of the files on disk.
+#[tokio::test]
+async fn a_line_deleted_from_a_written_entry_fails_check() {
+    let w = x_repo();
+    assert_eq!(run_apply(&w, BASE, true).await.code, 0);
+    let text = read(&w, F1_PATH).replace("See [[x:F-2]] and [F-2](x.md).\n", "");
+    write_files(&w.root, &[(F1_PATH, &text)]);
+    let out = run_check(&w, BASE, false);
+    assert_eq!(out.code, 1, "{}", out.stdout);
+    no_root_in(&w, &out);
+    let first = out.stdout.lines().next().unwrap();
+    assert_eq!(
+        first,
+        format!(
+            "{F1_PATH}: the body is not the body of its source lines at HEAD. The first \
+             difference is at body line 4."
+        )
+    );
+}
+
+/// The same key under `ledgers/` and `streams/`: the collection loads from its folder, but not
+/// by its key, so the hot view does not render and the item blocks. Breaks if the hot item
+/// cannot fail (filled from the folder load, or skipped).
+#[tokio::test]
+async fn an_ambiguous_collection_key_fails_the_hot_view_item() {
+    let w = x_repo();
+    assert_eq!(run_apply(&w, BASE, true).await.code, 0);
+    write_files(
+        &w.root,
+        &[(
+            "docs/trackers/streams/x/readme.md",
+            "---\nkind: collection\ntitle: X stream\nentry_kinds: [note]\nstatuses: {open: open}\ninitial_status: open\n---\n",
+        )],
+    );
+    let out = run_check(&w, BASE, true);
+    assert_eq!(out.code, 1, "{}", out.stdout);
+    no_root_in(&w, &out);
+    let blocking = blocking_of(&out);
+    assert!(
+        blocking
+            .iter()
+            .any(|l| l.starts_with("The hot view does not render:") && l.contains("2 collections")),
+        "{blocking:#?}"
+    );
+}
+
+/// A CRLF tracker applies and checks clean. Breaks if a `\r` reaches the partition, a body or
+/// a row compare.
+#[tokio::test]
+async fn check_on_a_crlf_tracker_passes() {
+    let w = work_repo(&[
+        (X, &X_TRACKER.replace('\n', "\r\n")),
+        (SIDECAR, "prompt: Keep it short.\n"),
+        ("docs/trackers/other.md", "# Other\n"),
+    ]);
+    let out = run_apply(&w, BASE, true).await;
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    let out = run_check(&w, BASE, true);
+    assert_eq!(out.code, 0, "{}", out.stdout);
+}
+
+/// Before apply nothing is migrated: every entry is missing and the source and its sidecar
+/// are still on disk. Breaks if check passes a migration that never ran.
+#[tokio::test]
+async fn check_before_apply_is_not_clean() {
+    let w = x_repo();
+    let out = run_check(&w, BASE, true);
+    assert_eq!(out.code, 1, "{}", out.stdout);
+    let blocking = blocking_of(&out);
+    for want in [
+        format!("{F1_PATH} is not on disk. The plan writes an entry there."),
+        format!("{X} is still on disk. Apply deletes every source."),
+        format!("{SIDECAR} is still on disk. The mapping retires this sidecar."),
+    ] {
+        assert!(blocking.contains(&want), "{want}\n{blocking:#?}");
+    }
+}
+
+/// After a key change, check is clean; a citation of the old key put back into another file
+/// blocks, with its file and line. Breaks if the old-key item is skipped or reads only the
+/// collection.
+#[tokio::test]
+async fn an_old_key_citation_left_in_another_file_fails() {
+    let w = work_repo(&[
+        (X, X_TRACKER),
+        (SIDECAR, "prompt: Keep it short.\n"),
+        ("docs/notes.md", "See F-1 and [[x:F-1]].\n"),
+    ]);
+    let m = BASE.replace(
+        "lifecycle = \"ledgers\"\n",
+        "lifecycle = \"ledgers\"\nkey = \"y\"\n",
+    );
+    assert_eq!(run_apply(&w, &m, true).await.code, 0);
+    let out = run_check(&w, &m, true);
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    write_files(&w.root, &[("docs/notes.md", "See F-1 and [[x:F-1]].\n")]);
+    let out = run_check(&w, &m, true);
+    assert_eq!(out.code, 1, "{}", out.stdout);
+    assert!(
+        blocking_of(&out)
+            .contains(&"docs/notes.md line 1 cites the old collection key.".to_string()),
+        "{}",
+        out.stdout
+    );
+}
+
+/// A mapping file that is not there: exit 2, one line, no absolute path.
+#[test]
+fn check_without_its_mapping_file_exits_2() {
+    let w = x_repo();
+    let path = PathBuf::from(".codescout/none.toml");
+    let req = CheckRequest {
+        mapping: &path,
+        project: None,
+        json: false,
+    };
+    let out = check_outcome(&req, &w.root, test_env().now);
+    assert_eq!(out.code, 2, "{}", out.stdout);
+    assert_eq!(out.stdout.lines().count(), 1, "{}", out.stdout);
+    no_root_in(&w, &out);
+}
