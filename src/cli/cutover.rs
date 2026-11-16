@@ -2,10 +2,10 @@
 //!
 //! This file holds `cutover plan`, `cutover export` and `cutover build`. `plan` is the dry run:
 //! it resolves the old catalog, refuses when a side file lies beside it, opens it immutable,
-//! loads the rows under the
-//! repository, plans `HEAD`, checks that the catalog did not change while it was read, and prints
-//! the report. It writes nothing: not to the old catalog, not to the repository, not to a report
-//! file. `export` does the same, then (in D-R8 and D-R30's order) refuses when the new catalog
+//! loads the rows under the repository, plans `HEAD`, checks that the catalog did not change while
+//! it was read, and prints the report. It writes nothing: not to the old catalog, not to the
+//! repository, not to a report file. `export` does the same, then (in D-R8 and D-R30's order)
+//! refuses when the new catalog
 //! (`.codescout/derived.db` in the checkout) exists or the project write lock is held, re-checks
 //! the old catalog, applies the plan to the working tree (`librarian::cutover::apply`), and keeps
 //! the report beside the old catalog. `build` writes the new catalog from `HEAD`, in the git root
@@ -507,8 +507,8 @@ fn refuse_unsafe_catalog_path(repo: &git2::Repository, git_root: &Path) -> Resul
                  this again"
             ),
             Ok(meta) if has_other_hard_links(&meta) => bail!(
-                "{name} has more than one hard link, and build would write into the other copy. \
-                 Remove it, then run this again"
+                "{name} has more than one hard link, and build would write into the same file \
+                 under its other name. Remove it, then run this again"
             ),
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -1785,6 +1785,7 @@ mod tests {
     }
 
     /// Every `derived.db*` file under `root`, found without following a link.
+    #[cfg(unix)]
     fn catalog_files(root: &Path) -> Vec<PathBuf> {
         let mut found = Vec::new();
         let mut pending = vec![root.to_path_buf()];
@@ -2087,8 +2088,8 @@ mod tests {
 
     #[cfg(unix)]
     const HARD_LINK_REFUSAL: &str =
-        "has more than one hard link, and build would write into the other copy. Remove it, then \
-         run this again";
+        "has more than one hard link, and build would write into the same file under its other \
+          name. Remove it, then run this again";
 
     // mutation: drop the hard-link check.
     #[cfg(unix)]
