@@ -13,7 +13,7 @@ codescout cutover build   # build the new catalog from HEAD
 
 The old catalog (`catalog.db`) holds facts that no committed file holds: events,
 observations, manual links, augmentation shapes, and params. The new catalog
-(`derived.db`) reads committed text only. `codescout cutover` moves each of these
+(`.codescout/derived.db`) reads committed text only. `codescout cutover` moves each of these
 facts into a committed file. When it cannot move a fact, it names the fact in a
 report. Then it builds the new catalog.
 
@@ -25,8 +25,9 @@ report. Then it builds the new catalog.
 2. **`cutover export`** does the same, then writes the plan into the working tree.
    It makes one atomic write per file. It keeps the report beside the old catalog.
    You commit the changed files yourself.
-3. **`cutover build`** builds `derived.db` from `HEAD`. It builds only when a plan
-   of `HEAD` writes nothing. Run it after the commit.
+3. **`cutover build`** builds `.codescout/derived.db` in this checkout from `HEAD`.
+   It builds only when a plan of `HEAD` writes nothing. Run it after the commit.
+   Git must ignore the file (see Build).
 
 The usual sequence is:
 
@@ -36,7 +37,7 @@ codescout cutover export              # write the files, read the report again
 git status --short                    # the files the report lists, no .codescout/write.lock*
 git add <the files>; git commit       # you commit; the tool never does
 codescout cutover plan                # the plan writes nothing
-codescout cutover build               # derived.db appears beside catalog.db
+codescout cutover build               # .codescout/derived.db appears in this checkout
 ```
 
 All three take the same options:
@@ -103,10 +104,8 @@ it was read`. Stop the process that wrote and run the command again.
 
 `export` also refuses in these cases:
 
-- `derived.db` already exists beside the old catalog. `export` runs before the new
-  catalog exists. The file can belong to another repository that shares the old
-  catalog. Move `derived.db` aside. Delete it only when you know it is for this
-  repository (git can rebuild it). Then run `export` again.
+- `.codescout/derived.db` already exists in this checkout. `export` runs before the
+  build. Delete the file (git can rebuild it), then run `export` again.
 - The project write lock is not free. Another codescout process writes to the
   project. The lock file is `.codescout/write.lock`, in the nearest directory (from
   the project up to the git root) that holds `.codescout/project.toml`. `export`
@@ -270,42 +269,58 @@ files of an excluded tree have no key.
 the export is not committed: <n> files would change. Run codescout cutover export, commit, then run this again
 ```
 
-When the plan writes nothing, `build` creates `derived.db` in the directory of the
-old catalog. It builds from the committed files of `HEAD`, not from the working
+When the plan writes nothing, `build` creates `.codescout/derived.db` in the git root
+of this checkout. It builds from the committed files of `HEAD`, not from the working
 tree. It prints the number of documents, entries, edges, chunks, skipped files, and
 problems it stored.
 
-A second `build` rebuilds the same file in place. `build` refuses with code 2 in these
-cases:
+Each checkout has one `derived.db`: its own. A linked worktree and a clone each build
+their own file, and a build in one checkout does not change the file of another. Run
+`build` in each checkout that needs one.
+
+A second `build` rebuilds the same file in place. A `-wal`, `-shm` or `-journal` file
+that a killed build left is not an error: SQLite recovers it. A `derived.db` that
+holds no build is built over too.
+
+`build` refuses with code 2 in these cases:
 
 - `HEAD` moved after the plan.
 - A `-wal`, `-shm` or non-empty `-journal` file lies beside the old catalog. Stop every
   codescout process, then use the `sqlite3` command above.
-- A `-wal`, `-shm` or non-empty `-journal` file lies beside `derived.db`. A killed
-  build or a killed reader leaves these files. If a codescout process holds the
-  file, stop that process. Otherwise move `derived.db` and its `-wal`, `-shm` and
-  `-journal` files aside, or delete them (git can rebuild them). Then run `build`
+- Git does not ignore `.codescout/derived.db` and its `-wal`, `-shm` and `-journal`
+  files. `build` writes them in the working tree, and the next `git add -A` can then
+  stage them. Add this line to `.gitignore`, or to the `info/exclude` file of the
+  repository (`git rev-parse --git-path info/exclude` prints its path), then run
+  `build` again:
+
+  ```text
+  /.codescout/derived.db*
+  ```
+
+  A rule from any source that git reads, such as `core.excludesFile`, also counts.
+- `.codescout` in this checkout is a link, is not a directory, or resolves to another
+  directory. `build` writes only inside the checkout. Replace it with a directory.
+- `.codescout/derived.db` or one of its side files is a link. On Unix, a file with more
+  than one hard link is refused too. A write through it would also change the file
+  under its other name. Remove it.
+- Git tracks `.codescout/derived.db` or one of its side files. `build` would
+  overwrite a committed file. Run `git rm --cached <file>`, commit, then run `build`
   again.
-- `derived.db` is not a new catalog. It is a file of another program.
-- A newer codescout made `derived.db`.
-- `derived.db` was built for another repository. One old catalog can hold the rows
-  of several repositories, but the new catalog beside it serves one. The name in its
-  `checkout` row differs from this repository's name, or the commit in that row is not
-  in this repository's history. A worktree, or a clone that has that commit, rebuilds
-  the file. Move `derived.db` aside, or delete it (git can rebuild it), then run
-  `build` again.
-
-Do not cut over a second repository before Plan E decides where the new catalog of
-each repository lives. One `derived.db` can sit beside the shared old catalog at a
-time.
-
-A `derived.db` that holds no build is not another repository's file. A failed first
-build leaves such a file. `build` builds over it.
+- `.codescout/derived.db` is not a new catalog. It is a file of another program.
+- A newer codescout made `.codescout/derived.db`.
+- `.codescout/derived.db` cannot be created or opened. Check that the `.codescout`
+  directory of this checkout is writable.
+- The tool cannot inspect `.codescout` or one of the files, cannot read the git
+  index, or cannot tell whether git ignores the file. The refusal says which.
 
 The old catalog is never written.
 
-`derived.db` and `catalog.db` share one directory, so they share one
-`vector-cache.db`. An old codescout binary never opens `derived.db`.
+A `derived.db` beside the old catalog is unused. Delete it.
+
+The vector cache is `vector-cache.db` in the librarian directory of the machine: the
+directory of `LIBRARIAN_DB` when it is set, else the `librarian` directory of the
+local data directory. Every checkout shares it. An old codescout binary never opens
+`.codescout/derived.db`.
 
 ## Exit codes
 
@@ -324,9 +339,15 @@ The old catalog is never written.
 - a `repo.toml` or a `key-space.toml` in `HEAD` that does not parse;
 - no git repository;
 - a held project write lock (`export`);
-- an existing `derived.db` (`export`);
+- an existing `.codescout/derived.db` (`export`);
 - an export that is not committed (`build`);
 - a `HEAD` that moved after the plan (`build`);
-- a side file beside `derived.db` (`build`);
-- a `derived.db` that is not a new catalog, that a newer codescout made, or that
-  another repository built (`build`).
+- a repository that does not ignore `.codescout/derived.db` and its side files
+  (`build`);
+- a link at `.codescout`, a `.codescout` that is not a directory of this checkout,
+  or a link at `.codescout/derived.db` or a side file, or, on Unix, a hard link there
+  (`build`);
+- a `.codescout/derived.db` or a side file that git tracks (`build`);
+- a `.codescout/derived.db` that is not a new catalog, that a newer codescout made,
+  or that cannot be created or opened (`build`);
+- a file or git state that the tool cannot inspect (`build`).

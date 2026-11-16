@@ -9,7 +9,7 @@
 
 use crate::librarian::catalog::event_text::{home_lines, splice_under_home};
 use crate::librarian::frontmatter;
-use crate::librarian::lifecycle::relations::relations;
+use crate::librarian::lifecycle::relations::{rel_of_label, relation_labels, relations};
 use anyhow::{bail, Result};
 
 /// The heading that is the home of every relation line of a document.
@@ -32,10 +32,24 @@ pub(crate) fn label_for_rel(rel: &str) -> Result<String, String> {
     }
     valid_label(&label).map(|()| label)
 }
+/// Whether a link of `rel` is a `supersedes` link: any spelling the label reader takes as
+/// `Supersedes` (`supersedes`, `SUPERSEDES`, `Supersedes`) writes the destination's `status:
+/// superseded` and the row's canonical rel. One predicate for the write (`tools::link::call`) and
+/// for the path the write names (`artifact::write_target_id`), so the two never disagree on which
+/// file changed.
+pub(crate) fn is_superseding(rel: &str) -> bool {
+    label_for_rel(rel).is_ok_and(|label| rel_of_label(&label) == "supersedes")
+}
 
-/// `doc` with the line `**<label>:** <form>` added at the end of its `## Relations` section, after
-/// one blank line. The heading is created at the end of the body when absent. `Ok(None)` when the
-/// identical line is already in that section (a repeated link adds nothing).
+/// `doc` with the line `**<label>:** <form>` added to its `## Relations` section, in text order:
+/// before the first declaring line (a column-0 `**Label:**` line outside a code fence) whose text is
+/// greater than the new line's, with one blank line after it; with no greater line, at the end of
+/// the section after one blank line. The heading is created at the end of the body when absent.
+/// `Ok(None)` when the identical line is already in that section (a repeated link adds nothing).
+///
+/// The text order makes a line that two branches add to the same document merge as one line, and
+/// keeps a document's relation lines in one order whatever order the links were made in. Text is
+/// compared with a trailing `\r` removed; a line put before a CRLF line ends in CRLF.
 ///
 /// `form` is one grammar token such as `[[key]]` or `[[key:F-3]]`, without whitespace. It is an
 /// error when `form` is not such a token, when the frontmatter does not parse, or when the new line
@@ -62,7 +76,13 @@ pub(crate) fn splice_relation(doc: &str, label: &str, form: &str) -> Result<Opti
     {
         return Ok(None);
     }
-    let out = splice_under_home(doc, body, RELATIONS_HEADING, &format!("{line}\n"));
+    let out = match first_greater_line(body, &line) {
+        Some((at, eol)) => {
+            let new_body = format!("{}{line}{eol}{eol}{}", &body[..at], &body[at..]);
+            frontmatter::replace_body(doc, &new_body).unwrap_or(new_body)
+        }
+        None => splice_under_home(doc, body, RELATIONS_HEADING, &format!("{line}\n")),
+    };
     // An open code fence, or other text that swallows the new line, would make the relation
     // invisible to the reader, and a repeat of the call would then add it again.
     if readable_copies(&out, label, &line) != readable_copies(doc, label, &line) + 1 {
@@ -72,6 +92,31 @@ pub(crate) fn splice_relation(doc: &str, label: &str, form: &str) -> Result<Opti
         );
     }
     Ok(Some(out))
+}
+
+/// Where in `body` the relation line `line` goes by text order: the byte offset of the first
+/// declaring line of the `## Relations` section, outside a code fence, whose text (trailing `\r`
+/// removed) is greater than `line`, and the line ending to use there (`\r\n` when that line ends in
+/// `\r`). `None` when no declaring line is greater: the line goes at the end of the section.
+///
+/// A declaring line is one the relation reader labels: `relation_labels` of the line alone is not
+/// empty. The line ends the paragraph before it (a bold field does), so the paragraph above keeps
+/// its labels whether it ends in a blank line or in a wrapped line.
+fn first_greater_line(body: &str, line: &str) -> Option<(usize, &'static str)> {
+    home_lines(body, RELATIONS_HEADING)
+        .into_iter()
+        .find(|l| {
+            let text = l.trim_end_matches('\r');
+            text > line && !relation_labels(text).is_empty()
+        })
+        .and_then(|l| {
+            // `home_lines` yields slices of `body`, so a line's offset is its distance from `body`.
+            // The check is defensive: a slice that did not lie in `body` (a change to `home_lines`)
+            // gives no place, and the line goes at the end of the section as it always did.
+            let at = (l.as_ptr() as usize).checked_sub(body.as_ptr() as usize)?;
+            body.get(at..)?.starts_with(l).then_some(())?;
+            Some((at, if l.ends_with('\r') { "\r\n" } else { "\n" }))
+        })
 }
 
 /// Whether `label` is one the reader takes: ASCII letters and spaces, a capital first, a
@@ -134,6 +179,16 @@ mod tests {
         );
     }
 
+    // mutation: `rel_of_label` keeps the case of the label's letters.
+    #[test]
+    fn every_spelling_of_one_label_has_one_canonical_rel() {
+        use crate::librarian::lifecycle::relations::rel_of_label;
+        for rel in ["depends_on", "depends-on", "Depends On", "__depends--on "] {
+            let label = label_for_rel(rel).unwrap();
+            assert_eq!(rel_of_label(&label), "depends_on", "{rel:?}");
+        }
+    }
+
     #[test]
     fn a_rel_with_a_digit_is_not_a_label() {
         let why = label_for_rel("depends2").unwrap_err();
@@ -172,16 +227,123 @@ mod tests {
         );
     }
 
+    // mutation: always append.
     #[test]
-    fn a_line_joins_the_end_of_an_existing_section_and_leaves_the_next_heading_alone() {
+    fn a_line_takes_its_sorted_place_and_leaves_the_next_heading_alone() {
         let doc = "# T\n\n## Relations\n\n**Rests on:** [[a]]\n\n## Later\n\ntext\n";
         let out = splice_relation(doc, "Implements", "[[b]]")
             .unwrap()
             .unwrap();
         assert_eq!(
             out,
-            "# T\n\n## Relations\n\n**Rests on:** [[a]]\n\n**Implements:** [[b]]\n\n## Later\n\ntext\n"
+            "# T\n\n## Relations\n\n**Implements:** [[b]]\n\n**Rests on:** [[a]]\n\n## Later\n\ntext\n"
         );
+    }
+    // This one is green with always-append, and stays as a guard on the other side.
+    // mutation: insert before the first declaring line whatever its text.
+    #[test]
+    fn a_line_that_sorts_last_still_appends() {
+        let doc = "# T\n\n## Relations\n\n**Rests on:** [[a]]\n\n## Later\n\ntext\n";
+        let out = splice_relation(doc, "Supersedes", "[[b]]")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            out,
+            "# T\n\n## Relations\n\n**Rests on:** [[a]]\n\n**Supersedes:** [[b]]\n\n## Later\n\ntext\n"
+        );
+    }
+
+    // mutation: the inserted line and its blank line end in `\n` whatever the greater line ends in.
+    #[test]
+    fn a_crlf_document_takes_the_line_before_the_greater_line_and_keeps_crlf() {
+        let doc = "# T\r\n\r\n## Relations\r\n\r\n**Rests on:** [[a]]\r\n";
+        let out = splice_relation(doc, "Implements", "[[b]]")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            out,
+            "# T\r\n\r\n## Relations\r\n\r\n**Implements:** [[b]]\r\n\r\n**Rests on:** [[a]]\r\n"
+        );
+        assert_eq!(
+            splice_relation(&out, "Implements", "[[b]]").unwrap(),
+            None,
+            "the CRLF copy is the same line"
+        );
+    }
+
+    // mutation: the scan for the first greater line does not skip a fence's lines.
+    #[test]
+    fn a_greater_line_inside_a_fence_is_not_an_insertion_point() {
+        let doc = "# T\n\n## Relations\n\n**Alpha link:** [[a]]\n\n```\n**Zzz:** [[z]]\n```\n\n**Rests on:** [[r]]\n";
+        let out = splice_relation(doc, "Implements", "[[b]]")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            out,
+            "# T\n\n## Relations\n\n**Alpha link:** [[a]]\n\n```\n**Zzz:** [[z]]\n```\n\n**Implements:** [[b]]\n\n**Rests on:** [[r]]\n",
+            "the fenced `**Zzz:**` line is text, not a place"
+        );
+    }
+
+    // The line before the insertion point is the last line of the previous paragraph, not a blank
+    // line. The new line is a bold field, so the reader ends that paragraph at it: it gets its own
+    // label and the previous paragraph keeps its own on every line, with no extra blank line.
+    // mutation: insert before the continuation line, inside the previous paragraph.
+    #[test]
+    fn a_line_after_a_continuation_line_gets_its_own_label() {
+        use crate::librarian::lifecycle::relations::relation_labels;
+        let doc =
+            "# T\n\n## Relations\n\n**Alpha link:** [[a]]\nwrapped [[w]]\n**Rests on:** [[r]]\n";
+        let out = splice_relation(doc, "Implements", "[[b]]")
+            .unwrap()
+            .unwrap();
+        let labels = relation_labels(&out);
+        let got: Vec<(u32, &str)> = labels.iter().map(|(n, l)| (*n, l.as_str())).collect();
+        assert_eq!(
+            got,
+            [
+                (5, "Alpha link"),
+                (6, "Alpha link"),
+                (7, "Implements"),
+                (9, "Rests on")
+            ],
+            "{out}"
+        );
+        let read = relations(&out);
+        let implements: Vec<_> = read.iter().filter(|r| r.label == "Implements").collect();
+        assert_eq!(implements.len(), 1, "{read:?}");
+        assert_eq!(implements[0].reference, parse_target("b"));
+        assert!(
+            read.iter()
+                .any(|r| r.label == "Alpha link" && r.reference == parse_target("w")),
+            "the continuation line's citation stays the previous paragraph's: {read:?}"
+        );
+    }
+
+    // mutation: append, which conflicts where the two branches both added the line.
+    #[test]
+    fn the_same_link_added_on_two_branches_merges_as_one_line() {
+        use crate::librarian::derived::testkit::git;
+        let base = "# T\n\n## Relations\n\n**Depends on:** [[a]]\n\n**Supersedes:** [[z]]\n";
+        let ours = splice_relation(base, "Implements", "[[k]]")
+            .unwrap()
+            .unwrap();
+        let ours = splice_relation(&ours, "Supersedes", "[[zz]]")
+            .unwrap()
+            .unwrap();
+        let theirs = splice_relation(base, "Implements", "[[k]]")
+            .unwrap()
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        for (name, text) in [
+            ("ours", ours.as_str()),
+            ("base", base),
+            ("theirs", theirs.as_str()),
+        ] {
+            std::fs::write(dir.path().join(name), text).unwrap();
+        }
+        let merged = git(dir.path(), &["merge-file", "-p", "ours", "base", "theirs"]);
+        assert_eq!(merged, ours, "the shared line merges as one line");
     }
 
     #[test]

@@ -12,8 +12,8 @@
 //!   and the committed files of `HEAD`, composes every change of every file in memory (an
 //!   [`plan::ExportPlan`]), prints the report and writes nothing.
 //! - `cutover export` writes the plan, one atomic write per file. The operator commits the result.
-//! - `cutover build` builds `derived.db` beside the old catalog from `HEAD`, but only when a plan
-//!   of `HEAD` writes nothing.
+//! - `cutover build` builds `.codescout/derived.db` in the checkout from `HEAD`, but only when a
+//!   plan of `HEAD` writes nothing.
 //!
 //! # Inputs (D-R10)
 //!

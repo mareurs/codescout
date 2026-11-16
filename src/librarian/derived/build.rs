@@ -1,9 +1,17 @@
 //! A full rebuild of the derived index from one commit.
 //!
-//! [`build_full`] reads a commit's tree through `git2` (never the working tree, and no path from
-//! the file system), then rewrites every derived table in one transaction. Every input is a
-//! committed blob: the markdown files, `.codescout/repo.toml`, `.codescout/librarian.toml` and
-//! `.codescout/key-space.toml`. Two clones at one commit therefore give one answer.
+//! [`build_full`] reads a commit through `git2` (never the working tree, and no path from the file
+//! system), then rewrites every derived table in one transaction. The inputs are git objects:
+//!
+//! - the commit's committed blobs: the markdown files, `.codescout/repo.toml`,
+//!   `.codescout/librarian.toml` and `.codescout/key-space.toml`;
+//! - the augmentation sidecars, committed blobs of the same tree that a document's
+//!   `expects_augmentation:` names;
+//! - the commit graph: the first-parent history walk (`super::history`) reads earlier commits,
+//!   their trees and the blobs it needs.
+//!
+//! Two clones at one commit therefore give one answer. The working tree is read only by
+//! [`update_with_working_tree`](super::worktree::update_with_working_tree).
 //!
 //! What the tables hold, where the plan left a choice:
 //!
@@ -14,21 +22,52 @@
 //!   `target_key` and `target_token` are what the citation says as written; a malformed target's
 //!   raw text is kept in `target_key`, so a reader must filter on `kind != 'malformed'` before it
 //!   treats `target_key` as a key. `dst_key` is the key of the document a `file` or `entry`
-//!   citation resolved to (NULL for every other kind).
+//!   citation resolved to (NULL for every other kind). `rel` is the canonical relation of a `File`
+//!   or `Entry` citation on a line of a relation paragraph (`**Depends on:** [[b]]` gives
+//!   `depends_on`); it is NULL for every other citation, for a bare or malformed citation on such
+//!   a line, and for a line inside an event section (from its heading to its last line,
+//!   inclusive), which is the event's own text.
 //! - `problem`: `invalid_key` (`key` is the key the path gave, when it gave one, and `rel_paths`
-//!   the one path) and `duplicate_key` (`rel_paths` every holder, sorted).
+//!   the one path) and `duplicate_key` (`rel_paths` every holder, sorted), and the document
+//!   problems, each with the document's key (NULL when its path gives none) and the document's
+//!   path first in `rel_paths`: `entry_unparsed` (an entry document that does not parse as one),
+//!   `augmentation_unparseable` (an `expects_augmentation:` that does not parse), and
+//!   `sidecar_missing` and `sidecar_invalid` (a declared sidecar the commit does not hold, or one
+//!   that is refused or does not read; the sidecar's path follows the document's).
+//! - `event`: one row per event section (a `###` heading followed by an event comment that reads
+//!   back), with its span: `heading_line` to `end_line`, inclusive.
+//! - `entry_doc`: one row per entry document (a frontmatter with an `entry_kind` that is present
+//!   and not null) that parses as one; one that does not is an `entry_unparsed` problem instead.
+//! - `augmentation`: one row per document whose `expects_augmentation:` gives one: the sidecar's
+//!   path as read and the shape it holds (NULL columns for a bare `true`).
 //! - `skipped`: one row per `(rel_path, reason)`; a repeated pair is stored once.
-//! - `checkout`: one row; `rules_source` is always `committed+builtin`.
+//! - `checkout`: one row; `rules_source` is always `committed+builtin`, because
+//!   `BuildInput::from_commit` is the only way outside `derived` to build an input.
+//! - `doc_history` and `history_meta`: the history walk of the commit, and what it was walked
+//!   from (`super::history`).
+//! - `worktree_layer`: empty after every build of a commit alone;
+//!   [`update_with_working_tree`](super::worktree::update_with_working_tree) writes one row per
+//!   working-tree markdown file it laid over `HEAD`.
+//!
+//! Every stored path but `checkout.root` (the root the caller names) is relative to the
+//! repository, with one exception: a sidecar path refused lexically (an absolute path or a `..`
+//! segment) is stored in its `sidecar_invalid` problem row as the declaration spelled it, so that
+//! row can hold an absolute path written in the committed text.
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Component, Path};
 
 use anyhow::Context;
 use rusqlite::{params, Connection};
 use sha2::{Digest, Sha256};
 
+use super::history;
 use super::incremental::{self, CacheKey, Parsed};
 use super::scan::{blob_text, scan_commit, ScannedFile};
+use super::worktree::LayerRow;
+use crate::librarian::augmentation_sidecar::{refuse_lexical_escape, AugmentationSidecar};
 use crate::librarian::catalog::chunk::{build_chunks, ChunkRow};
+use crate::librarian::catalog::event_text::{parse_event_sections_spanned, EventSpan, EventText};
 use crate::librarian::classify::{
     classify, default_rules, load_rules, CompiledRule, PROJECT_RULES_REL,
 };
@@ -39,16 +78,28 @@ use crate::librarian::identity::key::{key_of, KeyError};
 use crate::librarian::identity::key_space::{KeySpace, KEY_SPACE_FILE_REL};
 use crate::librarian::identity::repo_name::{self, RepoName, REPO_FILE_REL};
 use crate::librarian::indexer::first_h1;
+use crate::librarian::lifecycle::entry::parse_entry;
+use crate::librarian::lifecycle::relations::{rel_of_label, relation_labels};
+use crate::librarian::statements::Validity;
+use crate::librarian::tools::doctor::{parse_declaration, Declaration};
 use crate::librarian::tools::link_scan::extract::entry_sections;
 
-/// Names the version of the parse logic: [`parse_document`] and everything it calls
-/// (frontmatter, entry sections, the citation grammar, chunking, metadata derivation) and the
-/// shape the parse cache stores. It is part of the parse cache's key, so a cached row from another
-/// version is never read.
+/// Names the version of the parse logic: [`parse_document`] and everything it calls (frontmatter,
+/// entry sections, the citation grammar, chunking, metadata derivation, event sections
+/// (`parse_event_sections_spanned`), the relation paragraphs (`lifecycle::relations`'s
+/// `relation_labels` and `rel_of_label`), the entry document (`lifecycle::entry::parse_entry` and
+/// the text of its `Validity`), and the augmentation declaration
+/// (`tools::doctor::parse_declaration`)) and the shape the parse cache stores. It is part of the
+/// parse cache's key, so a cached row from another version is never read. A change to any of
+/// those functions that changes what they give for some text changes cached facts.
 ///
 /// Bump it whenever the parse of some text changes. The test
 /// `the_parse_of_a_pinned_corpus_is_tied_to_parser_version` fails when it should have been.
-pub const PARSER_VERSION: &str = "1";
+///
+/// It is also the key of the git-history cache (`history_meta.parser_version`): a change to a
+/// rule of the history walk, or to `RENAME_THRESHOLD` or `RENAME_LIMIT` of `git::diff_trees`,
+/// leaves history walked under the old rule in place at the same commit unless it is bumped.
+pub const PARSER_VERSION: &str = "2";
 
 /// The chunk grain, fixed: 2048 characters (512 tokens), the old indexer's `CHUNK_CHARS`. It is
 /// not read from `.codescout/project.toml`, which is not committed.
@@ -67,19 +118,86 @@ const RULES_SOURCE: &str = "committed+builtin";
 pub(super) const PARSE_NOTE_FRONTMATTER_ERROR: &str = "frontmatter_error";
 
 /// The tables a build rewrites. `parse_cache` is not here: it caches parse products and is no
-/// part of the answer.
-const DERIVED_TABLES: [&str; 7] = [
-    "checkout", "document", "entry", "edge", "chunk", "problem", "skipped",
+/// part of the answer. The history tables (`history_meta`, `doc_history`) are not here either:
+/// the history walk owns them.
+const DERIVED_TABLES: [&str; 11] = [
+    "checkout",
+    "document",
+    "entry",
+    "edge",
+    "chunk",
+    "problem",
+    "skipped",
+    "event",
+    "entry_doc",
+    "augmentation",
+    "worktree_layer",
 ];
 
 /// What one build reads: a commit of a repository, the rules, and the key space.
+///
+/// [`BuildInput::from_commit`] is the only way to make one. The rules and the key space are read
+/// from the commit itself, so no caller can pair a commit with rules or a key space of another
+/// source. A struct literal from outside the `derived` module does not compile:
+///
+/// ```compile_fail,E0451
+/// use codescout::librarian::derived::build::BuildInput;
+///
+/// fn make() {
+///     let _input: BuildInput<'_> = BuildInput { ..todo!() };
+/// }
+/// ```
+///
+/// The block names no field, so a renamed, added or retyped field cannot change the reason it
+/// fails: struct-update syntax is refused whenever any field is private.
+///
+/// The constructor compiles from outside the module:
+///
+/// ```no_run
+/// use codescout::librarian::derived::build::BuildInput;
+///
+/// fn make(
+///     repo: &git2::Repository,
+///     commit: &git2::Commit,
+///     root: &std::path::Path,
+/// ) -> anyhow::Result<()> {
+///     let input = BuildInput::from_commit(repo, commit, root)?;
+///     let _rules = input.rules();
+///     Ok(())
+/// }
+/// ```
 pub struct BuildInput<'a> {
-    pub repo: &'a git2::Repository,
-    pub commit: &'a git2::Commit<'a>,
+    pub(super) repo: &'a git2::Repository,
+    pub(super) commit: &'a git2::Commit<'a>,
     /// Recorded in the `checkout` row and read from nowhere: the build never opens a path.
-    pub root: &'a Path,
-    pub rules: &'a [CompiledRule],
-    pub space: &'a KeySpace,
+    pub(super) root: &'a Path,
+    pub(super) rules: Vec<CompiledRule>,
+    pub(super) space: KeySpace,
+}
+
+impl<'a> BuildInput<'a> {
+    /// The input of `commit`: its rules ([`rules_from_commit`]) and its key space
+    /// ([`key_space_from_commit`]). An error from either read passes through unchanged.
+    pub fn from_commit(
+        repo: &'a git2::Repository,
+        commit: &'a git2::Commit<'a>,
+        root: &'a Path,
+    ) -> anyhow::Result<Self> {
+        let rules = rules_from_commit(repo, commit)?;
+        let space = key_space_from_commit(repo, commit)?;
+        Ok(Self {
+            repo,
+            commit,
+            root,
+            rules,
+            space,
+        })
+    }
+
+    /// The classification rules the build uses: the commit's own, then the built-in defaults.
+    pub fn rules(&self) -> &[CompiledRule] {
+        &self.rules
+    }
 }
 
 /// What one build stored: the rows of each table.
@@ -189,14 +307,25 @@ pub(super) fn rebuild(
     reuse_cache: bool,
     changes: Option<ChangeCounts>,
 ) -> anyhow::Result<BuildReport> {
-    rebuild_from(conn, input, parser, reuse_cache, changes, &|| {
-        scan_commit(input.repo, input.commit, input.space)
-    })
+    rebuild_from(
+        conn,
+        input,
+        parser,
+        reuse_cache,
+        changes,
+        &|| scan_commit(input.repo, input.commit, &input.space),
+        &[],
+    )
 }
 
 /// [`rebuild`] with the scan of the commit passed in, so that a test can hand the build the same
 /// files in another order and see that nothing stored depends on it. `scan` runs once, after the
-/// repo name is read, as the scan always did; production passes [`scan_commit`] and nothing else.
+/// repo name is read, as the scan always did; production passes [`scan_commit`] and nothing else,
+/// except [`update_with_working_tree`](super::worktree::update_with_working_tree), which passes
+/// the commit's scan with the working tree's changed markdown laid over it.
+///
+/// `layer` is what `worktree_layer` stores: one row per working-tree file laid over the commit,
+/// and empty for a build of the commit alone.
 pub(super) fn rebuild_from(
     conn: &mut Connection,
     input: &BuildInput,
@@ -204,6 +333,7 @@ pub(super) fn rebuild_from(
     reuse_cache: bool,
     changes: Option<ChangeCounts>,
     scan: &dyn Fn() -> anyhow::Result<Vec<ScannedFile>>,
+    layer: &[LayerRow],
 ) -> anyhow::Result<BuildReport> {
     let (name, name_source) = repo_name_of(input.repo, input.commit)?;
 
@@ -233,7 +363,7 @@ pub(super) fn rebuild_from(
 
     // Every parse, and every cache read, happens here and not inside the write transaction: the
     // write lock is held for the deletes and inserts alone.
-    let rules_hash = incremental::rules_hash(input.rules);
+    let rules_hash = incremental::rules_hash(&input.rules);
     let mut parsed: Vec<Parsed> = Vec::with_capacity(documents.len());
     for doc in &documents {
         let key = CacheKey {
@@ -251,12 +381,40 @@ pub(super) fn rebuild_from(
         parsed.push(match cached {
             Some(products) => Parsed::cached(key, products),
             None => {
-                let products = (parser.parse)(&doc.rel_path, &doc.text, input.rules);
+                let products = (parser.parse)(&doc.rel_path, &doc.text, &input.rules);
                 Parsed::fresh(key, products)
                     .with_context(|| format!("encoding the parse cache row of {}", doc.rel_path))?
             }
         });
     }
+
+    // The sidecars are read here too, from the commit, before the write transaction opens: the
+    // shape is not cached (a sidecar is another blob, so an edit to it alone must be seen), and
+    // the problems this finds join the list the entry documents' problems are pushed onto below.
+    let mut document_problems: Vec<ProblemRow> = Vec::new();
+    let augmentations: Vec<Option<AugmentationRow>> = documents
+        .iter()
+        .zip(&parsed)
+        .map(|(doc, parsed)| {
+            read_augmentation(
+                input.repo,
+                input.commit,
+                doc,
+                &parsed.products.augmentation,
+                &mut document_problems,
+            )
+        })
+        .collect();
+
+    // The git history is walked here too, before the write transaction: a walk reads the object
+    // database and takes as long as the repository is deep. An update at the commit, parse
+    // version and shallow state the stored history was walked from keeps it; `build_full` never
+    // reuses anything.
+    let walked = if reuse_cache && history::reusable(conn, input.repo, input.commit)? {
+        None
+    } else {
+        Some(history::walk(input.repo, input.commit).context("walking the git history")?)
+    };
 
     let tx = conn.transaction()?;
     for table in DERIVED_TABLES {
@@ -274,19 +432,36 @@ pub(super) fn rebuild_from(
         ],
     )?;
 
+    for row in layer {
+        tx.prepare_cached(
+            "INSERT INTO worktree_layer (rel_path, state, sha256) VALUES (?1, ?2, ?3)",
+        )?
+        .execute(params![row.rel_path, row.state, row.sha256])
+        .with_context(|| format!("storing the working-tree layer row of {}", row.rel_path))?;
+    }
+
     let mut report = BuildReport {
         changes,
         ..BuildReport::default()
     };
-    for (doc, parsed) in documents.iter().zip(&parsed) {
+    for ((doc, parsed), augmentation) in documents.iter().zip(&parsed).zip(&augmentations) {
         store_document(&tx, doc, &parsed.products, &index, &mut report)
             .with_context(|| format!("storing {}", doc.rel_path))?;
+        if let Some(row) = augmentation {
+            store_augmentation(&tx, row)
+                .with_context(|| format!("storing the augmentation of {}", doc.rel_path))?;
+        }
+        document_problems.extend(entry_problem(doc, &parsed.products));
     }
     for problem in index.problems() {
-        let (kind, key, rel_paths) = problem_row(problem);
-        tx.prepare_cached("INSERT INTO problem (kind, \"key\", rel_paths) VALUES (?1, ?2, ?3)")?
-            .execute(params![kind, key, json_array(&rel_paths)])?;
-        report.problems += 1;
+        insert_problem(&tx, &mut report, problem_row(problem))?;
+    }
+    // The problems that one document alone decides (not the key index): one list, sorted by
+    // `(kind, key, rel_paths)` so that the order does not depend on the scan, stored after the
+    // index's own rows. A later source of such a problem pushes its rows onto this list.
+    document_problems.sort();
+    for problem in document_problems {
+        insert_problem(&tx, &mut report, problem)?;
     }
     for (rel_path, reason) in &skipped {
         // `OR IGNORE`: the same pair twice is one row, and only a stored row is counted.
@@ -295,6 +470,10 @@ pub(super) fn rebuild_from(
             .execute(params![rel_path, reason])?;
     }
     incremental::sync_cache(&tx, &parsed).context("writing the parse cache")?;
+    // Under the write lock the reuse is checked again: another writer may have stored another
+    // commit's history since the check above.
+    history::settle(&tx, input.repo, input.commit, walked.as_ref())
+        .context("writing the git history")?;
     tx.commit()?;
     Ok(report)
 }
@@ -349,6 +528,27 @@ pub struct EntryRow {
     pub end_line: u32,
 }
 
+/// One event section of a document: where it sits (file lines) and the event the text holds.
+/// `source_json` and `payload_json` are `serde_json::to_string` of the parsed values (key order as
+/// written); `mutates` is a JSON array of the forms on the section's `**Mutates:**` line. Events
+/// are keyed by `(rel_path, heading_line)`, so two sections with one id are two rows (E2-R7).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DerivedEventRow {
+    pub heading_line: u32,
+    pub end_line: u32,
+    pub event_id: String,
+    pub kind: String,
+    pub created_at_ms: i64,
+    pub author: Option<String>,
+    pub anchor_commit: Option<String>,
+    pub head_commit: Option<String>,
+    pub parent: Option<String>,
+    pub resolves: Option<String>,
+    pub source_json: Option<String>,
+    pub mutates: Vec<String>,
+    pub payload_json: String,
+}
+
 /// Everything one document's text and path give, whatever else is in the tree. Resolution is not
 /// here: an edge's resolution depends on every other document, so it is computed over the whole
 /// tree after all documents are parsed. This is what the parse cache holds.
@@ -360,6 +560,107 @@ pub struct ParsedDocument {
     pub citations: Vec<Citation>,
     /// `chunk_id` is filled by [`chunk_id`]; `artifact_id` is the document's `rel_path`.
     pub chunks: Vec<ChunkRow>,
+    /// The event sections, in document order.
+    pub events: Vec<DerivedEventRow>,
+    /// Line (whole document) -> canonical `rel` of the relation paragraph the line lies in, for
+    /// every such line outside every event section; see `relation_rels`.
+    pub relation_rels: BTreeMap<u32, String>,
+    /// Whether the document is an entry document, and the fields its `entry_doc` row holds.
+    pub entry_doc: EntryDoc,
+    /// What the frontmatter's `expects_augmentation:` declares (E2-R9). The sidecar a declaration
+    /// names is not part of the parse: it is another blob, read from the commit by the build.
+    pub augmentation: AugmentationDecl,
+}
+/// What a document's `expects_augmentation:` frontmatter value says, as
+/// `tools::doctor::parse_declaration` reads it. `None` is no key, an explicit false, or a
+/// frontmatter that did not parse; `Unparseable` is a value that declares nothing readable, which
+/// is a reported problem (`augmentation_unparseable`), never `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AugmentationDecl {
+    None,
+    /// `sidecar` is the path as the author wrote it (trimmed); `None` for `true`.
+    Declared {
+        sidecar: Option<String>,
+    },
+    Unparseable,
+}
+
+/// The [`AugmentationDecl`] of a document's frontmatter (`None`: no frontmatter, or one that did
+/// not parse).
+fn augmentation_decl_of(fm: Option<&Frontmatter>) -> AugmentationDecl {
+    let declaration = fm
+        .and_then(|fm| fm.extra.get("expects_augmentation"))
+        .map(parse_declaration);
+    match declaration {
+        Option::None | Some(Declaration::Absent) => AugmentationDecl::None,
+        Some(Declaration::Declared { sidecar }) => AugmentationDecl::Declared { sidecar },
+        Some(Declaration::Unparseable) => AugmentationDecl::Unparseable,
+    }
+}
+
+/// The columns of an `entry_doc` row, as stored. Dates are `%Y-%m-%d`; `valid` is the text of the
+/// validity class (`invariant`, `dated <d>` or `conditional — <c>`); `fields_json` is the JSON
+/// object of every frontmatter key that is not an entry key (top-level keys sorted; a nested
+/// object keeps the order written) (E2-R8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryDocRow {
+    pub entry_kind: String,
+    pub status_since: String,
+    pub created: String,
+    pub closed: Option<String>,
+    pub revisit_by: Option<String>,
+    pub valid: Option<String>,
+    pub fields_json: String,
+}
+
+/// What a document's frontmatter says about being an entry document. It is one when the
+/// frontmatter parses and has a non-null `entry_kind`; it then either reads as an entry
+/// ([`EntryDoc::Parsed`], one `entry_doc` row) or does not ([`EntryDoc::Unparsed`], an
+/// `entry_unparsed` problem row and no `entry_doc` row).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryDoc {
+    NotAnEntry,
+    Unparsed,
+    Parsed(EntryDocRow),
+}
+
+/// The [`EntryDoc`] of a document's frontmatter (`None`: no frontmatter, or one that did not
+/// parse). A ledger has no `entry_kind`, so it is no entry document whatever its `status`.
+fn entry_doc_of(fm: Option<&Frontmatter>) -> EntryDoc {
+    let Some(fm) = fm else {
+        return EntryDoc::NotAnEntry;
+    };
+    if matches!(
+        fm.extra.get("entry_kind"),
+        None | Some(serde_json::Value::Null)
+    ) {
+        return EntryDoc::NotAnEntry;
+    }
+    let Ok(meta) = parse_entry(fm) else {
+        return EntryDoc::Unparsed;
+    };
+    let date = |d: chrono::NaiveDate| d.format("%Y-%m-%d").to_string();
+    EntryDoc::Parsed(EntryDocRow {
+        entry_kind: meta.entry_kind,
+        status_since: date(meta.status_since),
+        created: date(meta.created),
+        closed: meta.closed.map(date),
+        revisit_by: meta.revisit_by.map(date),
+        valid: meta.valid.as_ref().map(validity_text),
+        // `Value::Object` of the sorted fields: the JSON `serde_json::to_string(&meta.fields)`
+        // writes, without a `Result` that cannot be an `Err` for string keys.
+        fields_json: serde_json::Value::Object(meta.fields.into_iter().collect()).to_string(),
+    })
+}
+
+/// The text of a validity class, in the form `**Valid:**` takes. (`tools/context.rs` renders the
+/// same three forms inline, in a match that also handles a parse error.)
+fn validity_text(valid: &Validity) -> String {
+    match valid {
+        Validity::Invariant => "invariant".to_owned(),
+        Validity::Dated(d) => format!("dated {d}"),
+        Validity::Conditional { condition } => format!("conditional — {condition}"),
+    }
 }
 
 /// Parse one document: a pure function of its path, its text and the rules.
@@ -367,7 +668,8 @@ pub struct ParsedDocument {
 /// A frontmatter block that does not parse is not an error: the document is indexed with no
 /// frontmatter, its whole text as the body, and `parse_note = "frontmatter_error"`. Entries and
 /// citations are read from the whole text (both skip a valid frontmatter block themselves);
-/// chunks are cut from the body and carry file lines.
+/// chunks are cut from the body and carry file lines. Event sections are read from the whole text
+/// and carry file lines too.
 pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> ParsedDocument {
     let (fm, body, parse_note) = match frontmatter::parse(text) {
         Ok((fm, body)) => (fm, body, None),
@@ -393,12 +695,66 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
             chunk
         })
         .collect();
+    let spanned = parse_event_sections_spanned(text);
+    let spans: Vec<EventSpan> = spanned.iter().map(|(_, span)| *span).collect();
+    let relation_rels = relation_rels(text, &spans);
+    let events = spanned
+        .into_iter()
+        .map(|(event, span)| event_row(event, span))
+        .collect();
+    let entry_doc = entry_doc_of(fm.as_ref());
+    let augmentation = augmentation_decl_of(fm.as_ref());
     ParsedDocument {
         metadata,
         parse_note,
         entries,
         citations,
         chunks,
+        events,
+        relation_rels,
+        entry_doc,
+        augmentation,
+    }
+}
+
+/// The canonical `rel` of each line of a relation paragraph in `text`, outside every event
+/// section in `spans` (E2-R4, E2-R5). The paragraph rule is that of `relation_labels`; a line inside an
+/// event section is that event's own text, so its `**Mutates:**` line is no relation of the
+/// document (the event's `mutates` column holds it). Which of a line's citations take the rel is
+/// decided by the edge insert in [`store_document`], not here.
+fn relation_rels(text: &str, spans: &[EventSpan]) -> BTreeMap<u32, String> {
+    relation_labels(text)
+        .into_iter()
+        .filter(|(line, _)| {
+            !spans
+                .iter()
+                .any(|span| (span.heading_line..=span.end_line).contains(line))
+        })
+        .map(|(line, label)| (line, rel_of_label(&label)))
+        .collect()
+}
+
+/// The row of one event section. The source and the payload are stored as `serde_json::to_string`
+/// of the parsed values (key order as written, `preserve_order`), the `mutates` forms as a list
+/// that [`store_document`] writes as a JSON array (E2-R7).
+fn event_row(event: EventText, span: EventSpan) -> DerivedEventRow {
+    DerivedEventRow {
+        heading_line: span.heading_line,
+        end_line: span.end_line,
+        event_id: event.id,
+        kind: event.kind,
+        created_at_ms: event.created_at_ms,
+        author: event.author,
+        anchor_commit: event.anchor_commit,
+        head_commit: event.head_commit,
+        parent: event.parent,
+        resolves: event.resolves,
+        source_json: event.source.map(|source| {
+            serde_json::to_string(&source).expect("two strings and a JSON value always serialize")
+        }),
+        mutates: event.mutates,
+        payload_json: serde_json::to_string(&event.payload)
+            .expect("a JSON value always serializes"),
     }
 }
 
@@ -489,7 +845,8 @@ fn derive_metadata(
     }
 }
 
-/// Write one document's rows (document, entries, edges, chunks) and count them.
+/// Write one document's rows (document, entries, events, edges, chunks) and count them; the
+/// report has no count for events.
 fn store_document(
     conn: &Connection,
     doc: &Document,
@@ -546,15 +903,64 @@ fn store_document(
         report.entries += 1;
     }
 
+    for event in &parsed.events {
+        conn.prepare_cached(
+            "INSERT INTO event (rel_path, heading_line, end_line, event_id, kind, created_at_ms, \
+             author, anchor_commit, head_commit, parent, resolves, source_json, mutates, \
+             payload_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        )?
+        .execute(params![
+            doc.rel_path,
+            event.heading_line,
+            event.end_line,
+            event.event_id,
+            event.kind,
+            event.created_at_ms,
+            event.author,
+            event.anchor_commit,
+            event.head_commit,
+            event.parent,
+            event.resolves,
+            event.source_json,
+            json_array(&event.mutates),
+            event.payload_json,
+        ])?;
+    }
+
+    if let EntryDoc::Parsed(row) = &parsed.entry_doc {
+        conn.prepare_cached(
+            "INSERT INTO entry_doc (rel_path, entry_kind, status_since, created, closed, \
+             revisit_by, valid, fields_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?
+        .execute(params![
+            doc.rel_path,
+            row.entry_kind,
+            row.status_since,
+            row.created,
+            row.closed,
+            row.revisit_by,
+            row.valid,
+            row.fields_json,
+        ])?;
+    }
+
     for (ord, citation) in parsed.citations.iter().enumerate() {
         let resolution = index.resolve(&doc.rel_path, &citation.reference);
         let Some(kind) = edge_kind(&resolution) else {
             continue;
         };
         let (target_repo, target_key, target_token) = edge_target(&citation.reference);
+        // Only a `File` or `Entry` citation is a relation; a bare or malformed token on a
+        // labelled line is not (the reader `lifecycle::relations` makes the same cut).
+        let rel = match citation.reference {
+            Reference::File { .. } | Reference::Entry { .. } => {
+                parsed.relation_rels.get(&citation.line)
+            }
+            Reference::Bare { .. } | Reference::Malformed { .. } => None,
+        };
         conn.prepare_cached(
             "INSERT INTO edge (src_rel_path, ord, line, kind, target_repo, target_key, \
-             target_token, dst_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             target_token, dst_key, rel) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?
         .execute(params![
             doc.rel_path,
@@ -564,7 +970,8 @@ fn store_document(
             target_repo,
             target_key,
             target_token,
-            edge_dst_key(&resolution)
+            edge_dst_key(&resolution),
+            rel
         ])?;
         report.edges += 1;
     }
@@ -644,8 +1051,11 @@ fn edge_target(reference: &Reference) -> (Option<&str>, Option<&str>, Option<&st
     }
 }
 
-/// `(kind, key, rel_paths)` of a `problem` row.
-fn problem_row(problem: &IndexProblem) -> (&'static str, Option<String>, Vec<String>) {
+/// `(kind, key, rel_paths)` of a `problem` row, before it is stored.
+type ProblemRow = (&'static str, Option<String>, Vec<String>);
+
+/// The `problem` row of an index problem.
+fn problem_row(problem: &IndexProblem) -> ProblemRow {
     match problem {
         IndexProblem::InvalidKey(KeyError::NotMarkdown(rel_path)) => {
             ("invalid_key", None, vec![rel_path.clone()])
@@ -661,6 +1071,141 @@ fn problem_row(problem: &IndexProblem) -> (&'static str, Option<String>, Vec<Str
     }
 }
 
+/// Store one `problem` row and count it: every stored row is counted, whatever decided it.
+fn insert_problem(
+    conn: &Connection,
+    report: &mut BuildReport,
+    (kind, key, rel_paths): ProblemRow,
+) -> rusqlite::Result<()> {
+    conn.prepare_cached("INSERT INTO problem (kind, \"key\", rel_paths) VALUES (?1, ?2, ?3)")?
+        .execute(params![kind, key, json_array(&rel_paths)])?;
+    report.problems += 1;
+    Ok(())
+}
+
+/// The problem row of an entry document that does not read as an entry (`entry_unparsed`): its
+/// key (NULL when the path has none) and its path.
+fn entry_problem(doc: &Document, parsed: &ParsedDocument) -> Option<ProblemRow> {
+    (parsed.entry_doc == EntryDoc::Unparsed).then(|| {
+        (
+            "entry_unparsed",
+            problem_key(doc),
+            vec![doc.rel_path.clone()],
+        )
+    })
+}
+
+/// The `key` of a problem row about a document: its key, NULL when its path has none.
+fn problem_key(doc: &Document) -> Option<String> {
+    key_of(&doc.rel_path).ok().map(|k| k.as_str().to_owned())
+}
+
+/// An `augmentation` row before it is stored: the document it belongs to, the path of the sidecar
+/// that was read (`None` for a bare `true` declaration), and the shape that sidecar held.
+struct AugmentationRow {
+    rel_path: String,
+    sidecar: Option<(String, AugmentationSidecar)>,
+}
+
+/// The `augmentation` row of a document, and the problem row when its declaration cannot give one
+/// (E2-R9). The sidecar is read from `commit`'s tree and from nowhere else.
+///
+/// - `Declared { sidecar: None }` is a row with the path alone.
+/// - A declared path is first judged by [`refuse_lexical_escape`], the rule the live reader
+///   applies: an absolute path or a `..` segment is `sidecar_invalid`, and nothing is read. (Its
+///   problem row names the path as declared: no path was looked up.)
+/// - Otherwise the path read is the declared one's `Normal` components joined with `/`, as the
+///   file system treats `docs/./a.yaml` (a tree lookup has no `.` entry). That path, not the
+///   declared spelling, goes in the row and in the problem rows. A path the commit does not hold is
+///   `sidecar_missing`; a link, a file that is not UTF-8 and a YAML error are `sidecar_invalid`.
+/// - `Unparseable` is `augmentation_unparseable`, naming the document alone.
+fn read_augmentation(
+    repo: &git2::Repository,
+    commit: &git2::Commit,
+    doc: &Document,
+    decl: &AugmentationDecl,
+    problems: &mut Vec<ProblemRow>,
+) -> Option<AugmentationRow> {
+    let mut problem = |kind: &'static str, sidecar: Option<String>| {
+        let mut rel_paths = vec![doc.rel_path.clone()];
+        rel_paths.extend(sidecar);
+        problems.push((kind, problem_key(doc), rel_paths));
+    };
+    let declared = match decl {
+        AugmentationDecl::None => return None,
+        AugmentationDecl::Unparseable => {
+            problem("augmentation_unparseable", None);
+            return None;
+        }
+        AugmentationDecl::Declared { sidecar: None } => {
+            return Some(AugmentationRow {
+                rel_path: doc.rel_path.clone(),
+                sidecar: None,
+            })
+        }
+        AugmentationDecl::Declared {
+            sidecar: Some(declared),
+        } => declared,
+    };
+    if refuse_lexical_escape(declared, "read").is_err() {
+        problem("sidecar_invalid", Some(declared.clone()));
+        return None;
+    }
+    let read_path = Path::new(declared)
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    let shape = match blob_text(repo, commit, &read_path) {
+        Ok(Some(text)) => serde_yml::from_str::<AugmentationSidecar>(&text).ok(),
+        Ok(None) => {
+            problem("sidecar_missing", Some(read_path));
+            return None;
+        }
+        Err(_) => None,
+    };
+    let Some(shape) = shape else {
+        problem("sidecar_invalid", Some(read_path));
+        return None;
+    };
+    Some(AugmentationRow {
+        rel_path: doc.rel_path.clone(),
+        sidecar: Some((read_path, shape)),
+    })
+}
+
+/// Insert one `augmentation` row. `params_schema` is the JSON text of the sidecar's mapping (key
+/// order as written); `append_mode` is 0 or 1.
+fn store_augmentation(conn: &Connection, row: &AugmentationRow) -> anyhow::Result<()> {
+    let (path, shape) = match &row.sidecar {
+        Some((path, shape)) => (Some(path.as_str()), Some(shape)),
+        None => (None, None),
+    };
+    let params_schema = shape
+        .and_then(|s| s.params_schema.as_ref())
+        .map(serde_json::Value::to_string);
+    conn.prepare_cached(
+        "INSERT INTO augmentation (rel_path, sidecar_rel_path, schema_version, prompt, \
+         entry_collection, params_schema, render_template, append_mode, history_cap) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?
+    .execute(params![
+        row.rel_path,
+        path,
+        shape.map(|s| i64::from(s.schema_version)),
+        shape.map(|s| s.prompt.as_str()),
+        shape.and_then(|s| s.entry_collection.as_deref()),
+        params_schema,
+        shape.and_then(|s| s.render_template.as_deref()),
+        shape.map(|s| i64::from(s.append_mode)),
+        shape.and_then(|s| s.history_cap),
+    ])?;
+    Ok(())
+}
+
 /// A compact JSON array of strings: `["a","b"]`.
 fn json_array(items: &[String]) -> String {
     serde_json::Value::from(items.to_vec()).to_string()
@@ -669,10 +1214,13 @@ fn json_array(items: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::librarian::catalog::event_text::{render_event_section, EventSource};
     use crate::librarian::derived::scan::open_commit;
-    use crate::librarian::derived::schema::{dump_all, open as open_index, open_in_memory};
+    use crate::librarian::derived::schema::{
+        dump_all, dump_tree, open as open_index, open_in_memory,
+    };
     use crate::librarian::derived::testkit::{
-        repo_with, repo_with_commit, repo_with_raw_tree, FILE, LINK,
+        clone_repo, git, repo_with, repo_with_commit, repo_with_raw_tree, FILE, LINK,
     };
     use rusqlite::types::Value;
     use sha2::{Digest, Sha256};
@@ -685,6 +1233,40 @@ mod tests {
 
     fn sha_hex(bytes: &[u8]) -> String {
         format!("{:x}", Sha256::digest(bytes))
+    }
+
+    // mutation: widen one field of `BuildInput` to `pub(crate)` or `pub`. The compile_fail doctest
+    // is outside the crate, so it cannot see a widening that stays inside the crate; this text
+    // check can. Every field must be private or `pub(super)`: the one way to make the input is
+    // `BuildInput::from_commit`, which takes the rules and the key space from the commit.
+    #[test]
+    fn every_field_of_build_input_stays_inside_derived() {
+        let source = include_str!("build.rs");
+        let start = source
+            .find("pub struct BuildInput<'a> {")
+            .expect("the struct BuildInput is in build.rs");
+        let body = &source[start..];
+        let body = &body[body.find('{').unwrap() + 1..body.find("\n}").unwrap()];
+        let fields: Vec<&str> = body
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("//") && !l.starts_with("#["))
+            .collect();
+        let names: Vec<&str> = fields
+            .iter()
+            .filter_map(|l| l.split(':').next()?.split_whitespace().last())
+            .collect();
+        // Non-vacuity: the scan found the fields, not an empty or a wrong span.
+        assert!(
+            names.contains(&"repo") && names.contains(&"space"),
+            "the scan of BuildInput found these fields: {names:?}"
+        );
+        for field in fields {
+            assert!(
+                field.starts_with("pub(super) ") || !field.starts_with("pub"),
+                "a field of BuildInput is visible outside `derived`: {field}"
+            );
+        }
     }
 
     /// A one-commit repo holding `files` (path, text).
@@ -705,17 +1287,9 @@ mod tests {
     /// file is read from the commit, so a failure of any of the three comes out of here.
     fn build_commit(conn: &mut Connection, repo: &git2::Repository) -> anyhow::Result<BuildReport> {
         let commit = open_commit(repo, "HEAD")?;
-        let rules = rules_from_commit(repo, &commit)?;
-        let space = key_space_from_commit(repo, &commit)?;
         build_full(
             conn,
-            &BuildInput {
-                repo,
-                commit: &commit,
-                root: Path::new(ROOT),
-                rules: &rules,
-                space: &space,
-            },
+            &BuildInput::from_commit(repo, &commit, Path::new(ROOT))?,
         )
     }
 
@@ -742,6 +1316,210 @@ mod tests {
         let report = build_commit(&mut conn, repo).unwrap();
         assert_report_matches_tables(&conn, &report);
         (conn, report)
+    }
+
+    /// An event as a committed section, rendered by the writer.
+    fn event_text(id: &str, kind: &str, mutates: &[&str], payload: serde_json::Value) -> EventText {
+        EventText {
+            id: id.to_owned(),
+            kind: kind.to_owned(),
+            created_at_ms: 1_794_637_800_000,
+            author: Some("alice".to_owned()),
+            anchor_commit: None,
+            head_commit: None,
+            parent: None,
+            resolves: None,
+            source: None,
+            mutates: mutates.iter().map(|m| (*m).to_owned()).collect(),
+            payload,
+        }
+    }
+
+    fn section(e: &EventText) -> String {
+        render_event_section(e)
+    }
+
+    /// `(event_id, kind, created_at_ms, mutates, payload_json, heading_line, end_line)` of every
+    /// `event` row, by heading line.
+    type EventCells = (String, String, i64, String, String, i64, i64);
+
+    fn event_cells(conn: &Connection) -> Vec<EventCells> {
+        conn.prepare(
+            "SELECT event_id, kind, created_at_ms, mutates, payload_json, heading_line, end_line \
+             FROM event ORDER BY heading_line",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    // mutation: store `mutates.join(" ")` instead of the JSON array.
+    #[test]
+    fn event_sections_become_event_rows() {
+        let note = event_text(
+            "n-1",
+            "note",
+            &["[[b]]"],
+            serde_json::json!({"text": "first\nsecond"}),
+        );
+        let verdict = event_text(
+            "v-1",
+            "verdict",
+            &[],
+            serde_json::json!({"outcome": "go", "score": 1.5}),
+        );
+        let doc = format!(
+            "---\ntitle: Notes\n---\n# Notes\n\n## Events\n\n{}{}\n## Later\n\ntext\n",
+            section(&note),
+            section(&verdict)
+        );
+        let headings: Vec<i64> = doc
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.starts_with("### "))
+            .map(|(i, _)| i as i64 + 1)
+            .collect();
+        let later = doc.lines().position(|l| l == "## Later").unwrap() as i64 + 1;
+        let (_dir, repo) = fixture(&[("docs/notes.md", &doc)]);
+
+        let (conn, _) = built(&repo);
+
+        assert_eq!(
+            event_cells(&conn),
+            vec![
+                (
+                    "n-1".to_owned(),
+                    "note".to_owned(),
+                    1_794_637_800_000,
+                    r#"["[[b]]"]"#.to_owned(),
+                    r#"{"text":"first\nsecond"}"#.to_owned(),
+                    headings[0],
+                    headings[1] - 1
+                ),
+                (
+                    "v-1".to_owned(),
+                    "verdict".to_owned(),
+                    1_794_637_800_000,
+                    "[]".to_owned(),
+                    r#"{"outcome":"go","score":1.5}"#.to_owned(),
+                    headings[1],
+                    later - 1
+                ),
+            ]
+        );
+    }
+
+    /// The columns an event row may leave empty, and the source, round-trip through the build.
+    #[test]
+    fn an_events_optional_fields_and_source_are_stored() {
+        let mut full = event_text("n-2", "note", &[], serde_json::json!({"text": "x"}));
+        full.anchor_commit = Some("a1".to_owned());
+        full.head_commit = Some("h2".to_owned());
+        full.parent = Some("p3".to_owned());
+        full.resolves = Some("r4".to_owned());
+        full.source = Some(EventSource {
+            kind: "url".to_owned(),
+            uri: "https://example.invalid/x".to_owned(),
+            payload: Some(serde_json::json!({"k": 1})),
+        });
+        let mut bare = event_text("n-3", "note", &[], serde_json::json!({"text": "y"}));
+        bare.author = None;
+        let doc = format!("# D\n\n## Events\n\n{}{}", section(&full), section(&bare));
+        let (_dir, repo) = fixture(&[("docs/d.md", &doc)]);
+
+        let (conn, _) = built(&repo);
+
+        type Cells = Vec<Option<String>>;
+        let cells: Vec<(String, Cells)> = conn
+            .prepare(
+                "SELECT event_id, author, anchor_commit, head_commit, parent, resolves, \
+                 source_json FROM event ORDER BY heading_line",
+            )
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    (1..7)
+                        .map(|i| r.get::<_, Option<String>>(i))
+                        .collect::<Result<Cells, _>>()?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let s = |v: &str| Some(v.to_owned());
+        assert_eq!(
+            cells,
+            vec![
+                (
+                    "n-2".to_owned(),
+                    vec![
+                        s("alice"),
+                        s("a1"),
+                        s("h2"),
+                        s("p3"),
+                        s("r4"),
+                        s(r#"{"kind":"url","uri":"https://example.invalid/x","payload":{"k":1}}"#)
+                    ]
+                ),
+                ("n-3".to_owned(), vec![None, None, None, None, None, None]),
+            ]
+        );
+    }
+
+    // mutation: key `event` on `(rel_path, event_id)`.
+    #[test]
+    fn one_id_twice_is_two_event_rows() {
+        let one = event_text("same", "note", &[], serde_json::json!({"text": "one"}));
+        let two = event_text("same", "note", &[], serde_json::json!({"text": "two"}));
+        let doc = format!("# D\n\n## Events\n\n{}{}", section(&one), section(&two));
+        let (_dir, repo) = fixture(&[("docs/d.md", &doc)]);
+
+        let (conn, _) = built(&repo);
+
+        let cells = event_cells(&conn);
+        assert_eq!(cells.len(), 2, "{cells:?}");
+        assert_eq!(cells[0].0, cells[1].0, "one id");
+        assert_ne!(cells[0].5, cells[1].5, "two heading lines");
+        assert_ne!(cells[0].4, cells[1].4, "two payloads");
+    }
+
+    // mutation: drop `event` from `DERIVED_TABLES`.
+    #[test]
+    fn a_rebuild_replaces_the_event_rows() {
+        let e = event_text("n-1", "note", &[], serde_json::json!({"text": "gone soon"}));
+        let with = format!("# D\n\n## Events\n\n{}", section(&e));
+        let (_dir, repo) = fixture(&[("docs/d.md", &with)]);
+        let (mut conn, _) = built(&repo);
+        assert_eq!(count(&conn, "event"), 1);
+        let parent = open_commit(&repo, "HEAD").unwrap();
+        let second = crate::librarian::derived::testkit::commit_files(
+            &repo,
+            &[("docs/d.md", b"# D\n".as_slice())],
+            &[&parent],
+            "drop the event",
+        );
+        let commit = open_commit(&repo, &second.to_string()).unwrap();
+
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(count(&conn, "event"), 0, "a stale event row survived");
     }
 
     /// A document's whole row, in column order.
@@ -1158,6 +1936,763 @@ mod tests {
                 edge(2, 3, "file", None, Some("b"), None),
                 edge(3, 3, "file", None, Some("b"), None),
             ]
+        );
+    }
+
+    /// `(kind, target_key, rel)` of a document's edges, by `ord`.
+    type RelRow = (String, Option<String>, Option<String>);
+
+    fn rel_rows(conn: &Connection, src: &str) -> Vec<RelRow> {
+        conn.prepare("SELECT kind, target_key, rel FROM edge WHERE src_rel_path = ?1 ORDER BY ord")
+            .unwrap()
+            .query_map([src], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn rel_row(kind: &str, key: Option<&str>, rel: Option<&str>) -> RelRow {
+        (
+            kind.to_owned(),
+            key.map(str::to_owned),
+            rel.map(str::to_owned),
+        )
+    }
+
+    // mutation: give every citation on a labelled line the rel (no `File`/`Entry` check).
+    #[test]
+    fn a_relation_paragraph_gives_its_citations_the_canonical_rel() {
+        let a = "# A\n\n## F-1 — e\n\n**Depends on:** [[b]] [[b:B-1]] F-1 [[Bad Target]]\n[[c]]\n\nProse [[d]].\n";
+        let (_dir, repo) = fixture(&[
+            ("docs/a.md", a),
+            ("docs/b.md", "# B\n\n## B-1 — x\n"),
+            ("docs/c.md", "# C\n"),
+            ("docs/d.md", "# D\n"),
+        ]);
+
+        let (conn, _) = built(&repo);
+
+        assert_eq!(
+            rel_rows(&conn, "docs/a.md"),
+            [
+                rel_row("file", Some("b"), Some("depends_on")),
+                rel_row("entry", Some("b"), Some("depends_on")),
+                rel_row("local", None, None),
+                rel_row("malformed", Some("Bad Target"), None),
+                rel_row("file", Some("c"), Some("depends_on")),
+                rel_row("file", Some("d"), None),
+            ]
+        );
+    }
+
+    // mutation: skip the span filter (keep every line `relation_labels` names).
+    #[test]
+    fn an_events_mutates_line_has_no_rel_and_a_relations_mutates_line_does() {
+        let event = event_text("n-1", "note", &["[[b]]"], serde_json::json!({"text": "x"}));
+        let doc = format!(
+            "# A\n\n## Relations\n\n**Mutates:** [[b]]\n\n## Events\n\n{}",
+            section(&event)
+        );
+        let (_dir, repo) = fixture(&[("docs/a.md", &doc), ("docs/b.md", "# B\n")]);
+
+        let (conn, _) = built(&repo);
+
+        assert_eq!(
+            rel_rows(&conn, "docs/a.md"),
+            [
+                rel_row("file", Some("b"), Some("mutates")),
+                rel_row("file", Some("b"), None),
+            ]
+        );
+    }
+    // An event section's span runs to its last line inclusive (`end_line`), the end of the file
+    // included: a relation line there is the event's text and has no rel. The first relation line
+    // after the span (under the next heading) has its rel.
+    // mutation: the span filter's `heading_line..=end_line` to `heading_line..end_line`.
+    #[test]
+    fn a_relation_line_on_an_event_spans_last_line_has_no_rel_and_one_after_the_span_does() {
+        let event = event_text("n-1", "note", &[], serde_json::json!({"text": "x"}));
+        let at_eof = format!(
+            "# A\n\n## Events\n\n{}\n**Depends on:** [[c]]\n",
+            section(&event)
+        );
+        let before_heading = format!(
+            "# E\n\n## Events\n\n{}\n**Depends on:** [[c]]\n## Relations\n\n**Depends on:** [[c]]\n",
+            section(&event)
+        );
+        let (_dir, repo) = fixture(&[
+            ("docs/a.md", &at_eof),
+            ("docs/e.md", &before_heading),
+            ("docs/c.md", "# C\n"),
+        ]);
+
+        let (conn, _) = built(&repo);
+
+        // The fixture: in each document the in-span relation line is the span's last line.
+        let span_end = |rel_path: &str| -> i64 {
+            conn.query_row(
+                "SELECT end_line FROM event WHERE rel_path = ?1",
+                [rel_path],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let lines_of = |rel_path: &str| -> Vec<i64> {
+            conn.prepare("SELECT line FROM edge WHERE src_rel_path = ?1 ORDER BY ord")
+                .unwrap()
+                .query_map([rel_path], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let at_eof_lines = lines_of("docs/a.md");
+        assert_eq!(at_eof_lines, [at_eof.lines().count() as i64]);
+        assert_eq!(span_end("docs/a.md"), at_eof_lines[0]);
+        let e_lines = lines_of("docs/e.md");
+        assert_eq!(e_lines.len(), 2, "{e_lines:?}");
+        assert_eq!(span_end("docs/e.md"), e_lines[0]);
+        assert_eq!(
+            e_lines[1],
+            e_lines[0] + 3,
+            "heading, blank line, relation line"
+        );
+
+        assert_eq!(
+            rel_rows(&conn, "docs/a.md"),
+            [rel_row("file", Some("c"), None)]
+        );
+        assert_eq!(
+            rel_rows(&conn, "docs/e.md"),
+            [
+                rel_row("file", Some("c"), None),
+                rel_row("file", Some("c"), Some("depends_on")),
+            ]
+        );
+    }
+
+    /// `(rel_path, entry_kind, status_since, created, closed, revisit_by, valid, fields_json)` of
+    /// every `entry_doc` row, by path.
+    type EntryDocCells = (
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    );
+
+    fn entry_doc_rows(conn: &Connection) -> Vec<EntryDocCells> {
+        conn.prepare(
+            "SELECT rel_path, entry_kind, status_since, created, closed, revisit_by, valid, \
+             fields_json FROM entry_doc ORDER BY rel_path",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    /// An entry document's text: the frontmatter lines between the fences, then a title.
+    fn entry_text(frontmatter: &str) -> String {
+        format!("---\n{frontmatter}---\n# X\n")
+    }
+
+    // mutation: `fields_json` from the whole `extra` (the reserved keys are not left out).
+    #[test]
+    fn an_entry_document_stores_its_entry_fields() {
+        let text = entry_text(
+            "entry_kind: finding\ntitle: X\nstatus: open\nstatus_since: 2026-11-01\n\
+             created: 2026-10-30\nrevisit_by: 2026-12-01\nvalid: dated 2026-11-01\n\
+             severity: high\ntags: [a]\n",
+        );
+        let (_dir, repo) = fixture(&[("docs/x.md", &text)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(
+            entry_doc_rows(&conn),
+            [(
+                "docs/x.md".to_owned(),
+                "finding".to_owned(),
+                "2026-11-01".to_owned(),
+                "2026-10-30".to_owned(),
+                None,
+                Some("2026-12-01".to_owned()),
+                Some("dated 2026-11-01".to_owned()),
+                r#"{"severity":"high"}"#.to_owned(),
+            )]
+        );
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: render a `Validity` by its `Debug` form, or drop the condition of `conditional`.
+    #[test]
+    fn valid_is_stored_as_the_text_of_its_class_and_closed_as_a_date() {
+        let base = "entry_kind: finding\ntitle: X\nstatus: done\nstatus_since: 2026-11-01\n\
+                    created: 2026-10-30\n";
+        let invariant = entry_text(&format!("{base}closed: 2026-11-02\nvalid: invariant\n"));
+        let conditional = entry_text(&format!("{base}valid: conditional — the plan edit lands\n"));
+        let none = entry_text(base);
+        let (_dir, repo) = fixture(&[
+            ("docs/a.md", &invariant),
+            ("docs/b.md", &conditional),
+            ("docs/c.md", &none),
+        ]);
+
+        let (conn, _) = built(&repo);
+
+        let got: Vec<(String, Option<String>, Option<String>)> = entry_doc_rows(&conn)
+            .into_iter()
+            .map(|r| (r.0, r.4, r.6))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (
+                    "docs/a.md".to_owned(),
+                    Some("2026-11-02".to_owned()),
+                    Some("invariant".to_owned())
+                ),
+                (
+                    "docs/b.md".to_owned(),
+                    None,
+                    Some("conditional — the plan edit lands".to_owned())
+                ),
+                ("docs/c.md".to_owned(), None, None),
+            ]
+        );
+    }
+
+    // mutation: store a row with an empty `created` (the date of a failed parse defaulted).
+    #[test]
+    fn an_entry_document_that_does_not_parse_is_a_problem_and_no_row() {
+        let text =
+            entry_text("entry_kind: finding\ntitle: X\nstatus: open\nstatus_since: 2026-11-01\n");
+        let (_dir, repo) = fixture(&[("docs/x.md", &text)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(count(&conn, "entry_doc"), 0, "{:?}", entry_doc_rows(&conn));
+        assert_eq!(
+            problem_rows(&conn),
+            [(
+                "entry_unparsed".to_owned(),
+                Some("x".to_owned()),
+                r#"["docs/x.md"]"#.to_owned()
+            )]
+        );
+        assert_eq!(report.problems, 1);
+    }
+    // An `entry_kind` that is present and not null makes an entry document, whatever its type; a
+    // value that is no string does not parse as one.
+    // mutation: detect an entry document with `as_str` only (`5` and `[a]` are then no entry
+    // document, and no problem row is written).
+    #[test]
+    fn a_non_string_entry_kind_is_an_unparsed_entry_document() {
+        let rest = "title: X\nstatus: open\nstatus_since: 2026-11-01\ncreated: 2026-10-30\n";
+        let number = entry_text(&format!("entry_kind: 5\n{rest}"));
+        let list = entry_text(&format!("entry_kind: [a]\n{rest}"));
+        let (_dir, repo) = fixture(&[("docs/n.md", &number), ("docs/l.md", &list)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(count(&conn, "entry_doc"), 0, "{:?}", entry_doc_rows(&conn));
+        assert_eq!(
+            problem_rows(&conn),
+            [
+                (
+                    "entry_unparsed".to_owned(),
+                    Some("l".to_owned()),
+                    r#"["docs/l.md"]"#.to_owned()
+                ),
+                (
+                    "entry_unparsed".to_owned(),
+                    Some("n".to_owned()),
+                    r#"["docs/n.md"]"#.to_owned()
+                ),
+            ]
+        );
+        assert_eq!(report.problems, 2);
+    }
+
+    // mutation: the key of the problem row is the file stem, or the row is left out for a path
+    // that has no key.
+    #[test]
+    fn an_unparsed_entry_document_at_a_path_with_no_key_has_a_null_key() {
+        let text = entry_text("entry_kind: finding\ntitle: X\n");
+        let (_dir, repo) = fixture(&[("docs/Bad_Name.md", &text)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(
+            problem_rows(&conn),
+            [
+                (
+                    "entry_unparsed".to_owned(),
+                    None,
+                    r#"["docs/Bad_Name.md"]"#.to_owned()
+                ),
+                (
+                    "invalid_key".to_owned(),
+                    Some("bad_name".to_owned()),
+                    r#"["docs/Bad_Name.md"]"#.to_owned()
+                ),
+            ]
+        );
+        assert_eq!(report.problems, 2);
+    }
+
+    // mutation: detect an entry document by `status` instead of `entry_kind`.
+    #[test]
+    fn a_ledger_is_not_an_entry_document() {
+        let ledger = "---\nkind: tracker\nstatus: active\ntitle: L\n---\n# L\n\n## F-1 — x\n";
+        let (_dir, repo) = fixture(&[("docs/l.md", ledger)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(count(&conn, "entry_doc"), 0);
+        assert_eq!(problem_rows(&conn), []);
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: test for the key (`contains_key`) and not for a value that is not null; or read
+    // an entry document out of a frontmatter block that does not parse.
+    #[test]
+    fn a_null_entry_kind_or_a_broken_frontmatter_is_not_an_entry_document() {
+        let null_kind = entry_text("entry_kind:\ntitle: X\nstatus: open\n");
+        let broken = "---\nentry_kind: [unterminated\n---\n# Broken\n";
+        let (_dir, repo) = fixture(&[("docs/n.md", &null_kind), ("docs/b.md", broken)]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(count(&conn, "entry_doc"), 0);
+        assert_eq!(problem_rows(&conn), []);
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: drop `entry_doc` from `DERIVED_TABLES`.
+    #[test]
+    fn a_rebuild_replaces_the_entry_doc_rows() {
+        let text = entry_text(
+            "entry_kind: finding\ntitle: X\nstatus: open\nstatus_since: 2026-11-01\n\
+             created: 2026-10-30\n",
+        );
+        let (_dir, repo) = fixture(&[("docs/d.md", &text)]);
+        let (mut conn, _) = built(&repo);
+        assert_eq!(count(&conn, "entry_doc"), 1);
+        let parent = open_commit(&repo, "HEAD").unwrap();
+        let second = crate::librarian::derived::testkit::commit_files(
+            &repo,
+            &[("docs/d.md", b"# D\n".as_slice())],
+            &[&parent],
+            "no longer an entry",
+        );
+        let commit = open_commit(&repo, &second.to_string()).unwrap();
+
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            count(&conn, "entry_doc"),
+            0,
+            "a stale entry_doc row survived"
+        );
+    }
+
+    // mutation: insert the document problems in scan order (no sort), or before the index's own
+    // problem rows.
+    #[test]
+    fn document_problem_rows_follow_the_index_rows_sorted_by_kind_key_and_path() {
+        let unparsed = entry_text("entry_kind: finding\n");
+        let (_dir, repo) = fixture(&[
+            ("docs/c.md", &unparsed),
+            ("x/b.md", &unparsed),
+            ("docs/Bad_Name.md", "# Bad\n"),
+        ]);
+
+        let (conn, report) = built(&repo);
+
+        let in_order: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT kind, \"key\" FROM problem ORDER BY rowid")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            in_order,
+            [
+                ("invalid_key".to_owned(), Some("bad_name".to_owned())),
+                ("entry_unparsed".to_owned(), Some("b".to_owned())),
+                ("entry_unparsed".to_owned(), Some("c".to_owned())),
+            ]
+        );
+        assert_eq!(report.problems, 3);
+    }
+    /// `(rel_path, sidecar_rel_path, schema_version, prompt, entry_collection, params_schema,
+    /// render_template, append_mode, history_cap)` of every `augmentation` row, by path.
+    type AugmentationCells = (
+        String,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+    );
+
+    fn augmentation_rows(conn: &Connection) -> Vec<AugmentationCells> {
+        conn.prepare(
+            "SELECT rel_path, sidecar_rel_path, schema_version, prompt, entry_collection, \
+             params_schema, render_template, append_mode, history_cap FROM augmentation \
+             ORDER BY rel_path",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    /// A tracker's text whose frontmatter carries `expects_augmentation: <decl>`.
+    fn declaring(decl: &str) -> String {
+        format!("---\nkind: tracker\nstatus: active\nexpects_augmentation: {decl}\n---\n# T\n")
+    }
+
+    // mutation: read the default name `rel_path_for` gives instead of the declared path, with the
+    // sidecar committed under another name.
+    #[test]
+    fn a_declared_sidecar_gives_the_shape_row() {
+        let sidecar = "prompt: P\nentry_collection: rows\nappend_mode: true\nhistory_cap: 3\n\
+                       render_template: \"- {{a}}\"\nparams_schema:\n  type: object\n  required: [a]\n";
+        let (_dir, repo) = fixture(&[
+            ("docs/t.md", &declaring("docs/augmentations/t.yaml")),
+            ("docs/augmentations/t.yaml", sidecar),
+        ]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(
+            augmentation_rows(&conn),
+            [(
+                "docs/t.md".to_owned(),
+                Some("docs/augmentations/t.yaml".to_owned()),
+                Some(1),
+                Some("P".to_owned()),
+                Some("rows".to_owned()),
+                Some(r#"{"type":"object","required":["a"]}"#.to_owned()),
+                Some("- {{a}}".to_owned()),
+                Some(1),
+                Some(3),
+            )]
+        );
+        assert_eq!(problem_rows(&conn), []);
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: an absent `append_mode` stored as NULL, or an absent `schema_version` as 0.
+    #[test]
+    fn a_sidecar_with_only_a_prompt_takes_the_sidecar_defaults() {
+        let (_dir, repo) = fixture(&[
+            ("docs/t.md", &declaring("docs/augmentations/t.yaml")),
+            ("docs/augmentations/t.yaml", "prompt: only\n"),
+        ]);
+
+        let (conn, _) = built(&repo);
+
+        assert_eq!(
+            augmentation_rows(&conn),
+            [(
+                "docs/t.md".to_owned(),
+                Some("docs/augmentations/t.yaml".to_owned()),
+                Some(1),
+                Some("only".to_owned()),
+                None,
+                None,
+                None,
+                Some(0),
+                None,
+            )]
+        );
+    }
+
+    // mutation: map `Declared { sidecar: None }` to no row.
+    #[test]
+    fn a_true_declaration_is_augmented_without_a_shape() {
+        let (_dir, repo) = fixture(&[
+            ("docs/t.md", &declaring("true")),
+            // The default name `rel_path_for` gives: a `true` declaration must not go looking.
+            ("docs/augmentations/docs-t.yaml", "prompt: P\n"),
+        ]);
+
+        let (conn, report) = built(&repo);
+
+        assert_eq!(
+            augmentation_rows(&conn),
+            [(
+                "docs/t.md".to_owned(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None
+            )]
+        );
+        assert_eq!(problem_rows(&conn), []);
+        assert_eq!(report.problems, 0);
+    }
+
+    // mutation: drop the `refuse_lexical_escape` call (the absolute case then gives a row).
+    #[test]
+    fn a_bad_sidecar_is_a_problem_and_no_shape() {
+        let good: &[u8] = b"prompt: P\n";
+        type Case<'a> = (
+            &'a str,
+            &'a str,
+            Vec<(&'a str, u32, &'a [u8])>,
+            &'a str,
+            &'a str,
+        );
+        let cases: Vec<Case> = vec![
+            (
+                "the file is not in the commit",
+                "docs/augmentations/t.yaml",
+                vec![],
+                "sidecar_missing",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "a `..` segment (the file it reaches is committed)",
+                "../x.yaml",
+                vec![("x.yaml", FILE, good)],
+                "sidecar_invalid",
+                r#"["docs/t.md","../x.yaml"]"#,
+            ),
+            (
+                "an absolute path (that file is committed)",
+                "/docs/augmentations/t.yaml",
+                vec![("docs/augmentations/t.yaml", FILE, good)],
+                "sidecar_invalid",
+                r#"["docs/t.md","/docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar is a link in the commit",
+                "docs/augmentations/t.yaml",
+                vec![
+                    ("docs/augmentations/t.yaml", LINK, b"real.yaml"),
+                    ("docs/augmentations/real.yaml", FILE, good),
+                ],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar's directory is a link in the commit",
+                "docs/augmentations/t.yaml",
+                vec![("docs/augmentations", LINK, b"../shared")],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar is not YAML",
+                "docs/augmentations/t.yaml",
+                vec![("docs/augmentations/t.yaml", FILE, b"prompt: [\n")],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar has no prompt",
+                "docs/augmentations/t.yaml",
+                vec![(
+                    "docs/augmentations/t.yaml",
+                    FILE,
+                    b"entry_collection: rows\n",
+                )],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+            (
+                "the sidecar is not UTF-8",
+                "docs/augmentations/t.yaml",
+                vec![("docs/augmentations/t.yaml", FILE, &[0xff, 0xfe])],
+                "sidecar_invalid",
+                r#"["docs/t.md","docs/augmentations/t.yaml"]"#,
+            ),
+        ];
+        for (name, decl, files, kind, rel_paths) in cases {
+            let doc = declaring(decl);
+            let mut entries: Vec<(&str, u32, &[u8])> = vec![("docs/t.md", FILE, doc.as_bytes())];
+            entries.extend(files);
+            let dir = tempfile::tempdir().unwrap();
+            let repo = repo_with(dir.path(), &entries);
+
+            let (conn, report) = built(&repo);
+
+            assert_eq!(augmentation_rows(&conn), [], "{name}: no shape");
+            assert_eq!(
+                problem_rows(&conn),
+                [(kind.to_owned(), Some("t".to_owned()), rel_paths.to_owned())],
+                "{name}"
+            );
+            assert_eq!(report.problems, 1, "{name}");
+            assert_eq!(count(&conn, "document"), 1, "{name}: the document stays");
+        }
+    }
+
+    // mutation: pass the declared string to `blob_text` unchanged (a `.` component then names no
+    // tree entry); or record the declared string in the row and in the problem.
+    #[test]
+    fn a_dot_component_reads_like_the_live_reader() {
+        for decl in [
+            "docs/./augmentations/t.yaml",
+            "./docs/augmentations/t.yaml",
+            "docs//augmentations/t.yaml",
+        ] {
+            let (_dir, repo) = fixture(&[
+                ("docs/t.md", &declaring(decl)),
+                ("docs/augmentations/t.yaml", "prompt: P\n"),
+            ]);
+
+            let (conn, _) = built(&repo);
+
+            let rows = augmentation_rows(&conn);
+            assert_eq!(rows.len(), 1, "{decl}: {rows:?}");
+            assert_eq!(
+                rows[0].1.as_deref(),
+                Some("docs/augmentations/t.yaml"),
+                "{decl}: the row holds the path that was read"
+            );
+            assert_eq!(problem_rows(&conn), [], "{decl}");
+        }
+        // A missing file is named by the path that was looked up, not the declared spelling.
+        let (_dir, repo) = fixture(&[("docs/t.md", &declaring("docs/./augmentations/gone.yaml"))]);
+        let (conn, _) = built(&repo);
+        assert_eq!(
+            problem_rows(&conn),
+            [(
+                "sidecar_missing".to_owned(),
+                Some("t".to_owned()),
+                r#"["docs/t.md","docs/augmentations/gone.yaml"]"#.to_owned()
+            )]
+        );
+    }
+
+    // mutation: treat `Unparseable` as `None`, or `false` as a declaration.
+    #[test]
+    fn an_unparseable_declaration_is_a_problem_and_a_false_one_is_nothing() {
+        let broken = "---\nexpects_augmentation: [unterminated\n---\n# B\n".to_owned();
+        let cases: Vec<(&str, String, bool)> = vec![
+            ("a misspelt true", declaring("ture"), true),
+            ("a key with no value", declaring(""), true),
+            ("a mapping", declaring("{a: 1}"), true),
+            ("false", declaring("false"), false),
+            ("no", declaring("no"), false),
+            ("0", declaring("0"), false),
+            ("a frontmatter that does not parse", broken, false),
+        ];
+        for (name, doc, is_problem) in cases {
+            let (_dir, repo) = fixture(&[("docs/t.md", &doc)]);
+
+            let (conn, report) = built(&repo);
+
+            assert_eq!(augmentation_rows(&conn), [], "{name}: no row");
+            let expected: Vec<(String, Option<String>, String)> = if is_problem {
+                vec![(
+                    "augmentation_unparseable".to_owned(),
+                    Some("t".to_owned()),
+                    r#"["docs/t.md"]"#.to_owned(),
+                )]
+            } else {
+                vec![]
+            };
+            assert_eq!(problem_rows(&conn), expected, "{name}");
+            assert_eq!(report.problems, expected.len(), "{name}");
+        }
+    }
+
+    // mutation: drop `augmentation` from `DERIVED_TABLES`.
+    #[test]
+    fn a_rebuild_replaces_the_augmentation_rows() {
+        let (_dir, repo) = fixture(&[
+            ("docs/t.md", &declaring("docs/augmentations/t.yaml")),
+            ("docs/augmentations/t.yaml", "prompt: A\n"),
+        ]);
+        let (mut conn, _) = built(&repo);
+        assert_eq!(count(&conn, "augmentation"), 1);
+        let parent = open_commit(&repo, "HEAD").unwrap();
+        let edited = crate::librarian::derived::testkit::commit_files(
+            &repo,
+            &[
+                (
+                    "docs/t.md",
+                    declaring("docs/augmentations/t.yaml").as_bytes(),
+                ),
+                ("docs/augmentations/t.yaml", b"prompt: B\n".as_slice()),
+            ],
+            &[&parent],
+            "edit the sidecar",
+        );
+        let commit = open_commit(&repo, &edited.to_string()).unwrap();
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap(),
+        )
+        .unwrap();
+        let prompts: Vec<Option<String>> =
+            augmentation_rows(&conn).into_iter().map(|r| r.3).collect();
+        assert_eq!(prompts, [Some("B".to_owned())], "the old row survived");
+
+        let parent = commit;
+        let plain = crate::librarian::derived::testkit::commit_files(
+            &repo,
+            &[("docs/t.md", b"# T\n".as_slice())],
+            &[&parent],
+            "no longer augmented",
+        );
+        let commit = open_commit(&repo, &plain.to_string()).unwrap();
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            count(&conn, "augmentation"),
+            0,
+            "a stale augmentation row survived"
         );
     }
 
@@ -1640,39 +3175,6 @@ mod tests {
 
     // ---- Determinism: nothing a clone's path, name, identity or time can leak into a row ----
 
-    /// Run `git` in `dir` with the machine's own configuration out of the way, so that what a test
-    /// sees does not depend on the developer's git setup (nor on a hook that set `GIT_DIR`).
-    fn git(dir: &Path, args: &[&str]) -> String {
-        let out = std::process::Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .output()
-            .expect("run git");
-        assert!(
-            out.status.success(),
-            "git {args:?} in {}: {}",
-            dir.display(),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        String::from_utf8(out.stdout).unwrap()
-    }
-
-    /// `git clone` of `src` into `dst` over a `file://` URL: a second checkout of one repository,
-    /// with its own path, its own working tree and its own local config.
-    fn clone_repo(src: &Path, dst: &Path) {
-        let url = format!("file://{}", src.display());
-        git(
-            dst.parent().unwrap(),
-            &["clone", "--quiet", &url, dst.to_str().unwrap()],
-        );
-    }
-
     /// `(path, mode, bytes)` of a tree entry, owned.
     type Entry = (String, u32, Vec<u8>);
 
@@ -1714,6 +3216,64 @@ mod tests {
                  [[trackers:T-1]], [[bug-log:B-1]], [[dup1]], [[dup1:D-1]], [[Bad_Name]]\n",
             ),
             text("docs/b.md", "# B\n"),
+            // An entry document, and two that carry an `entry_kind` and do not read as an entry
+            // (no `created`): the two problem rows are stored sorted, whatever the scan order.
+            text(
+                "docs/entry-ok.md",
+                "---\nentry_kind: finding\ntitle: Ok\nstatus: open\nstatus_since: 2026-11-01\n\
+                 created: 2026-10-30\nvalid: invariant\nseverity: high\n---\n# Ok\n",
+            ),
+            text(
+                "docs/entry-bad-b.md",
+                "---\nentry_kind: finding\ntitle: B\nstatus: open\nstatus_since: 2026-11-01\n---\n# B\n",
+            ),
+            text(
+                "docs/entry-bad-a.md",
+                "---\nentry_kind: finding\ntitle: A\nstatus: open\nstatus_since: 2026-11-01\n---\n# A\n",
+            ),
+            // Augmented trackers. One has its sidecar committed (`corpus.yaml`: no markdown, so no
+            // document of its own), one names a sidecar that is not committed (`sidecar_missing`),
+            // one declares nothing readable (`augmentation_unparseable`): with the entry problems,
+            // three kinds of document problem that sort by `(kind, key, rel_paths)`.
+            text(
+                "docs/aug-ok.md",
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/corpus.yaml\n---\n# Aug ok\n",
+            ),
+            text(
+                "docs/augmentations/corpus.yaml",
+                "prompt: P\nentry_collection: rows\nappend_mode: true\nhistory_cap: 3\n",
+            ),
+            text(
+                "docs/aug-gone.md",
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/gone.yaml\n---\n# Aug gone\n",
+            ),
+            text(
+                "docs/aug-bad.md",
+                "---\nkind: tracker\nexpects_augmentation: ture\n---\n# Aug bad\n",
+            ),
+            // A two-line relation paragraph: both citations take the canonical rel `depends_on`.
+            text(
+                "docs/rel.md",
+                "# Rel\n\n**Depends on:** [[b]]\n  and [[a:F-1]]\n",
+            ),
+            text(
+                "docs/notes.md",
+                &format!(
+                    "# Notes\n\n## Events\n\n{}{}",
+                    section(&event_text(
+                        "n-1",
+                        "note",
+                        &[],
+                        serde_json::json!({"text": "first\nsecond"})
+                    )),
+                    section(&event_text(
+                        "v-1",
+                        "verdict",
+                        &[],
+                        serde_json::json!({"outcome": "go", "score": 1.5})
+                    ))
+                ),
+            ),
             text("docs/Bad_Name.md", "# Bad\n\n## F-9 — still indexed\n"),
             text("docs/0123456789abcdef.md", "# Hex\n"),
             text("docs/broken.md", "---\nkind: [unterminated\n---\n# Broken\n"),
@@ -1745,13 +3305,28 @@ mod tests {
     /// rows, the edges cover several kinds, and a document has more than one chunk.
     fn assert_corpus_is_not_vacuous(dump: &std::collections::BTreeMap<String, Vec<Vec<String>>>) {
         for table in [
-            "checkout", "document", "entry", "edge", "chunk", "problem", "skipped",
+            "checkout",
+            "document",
+            "entry",
+            "edge",
+            "chunk",
+            "problem",
+            "skipped",
+            "event",
+            "entry_doc",
+            "augmentation",
+            "doc_history",
+            "history_meta",
         ] {
             assert!(!dump[table].is_empty(), "the corpus gives {table} no rows");
         }
         let kinds: std::collections::BTreeSet<&str> =
             dump["edge"].iter().map(|row| row[3].as_str()).collect();
         assert!(kinds.len() >= 4, "edge kinds: {kinds:?}");
+        assert!(
+            dump["edge"].iter().any(|row| row[8] != "N"),
+            "no edge of the corpus carries a rel"
+        );
         assert!(
             dump["chunk"].iter().any(|row| row[2] != "I:0"),
             "no document has a second chunk"
@@ -1762,18 +3337,10 @@ mod tests {
     fn build_clone(clone: &Path, sha: &str, index_file: &Path) -> (Connection, BuildReport) {
         let repo = git2::Repository::open(clone).unwrap();
         let commit = open_commit(&repo, sha).unwrap();
-        let rules = rules_from_commit(&repo, &commit).unwrap();
-        let space = key_space_from_commit(&repo, &commit).unwrap();
         let mut conn = open_index(index_file).unwrap();
         let report = build_full(
             &mut conn,
-            &BuildInput {
-                repo: &repo,
-                commit: &commit,
-                root: clone,
-                rules: &rules,
-                space: &space,
-            },
+            &BuildInput::from_commit(&repo, &commit, clone).unwrap(),
         )
         .unwrap();
         (conn, report)
@@ -1871,10 +3438,15 @@ mod tests {
 
         let (conn_a, report_a) = built(&repo_a);
         let (conn_b, report_b) = built(&repo_b);
-        let dump_a = dump_all(&conn_a);
-        assert_corpus_is_not_vacuous(&dump_a);
+        let (all_a, all_b) = (dump_all(&conn_a), dump_all(&conn_b));
+        assert_corpus_is_not_vacuous(&all_a);
         assert_eq!(report_a, report_b);
-        assert_eq!(dump_a, dump_all(&conn_b));
+        // The derived answer about the tree is one.
+        assert_eq!(dump_tree(&conn_a), dump_tree(&conn_b));
+        // The two commits have two histories, and the history tables are where that shows.
+        assert_ne!(all_a, all_b);
+        assert_ne!(all_a["history_meta"], all_b["history_meta"]);
+        assert_ne!(all_a["doc_history"], all_b["doc_history"]);
         // The commit id is excluded from the dump by design, and it is what differs.
         let sha_of = |conn: &Connection| -> String {
             conn.query_row("SELECT commit_sha FROM checkout", [], |r| r.get(0))
@@ -1973,16 +3545,8 @@ mod tests {
         let entries = corpus();
         let repo = repo_with(dir.path(), &borrowed(&entries));
         let commit = open_commit(&repo, "HEAD").unwrap();
-        let rules = rules_from_commit(&repo, &commit).unwrap();
-        let space = key_space_from_commit(&repo, &commit).unwrap();
-        let input = BuildInput {
-            repo: &repo,
-            commit: &commit,
-            root: Path::new(ROOT),
-            rules: &rules,
-            space: &space,
-        };
-        let natural_order: Vec<String> = scan_commit(&repo, &commit, &space)
+        let input = BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap();
+        let natural_order: Vec<String> = scan_commit(&repo, &commit, &input.space)
             .unwrap()
             .into_iter()
             .map(|f| f.rel_path)
@@ -2002,12 +3566,20 @@ mod tests {
         for (name, permute) in permutations {
             let order = std::cell::RefCell::new(Vec::new());
             let mut conn = open_in_memory().unwrap();
-            let report = rebuild_from(&mut conn, &input, &Parser::PRODUCTION, false, None, &|| {
-                let mut files = scan_commit(&repo, &commit, &space)?;
-                permute(&mut files);
-                *order.borrow_mut() = files.iter().map(|f| f.rel_path.clone()).collect();
-                Ok(files)
-            })
+            let report = rebuild_from(
+                &mut conn,
+                &input,
+                &Parser::PRODUCTION,
+                false,
+                None,
+                &|| {
+                    let mut files = scan_commit(&repo, &commit, &input.space)?;
+                    permute(&mut files);
+                    *order.borrow_mut() = files.iter().map(|f| f.rel_path.clone()).collect();
+                    Ok(files)
+                },
+                &[],
+            )
             .unwrap();
             let order = order.into_inner();
             if name == "as scanned" {
@@ -2043,6 +3615,25 @@ mod tests {
                 format!(r#"["x/dup{i}.md","y/dup{i}.md"]"#),
             ));
         }
+        // Then the documents' own problems, sorted by kind, then key: the unreadable declaration,
+        // the unparsed entry documents, the sidecar that is not committed.
+        expected_problems.push((
+            "augmentation_unparseable".to_owned(),
+            Some("aug-bad".to_owned()),
+            r#"["docs/aug-bad.md"]"#.to_owned(),
+        ));
+        for stem in ["a", "b"] {
+            expected_problems.push((
+                "entry_unparsed".to_owned(),
+                Some(format!("entry-bad-{stem}")),
+                format!(r#"["docs/entry-bad-{stem}.md"]"#),
+            ));
+        }
+        expected_problems.push((
+            "sidecar_missing".to_owned(),
+            Some("aug-gone".to_owned()),
+            r#"["docs/aug-gone.md","docs/augmentations/gone.yaml"]"#.to_owned(),
+        ));
         for (name, conn, report) in &builds {
             assert_eq!(report, first_report, "{name}: report");
             assert_eq!(dump_all(conn), expected_dump, "{name}: dump");
@@ -2090,6 +3681,8 @@ mod tests {
                 "# Staged, not committed\n\n## S-1 — staged\n",
             ),
             ("docs/staged-new.md", "# New and staged\n"),
+            // The sidecar of `docs/aug-ok.md`: the shape is read from the commit, not from here.
+            ("docs/augmentations/corpus.yaml", "prompt: working tree\n"),
         ];
         for (rel, body) in edits {
             std::fs::write(clone.join(rel), body).unwrap();
@@ -2118,6 +3711,7 @@ mod tests {
             " D docs/b.md",
             "M  docs/trackers/bug-log.md",
             "A  docs/staged-new.md",
+            " M docs/augmentations/corpus.yaml",
         ] {
             assert!(
                 status.lines().any(|l| l == line),
@@ -2172,17 +3766,9 @@ mod tests {
         );
         let mut conn = open_index(&scratch.path().join("derived.db")).unwrap();
         let commit = open_commit(&repo, "HEAD").unwrap();
-        let rules = rules_from_commit(&repo, &commit).unwrap();
-        let space = key_space_from_commit(&repo, &commit).unwrap();
         let report = build_full(
             &mut conn,
-            &BuildInput {
-                repo: &repo,
-                commit: &commit,
-                root: &root,
-                rules: &rules,
-                space: &space,
-            },
+            &BuildInput::from_commit(&repo, &commit, &root).unwrap(),
         )
         .unwrap();
         assert_report_matches_tables(&conn, &report);
@@ -2222,6 +3808,30 @@ mod tests {
         println!("problems by kind: {problems:?}");
         println!("skipped by reason: {skipped:?}");
 
+        // The other tables E2 added, and the history walk on its own (a second walk, timed).
+        let rels =
+            grouped("SELECT coalesce(rel, '(none)'), count(*) FROM edge GROUP BY rel ORDER BY rel");
+        let started = std::time::Instant::now();
+        let walked = history::walk(&repo, &commit).unwrap();
+        let walk_ms = started.elapsed().as_millis();
+        println!(
+            "event {}, entry_doc {}, augmentation {}, doc_history {}",
+            count(&conn, "event"),
+            count(&conn, "entry_doc"),
+            count(&conn, "augmentation"),
+            count(&conn, "doc_history")
+        );
+        println!("edges by rel: {rels:?}");
+        println!("history walk: {walk_ms} ms, {} rows", walked.rows.len());
+        assert!(
+            count(&conn, "doc_history") > 0,
+            "no history row for any document of HEAD"
+        );
+        assert_eq!(
+            count(&conn, "doc_history"),
+            walked.rows.len(),
+            "the build stored the walk"
+        );
         assert!(report.documents > 0, "no document in HEAD's tree");
         assert_eq!(
             edges.iter().map(|(_, n)| n).sum::<usize>(),
@@ -2240,5 +3850,31 @@ mod tests {
                 "skip reason {reason}"
             );
         }
+    }
+
+    /// A measurement, not a regression test: the first-parent history walk of THIS checkout's
+    /// HEAD, timed and counted. Run it with
+    /// `cargo test --lib history_walk_of_this_repo -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement of this repository's HEAD: run with --ignored --nocapture"]
+    fn history_walk_of_this_repo() {
+        let repo = git2::Repository::discover(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let commit = open_commit(&repo, "HEAD").unwrap();
+        let started = std::time::Instant::now();
+        let walked = history::walk(&repo, &commit).unwrap();
+        let walk_ms = started.elapsed().as_millis();
+        let paths: std::collections::BTreeSet<&str> =
+            walked.rows.iter().map(|r| r.rel_path.as_str()).collect();
+        let deepest = walked.rows.iter().map(|r| r.walk_pos).max();
+        println!(
+            "history walk of {}: {walk_ms} ms, {} rows, {} paths, deepest walk_pos {deepest:?}, \
+             shallow {}",
+            commit.id(),
+            walked.rows.len(),
+            paths.len(),
+            walked.shallow
+        );
+        assert!(!walked.rows.is_empty(), "no history row for any document");
+        assert_eq!(walked.shallow, repo.is_shallow());
     }
 }

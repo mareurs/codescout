@@ -29,6 +29,14 @@ use sha2::{Digest, Sha256};
 const OLD_ROOT: &str = "/nonexistent/old-root";
 
 fn git(dir: &Path, args: &[&str]) {
+    git_stdout(dir, args);
+}
+
+/// Run `git` in `dir` with the one environment every call here shares, require success, and
+/// return what it printed. Global and system config are off. The user's global ignore file
+/// (`~/.config/git/ignore`) is not a config entry: `make_repo` sets a local `core.excludesFile`
+/// to stop git from reading it.
+fn git_stdout(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -52,6 +60,7 @@ fn git(dir: &Path, args: &[&str]) {
         "git {args:?}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    String::from_utf8(out.stdout).unwrap()
 }
 
 fn write(root: &Path, rel: &str, text: &str) {
@@ -72,9 +81,20 @@ fn plan_x_id() -> String {
 
 const PLAN_X: &str = "# Plan X\n\nThe plan text. It is the same in both commits.\n";
 
-/// The repository: commit 1 holds `docs/old/plan-x.md`; commit 2 renames it and adds the rest.
+/// The repository: commit 1 holds `docs/old/plan-x.md`; commit 2 renames it and adds the rest,
+/// with the `.gitignore` line `build` needs for the checkout's catalog.
+///
+/// `core.excludesFile` is set to an empty file inside the git directory. Git and libgit2 read
+/// `~/.config/git/ignore` when it is unset, so without this the `.gitignore` line could be
+/// shadowed by the machine's own rules, and the `status` check below would prove nothing.
 fn make_repo(root: &Path) {
     git(root, &["init", "-q", "."]);
+    let excludes = root.join(".git/empty-excludes");
+    std::fs::write(&excludes, "").unwrap();
+    git(
+        root,
+        &["config", "core.excludesFile", excludes.to_str().unwrap()],
+    );
     write(root, "docs/old/plan-x.md", PLAN_X);
     git(root, &["add", "-A"]);
     git(root, &["commit", "-q", "-m", "one"]);
@@ -103,6 +123,11 @@ fn make_repo(root: &Path) {
     write(root, "docs/My_Notes.md", "# My notes\n\nSome text.\n");
     write(root, "docs/a/one.md", "# One\n\n## F-7 — seven\n\nx\n");
     write(root, "docs/b/two.md", "# Two\n\n## F-7 — seven\n\ny\n");
+    write(
+        root,
+        ".gitignore",
+        "/.codescout/derived.db*\n/.codescout/write.lock*\n",
+    );
     write(root, "src/render_prompt.md", "# Prompt\n\nText.\n");
     write(
         root,
@@ -463,7 +488,7 @@ fn the_cutover_exports_every_class_and_leaves_the_old_catalog_unchanged() {
             .starts_with("the export is not committed: "),
         "{refused}"
     );
-    assert!(!catalog_dir.join("derived.db").exists());
+    assert!(!root.join(".codescout/derived.db").exists());
 
     // ---- commit, then plan again ----
     git(&root, &["add", "-A"]);
@@ -492,21 +517,35 @@ fn the_cutover_exports_every_class_and_leaves_the_old_catalog_unchanged() {
     // ---- build ----
     let built = run(&root, &db, "build", 0);
     assert_eq!(built["ran"], true, "{built}");
-    assert_eq!(built["catalog"], "derived.db");
-    assert!(catalog_dir.join("derived.db").is_file());
+    assert_eq!(built["catalog"], ".codescout/derived.db");
+    assert!(
+        built.get("location").is_none(),
+        "the output names no location: {built}"
+    );
+    let derived = root.join(".codescout/derived.db");
+    assert!(derived.is_file());
+    assert_eq!(
+        git_stdout(&root, &["status", "--porcelain"]),
+        "",
+        "git ignores the built catalog and its side files"
+    );
+    assert_eq!(
+        git_stdout(&root, &["ls-files", ".codescout"]),
+        "",
+        "git tracks nothing in .codescout: the lock files and the catalog stay out"
+    );
     assert_eq!(
         sha256_of(&db),
         db_sha,
         "build leaves the old catalog unchanged"
     );
-    // Beside the old catalog: what it began with, the reports of the two exports, and the new
-    // catalog. A build that left a side file would show here, and the sha256 would not.
+    // Beside the old catalog: what it began with and the reports of the two exports. The new
+    // catalog is in the checkout, so a build that wrote beside the old one would show here.
     let mut with_new = dir_before.clone();
     for report in [&exported, &again] {
         with_new.push(report["report"]["markdown"].as_str().unwrap().to_owned());
         with_new.push(report["report"]["json"].as_str().unwrap().to_owned());
     }
-    with_new.push("derived.db".to_owned());
     with_new.sort();
     assert_eq!(listing(&catalog_dir), with_new);
     assert_eq!(
@@ -514,7 +553,7 @@ fn the_cutover_exports_every_class_and_leaves_the_old_catalog_unchanged() {
         "the one problem is the frozen file's key: {built}"
     );
 
-    let conn = rusqlite::Connection::open(catalog_dir.join("derived.db")).unwrap();
+    let conn = rusqlite::Connection::open(&derived).unwrap();
     let problems: Vec<(String, Option<String>, String)> = conn
         .prepare("SELECT kind, \"key\", rel_paths FROM problem ORDER BY rowid")
         .unwrap()

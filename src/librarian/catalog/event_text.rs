@@ -297,11 +297,24 @@ fn body_lenient(doc: &str) -> &str {
     frontmatter::parse(doc).map(|(_, b)| b).unwrap_or(doc)
 }
 
-/// Every event section in `doc`, in document order. A `###` heading counts when its next line is
-/// an `<!-- event {json} -->` comment and the section holds a payload in one of the two forms.
-/// A section that does not read back is skipped.
-pub(crate) fn parse_event_sections(doc: &str) -> Vec<EventText> {
-    let lines = scan(body_lenient(doc));
+/// Where one event section sits in its document: 1-based lines of the whole document, frontmatter
+/// included, numbered as `grammar::extract` numbers them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EventSpan {
+    /// The `###` heading line.
+    pub heading_line: u32,
+    /// The line before the next heading of level 3 or less, or the document's last line.
+    pub end_line: u32,
+}
+
+/// Every event section in `doc`, in document order, with its span. A `###` heading counts when its
+/// next line is an `<!-- event {json} -->` comment and the section holds a payload in one of the
+/// two forms. A section that does not read back is skipped.
+pub(crate) fn parse_event_sections_spanned(doc: &str) -> Vec<(EventText, EventSpan)> {
+    let body = body_lenient(doc);
+    // `body` is a suffix of `doc` in both arms of `body_lenient`, which `body_line_offset` needs.
+    let offset = frontmatter::body_line_offset(doc, body);
+    let lines = scan(body);
     let mut out = Vec::new();
     for (ix, line) in lines.iter().enumerate() {
         if !matches!(heading_of(line), Some((3, _))) {
@@ -312,10 +325,23 @@ pub(crate) fn parse_event_sections(doc: &str) -> Vec<EventText> {
             .position(|l| matches!(heading_of(l), Some((level, _)) if level <= 3))
             .map_or(lines.len(), |p| ix + 1 + p);
         if let Some(event) = read_section(&lines[ix + 1..end]) {
-            out.push(event);
+            let span = EventSpan {
+                heading_line: (offset + ix + 1) as u32,
+                end_line: (offset + end) as u32,
+            };
+            out.push((event, span));
         }
     }
     out
+}
+
+/// Every event section in `doc`, in document order: [`parse_event_sections_spanned`] without the
+/// spans.
+pub(crate) fn parse_event_sections(doc: &str) -> Vec<EventText> {
+    parse_event_sections_spanned(doc)
+        .into_iter()
+        .map(|(event, _)| event)
+        .collect()
 }
 
 /// The title of a level-2 home heading: `Events` for `## Events`.
@@ -911,5 +937,82 @@ mod tests {
         let closed = "# T\n\n```\nclosed\n```\n";
         let doc = splice_event(closed, &note("ev-1", "x")).unwrap();
         assert_eq!(ids(&doc), vec!["ev-1"]);
+    }
+
+    /// A span counts the lines of the whole document, frontmatter included, as `grammar::extract`
+    /// numbers them: the heading line of a section is the 1-based index of its `###` line in
+    /// `doc.lines()`, and its last line is the one before the next heading of level 3 or less.
+    #[test]
+    fn spanned_sections_carry_whole_document_lines() {
+        // mutation: drop the frontmatter offset (every line is then off by three).
+        let first = render_event_section(&note("e-1", "one"));
+        let second = render_event_section(&note("e-2", "two\nlines"));
+        let doc = format!(
+            "---\ntitle: T\n---\n# Doc\n\n## Events\n\n{first}{second}\n## Later\n\ntext\n"
+        );
+        let line_of = |needle: &str| doc.lines().position(|l| l == needle).unwrap() as u32 + 1;
+        let headings: Vec<u32> = doc
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.starts_with("### "))
+            .map(|(i, _)| i as u32 + 1)
+            .collect();
+        assert_eq!(headings.len(), 2, "the fixture has two sections");
+
+        let spanned = parse_event_sections_spanned(&doc);
+
+        assert_eq!(
+            spanned
+                .iter()
+                .map(|(e, s)| (e.id.as_str(), s.heading_line, s.end_line))
+                .collect::<Vec<_>>(),
+            vec![
+                ("e-1", headings[0], headings[1] - 1),
+                ("e-2", headings[1], line_of("## Later") - 1),
+            ]
+        );
+        // `parse_event_sections` is the same parse without the spans.
+        assert_eq!(
+            parse_event_sections(&doc),
+            spanned.into_iter().map(|(e, _)| e).collect::<Vec<_>>()
+        );
+    }
+
+    /// The last section of a document that has no later heading ends at the document's last line,
+    /// and a document without frontmatter has no offset.
+    #[test]
+    fn the_last_section_ends_at_the_last_line() {
+        let section = render_event_section(&note("e-1", "one"));
+        let doc = format!("## Events\n\n{section}");
+        let spanned = parse_event_sections_spanned(&doc);
+        assert_eq!(spanned.len(), 1);
+        assert_eq!(spanned[0].1.heading_line, 3);
+        assert_eq!(spanned[0].1.end_line, doc.lines().count() as u32);
+    }
+
+    /// In a CRLF document a blockquote note payload keeps the `\r` of every line (plan M-6: the
+    /// parser does not strip it), while the spans count the same lines as in the LF document. A
+    /// fenced payload is not affected, because JSON takes `\r` as white space.
+    #[test]
+    fn a_crlf_blockquote_payload_keeps_a_carriage_return_per_line() {
+        let lf = format!(
+            "# Doc\n\n## Events\n\n{}{}",
+            render_event_section(&note("e-1", "a\n\nb")),
+            render_event_section(&EventText {
+                kind: "verdict".to_owned(),
+                payload: json!({"outcome": "go"}),
+                ..note("e-2", "unused")
+            })
+        );
+        let crlf = lf.replace('\n', "\r\n");
+
+        let from_lf = parse_event_sections_spanned(&lf);
+        let from_crlf = parse_event_sections_spanned(&crlf);
+
+        assert_eq!(from_lf[0].0.payload, json!({"text": "a\n\nb"}));
+        assert_eq!(from_crlf[0].0.payload, json!({"text": "a\r\n\r\nb\r"}));
+        assert_eq!(from_crlf[1].0.payload, from_lf[1].0.payload);
+        let spans = |v: &[(EventText, EventSpan)]| v.iter().map(|(_, s)| *s).collect::<Vec<_>>();
+        assert_eq!(spans(&from_crlf), spans(&from_lf));
     }
 }

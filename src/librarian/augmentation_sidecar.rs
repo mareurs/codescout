@@ -215,7 +215,7 @@ fn confined_write_path(roots: &[PathBuf], base: &Path, rel: &str, verb: &str) ->
 
 /// The LEXICAL half of the declared-path rule: an absolute path (which `join` lets replace the
 /// base outright) or a `..` segment.
-fn refuse_lexical_escape(rel: &str, verb: &str) -> Result<()> {
+pub(crate) fn refuse_lexical_escape(rel: &str, verb: &str) -> Result<()> {
     use std::path::Component;
     if Path::new(rel).components().any(|c| {
         matches!(

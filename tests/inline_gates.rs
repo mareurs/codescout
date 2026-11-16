@@ -693,6 +693,36 @@ fn tracked_src_files_lists_production_files_and_excludes_test_only_ones() {
     assert!(!files.iter().any(|f| f.ends_with("/hint_probe.rs")));
 }
 
+/// E1-R9: in production code only `cutover build` and `export` use the checkout's catalog path,
+/// and `derived/schema.rs` defines it. A commit that reads `.codescout/derived.db` from the server
+/// (Q4 forbids it until Plan E4) turns this red.
+///
+/// Blind spots: a test-only file whose name lacks `tests` (`derived/testkit.rs`, which names
+/// neither), and a path built from the literal text.
+// mutation: use `derived_catalog_in` from `build_tool_context_with` in `src/librarian/mod.rs`,
+// called or passed as a value (`.map(schema::derived_catalog_in)`).
+#[test]
+fn only_the_cutover_uses_the_checkouts_catalog_path() {
+    let mut users = std::collections::BTreeSet::new();
+    for file in tracked_src_files() {
+        let src = std::fs::read_to_string(repo_root().join(&file))
+            .unwrap_or_else(|e| panic!("{file} is tracked but unreadable: {e}"));
+        let (production, _) = excise_test_items(&lex(&src).code)
+            .unwrap_or_else(|at| panic!("{file}: a test-gated item at byte {at} never ends"));
+        if production.contains("derived_catalog_in") || production.contains("DERIVED_CATALOG_REL") {
+            users.insert(file);
+        }
+    }
+    let want: std::collections::BTreeSet<String> =
+        ["src/cli/cutover.rs", "src/librarian/derived/schema.rs"]
+            .map(str::to_owned)
+            .into();
+    assert_eq!(
+        users, want,
+        "production code that names the checkout's catalog path (E1-R9): only the cutover may"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Self-tests: the scanner on fixtures
 // ---------------------------------------------------------------------------

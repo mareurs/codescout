@@ -113,6 +113,44 @@ fn parse_embed_concurrency(raw: Option<&str>) -> Option<usize> {
         .filter(|n| *n >= 1)
 }
 
+/// Where the machine keeps its librarian files.
+///
+/// The catalog is whatever `LIBRARIAN_DB` names, or `catalog.db` in the data directory. The
+/// vector cache is named by the machine, never by a catalog that a caller opens: it is
+/// `vector-cache.db` in the directory of `LIBRARIAN_DB` when that has a parent, else in the
+/// data directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachinePaths {
+    /// The catalog file.
+    pub catalog: std::path::PathBuf,
+    /// The vector cache file.
+    pub vector_cache: std::path::PathBuf,
+}
+
+/// The pure form of [`LibrarianEnv::machine_paths`]: `db` is `LIBRARIAN_DB`, `data_dir` is the
+/// platform data-local directory. `/tmp` stands in when the platform names none.
+pub(crate) fn machine_paths(
+    db: Option<&std::path::Path>,
+    data_dir: Option<std::path::PathBuf>,
+) -> MachinePaths {
+    use std::path::{Path, PathBuf};
+
+    // An empty parent (`catalog.db`) stays empty: the cache is then a bare file name.
+    let dir = match db.and_then(Path::parent) {
+        Some(parent) => parent.to_path_buf(),
+        None => data_dir
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("librarian"),
+    };
+    MachinePaths {
+        catalog: match db {
+            Some(db) => db.to_path_buf(),
+            None => dir.join("catalog.db"),
+        },
+        vector_cache: dir.join(vector_cache::VECTOR_CACHE_FILE),
+    }
+}
+
 impl LibrarianEnv {
     /// Read the real process environment. The production entry point.
     ///
@@ -156,13 +194,19 @@ impl LibrarianEnv {
             init_default_workspace: true,
         }
     }
+    /// The machine's catalog and vector cache paths for this environment.
+    pub fn machine_paths(&self) -> MachinePaths {
+        machine_paths(self.db.as_deref(), dirs::data_local_dir())
+    }
 }
 
 #[cfg(test)]
 mod librarian_env_tests {
     use super::{
-        librarian_embed_field, parse_embed_concurrency, should_init_default_workspace, LibrarianEnv,
+        librarian_embed_field, machine_paths, parse_embed_concurrency,
+        should_init_default_workspace, LibrarianEnv,
     };
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn explicit_wins_when_both_are_set() {
@@ -265,6 +309,56 @@ mod librarian_env_tests {
         assert!(LibrarianEnv::from_env().init_default_workspace);
         assert!(!LibrarianEnv::default().init_default_workspace);
     }
+    // mutation: take the cache from the data dir even when `db` has a parent; drop the `/tmp` fallback;
+    // make the catalog always `<dir>/catalog.db`.
+    #[test]
+    fn the_vector_cache_lives_in_the_machine_directory_whatever_catalog_is_opened() {
+        let p = machine_paths(
+            Some(Path::new("/m/lib/catalog.db")),
+            Some(PathBuf::from("/d")),
+        );
+        assert_eq!(
+            (p.catalog, p.vector_cache),
+            (
+                PathBuf::from("/m/lib/catalog.db"),
+                PathBuf::from("/m/lib/vector-cache.db")
+            )
+        );
+        let p = machine_paths(None, Some(PathBuf::from("/d")));
+        assert_eq!(
+            (p.catalog, p.vector_cache),
+            (
+                PathBuf::from("/d/librarian/catalog.db"),
+                PathBuf::from("/d/librarian/vector-cache.db")
+            )
+        );
+        // A `LIBRARIAN_DB` with another file name is the catalog as given, never
+        // `<dir>/catalog.db`: the live server opens this path.
+        let p = machine_paths(
+            Some(Path::new("/m/lib/other.db")),
+            Some(PathBuf::from("/d")),
+        );
+        assert_eq!(
+            (p.catalog, p.vector_cache),
+            (
+                PathBuf::from("/m/lib/other.db"),
+                PathBuf::from("/m/lib/vector-cache.db")
+            )
+        );
+        assert_eq!(
+            machine_paths(None, None).vector_cache,
+            PathBuf::from("/tmp/librarian/vector-cache.db")
+        );
+        assert_eq!(
+            machine_paths(Some(Path::new("catalog.db")), None).vector_cache,
+            PathBuf::from("vector-cache.db")
+        );
+        // No parent at all: the data directory, never a path made from the catalog.
+        assert_eq!(
+            machine_paths(Some(Path::new("/")), Some(PathBuf::from("/d"))).vector_cache,
+            PathBuf::from("/d/librarian/vector-cache.db")
+        );
+    }
 }
 
 /// Whether this run may create the default workspace file: only when the caller asked
@@ -313,15 +407,10 @@ pub async fn build_tool_context_with(
     lsp: std::sync::Arc<dyn crate::lsp::LspProvider>,
     env: &LibrarianEnv,
 ) -> Result<tools::ToolContext> {
-    use std::path::PathBuf;
-
     let ws = load_workspace_config(env, workspace::default_config_path)?;
-    let db_path = env.db.clone().unwrap_or_else(|| {
-        dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("librarian/catalog.db")
-    });
-    let cache = std::sync::Arc::new(vector_cache::VectorCache::beside(Some(&db_path)));
+    let paths = env.machine_paths();
+    let cache = std::sync::Arc::new(vector_cache::VectorCache::open(&paths.vector_cache));
+    let db_path = paths.catalog;
     let ws_arc = std::sync::Arc::new(ws);
     let catalog = catalog::Catalog::open_with_workspace(&db_path, &ws_arc)?;
 
@@ -614,12 +703,9 @@ pub(crate) async fn reindex_cli(env: &LibrarianEnv, repo: Option<&str>) -> Resul
     let ignore = workspace::compile_ignore(&ws.ignore)?;
     let mut rules = classify::compile_rules(&ws.rules)?;
     rules.extend(classify::default_rules()?);
-    let db_path = env.db.clone().unwrap_or_else(|| {
-        dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("librarian/catalog.db")
-    });
-    let cache = std::sync::Arc::new(vector_cache::VectorCache::beside(Some(&db_path)));
+    let paths = env.machine_paths();
+    let cache = std::sync::Arc::new(vector_cache::VectorCache::open(&paths.vector_cache));
+    let db_path = paths.catalog;
     let cat = catalog::Catalog::open(&db_path)?;
 
     let embedding = if let Some(model) = env.embed_model.as_deref() {
@@ -941,7 +1027,7 @@ kind = "spec"
     /// at the first call that needs it, so a fresh service has neither a width nor a file.
     #[cfg(feature = "remote-embed")]
     #[tokio::test]
-    async fn the_service_a_reindex_runs_on_carries_a_vector_cache_beside_the_catalog() {
+    async fn the_service_a_reindex_runs_on_carries_a_vector_cache_in_the_machine_directory() {
         let tmp = tempfile::TempDir::new().unwrap();
         let workspace = tmp.path().join("workspace.toml");
         std::fs::write(&workspace, "").unwrap();

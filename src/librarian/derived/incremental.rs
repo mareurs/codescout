@@ -24,7 +24,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::build::{
-    rebuild, BuildInput, BuildReport, ChangeCounts, DocMetadata, EntryRow, ParsedDocument, Parser,
+    rebuild, AugmentationDecl, BuildInput, BuildReport, ChangeCounts, DerivedEventRow, DocMetadata,
+    EntryDoc, EntryDocRow, EntryRow, ParsedDocument, Parser,
 };
 use crate::git::{diff_tree_to_tree, DiffStatus};
 use crate::librarian::catalog::chunk::ChunkRow;
@@ -80,6 +81,101 @@ enum ReferenceJson {
 struct CitationJson {
     reference: ReferenceJson,
     line: u32,
+}
+
+/// The facts of a parse that no column above holds. No field is an `Option` or carries a serde
+/// default, so a row written before a fact existed does not decode and is a cache miss (E2-R3).
+///
+/// The rule for a fact added later: its key must be required on decode (a cache row without it is
+/// a miss), because `PARSER_VERSION` is not bumped for it; otherwise bump `PARSER_VERSION`. A
+/// nullable field of a nested type takes [`required`], which serde's plain `Option` does not give.
+#[derive(Serialize, Deserialize)]
+struct FactsJson {
+    events: Vec<EventJson>,
+    /// `(line, rel)` of each line of a relation paragraph outside every event section, by line
+    /// ([`ParsedDocument::relation_rels`]). A pair, since JSON object keys are strings.
+    relation_rels: Vec<(u32, String)>,
+    /// [`ParsedDocument::entry_doc`]. A plain field with no default: a row without it is a miss.
+    entry_doc: EntryDocJson,
+    /// [`ParsedDocument::augmentation`]. A plain field with no default: a row without it is a miss
+    /// (E2-R3). The sidecar's shape is not here: it is read from the commit on every build.
+    augmentation: AugmentationDeclJson,
+}
+
+/// [`EntryDoc`] as the cache holds it (externally tagged: `"NotAnEntry"`, `"Unparsed"`, or
+/// `{"Parsed": {..}}`).
+#[derive(Serialize, Deserialize)]
+enum EntryDocJson {
+    NotAnEntry,
+    Unparsed,
+    Parsed(EntryDocRowJson),
+}
+
+/// An `entry_doc` row as the cache holds it: [`EntryDocRow`] field for field. Every key is
+/// required on decode, the nullable ones included; a field added here follows the rule on
+/// [`FactsJson`].
+#[derive(Serialize, Deserialize)]
+struct EntryDocRowJson {
+    entry_kind: String,
+    status_since: String,
+    created: String,
+    #[serde(deserialize_with = "required")]
+    closed: Option<String>,
+    #[serde(deserialize_with = "required")]
+    revisit_by: Option<String>,
+    #[serde(deserialize_with = "required")]
+    valid: Option<String>,
+    fields_json: String,
+}
+
+/// [`AugmentationDecl`] as the cache holds it (externally tagged: `"None"`, `"Unparseable"`, or
+/// `{"Declared": {"sidecar": ..}}`). The `sidecar` key is required on decode though it is nullable:
+/// a plain `Option` would read a row without it as a bare `true` declaration.
+#[derive(Serialize, Deserialize)]
+enum AugmentationDeclJson {
+    None,
+    Declared {
+        #[serde(deserialize_with = "required")]
+        sidecar: Option<String>,
+    },
+    Unparseable,
+}
+
+/// An event section as the cache holds it: [`DerivedEventRow`] field for field. Every key is
+/// required on decode, the nullable ones included (an explicit `null` is a value, a missing key is
+/// a miss); a field added here follows the rule on [`FactsJson`].
+#[derive(Serialize, Deserialize)]
+struct EventJson {
+    heading_line: u32,
+    end_line: u32,
+    event_id: String,
+    kind: String,
+    created_at_ms: i64,
+    #[serde(deserialize_with = "required")]
+    author: Option<String>,
+    #[serde(deserialize_with = "required")]
+    anchor_commit: Option<String>,
+    #[serde(deserialize_with = "required")]
+    head_commit: Option<String>,
+    #[serde(deserialize_with = "required")]
+    parent: Option<String>,
+    #[serde(deserialize_with = "required")]
+    resolves: Option<String>,
+    #[serde(deserialize_with = "required")]
+    source_json: Option<String>,
+    mutates: Vec<String>,
+    payload_json: String,
+}
+
+/// `Option<T>` that must be present: serde reads a missing `Option` key as `None`, but a field
+/// with `deserialize_with` has no such default, so a missing key is an error and an explicit
+/// `null` is `None`.
+fn required<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
 }
 
 /// A chunk without its `artifact_id`, which is the document's own `rel_path`.
@@ -143,6 +239,7 @@ pub(super) struct Stored {
     pub(super) entries_json: String,
     pub(super) citations_json: String,
     pub(super) chunks_json: String,
+    pub(super) facts_json: String,
 }
 
 /// The cache row for `products`. A reader gets exactly `products` back from [`decode`].
@@ -206,12 +303,59 @@ pub(super) fn encode(products: &ParsedDocument) -> serde_json::Result<Stored> {
             content_hash: c.content_hash.clone(),
         })
         .collect();
+    let events: Vec<EventJson> = products
+        .events
+        .iter()
+        .map(|e| EventJson {
+            heading_line: e.heading_line,
+            end_line: e.end_line,
+            event_id: e.event_id.clone(),
+            kind: e.kind.clone(),
+            created_at_ms: e.created_at_ms,
+            author: e.author.clone(),
+            anchor_commit: e.anchor_commit.clone(),
+            head_commit: e.head_commit.clone(),
+            parent: e.parent.clone(),
+            resolves: e.resolves.clone(),
+            source_json: e.source_json.clone(),
+            mutates: e.mutates.clone(),
+            payload_json: e.payload_json.clone(),
+        })
+        .collect();
     Ok(Stored {
         parse_note: products.parse_note.clone(),
         metadata_json: serde_json::to_string(&metadata)?,
         entries_json: serde_json::to_string(&entries)?,
         citations_json: serde_json::to_string(&citations)?,
         chunks_json: serde_json::to_string(&chunks)?,
+        facts_json: serde_json::to_string(&FactsJson {
+            events,
+            relation_rels: products
+                .relation_rels
+                .iter()
+                .map(|(line, rel)| (*line, rel.clone()))
+                .collect(),
+            entry_doc: match &products.entry_doc {
+                EntryDoc::NotAnEntry => EntryDocJson::NotAnEntry,
+                EntryDoc::Unparsed => EntryDocJson::Unparsed,
+                EntryDoc::Parsed(row) => EntryDocJson::Parsed(EntryDocRowJson {
+                    entry_kind: row.entry_kind.clone(),
+                    status_since: row.status_since.clone(),
+                    created: row.created.clone(),
+                    closed: row.closed.clone(),
+                    revisit_by: row.revisit_by.clone(),
+                    valid: row.valid.clone(),
+                    fields_json: row.fields_json.clone(),
+                }),
+            },
+            augmentation: match &products.augmentation {
+                AugmentationDecl::None => AugmentationDeclJson::None,
+                AugmentationDecl::Declared { sidecar } => AugmentationDeclJson::Declared {
+                    sidecar: sidecar.clone(),
+                },
+                AugmentationDecl::Unparseable => AugmentationDeclJson::Unparseable,
+            },
+        })?,
     })
 }
 
@@ -223,6 +367,12 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
     let entries: Vec<EntryJson> = serde_json::from_str(&stored.entries_json).ok()?;
     let citations: Vec<CitationJson> = serde_json::from_str(&stored.citations_json).ok()?;
     let chunks: Vec<ChunkJson> = serde_json::from_str(&stored.chunks_json).ok()?;
+    let FactsJson {
+        events,
+        relation_rels,
+        entry_doc,
+        augmentation,
+    } = serde_json::from_str(&stored.facts_json).ok()?;
     let repo_of = |repo: Option<String>| match repo {
         None => Some(None),
         Some(name) => RepoName::parse(&name).ok().map(Some),
@@ -286,6 +436,43 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
                 content_hash: c.content_hash,
             })
             .collect(),
+        events: events
+            .into_iter()
+            .map(|e| DerivedEventRow {
+                heading_line: e.heading_line,
+                end_line: e.end_line,
+                event_id: e.event_id,
+                kind: e.kind,
+                created_at_ms: e.created_at_ms,
+                author: e.author,
+                anchor_commit: e.anchor_commit,
+                head_commit: e.head_commit,
+                parent: e.parent,
+                resolves: e.resolves,
+                source_json: e.source_json,
+                mutates: e.mutates,
+                payload_json: e.payload_json,
+            })
+            .collect(),
+        relation_rels: relation_rels.into_iter().collect(),
+        entry_doc: match entry_doc {
+            EntryDocJson::NotAnEntry => EntryDoc::NotAnEntry,
+            EntryDocJson::Unparsed => EntryDoc::Unparsed,
+            EntryDocJson::Parsed(row) => EntryDoc::Parsed(EntryDocRow {
+                entry_kind: row.entry_kind,
+                status_since: row.status_since,
+                created: row.created,
+                closed: row.closed,
+                revisit_by: row.revisit_by,
+                valid: row.valid,
+                fields_json: row.fields_json,
+            }),
+        },
+        augmentation: match augmentation {
+            AugmentationDeclJson::None => AugmentationDecl::None,
+            AugmentationDeclJson::Declared { sidecar } => AugmentationDecl::Declared { sidecar },
+            AugmentationDeclJson::Unparseable => AugmentationDecl::Unparseable,
+        },
     })
 }
 
@@ -321,8 +508,8 @@ pub(super) fn rules_hash(rules: &[CompiledRule]) -> String {
 pub(super) fn load(conn: &Connection, key: &CacheKey) -> rusqlite::Result<Option<ParsedDocument>> {
     let stored = conn
         .prepare_cached(
-            "SELECT parse_note, metadata_json, entries_json, citations_json, chunks_json \
-             FROM parse_cache \
+            "SELECT parse_note, metadata_json, entries_json, citations_json, chunks_json, \
+             facts_json FROM parse_cache \
              WHERE sha256 = ?1 AND rel_path = ?2 AND rules_hash = ?3 AND parser_version = ?4",
         )?
         .query_row(
@@ -334,6 +521,7 @@ pub(super) fn load(conn: &Connection, key: &CacheKey) -> rusqlite::Result<Option
                     entries_json: r.get(2)?,
                     citations_json: r.get(3)?,
                     chunks_json: r.get(4)?,
+                    facts_json: r.get(5)?,
                 })
             },
         )
@@ -377,8 +565,8 @@ pub(super) fn sync_cache(tx: &Connection, parsed: &[Parsed]) -> anyhow::Result<(
         // `OR REPLACE`: a row that was there but did not read back is replaced by the new one.
         tx.prepare_cached(
             "INSERT OR REPLACE INTO parse_cache (sha256, rel_path, rules_hash, parser_version, \
-             parse_note, metadata_json, entries_json, citations_json, chunks_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             parse_note, metadata_json, entries_json, citations_json, chunks_json, facts_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )?
         .execute(params![
             key.sha256,
@@ -389,7 +577,8 @@ pub(super) fn sync_cache(tx: &Connection, parsed: &[Parsed]) -> anyhow::Result<(
             stored.metadata_json,
             stored.entries_json,
             stored.citations_json,
-            stored.chunks_json
+            stored.chunks_json,
+            stored.facts_json
         ])?;
     }
     Ok(())
@@ -462,9 +651,10 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::librarian::catalog::event_text::{render_event_section, EventSource, EventText};
     use crate::librarian::classify::load_rules;
     use crate::librarian::derived::build::{
-        build_full, key_space_from_commit, parse_document, rules_from_commit, PARSER_VERSION,
+        build_full, parse_document, rules_from_commit, PARSER_VERSION,
     };
     use crate::librarian::derived::schema::{dump_all, open, open_in_memory};
     use crate::librarian::derived::testkit::{commit_files, repo_with, FILE};
@@ -532,15 +722,8 @@ mod tests {
         commit: &git2::Commit,
         f: impl FnOnce(&BuildInput) -> R,
     ) -> R {
-        let rules = rules_from_commit(repo, commit).unwrap();
-        let space = key_space_from_commit(repo, commit).unwrap();
-        f(&BuildInput {
-            repo,
-            commit,
-            root: Path::new(ROOT),
-            rules: &rules,
-            space: &space,
-        })
+        let input = BuildInput::from_commit(repo, commit, Path::new(ROOT)).unwrap();
+        f(&input)
     }
 
     fn build_at(conn: &mut Connection, h: &History, i: usize) -> BuildReport {
@@ -969,6 +1152,174 @@ mod tests {
         assert_eq!(dump_all(&conn), honest);
     }
 
+    /// The distinct authors `doc_history` holds: a marker the test plants and looks for.
+    fn history_authors(conn: &Connection) -> Vec<String> {
+        conn.prepare("SELECT DISTINCT author FROM doc_history ORDER BY author")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn plant_sentinel(conn: &Connection) {
+        conn.execute("UPDATE doc_history SET author = 'sentinel'", [])
+            .unwrap();
+        assert_eq!(history_authors(conn), ["sentinel"]);
+    }
+
+    fn history_meta_of(conn: &Connection) -> (String, String, i64) {
+        conn.query_row(
+            "SELECT commit_sha, parser_version, shallow FROM history_meta",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap()
+    }
+
+    // mutation: compare the commit only (not the parser version, not the shallow state), or not
+    // even the commit.
+    #[test]
+    fn history_is_reused_only_at_the_same_commit_parser_and_shallow_state() {
+        let h = history(&[
+            &[("docs/a.md", "# A\n")],
+            &[("docs/a.md", "# A\n"), ("docs/b.md", "# B\n")],
+        ]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        assert_eq!(history_authors(&conn), ["Test"]);
+        assert_eq!(
+            history_meta_of(&conn),
+            (h.ids[0].to_string(), PARSER_VERSION.to_owned(), 0)
+        );
+
+        // An update at the same commit keeps the history it has.
+        plant_sentinel(&conn);
+        update_at(&mut conn, &h, 0, 0);
+        assert_eq!(history_authors(&conn), ["sentinel"], "same commit: reused");
+
+        // Another parse version in the record: walked again.
+        conn.execute("UPDATE history_meta SET parser_version = 'old'", [])
+            .unwrap();
+        update_at(&mut conn, &h, 0, 0);
+        assert_eq!(history_authors(&conn), ["Test"], "another parser version");
+        assert_eq!(history_meta_of(&conn).1, PARSER_VERSION);
+
+        // Another shallow state in the record (the repository is not shallow): walked again.
+        plant_sentinel(&conn);
+        conn.execute("UPDATE history_meta SET shallow = 1", [])
+            .unwrap();
+        update_at(&mut conn, &h, 0, 0);
+        assert_eq!(history_authors(&conn), ["Test"], "another shallow state");
+        assert_eq!(history_meta_of(&conn).2, 0);
+
+        // A full build never reuses it.
+        plant_sentinel(&conn);
+        build_at(&mut conn, &h, 0);
+        assert_eq!(history_authors(&conn), ["Test"], "build_full always walks");
+
+        // An update to the next commit walks again, and records that commit.
+        plant_sentinel(&conn);
+        update_at(&mut conn, &h, 0, 1);
+        assert_eq!(history_authors(&conn), ["Test"], "another commit");
+        assert_eq!(history_meta_of(&conn).0, h.ids[1].to_string());
+        assert_eq!(count(&conn, "doc_history"), 2);
+    }
+
+    // mutation: compare only the commit and the parse version (no shallow guard): a shallow
+    // repository reuses a history that `git fetch --deepen` has made stale.
+    #[test]
+    fn a_shallow_repository_never_reuses_its_history_and_a_deepened_one_is_walked_again() {
+        use crate::librarian::derived::testkit::git;
+        let parent = tempfile::tempdir().unwrap();
+        let (origin_path, clone_path) = (parent.path().join("origin"), parent.path().join("clone"));
+        let origin = git2::Repository::init(&origin_path).unwrap();
+        let mut ids: Vec<git2::Oid> = Vec::new();
+        let files: [&[(&str, &str)]; 3] = [
+            &[("a.md", "# A\n")],
+            &[("a.md", "# A\n"), ("b.md", "# B\n")],
+            &[("a.md", "# A\n"), ("b.md", "# B\n"), ("c.md", "# C\n")],
+        ];
+        for (i, snapshot) in files.iter().enumerate() {
+            let parent_commit = ids.last().map(|id| origin.find_commit(*id).unwrap());
+            let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
+            ids.push(commit_files(
+                &origin,
+                &bytes(snapshot),
+                &parents,
+                &format!("c{i}"),
+            ));
+        }
+        origin
+            .reference("refs/heads/main", ids[2], true, "tip")
+            .unwrap();
+        origin.set_head("refs/heads/main").unwrap();
+        let url = format!("file://{}", origin_path.display());
+        git(
+            parent.path(),
+            &[
+                "clone",
+                "--quiet",
+                "--depth",
+                "1",
+                &url,
+                clone_path.to_str().unwrap(),
+            ],
+        );
+
+        let positions = |conn: &Connection| -> Vec<(String, i64)> {
+            conn.prepare("SELECT rel_path, walk_pos FROM doc_history ORDER BY rel_path")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let update_clone = |conn: &mut Connection| {
+            let clone = git2::Repository::open(&clone_path).unwrap();
+            assert!(clone.is_shallow());
+            let tip = clone.head().unwrap().peel_to_commit().unwrap();
+            let input = BuildInput::from_commit(&clone, &tip, Path::new(ROOT)).unwrap();
+            update(conn, &input, &tip).unwrap();
+        };
+
+        let mut conn = open_in_memory().unwrap();
+        {
+            let clone = git2::Repository::open(&clone_path).unwrap();
+            let tip = clone.head().unwrap().peel_to_commit().unwrap();
+            let input = BuildInput::from_commit(&clone, &tip, Path::new(ROOT)).unwrap();
+            build_full(&mut conn, &input).unwrap();
+        }
+        let at_boundary = vec![
+            ("a.md".to_owned(), 0),
+            ("b.md".to_owned(), 0),
+            ("c.md".to_owned(), 0),
+        ];
+        assert_eq!(positions(&conn), at_boundary);
+
+        // A shallow repository's history is bounded, so it is walked again rather than trusted.
+        plant_sentinel(&conn);
+        update_clone(&mut conn);
+        assert_eq!(
+            history_authors(&conn),
+            ["Test"],
+            "a shallow repository walks again"
+        );
+
+        // After a deepening fetch the commit, the parser and `is_shallow` are all unchanged, and
+        // the history is not: the next update must see the new depth.
+        git(&clone_path, &["fetch", "--quiet", "--deepen=1"]);
+        update_clone(&mut conn);
+        assert_eq!(
+            positions(&conn),
+            vec![
+                ("a.md".to_owned(), 1),
+                ("b.md".to_owned(), 1),
+                ("c.md".to_owned(), 0)
+            ]
+        );
+    }
+
     #[test]
     fn a_changed_rules_blob_invalidates_the_cache() {
         let active = "[[rule]]\nglob = \"docs/**/*.md\"\nkind = \"spec\"\nstatus = \"active\"\n";
@@ -1311,6 +1662,453 @@ mod tests {
         assert!(parsed.is_empty(), "the bad rows were replaced by good ones");
     }
 
+    /// A row written before a fact existed has no field for it: `{}` is what `FactsJson` was before
+    /// `events`. It must not read back as "no events" (E2-R3: the tasks that add a fact do not
+    /// bump `PARSER_VERSION`, so a miss is all that keeps an old test database honest).
+    // mutation M4: `decode` ignores `facts_json` (reads no events from it, and no error).
+    #[test]
+    fn a_cache_row_without_the_events_fact_is_a_miss() {
+        let notes = notes_document(&[sample_event(
+            "n-1",
+            "note",
+            serde_json::json!({"text": "kept"}),
+        )]);
+        let h = history(&[&[REPO_TOML, ("docs/a.md", "# A\n"), ("docs/notes.md", &notes)]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1,
+            "the fixture's build stores its event"
+        );
+        let stored: Vec<String> = conn
+            .prepare("SELECT facts_json FROM parse_cache ORDER BY rel_path")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            stored.iter().any(|f| f.contains("n-1")),
+            "the notes document's facts hold its event: {stored:?}"
+        );
+        conn.execute(
+            "UPDATE parse_cache SET facts_json = '{}' WHERE rel_path = 'docs/notes.md'",
+            [],
+        )
+        .unwrap();
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/notes.md"]));
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
+    }
+    /// A cache row written before relation labels were cached has no `relation_rels` key: it must not
+    /// read back as "no relation lines" (E2-R3: the task that adds a fact does not bump
+    /// `PARSER_VERSION`, so a miss is all that keeps an old test database honest).
+    // mutation: `#[serde(default)]` on `FactsJson::relation_rels`.
+    #[test]
+    fn a_cache_row_without_the_relation_rels_fact_is_a_miss() {
+        let h = history(&[&[
+            REPO_TOML,
+            ("docs/a.md", "# A\n\n**Depends on:** [[b]]\n"),
+            ("docs/b.md", "# B\n"),
+        ]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let text: String = conn
+            .query_row(
+                "SELECT facts_json FROM parse_cache WHERE rel_path = 'docs/a.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let mut facts: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            facts["relation_rels"],
+            serde_json::json!([[3, "depends_on"]]),
+            "the fixture's facts hold its relation line: {text}"
+        );
+        facts.as_object_mut().unwrap().remove("relation_rels");
+        conn.execute(
+            "UPDATE parse_cache SET facts_json = ?1 WHERE rel_path = 'docs/a.md'",
+            [facts.to_string()],
+        )
+        .unwrap();
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/a.md"]));
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
+        let rewritten: String = conn
+            .query_row(
+                "SELECT facts_json FROM parse_cache WHERE rel_path = 'docs/a.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(rewritten, text, "the miss rewrote the row");
+    }
+    /// The text of a corpus document.
+    fn corpus_text(name: &str) -> String {
+        corpus()
+            .into_iter()
+            .find(|(rel_path, _)| *rel_path == name)
+            .unwrap_or_else(|| panic!("{name} is not in the corpus"))
+            .1
+    }
+
+    /// `facts_json` of `docs/e.md`, parsed.
+    fn entry_facts(conn: &Connection) -> serde_json::Value {
+        let text: String = conn
+            .query_row(
+                "SELECT facts_json FROM parse_cache WHERE rel_path = 'docs/e.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&text).unwrap()
+    }
+
+    fn put_entry_facts(conn: &Connection, facts: &serde_json::Value) {
+        conn.execute(
+            "UPDATE parse_cache SET facts_json = ?1 WHERE rel_path = 'docs/e.md'",
+            [facts.to_string()],
+        )
+        .unwrap();
+    }
+
+    /// A cache row written before the entry fields were cached has no `entry_doc` key: it must not
+    /// read back as "no entry document" (E2-R3: `PARSER_VERSION` is not bumped for a new fact).
+    // mutation: `#[serde(default)]` on `FactsJson::entry_doc` (and `Default` on `EntryDocJson`).
+    #[test]
+    fn a_cache_row_without_the_entry_doc_fact_is_a_miss() {
+        let text = corpus_text("docs/entries/full.md");
+        let h = history(&[&[REPO_TOML, ("docs/e.md", &text)]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let whole = entry_facts(&conn);
+        assert!(
+            whole["entry_doc"]["Parsed"].is_object(),
+            "the fixture's facts hold its entry fields: {whole}"
+        );
+        let mut cut = whole.clone();
+        cut.as_object_mut().unwrap().remove("entry_doc");
+        put_entry_facts(&conn, &cut);
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/e.md"]));
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
+        assert_eq!(entry_facts(&conn), whole, "the miss rewrote the row");
+    }
+
+    /// Every key of a cached entry row is required, the nullable ones (`closed`, `revisit_by`,
+    /// `valid`) included: a row with one key removed is a miss, a row with an explicit `null` is
+    /// a hit.
+    // mutation: plain `Option` fields in `EntryDocRowJson` (no `deserialize_with = "required"`).
+    #[test]
+    fn a_cache_row_with_an_entry_doc_key_removed_is_a_miss() {
+        let text = corpus_text("docs/entries/full.md");
+        let h = history(&[&[REPO_TOML, ("docs/e.md", &text)]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let whole = entry_facts(&conn);
+        let keys: Vec<String> = whole["entry_doc"]["Parsed"]
+            .as_object()
+            .expect("the cached entry row is an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(keys.len(), 7, "every column of the row is a key: {keys:?}");
+        for key in &keys {
+            let mut cut = whole.clone();
+            cut["entry_doc"]["Parsed"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            put_entry_facts(&conn, &cut);
+
+            let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+            assert_eq!(parsed, strings(&["docs/e.md"]), "without `{key}`");
+            assert_eq!(dump_all(&conn), fresh_dump(&h, 0), "without `{key}`");
+            assert_eq!(entry_facts(&conn), whole, "the miss rewrote the row");
+        }
+        let mut nulled = whole.clone();
+        nulled["entry_doc"]["Parsed"]["closed"] = serde_json::Value::Null;
+        put_entry_facts(&conn, &nulled);
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+        assert!(parsed.is_empty(), "a null `closed` reads back: {parsed:?}");
+    }
+
+    /// The corpus must keep one document of each shape the `entry_doc` cache holds, so that the
+    /// digest and the round-trip test cover each: every optional column set, each class of
+    /// `valid`, an entry document that does not read as an entry, and a document that is none.
+    #[test]
+    fn the_pinned_corpus_has_every_entry_doc_form() {
+        let rules = corpus_rules();
+        let entry_doc = |name: &str| parse_document(name, &corpus_text(name), &rules).entry_doc;
+        let EntryDoc::Parsed(full) = entry_doc("docs/entries/full.md") else {
+            panic!("full.md reads as an entry");
+        };
+        assert_eq!(
+            full,
+            EntryDocRow {
+                entry_kind: "finding".to_owned(),
+                status_since: "2026-11-01".to_owned(),
+                created: "2026-10-30".to_owned(),
+                closed: Some("2026-11-02".to_owned()),
+                revisit_by: Some("2026-12-01".to_owned()),
+                valid: Some("dated 2026-11-01".to_owned()),
+                fields_json: r#"{"meta":{"z":[1,2],"a":null},"severity":"high"}"#.to_owned(),
+            }
+        );
+        let valid = |name: &str| match entry_doc(name) {
+            EntryDoc::Parsed(row) => row.valid,
+            other => panic!("{name} reads as an entry: {other:?}"),
+        };
+        assert_eq!(
+            valid("docs/entries/invariant.md").as_deref(),
+            Some("invariant")
+        );
+        assert_eq!(
+            valid("docs/entries/conditional.md").as_deref(),
+            Some("conditional — the plan edit lands")
+        );
+        assert_eq!(entry_doc("docs/entries/unparsed.md"), EntryDoc::Unparsed);
+        assert_eq!(entry_doc("docs/specs/one.md"), EntryDoc::NotAnEntry);
+    }
+    /// The corpus must keep one document of each augmentation form the cache holds: a sidecar
+    /// path, `true` with no path, a declaration that reads as none, and one that cannot be read.
+    #[test]
+    fn the_pinned_corpus_has_every_augmentation_form() {
+        let rules = corpus_rules();
+        let decl = |name: &str| parse_document(name, &corpus_text(name), &rules).augmentation;
+        assert_eq!(
+            decl("docs/aug/sidecar.md"),
+            AugmentationDecl::Declared {
+                sidecar: Some("docs/augmentations/t.yaml".to_owned())
+            }
+        );
+        assert_eq!(
+            decl("docs/aug/true.md"),
+            AugmentationDecl::Declared { sidecar: None }
+        );
+        assert_eq!(decl("docs/aug/false.md"), AugmentationDecl::None);
+        assert_eq!(
+            decl("docs/aug/unparseable.md"),
+            AugmentationDecl::Unparseable
+        );
+        assert_eq!(decl("docs/specs/one.md"), AugmentationDecl::None);
+    }
+
+    /// A cache row written before the declaration was cached has no `augmentation` key: it must not
+    /// read back as "declares nothing" (E2-R3: `PARSER_VERSION` is not bumped for a new fact).
+    // mutation: `#[serde(default)]` on `FactsJson::augmentation` (and `Default` on
+    // `AugmentationDeclJson`).
+    #[test]
+    fn a_cache_row_without_the_augmentation_fact_is_a_miss() {
+        let text = corpus_text("docs/aug/sidecar.md");
+        let h = history(&[&[
+            REPO_TOML,
+            ("docs/e.md", &text),
+            ("docs/augmentations/t.yaml", "prompt: P\n"),
+        ]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let whole = entry_facts(&conn);
+        assert_eq!(
+            whole["augmentation"],
+            serde_json::json!({"Declared": {"sidecar": "docs/augmentations/t.yaml"}}),
+            "the fixture's facts hold its declaration: {whole}"
+        );
+        let mut cut = whole.clone();
+        cut.as_object_mut().unwrap().remove("augmentation");
+        put_entry_facts(&conn, &cut);
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/e.md"]));
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
+        assert_eq!(count(&conn, "augmentation"), 1);
+        assert_eq!(entry_facts(&conn), whole, "the miss rewrote the row");
+    }
+
+    /// The `sidecar` key of a cached declaration is required, though it is nullable: a row with it
+    /// removed is a miss, a row with an explicit `null` is a hit.
+    // mutation: a plain `Option` for `sidecar` (no `deserialize_with = "required"`).
+    #[test]
+    fn a_cache_row_with_the_sidecar_key_removed_is_a_miss() {
+        let text = corpus_text("docs/aug/true.md");
+        let h = history(&[&[REPO_TOML, ("docs/e.md", &text)]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let whole = entry_facts(&conn);
+        assert_eq!(
+            whole["augmentation"],
+            serde_json::json!({"Declared": {"sidecar": null}}),
+            "{whole}"
+        );
+        let mut cut = whole.clone();
+        cut["augmentation"]["Declared"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sidecar");
+        put_entry_facts(&conn, &cut);
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/e.md"]));
+        assert_eq!(entry_facts(&conn), whole, "the miss rewrote the row");
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+        assert!(
+            parsed.is_empty(),
+            "an explicit `null` reads back: {parsed:?}"
+        );
+    }
+
+    /// The shape is not cached: the sidecar is read from the commit on every update, so an edit to
+    /// the sidecar alone (the document's own bytes unchanged, its parse a cache hit) changes it.
+    // mutation: keep the shape in `FactsJson` (the parse reads the sidecar, the cache holds it).
+    #[test]
+    fn a_sidecar_edit_alone_changes_the_shape_on_update() {
+        let doc = "---\nkind: tracker\nexpects_augmentation: docs/augmentations/t.yaml\n---\n# T\n";
+        let h = history(&[
+            &[
+                REPO_TOML,
+                ("docs/t.md", doc),
+                ("docs/augmentations/t.yaml", "prompt: A\n"),
+            ],
+            &[
+                REPO_TOML,
+                ("docs/t.md", doc),
+                ("docs/augmentations/t.yaml", "prompt: B\n"),
+            ],
+        ]);
+        let prompt = |conn: &Connection| -> String {
+            conn.query_row(
+                "SELECT prompt FROM augmentation WHERE rel_path = 'docs/t.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        assert_eq!(prompt(&conn), "A");
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 1, PARSER_VERSION);
+
+        assert!(parsed.is_empty(), "the document did not change: {parsed:?}");
+        assert_eq!(prompt(&conn), "B");
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 1));
+    }
+
+    /// Every key of a cached event is required, the nullable ones included: a row with one key
+    /// removed does not read back as a row with that field `None`, it is a miss (the rule on
+    /// `FactsJson`: a field added later is required, or `PARSER_VERSION` is bumped). An explicit
+    /// `null` is a value and stays a hit.
+    // mutation: plain `Option` fields in `EventJson` (no `deserialize_with = "required"`).
+    #[test]
+    fn a_cache_row_with_an_event_key_removed_is_a_miss() {
+        let notes = notes_document(&[full_event("n-1")]);
+        let h = history(&[&[REPO_TOML, ("docs/a.md", "# A\n"), ("docs/notes.md", &notes)]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        let facts = |conn: &Connection| -> serde_json::Value {
+            let text: String = conn
+                .query_row(
+                    "SELECT facts_json FROM parse_cache WHERE rel_path = 'docs/notes.md'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            serde_json::from_str(&text).unwrap()
+        };
+        let whole = facts(&conn);
+        let keys: Vec<String> = whole["events"][0]
+            .as_object()
+            .expect("the cached event is an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(keys.len(), 13, "every field of an event is a key: {keys:?}");
+        for key in &keys {
+            let mut cut = whole.clone();
+            cut["events"][0].as_object_mut().unwrap().remove(key);
+            conn.execute(
+                "UPDATE parse_cache SET facts_json = ?1 WHERE rel_path = 'docs/notes.md'",
+                [cut.to_string()],
+            )
+            .unwrap();
+
+            let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+            assert_eq!(parsed, strings(&["docs/notes.md"]), "without `{key}`");
+            assert_eq!(dump_all(&conn), fresh_dump(&h, 0), "without `{key}`");
+            assert_eq!(facts(&conn), whole, "the miss rewrote the row");
+        }
+        // An explicit null is a value, not a missing key.
+        let mut nulled = whole.clone();
+        nulled["events"][0]["parent"] = serde_json::Value::Null;
+        conn.execute(
+            "UPDATE parse_cache SET facts_json = ?1 WHERE rel_path = 'docs/notes.md'",
+            [nulled.to_string()],
+        )
+        .unwrap();
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+        assert!(parsed.is_empty(), "a null `parent` reads back: {parsed:?}");
+    }
+
+    /// A document that holds `events` (id, kind, payload) as committed `###` sections under its
+    /// `## Events` heading.
+    fn notes_document(events: &[EventText]) -> String {
+        let mut doc = "# Notes\n\n## Events\n\n".to_owned();
+        for event in events {
+            doc.push_str(&render_event_section(event));
+        }
+        doc
+    }
+
+    /// A note-shaped event with the required fields only.
+    fn sample_event(id: &str, kind: &str, payload: serde_json::Value) -> EventText {
+        EventText {
+            id: id.to_owned(),
+            kind: kind.to_owned(),
+            created_at_ms: 1_794_637_800_000,
+            author: Some("alice".to_owned()),
+            anchor_commit: None,
+            head_commit: None,
+            parent: None,
+            resolves: None,
+            source: None,
+            mutates: Vec::new(),
+            payload,
+        }
+    }
+
+    /// An event with every optional field set: a source with a payload, two `mutates` forms, and
+    /// the parent, resolves, anchor and head commits. A cache round trip that drops one of them is
+    /// seen only through this event.
+    fn full_event(id: &str) -> EventText {
+        EventText {
+            anchor_commit: Some("a1b2".to_owned()),
+            head_commit: Some("c3d4".to_owned()),
+            parent: Some("p-parent".to_owned()),
+            resolves: Some("r-resolved".to_owned()),
+            source: Some(EventSource {
+                kind: "url".to_owned(),
+                uri: "https://example.invalid/x".to_owned(),
+                payload: Some(serde_json::json!({"k": [1, 2], "z": null})),
+            }),
+            mutates: vec!["[[b]]".to_owned(), "[[b:F-1]]".to_owned()],
+            ..sample_event(id, "note", serde_json::json!({"text": "full"}))
+        }
+    }
+
     /// A parse corpus that exercises every part of a `ParsedDocument`.
     fn corpus() -> Vec<(&'static str, String)> {
         let long = format!(
@@ -1371,6 +2169,75 @@ mod tests {
                 "docs/specs/bare.md",
                 "# Bare\n\nThe decision in R-43 settles this, and so does R-44.\n".to_owned(),
             ),
+            // A two-line relation paragraph: the parse stores its rel for both lines. (The
+            // `**Mutates:**` lines of the events in `docs/notes.md` are in event sections, which
+            // take no rel.)
+            (
+                "docs/rel.md",
+                "# Rel\n\n**Depends on:** [[one]]\n  and [[two:F-2]]\n".to_owned(),
+            ),
+            // Entry documents: one with every optional field set (and a field of nested JSON), one
+            // per other `valid` class, one that has an `entry_kind` and does not read as an entry
+            // (no `created`). The parse cache must hand each back as the parse made it.
+            (
+                "docs/entries/full.md",
+                "---\nentry_kind: finding\ntitle: Full\nstatus: done\nstatus_since: 2026-11-01\n\
+                 created: 2026-10-30\nclosed: 2026-11-02\nrevisit_by: 2026-12-01\n\
+                 valid: dated 2026-11-01\nseverity: high\nmeta: {z: [1, 2], a: null}\ntags: [a]\n---\n\
+                 # Full\n"
+                    .to_owned(),
+            ),
+            (
+                "docs/entries/invariant.md",
+                "---\nentry_kind: rule\ntitle: Inv\nstatus: open\nstatus_since: 2026-11-01\n\
+                 created: 2026-10-30\nvalid: invariant\n---\n# Inv\n"
+                    .to_owned(),
+            ),
+            (
+                "docs/entries/conditional.md",
+                "---\nentry_kind: rule\ntitle: Cond\nstatus: open\nstatus_since: 2026-11-01\n\
+                 created: 2026-10-30\nvalid: conditional — the plan edit lands\n---\n# Cond\n"
+                    .to_owned(),
+            ),
+            (
+                "docs/entries/unparsed.md",
+                "---\nentry_kind: finding\ntitle: Unparsed\nstatus: open\nstatus_since: 2026-11-01\n\
+                 ---\n# Unparsed\n"
+                    .to_owned(),
+            ),
+            // Augmentation declarations, one per form the cache holds: a sidecar path, `true` (no
+            // path), a declaration that reads as none (`false`), and one that cannot be read.
+            (
+                "docs/aug/sidecar.md",
+                "---\nkind: tracker\nexpects_augmentation: docs/augmentations/t.yaml\n---\n# Sidecar\n"
+                    .to_owned(),
+            ),
+            (
+                "docs/aug/true.md",
+                "---\nkind: tracker\nexpects_augmentation: true\n---\n# True\n".to_owned(),
+            ),
+            (
+                "docs/aug/false.md",
+                "---\nkind: tracker\nexpects_augmentation: false\n---\n# False\n".to_owned(),
+            ),
+            (
+                "docs/aug/unparseable.md",
+                "---\nkind: tracker\nexpects_augmentation: ture\n---\n# Unparseable\n".to_owned(),
+            ),
+            // Event sections under `## Events`, one per payload form: a note's blockquote and a
+            // verdict's fenced payload. The parse stores them as events, with whole-document lines.
+            (
+                "docs/notes.md",
+                notes_document(&[
+                    sample_event("n-1", "note", serde_json::json!({"text": "first\nsecond"})),
+                    sample_event(
+                        "v-1",
+                        "verdict",
+                        serde_json::json!({"outcome": "go", "score": 1.5}),
+                    ),
+                    full_event("f-1"),
+                ]),
+            ),
         ]
     }
 
@@ -1426,10 +2293,79 @@ mod tests {
         );
     }
 
+    /// The corpus must keep event sections of both payload forms, and one event with every optional
+    /// field set: the digest below and the round-trip test cover `events` only if some pinned text
+    /// has them.
+    #[test]
+    fn the_pinned_corpus_has_events_of_both_payload_forms() {
+        let rules = corpus_rules();
+        let (rel_path, text) = corpus()
+            .into_iter()
+            .find(|(rel_path, _)| *rel_path == "docs/notes.md")
+            .unwrap();
+        let parsed = parse_document(rel_path, &text, &rules);
+        let payloads: Vec<&str> = parsed
+            .events
+            .iter()
+            .map(|e| e.payload_json.as_str())
+            .collect();
+        assert_eq!(
+            payloads,
+            [
+                r#"{"text":"first\nsecond"}"#,
+                r#"{"outcome":"go","score":1.5}"#,
+                r#"{"text":"full"}"#
+            ]
+        );
+        let full = &parsed.events[2];
+        assert_eq!(full.mutates, ["[[b]]", "[[b:F-1]]"]);
+        for (name, field) in [
+            ("author", &full.author),
+            ("anchor_commit", &full.anchor_commit),
+            ("head_commit", &full.head_commit),
+            ("parent", &full.parent),
+            ("resolves", &full.resolves),
+            ("source_json", &full.source_json),
+        ] {
+            assert!(field.is_some(), "the corpus event leaves `{name}` empty");
+        }
+    }
+
+    /// The corpus must keep a relation paragraph, and event sections that carry `**Mutates:**` lines
+    /// that take no rel: the digest and the round-trip test cover `relation_rels` only if some pinned
+    /// text has them.
+    #[test]
+    fn the_pinned_corpus_has_a_relation_paragraph_and_events_that_take_no_rel() {
+        let rules = corpus_rules();
+        let parse = |name: &str| {
+            let (rel_path, text) = corpus()
+                .into_iter()
+                .find(|(rel_path, _)| *rel_path == name)
+                .unwrap();
+            parse_document(rel_path, &text, &rules)
+        };
+        let rel = parse("docs/rel.md");
+        assert_eq!(
+            rel.relation_rels.into_iter().collect::<Vec<_>>(),
+            [(3, "depends_on".to_owned()), (4, "depends_on".to_owned())]
+        );
+        let notes = parse("docs/notes.md");
+        assert!(
+            notes.events.iter().any(|e| !e.mutates.is_empty()),
+            "an event of the corpus mutates something"
+        );
+        assert!(
+            notes.relation_rels.is_empty(),
+            "a line inside an event section takes no rel: {:?}",
+            notes.relation_rels
+        );
+    }
+
     /// The pinned digest of the corpus's parse. When this fails, the parse of some text changed
-    /// (or the shape the cache stores did): bump `PARSER_VERSION`, so that no cached row from
-    /// the old logic is read, and then set this to the new digest.
-    const CORPUS_DIGEST: &str = "bab4fcc753c9e9275f19651b1b5f87e728ed77cf6bc1703522d83f61a0c01556";
+    /// or the shape the cache stores did. A parse change bumps `PARSER_VERSION`; a fact added to
+    /// the cache with a required key does not (E2-R3: a row without it is a miss). Either way, set
+    /// this to the new digest, after reading what changed.
+    const CORPUS_DIGEST: &str = "65181156700ef001fe9b13ba229c825952931cf2d2d68b76e8219e96b462ce53";
 
     #[test]
     fn the_parse_of_a_pinned_corpus_is_tied_to_parser_version() {
@@ -1445,6 +2381,7 @@ mod tests {
                 &stored.entries_json,
                 &stored.citations_json,
                 &stored.chunks_json,
+                &stored.facts_json,
             ] {
                 hasher.update(b"\n");
                 hasher.update(part.as_bytes());
@@ -1453,7 +2390,7 @@ mod tests {
         let digest = format!("{:x}", hasher.finalize());
         assert_eq!(
             digest, CORPUS_DIGEST,
-            "the parse changed: bump PARSER_VERSION ({PARSER_VERSION:?}) and pin this digest"
+            "the parse changed: bump PARSER_VERSION ({PARSER_VERSION:?}) unless the change only adds a required cache fact (E2-R3), and pin this digest"
         );
     }
 

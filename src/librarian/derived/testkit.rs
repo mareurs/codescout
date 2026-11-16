@@ -45,7 +45,7 @@ pub(crate) fn repo_with_commit(
 }
 
 /// The tree holding `entries` (`path`, `mode`, `bytes`), written to `repo`'s object database.
-fn tree_of(repo: &git2::Repository, entries: &[(&str, u32, &[u8])]) -> git2::Oid {
+pub(crate) fn tree_of(repo: &git2::Repository, entries: &[(&str, u32, &[u8])]) -> git2::Oid {
     // The repository's own index, used only to assemble a tree: it is never written to disk.
     let mut index = repo.index().unwrap();
     index.clear().unwrap();
@@ -78,14 +78,76 @@ pub(crate) fn commit_files(
     parents: &[&git2::Commit],
     message: &str,
 ) -> git2::Oid {
+    let sig = fixed_sig();
+    commit_files_at(repo, files, parents, message, &sig, &sig)
+}
+
+/// [`commit_files`] with the author and the committer chosen by the caller: a test of a history
+/// walk gives each commit its own time, and so its own place in the walk's order.
+pub(crate) fn commit_files_at(
+    repo: &git2::Repository,
+    files: &[(&str, &[u8])],
+    parents: &[&git2::Commit],
+    message: &str,
+    author: &git2::Signature,
+    committer: &git2::Signature,
+) -> git2::Oid {
     let entries: Vec<(&str, u32, &[u8])> = files
         .iter()
         .map(|&(path, bytes)| (path, FILE, bytes))
         .collect();
     let tree = repo.find_tree(tree_of(repo, &entries)).unwrap();
-    let sig = fixed_sig();
-    repo.commit(None, &sig, &sig, message, &tree, parents)
+    repo.commit(None, author, committer, message, &tree, parents)
         .unwrap()
+}
+
+/// `git` as the tests run it: the machine's own configuration out of the way, so that what a test
+/// sees does not depend on the developer's git setup (nor on a hook that set `GIT_DIR`). One
+/// place sets the environment, so [`git`] and [`git_exit`] cannot drift apart.
+fn git_command(dir: &std::path::Path, args: &[&str]) -> std::process::Command {
+    let mut cmd = std::process::Command::new("git");
+    cmd.current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE");
+    cmd
+}
+
+/// Run `git` in `dir` with the machine's own configuration out of the way, so that what a test
+/// sees does not depend on the developer's git setup (nor on a hook that set `GIT_DIR`).
+pub(crate) fn git(dir: &std::path::Path, args: &[&str]) -> String {
+    let out = git_command(dir, args).output().expect("run git");
+    assert!(
+        out.status.success(),
+        "git {args:?} in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// [`git`] without the success assertion: the exit code and the output (stdout, then stderr), for
+/// a test of a command that is meant to fail, such as a `git merge` that stops on a conflict. A
+/// process ended by a signal has no code and gives -1.
+pub(crate) fn git_exit(dir: &std::path::Path, args: &[&str]) -> (i32, String) {
+    let out = git_command(dir, args).output().expect("run git");
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap_or(-1), text)
+}
+
+/// `git clone` of `src` into `dst` over a `file://` URL: a second checkout of one repository,
+/// with its own path, its own working tree and its own local config.
+pub(crate) fn clone_repo(src: &std::path::Path, dst: &std::path::Path) {
+    let url = format!("file://{}", src.display());
+    git(
+        dst.parent().unwrap(),
+        &["clone", "--quiet", &url, dst.to_str().unwrap()],
+    );
 }
 
 /// A repo whose root tree is built by hand, so an entry name can be raw bytes.
@@ -239,10 +301,11 @@ pub(crate) struct Built {
 }
 
 /// Commit `files` (`path`, text) into a temp repo and run the full build over that commit: the
-/// commit oracle. The derived index reads commits only, so what an uncommitted working tree holds
-/// is invisible to it.
+/// commit oracle. `build_full` reads the commit only (its tree and its history), so what an
+/// uncommitted working tree holds is invisible to it; only `update_with_working_tree` reads the
+/// working tree.
 pub(crate) fn build_files(files: &[(&str, &str)]) -> Built {
-    use super::build::{build_full, key_space_from_commit, rules_from_commit, BuildInput};
+    use super::build::{build_full, BuildInput};
     use super::scan::open_commit;
 
     let dir = tempfile::tempdir().unwrap();
@@ -252,20 +315,9 @@ pub(crate) fn build_files(files: &[(&str, &str)]) -> Built {
         .collect();
     let repo = repo_with(dir.path(), &entries);
     let commit = open_commit(&repo, "HEAD").unwrap();
-    let rules = rules_from_commit(&repo, &commit).unwrap();
-    let space = key_space_from_commit(&repo, &commit).unwrap();
+    let input = BuildInput::from_commit(&repo, &commit, dir.path()).unwrap();
     let mut conn = super::schema::open_in_memory().unwrap();
-    build_full(
-        &mut conn,
-        &BuildInput {
-            repo: &repo,
-            commit: &commit,
-            root: dir.path(),
-            rules: &rules,
-            space: &space,
-        },
-    )
-    .unwrap();
+    build_full(&mut conn, &input).unwrap();
     Built { conn, _dir: dir }
 }
 
@@ -316,5 +368,18 @@ mod tests {
             edges_from(&b.conn, "docs/ledger.md"),
             vec![("file".into(), None, Some("target".into()), None)]
         );
+    }
+
+    #[test]
+    fn git_exit_reports_a_failing_command_without_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), &["init", "--quiet"]);
+        let (ok_code, ok_text) = git_exit(dir.path(), &["rev-parse", "--git-dir"]);
+        assert_eq!(ok_code, 0);
+        assert_eq!(ok_text.trim(), ".git");
+        let (bad_code, bad_text) =
+            git_exit(dir.path(), &["rev-parse", "--verify", "refs/heads/absent"]);
+        assert_ne!(bad_code, 0, "{bad_text}");
+        assert!(!bad_text.is_empty(), "git says why it failed");
     }
 }

@@ -184,7 +184,14 @@ struct WriteTarget {
 fn write_target_id(action: &str, args: &Value) -> Option<WriteTarget> {
     let key = match action {
         "append_entry" | "update_entry" | "augment" => "id",
-        "link" if args.get("rel").and_then(Value::as_str) == Some("supersedes") => "dst_id",
+        "link"
+            if args
+                .get("rel")
+                .and_then(Value::as_str)
+                .is_some_and(crate::librarian::catalog::link_text::is_superseding) =>
+        {
+            "dst_id"
+        }
         "link" => "src_id",
         _ => return None,
     };
@@ -730,6 +737,20 @@ mod tests {
             ),
             Some("d".to_string())
         );
+        // Any spelling the link writer treats as `supersedes` names the destination too; one it
+        // does not take as `supersedes` (`Super sedes` is the rel `super_sedes`) names the source.
+        // mutation: `write_target_id` compares the rel to `"supersedes"` exactly.
+        for (rel, want) in [
+            ("Supersedes", "d"),
+            ("SUPERSEDES", "d"),
+            ("Super sedes", id),
+        ] {
+            assert_eq!(
+                named("link", json!({"src_id": id, "dst_id": "d", "rel": rel})),
+                Some(want.to_string()),
+                "rel {rel:?}"
+            );
+        }
     }
 
     /// A `link` names the row whose FILE it wrote, one case per rel kind, in and out of a worktree

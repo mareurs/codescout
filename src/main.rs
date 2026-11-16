@@ -261,27 +261,34 @@ enum Commands {
     /// derived catalog. Three subcommands: `cutover plan` is the dry run (it prints what would
     /// move and what could not, and writes nothing); `cutover export` writes the plan into the
     /// working tree and keeps the report beside the old catalog; `cutover build` builds the new
-    /// catalog (`derived.db`, in the directory of the old catalog) from `HEAD`, and refuses while
-    /// a plan of `HEAD` would still change a file, so run it after the commit. A second `build`
-    /// rebuilds the same file. The tool never commits, stages or moves anything in git: commit the
-    /// exported files yourself. The old catalog is `--old-db`, else `LIBRARIAN_DB`, else
-    /// `librarian/catalog.db` in the local data directory. It is opened read-only and never
-    /// changed. Give `--old-root <path>` (repeatable, absolute) for each other spelling of this
-    /// repository's root that old rows carry. The plan reads `HEAD`, not the working tree:
-    /// commit or stash first. `export` refuses a file that changed since `HEAD`, and refuses the
-    /// whole run while another process holds the project write lock, or once the new catalog
-    /// (`derived.db`) exists. Exits 0 when the run did what it was asked, 1 when `export` refused
-    /// some files or could not write its report files, 2 and prints the reason when it did not
-    /// run: no old catalog, a `-wal`, `-shm` or non-empty `-journal` file beside it (stop every
-    /// codescout process and checkpoint it), a catalog that changed while it was read, no git
-    /// repository, a `HEAD` whose `.codescout/repo.toml` or `key-space.toml` does not parse, or,
-    /// for `export`, a new catalog that already exists or a project write lock that is held (or
-    /// whose file cannot be opened); or, for `build`, an export that is not committed yet, a
-    /// `HEAD` that moved after the plan, a `-wal`, `-shm` or non-empty `-journal` file beside
-    /// `derived.db` (stop the process that holds it, or move `derived.db` and its side files
-    /// aside), a `derived.db` that is not a new catalog or was made by a newer codescout, or a
-    /// `derived.db` built from another repository's history (move it aside). `export` refuses an
-    /// existing `derived.db` the same way: it can belong to another repository.
+    /// catalog from `HEAD` in the file `.codescout/derived.db` in the git root of this checkout,
+    /// and refuses while a plan of `HEAD` would still change a file, so run it after the commit.
+    /// Each checkout has its own file. A second `build` rebuilds the same file. Git must ignore
+    /// the file: add the line `/.codescout/derived.db*` to `.gitignore` or to the repository's
+    /// `info/exclude`. The tool never commits, stages or moves anything in git: commit the
+    /// exported files yourself.
+    /// The old catalog is `--old-db`, else `LIBRARIAN_DB`, else `librarian/catalog.db` in the
+    /// local data directory. It is opened read-only and never changed. A `derived.db` beside the
+    /// old catalog is unused: delete it. Give `--old-root <path>` (repeatable, absolute) for each
+    /// other spelling of this repository's root that old rows carry. The plan reads `HEAD`, not
+    /// the working tree: commit or stash first. `export` refuses a file that changed since
+    /// `HEAD`, and refuses the whole run while another process holds the project write lock, or
+    /// once `.codescout/derived.db` exists, because export runs before the build. Exits 0 when
+    /// the run did what it was asked, 1 when `export` refused some files or could not write its
+    /// report files, 2 and prints the reason when it did not run: no old catalog, a `-wal`,
+    /// `-shm` or non-empty `-journal` file beside it (stop every codescout process and
+    /// checkpoint it), a catalog that changed while it was read, no git repository, a `HEAD`
+    /// whose `.codescout/repo.toml` or `key-space.toml` does not parse, or, for `export`, a new
+    /// catalog that already exists or a project write lock that is held (or whose file cannot be
+    /// opened); or, for `build`, an export that is not committed yet, a `HEAD` that moved after
+    /// the plan, a repository that does not ignore `.codescout/derived.db` and its side files, a
+    /// link at `.codescout` or at one of those files, a directory at one of those files, on Unix
+    /// a file with more than one hard link, a file that git tracks (run `git rm --cached` on it,
+    /// then commit), a `.codescout`
+    /// that is not a directory of this checkout, a `.codescout/derived.db` that is not a new
+    /// catalog or was made by a newer codescout, a checkout whose `.codescout` directory cannot
+    /// be written, or a state in which the tool cannot inspect `.codescout` or one of the files,
+    /// cannot read the git index, or cannot tell whether git ignores the file.
     Cutover(codescout::cli::cutover::CutoverArgs),
 
     /// Move a flat tracker into a lifecycle collection, one tracker at a time. `trackers

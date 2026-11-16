@@ -52,6 +52,7 @@ crates/*/.codescout/code-index.db-wal
 crates/*/.codescout/constitution-seen/
 crates/*/.codescout/crash.log
 crates/*/.codescout/debug.log*
+crates/*/.codescout/derived.db*
 crates/*/.codescout/diagnostic-*.log
 crates/*/.codescout/embeddings.db
 crates/*/.codescout/embeddings.db-shm
@@ -84,6 +85,8 @@ crates/*/.codescout/write.lock
 crates/*/.codescout/write.lock.holder
 /.codescout/debug.log*
 /.codescout/diagnostic-*.log
+# the derived catalog of this checkout: built by `codescout cutover build`, derivable from git
+/.codescout/derived.db*
 /.codescout/libraries.json
 .codescout/embeddings
 /com/
