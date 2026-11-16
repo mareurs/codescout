@@ -1276,3 +1276,81 @@ fn index_table_can_name_one_of_two_sources_with_a_table_at_one_line() {
     );
     assert_clean(&r, &mapping);
 }
+
+// ---- final review: an archived target with a record that is not terminal ------------------
+
+const OLD_PATH: &str = "docs/trackers/old.md";
+const OLD: &str = "\
+# Old
+
+## F-1 — First
+
+**Status:** open
+One.
+
+## F-2 — Second
+
+**Status:** fixed
+**Closed:** 2026-08-05
+Two.
+";
+
+const OLD_MAPPING: &str = r#"
+entry_kind = "friction"
+status_source = "body_label"
+hot_view_none = "archive"
+
+[[sources]]
+path = "docs/trackers/old.md"
+kind = "file"
+
+[target]
+lifecycle = "ledgers"
+archived = true
+
+[schema]
+entry_kinds = ["friction"]
+initial_status = "open"
+
+[schema.statuses]
+open = "open"
+fixed = "terminal"
+
+[status_map]
+open = "open"
+fixed = "fixed"
+
+[[sections]]
+source = "docs/trackers/old.md"
+start = 1
+to = "readme"
+"#;
+
+/// Final review I2 (scenario F). An archived target holds only terminal entries, so apply
+/// refuses the open record before any write, naming the keys that settle it, and the source
+/// stays. With an override to a terminal status, apply writes and check is clean. Breaks if
+/// apply writes an invalid collection and deletes the source.
+#[test]
+fn an_archived_target_refuses_a_record_that_is_not_terminal() {
+    let r = repo(&[(OLD_PATH, OLD)]);
+    let (code, out) = apply(&r, OLD_MAPPING);
+    assert_eq!(code, 1, "apply: {out}");
+    assert_eq!(
+        strs(&out["refused"]),
+        [
+            "F-1: target.archived is true, and the status \"open\" is not terminal. Map it to a \
+          terminal status in status_map, or set overrides.F-1.status."
+        ],
+        "{out}"
+    );
+    assert_eq!(
+        changes(&r),
+        Vec::<String>::new(),
+        "a refusal writes nothing"
+    );
+
+    let mapping = format!("{OLD_MAPPING}\n[overrides.F-1]\nstatus = \"fixed\"\n");
+    let (code, out) = apply(&r, &mapping);
+    assert_eq!(code, 0, "apply: {out}");
+    assert_clean(&r, &mapping);
+}

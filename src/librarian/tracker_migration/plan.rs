@@ -588,6 +588,14 @@ fn plan_entry(
     let schema = ctx.schema?;
     // An undeclared status or kind is already a problem that names its mapping key.
     let class = schema.statuses.get(&status).copied()?;
+    // An archived collection holds only terminal entries (lifecycle placement): refuse before a
+    // write, or apply would write an invalid collection and delete the source (review I2).
+    if m.target.archived && class != StatusClass::Terminal {
+        problems.push(format!(
+            "{n}: target.archived is true, and the status \"{status}\" is not terminal. Map it to a terminal status in status_map, or set overrides.{n}.status."
+        ));
+        return None;
+    }
     let kind = entry_kind_of(m, it, problems)?;
     if !schema.entry_kinds.contains(&kind) {
         return None;

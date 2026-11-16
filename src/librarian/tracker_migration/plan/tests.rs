@@ -245,6 +245,14 @@ fn a_terminal_record_goes_to_archive() {
 fn an_archived_target_puts_everything_under_lifecycle_archive() {
     let mut m = mapping();
     m.target.archived = true;
+    // An archived collection holds only terminal entries (final review I2).
+    m.overrides.insert(
+        "F-1".into(),
+        Override {
+            status: Some("fixed".into()),
+            ..no_override()
+        },
+    );
     let p = plan(&m, TRACKER);
     no_problems(&p);
     assert_eq!(p.target_dir, "docs/trackers/ledgers/archive/x");
@@ -252,6 +260,31 @@ fn an_archived_target_puts_everything_under_lifecycle_archive() {
         keys(&p),
         vec![
             "docs/trackers/ledgers/archive/x/2026-08-01-first-thing.md",
+            "docs/trackers/ledgers/archive/x/2026-08-02-second-thing.md",
+            "docs/trackers/ledgers/archive/x/readme.md",
+        ]
+    );
+}
+
+/// Final review I2 (scenario F): an archived collection holds only terminal entries, so a
+/// record whose status is not terminal is a problem that names the mapping keys that settle
+/// it, and its entry is not planned. Breaks if the planner places it in the archived folder
+/// (apply would write an invalid collection and delete the source), or if a terminal record of
+/// the same run is refused.
+#[test]
+fn an_archived_target_refuses_a_record_that_is_not_terminal() {
+    let mut m = mapping();
+    m.target.archived = true;
+    let p = plan(&m, TRACKER);
+    assert_eq!(
+        p.problems,
+        vec![
+            "F-1: target.archived is true, and the status \"open\" is not terminal. Map it to a terminal status in status_map, or set overrides.F-1.status."
+        ]
+    );
+    assert_eq!(
+        keys(&p),
+        vec![
             "docs/trackers/ledgers/archive/x/2026-08-02-second-thing.md",
             "docs/trackers/ledgers/archive/x/readme.md",
         ]
