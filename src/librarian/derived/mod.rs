@@ -7,6 +7,7 @@ pub mod incremental;
 pub mod old_catalog;
 pub mod scan;
 pub mod schema;
+pub mod worktree;
 
 #[cfg(test)]
 pub(crate) mod testkit;

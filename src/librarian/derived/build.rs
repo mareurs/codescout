@@ -20,6 +20,9 @@
 //! - `skipped`: one row per `(rel_path, reason)`; a repeated pair is stored once.
 //! - `checkout`: one row; `rules_source` is always `committed+builtin`, because
 //!   `BuildInput::from_commit` is the only way outside `derived` to build an input.
+//! - `worktree_layer`: empty after every build of a commit alone;
+//!   [`update_with_working_tree`](super::worktree::update_with_working_tree) writes one row per
+//!   working-tree markdown file it laid over `HEAD`.
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path};
@@ -31,6 +34,7 @@ use sha2::{Digest, Sha256};
 use super::history;
 use super::incremental::{self, CacheKey, Parsed};
 use super::scan::{blob_text, scan_commit, ScannedFile};
+use super::worktree::LayerRow;
 use crate::librarian::augmentation_sidecar::{refuse_lexical_escape, AugmentationSidecar};
 use crate::librarian::catalog::chunk::{build_chunks, ChunkRow};
 use crate::librarian::catalog::event_text::{parse_event_sections_spanned, EventSpan, EventText};
@@ -269,14 +273,25 @@ pub(super) fn rebuild(
     reuse_cache: bool,
     changes: Option<ChangeCounts>,
 ) -> anyhow::Result<BuildReport> {
-    rebuild_from(conn, input, parser, reuse_cache, changes, &|| {
-        scan_commit(input.repo, input.commit, &input.space)
-    })
+    rebuild_from(
+        conn,
+        input,
+        parser,
+        reuse_cache,
+        changes,
+        &|| scan_commit(input.repo, input.commit, &input.space),
+        &[],
+    )
 }
 
 /// [`rebuild`] with the scan of the commit passed in, so that a test can hand the build the same
 /// files in another order and see that nothing stored depends on it. `scan` runs once, after the
-/// repo name is read, as the scan always did; production passes [`scan_commit`] and nothing else.
+/// repo name is read, as the scan always did; production passes [`scan_commit`] and nothing else,
+/// except [`update_with_working_tree`](super::worktree::update_with_working_tree), which passes
+/// the commit's scan with the working tree's changed markdown laid over it.
+///
+/// `layer` is what `worktree_layer` stores: one row per working-tree file laid over the commit,
+/// and empty for a build of the commit alone.
 pub(super) fn rebuild_from(
     conn: &mut Connection,
     input: &BuildInput,
@@ -284,6 +299,7 @@ pub(super) fn rebuild_from(
     reuse_cache: bool,
     changes: Option<ChangeCounts>,
     scan: &dyn Fn() -> anyhow::Result<Vec<ScannedFile>>,
+    layer: &[LayerRow],
 ) -> anyhow::Result<BuildReport> {
     let (name, name_source) = repo_name_of(input.repo, input.commit)?;
 
@@ -381,6 +397,14 @@ pub(super) fn rebuild_from(
             input.commit.id().to_string()
         ],
     )?;
+
+    for row in layer {
+        tx.prepare_cached(
+            "INSERT INTO worktree_layer (rel_path, state, sha256) VALUES (?1, ?2, ?3)",
+        )?
+        .execute(params![row.rel_path, row.state, row.sha256])
+        .with_context(|| format!("storing the working-tree layer row of {}", row.rel_path))?;
+    }
 
     let mut report = BuildReport {
         changes,
@@ -3412,12 +3436,20 @@ mod tests {
         for (name, permute) in permutations {
             let order = std::cell::RefCell::new(Vec::new());
             let mut conn = open_in_memory().unwrap();
-            let report = rebuild_from(&mut conn, &input, &Parser::PRODUCTION, false, None, &|| {
-                let mut files = scan_commit(&repo, &commit, &input.space)?;
-                permute(&mut files);
-                *order.borrow_mut() = files.iter().map(|f| f.rel_path.clone()).collect();
-                Ok(files)
-            })
+            let report = rebuild_from(
+                &mut conn,
+                &input,
+                &Parser::PRODUCTION,
+                false,
+                None,
+                &|| {
+                    let mut files = scan_commit(&repo, &commit, &input.space)?;
+                    permute(&mut files);
+                    *order.borrow_mut() = files.iter().map(|f| f.rel_path.clone()).collect();
+                    Ok(files)
+                },
+                &[],
+            )
             .unwrap();
             let order = order.into_inner();
             if name == "as scanned" {
