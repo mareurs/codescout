@@ -112,7 +112,7 @@ The commands are CLI subcommands (like `cutover` and `hot-view`), not MCP tools:
    - status disagreements between the body and the index;
    - the non-record sections, by line range;
    - every mention of each source outside the source: `[[key…]]` citations, path mentions (with the file, line, and whether inline code holds it), and its frontmatter `id:` written in prose;
-   - every non-markdown file that names a source (`CodeRefs`, plus a plain `git grep -F <stem>` over every tracked file, JSON and YAML included; the difference is listed);
+   - every non-markdown file that names a source (`CodeRefs`, plus a plain `git grep -F <stem>` over every tracked file, JSON and YAML included; the difference is listed. The grep skips what `CodeRefs` already treats as data: `.codescout/audit/`, paths outside the key space, and the data extensions `jsonl`, `txt`, `csv` and `log`. It keeps `json`, because a JSON file can read a tracker. Amended 2026-11-16 after the Task 6 review: on `observer-blindness.md` the plain grep returned 3077 hits in 35 files, nearly all audit and eval data);
    - the sidecar `docs/augmentations/docs-trackers-<stem>.yaml` if one exists, with its prompt text.
 3. **Propose.** The agent drafts a mapping file and shows the user one screen: target, schema, the status-word table (raw value → declared status → class, with counts), `status_none`, overrides, each possible record and how it is handled, each non-record section and where it goes, the classified code mentions, the sidecar's fate, `hot_cap` and `stale_after`, and anything the agent is unsure about.
 4. **Approve.** The user approves or edits. Nothing is written before this.
