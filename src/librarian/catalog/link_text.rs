@@ -101,10 +101,13 @@ fn first_greater_line(body: &str, line: &str) -> Option<(usize, &'static str)> {
             let text = l.trim_end_matches('\r');
             text > line && !relation_labels(text).is_empty()
         })
-        .map(|l| {
+        .and_then(|l| {
             // `home_lines` yields slices of `body`, so a line's offset is its distance from `body`.
-            let at = l.as_ptr() as usize - body.as_ptr() as usize;
-            (at, if l.ends_with('\r') { "\r\n" } else { "\n" })
+            // The check is defensive: a slice that did not lie in `body` (a change to `home_lines`)
+            // gives no place, and the line goes at the end of the section as it always did.
+            let at = (l.as_ptr() as usize).checked_sub(body.as_ptr() as usize)?;
+            body.get(at..)?.starts_with(l).then_some(())?;
+            Some((at, if l.ends_with('\r') { "\r\n" } else { "\n" }))
         })
 }
 

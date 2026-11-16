@@ -144,12 +144,20 @@ fn note_destination_change(e: anyhow::Error, dst_label: &str) -> anyhow::Error {
     crate::librarian::catalog::dual_write::with_sentence(e, &sentence)
 }
 
+/// Whether a link of `rel` is a `supersedes` link: any spelling the label reader takes as
+/// `Supersedes` (`supersedes`, `SUPERSEDES`, `Supersedes`) writes the destination's `status:
+/// superseded` and the row's canonical rel. One predicate for the write (`call`) and for the path
+/// the write names (`artifact::write_target_id`), so the two never disagree on which file changed.
+pub(crate) fn is_superseding(rel: &str) -> bool {
+    label_for_rel(rel).is_ok_and(|label| rel_of_label(&label) == "supersedes")
+}
+
 pub async fn call(ctx: &ToolContext, args: Value) -> Result<Value> {
     let a = parse_args(args)?;
     let now = chrono::Utc::now().timestamp_millis();
     // Any spelling the label reader takes as `Supersedes` is the same fact as the text line it
     // writes, so it moves the destination's status and its row stores the canonical rel.
-    let superseding = label_for_rel(&a.rel).is_ok_and(|label| rel_of_label(&label) == "supersedes");
+    let superseding = is_superseding(&a.rel);
 
     // The catalog lock is SCOPED here rather than held across the body, because
     // `write_field_to_frontmatter` below acquires it itself and `parking_lot::Mutex` is
