@@ -1,18 +1,19 @@
 ---
 id: '9391e97eeb937e90'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: LspClient::rename decodes a legal null answer into an opaque serde error, and edit_code rename passes it on'
 owners:
 - marius
 tags:
 - cluster/unclassified
 - lsp
+closed: 2026-11-16
 opened: 2026-11-12
 related:
 - '8117d5eac05e5723'
 severity: low
-unverified: 'No real `edit_code rename` call is known to have hit the null answer: the repo''s usage.db (149893 rows, 2026-10-16 to 2026-11-14) has none, among at least 79 renames, but 548 edit_code rows have no recorded input, rows of dropped writes are missing, and no other project''s database was read. The test failure was a direct `LspClient::rename` call, 2 of 15 suite runs. Whether the error reaches the agent as an error result or as a recoverable one was read from the code (`?` in `do_rename`), not run. Why rust-analyzer answered null was not established; the documentSymbol hint says it sends null while it reloads its workspace, and that was not measured for rename. Whether the null answers still happen in the 20 clean iterations after the test helper started retrying them was not measured, because the retry hides them.'
+unverified: STANDING Why rust-analyzer answers null for rename was not established, and no real `edit_code rename` call is known to have hit it. The new RecoverableError routing through `do_rename` was read in the code, not run.
 ---
 
 # BUG: LspClient::rename decodes a legal null answer into an opaque serde error, and edit_code rename passes it on
@@ -70,17 +71,16 @@ None beyond the two parts of Root cause. That a real `edit_code rename` call can
 
 ## Fix
 
-Not fixed in the product. The tests that call `LspClient::rename` directly now retry this one error for up to 20 s (`4603d77cf`, bug `8117d5eac05e5723`); that removes the test flake and changes nothing for `edit_code rename`. Two ways to fix the product, the owner's choice, each touching the `LspClientOps::rename` trait and its mocks (not counted):
+`LspClient::rename` now decodes the answer through `decode_rename_answer` (`src/lsp/client.rs`). A `null` answer becomes a `RecoverableError`: "the language server answered textDocument/rename with null: it returned no edit", with a hint to ask again. This is the second option of the earlier text, and it follows the `document_symbols` precedent. The `LspClientOps::rename` trait and its mocks did not change. `do_rename` still passes the error on with `?`, and the recoverable routing of that error was read in the code, not run. The test helper `rename_retrying_while_the_server_is_busy` now matches the new message in place of `invalid type: null`.
 
-- return `Result<Option<WorkspaceEdit>>` and let `do_rename` say "the server returned no edit";
-- map `null` inside `LspClient::rename` to a `RecoverableError` with a hint, so sibling tool calls survive and the agent knows asking again may work.
+## Fix provenance
 
-
-Precedent in the same file, read 2026-11-14: `LspClient::document_symbols` (`src/lsp/client.rs`, about lines 1596-1620) already treats a `null` answer as "the server has not answered". It retries for a window, then returns a `RecoverableError` named `the language server answered textDocument/documentSymbol with null for <path> on every attempt for <n> ms`, with a hint that says rust-analyzer sends null while it reloads its workspace. `normalize_err_family` (`src/usage/db.rs`, about line 750) gives that message its own family. The usage database has 22 `edit_code` rows with that message, from 2026-10-24 to 2026-11-01. So the second fix above has a sibling in the code base. The hint text is a claim in a source comment; nobody measured it for `rename`.
+- **SHA:** `41ba4adfa` (`experiments`)
+- **patch-id:** `d14f50d7d19bd8cdde5b54d7b8b508b3e77c5f3b`
 
 ## Tests added
 
-None. N/A: not fixed in the product, and a test needs a server that answers `null` on demand, which has not been found.
+Two unit tests in `src/lsp/client.rs`: `a_null_rename_answer_is_a_recoverable_error_that_names_the_method` and `a_real_rename_answer_still_decodes_to_the_edit`. Measured 2026-11-16: the first test fails when the `null` branch is disabled, with the message `invalid type: null, expected struct WorkspaceEdit`, and passes with the fix. The 73 `lsp::client` tests pass. A test with a live server that answers `null` was not written, because none was found.
 
 ## Workarounds
 
@@ -88,10 +88,7 @@ Ask for the rename again. Not verified in a real `edit_code rename` call.
 
 ## Resume
 
-Decide with the owner between the two fixes above. Before that, find out whether a real `edit_code rename` call, right after an outside write, can hit the null answer, and what the agent sees. The measurement that would settle it: run `edit_code rename` through the MCP server in a loop beside a load, and log the raw answer in `LspClient::rename` when it is null.
-
-
-Update 2026-11-14: the production measurement above found 0 null decode errors in 79 renames, so the bug stays low severity and is not urgent. The open choice is unchanged: a `null`-aware return type or a `RecoverableError` as `document_symbols` does. A reopen trigger for severity: any row with `invalid type: null` in `usage.db` from a real `edit_code rename` call.
+Fixed by `41ba4adfa`. The full `./scripts/gate.sh` has not run on the fix. Archive after a green gate. Why rust-analyzer answers `null` is still not established.
 
 ## References
 
