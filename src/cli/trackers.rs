@@ -752,7 +752,7 @@ async fn apply_run(req: &ApplyRequest<'_>, cwd: &Path, env: &ApplyEnv) -> Result
     reasons.extend(plan.problems.iter().cloned());
 
     // 3(c) needs the plan's paths, and step 6 decides each path before anything is written.
-    let dirty = dirty_paths(&work.changed, &plan);
+    let dirty = dirty_paths(&git_root, &work.changed, &plan);
     let refused_paths: BTreeSet<String> = dirty.iter().map(|(p, _)| p.clone()).collect();
     reasons.extend(dirty.into_iter().map(|(_, reason)| reason));
     let steps = decide(
@@ -1221,10 +1221,12 @@ fn is_shallow(repo: &git2::Repository) -> bool {
 
 /// Precondition (c): every changed path under `docs/trackers/` is one the plan writes or
 /// deletes (a previous run's output), and no other path the plan writes has a change, so a
-/// restore of apply's list cannot destroy another session's work. Each refused path with its
-/// reason.
-fn dirty_paths(changed: &[String], plan: &MigrationPlan) -> Vec<(String, String)> {
+/// restore of apply's list cannot destroy another session's work. A changed path outside
+/// `docs/trackers/` whose working text already equals the planned text is a previous run's
+/// output too (`already applied`, decided in [`decide`]). Each refused path with its reason.
+fn dirty_paths(git_root: &Path, changed: &[String], plan: &MigrationPlan) -> Vec<(String, String)> {
     let trackers = format!("{TRACKERS_DIR}/");
+    let door = ReadDoor::new(vec![git_root.to_path_buf()]);
     let mut out = Vec::new();
     for p in changed {
         let touched = plan.writes.contains_key(p) || plan.deletes.contains(p);
@@ -1238,14 +1240,19 @@ fn dirty_paths(changed: &[String], plan: &MigrationPlan) -> Vec<(String, String)
                     ),
                 ));
             }
-        } else if plan.writes.contains_key(p) {
-            out.push((
-                p.clone(),
-                format!(
-                    "{p} has an uncommitted change, and apply would rewrite it. Commit or \
-                     restore it, then run this again."
-                ),
-            ));
+        } else if let Some(planned) = plan.writes.get(p) {
+            let applied = door
+                .text(&git_root.join(p))
+                .is_ok_and(|on_disk| same_text(&on_disk, planned));
+            if !applied {
+                out.push((
+                    p.clone(),
+                    format!(
+                        "{p} has an uncommitted change, and apply would rewrite it. Commit or \
+                         restore it, then run this again."
+                    ),
+                ));
+            }
         }
     }
     out

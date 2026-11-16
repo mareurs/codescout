@@ -831,6 +831,39 @@ async fn apply_refuses_a_dirty_file_it_would_rewrite_outside_docs_trackers() {
     );
 }
 
+/// A second run after a key change finds `docs/notes.md` dirty (` M`), holding exactly the text
+/// the plan writes: it is already applied, not a foreign edit. Breaks if the clean-tree check
+/// refuses a dirty path in `writes` before comparing its text with the planned text.
+#[tokio::test]
+async fn a_second_apply_after_a_key_change_reports_the_rewritten_file_already_applied() {
+    let w = work_repo(&[
+        (X, X_TRACKER),
+        ("docs/notes.md", "See F-1 and [[x:F-1]].\n"),
+    ]);
+    let m = BASE.replace(
+        "lifecycle = \"ledgers\"\n",
+        "lifecycle = \"ledgers\"\nkey = \"y\"\n",
+    );
+    let first = run_apply(&w, &m, true).await;
+    assert_eq!(first.code, 0, "{}", first.stdout);
+    assert_eq!(read(&w, "docs/notes.md"), "See F-1 and [[y:F-1]].\n");
+    let out = run_apply(&w, &m, true).await;
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    let v = json_of(&out);
+    assert_eq!(v["written"], json!([]));
+    assert_eq!(v["deleted"], json!([]));
+    assert_eq!(
+        v["already_applied"],
+        json!([
+            "docs/notes.md",
+            "docs/trackers/ledgers/y/2026-08-01-first-thing.md",
+            "docs/trackers/ledgers/y/archive/2026-08-02-second-thing.md",
+            "docs/trackers/ledgers/y/readme.md",
+            X
+        ])
+    );
+}
+
 /// A code mention classed `reader` is a refusal that names the file; `comment` is not.
 /// Breaks if the reader check is skipped or blocks every class.
 #[tokio::test]
