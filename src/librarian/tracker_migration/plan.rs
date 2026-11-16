@@ -114,6 +114,9 @@ pub struct Review {
     pub disagreements: Vec<String>,
     pub path_mentions: Vec<String>,
     pub time_based: Vec<String>,
+    /// Entries whose key is not the key the source gave: an override `slug` on a `files`
+    /// source. Citations of the old key stop resolving, and check does not look for them.
+    pub renamed_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -626,7 +629,18 @@ fn plan_entry(
     }
     let fixed_stem = match ov.and_then(|o| o.slug.as_deref()) {
         Some(slug) => match entry_stem(schema.key_style, dates.dates.created, slug) {
-            Ok(key) => Some(key.as_str().to_string()),
+            Ok(key) => {
+                let key = key.as_str().to_string();
+                // A `files` entry keeps its stem as its key (plan P-R2); a slug changes it, and
+                // check does not look for `[[stem]]` citations (final review M-b).
+                if let Some(old) = s.fixed_stem.as_deref().filter(|old| *old != key) {
+                    out.review.renamed_keys.push(format!(
+                        "{n}: overrides.{n}.slug changes the key of {} from {old} to {key}. A [[{old}]] citation then stops resolving, and check does not look for one.",
+                        s.path
+                    ));
+                }
+                Some(key)
+            }
             Err(_) => {
                 problems.push(format!(
                     "{n}: overrides.{n}.slug \"{slug}\" gives no valid file name. Set overrides.{n}.slug to lowercase letters and digits joined by single hyphens."

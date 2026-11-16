@@ -1354,3 +1354,27 @@ fn an_archived_target_refuses_a_record_that_is_not_terminal() {
     assert_eq!(code, 0, "apply: {out}");
     assert_clean(&r, &mapping);
 }
+
+/// Final review M-a: the skill keeps the mapping outside the tracked tree, and a relative path
+/// to it can climb with `..`. Apply and check read it; the read door still judges the path.
+/// Breaks if a `..` path is refused as a link out of its folder.
+#[test]
+fn a_mapping_path_with_dot_dot_is_read() {
+    let r = repo(&[(OLD_PATH, OLD)]);
+    let outside = tempfile::Builder::new()
+        .prefix("trackers-map-")
+        .tempdir()
+        .unwrap();
+    let outside_root = std::fs::canonicalize(outside.path()).unwrap();
+    assert_eq!(outside_root.parent(), r.root.parent(), "sibling folders");
+    let name = outside_root.file_name().unwrap().to_str().unwrap();
+    let mapping = format!("{OLD_MAPPING}\n[overrides.F-1]\nstatus = \"fixed\"\n");
+    std::fs::write(outside_root.join("m.toml"), &mapping).unwrap();
+    let rel = format!("../{name}/m.toml");
+
+    let (code, out) = trackers(&r, &["apply", &rel, "--no-old-catalog"]);
+    assert_eq!(code, 0, "apply: {out}");
+    let (code, out) = trackers(&r, &["check", &rel]);
+    assert_eq!(code, 0, "check: {out}");
+    assert_eq!(out["clean"], json!(true), "{out}");
+}

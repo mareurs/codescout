@@ -822,19 +822,49 @@ fn lock_text(e: &anyhow::Error) -> String {
 
 /// Read the mapping through the read door and parse it. A read failure means the run cannot
 /// start; a parse problem is a refusal.
+///
+/// The path is normalised lexically first: the skill keeps the mapping outside the tracked
+/// tree, and a relative path to it climbs with `..`. The door then judges the normalised path,
+/// so a symbolic link on it is still refused.
 fn read_mapping(path: &Path) -> Result<Mapping, Stop> {
+    let path = lexical_path(path);
     let text = ReadDoor::new(Vec::new())
-        .text(path)
+        .text(&path)
         .map_err(|e| match e {
             ReadError::Io(io) => format!("the mapping file cannot be read: {}", io.kind()),
-            ReadError::Refused(_) => {
-                "the mapping file cannot be read: it is a link out of its folder, or not a \
-                 regular file"
-                    .to_string()
-            }
+            ReadError::Refused(_) => "the mapping file cannot be read: the path goes through a \
+                 symbolic link, a link takes it out of its repository, or it is not a regular file"
+                .to_string(),
         })
         .map_err(Stop::CouldNotRun)?;
     parse_mapping(&text).map_err(Stop::Refused)
+}
+
+/// `path` with every `.` removed and every `..` applied to the component before it, without
+/// asking the file system. A `..` at the root stays at the root; a leading `..` of a relative
+/// path is kept.
+fn lexical_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let at_root = out.has_root() && out.parent().is_none();
+                let climbs = matches!(
+                    out.components().next_back(),
+                    None | Some(Component::ParentDir)
+                );
+                if climbs && !at_root {
+                    out.push(c);
+                } else if !at_root {
+                    out.pop();
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// The uncommitted state of the working tree, from `git status`.
@@ -1571,7 +1601,7 @@ fn render_applied(done: &Applied, json: bool) -> String {
             "status disagreements"
         ),
     ));
-    out.push_str(&dropped_text(&r.dropped));
+    out.push_str(&review_lists(r));
     let long = [&done.written, &done.deleted, &done.already_applied]
         .iter()
         .any(|l| l.len() > LISTED_IN_TEXT);
@@ -1581,14 +1611,17 @@ fn render_applied(done: &Applied, json: bool) -> String {
     out
 }
 
-/// The text line that names every dropped item of a review (sections, catalog facts and source
-/// frontmatter keys), joined with `; ` because an item can hold commas; empty when none is.
-fn dropped_text(dropped: &[String]) -> String {
-    if dropped.is_empty() {
-        String::new()
-    } else {
-        format!("Dropped: {}.\n", dropped.join("; "))
+/// The text lines that name every item of the review lists a user must see without `--json`:
+/// the dropped items (sections, catalog facts, source frontmatter keys) and the renamed keys.
+/// Items are joined with `; `, because an item can hold commas. Empty when both are.
+fn review_lists(r: &Review) -> String {
+    let mut out = String::new();
+    for (label, items) in [("Dropped", &r.dropped), ("Renamed keys", &r.renamed_keys)] {
+        if !items.is_empty() {
+            out.push_str(&format!("{label}: {}.\n", items.join("; ")));
+        }
     }
+    out
 }
 
 /// The options of one `check` run.
@@ -1873,7 +1906,7 @@ fn render_checked(report: &CheckReport, json: bool) -> Outcome {
             "shortened entries"
         ),
     ));
-    stdout.push_str(&dropped_text(&r.dropped));
+    stdout.push_str(&review_lists(r));
     stdout.push_str("Use --json for every review line.\n");
     Outcome { code, stdout }
 }

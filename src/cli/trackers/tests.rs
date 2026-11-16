@@ -1119,7 +1119,8 @@ async fn apply_output_lists_exact_paths() {
                 "no_row": [],
                 "disagreements": [],
                 "path_mentions": [],
-                "time_based": []
+                "time_based": [],
+                "renamed_keys": []
             }
         })
     );
@@ -1181,6 +1182,46 @@ fn the_text_outputs_name_every_dropped_item() {
         "{}",
         out.stdout
     );
+}
+
+/// Final review M-a: the mapping path is normalised without the file system. Breaks if a `..`
+/// climbs above the root, a leading `..` of a relative path is lost, or a `.` is kept.
+#[test]
+fn a_mapping_path_is_normalised_lexically() {
+    for (path, want) in [
+        ("/r/repo/../m.toml", "/r/m.toml"),
+        ("/r/./repo/../../m.toml", "/m.toml"),
+        ("/../m.toml", "/m.toml"),
+        ("../m.toml", "../m.toml"),
+        ("a/./../../b/m.toml", "../b/m.toml"),
+    ] {
+        assert_eq!(lexical_path(Path::new(path)), PathBuf::from(want), "{path}");
+    }
+}
+
+/// Final review M-b: a renamed key is named in the text of apply and check. Breaks if the text
+/// leaves it to `--json`.
+#[test]
+fn the_text_outputs_name_every_renamed_key() {
+    let line = "ic-10: overrides.ic-10.slug changes the key";
+    let review = Review {
+        renamed_keys: vec![line.to_string()],
+        ..Review::default()
+    };
+    let done = Applied {
+        written: vec![],
+        deleted: vec![],
+        already_applied: vec![],
+        review: review.clone(),
+    };
+    let want = format!("Renamed keys: {line}.\n");
+    assert!(render_applied(&done, false).contains(&want));
+    let report = CheckReport {
+        blocking: vec![],
+        review,
+        shortened: vec![],
+    };
+    assert!(render_checked(&report, false).stdout.contains(&want));
 }
 
 /// A shallow clone is a refusal before any write: blame dates would be the boundary date.

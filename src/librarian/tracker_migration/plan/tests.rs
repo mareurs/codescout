@@ -671,6 +671,51 @@ fn source_frontmatter_keys_no_entry_keeps_are_listed_as_dropped() {
     );
 }
 
+/// Final review M-b (Task 8 M5): a `files` entry keeps its stem as its key, so citations of it
+/// stay valid. An override `slug` changes that key, and check does not look for `[[stem]]`
+/// citations. Breaks if the change is not listed, or if an entry that keeps its key is listed.
+#[test]
+fn a_slug_override_on_a_files_source_lists_the_key_change() {
+    let mut m = mapping();
+    m.sources = vec![SourceSpec {
+        path: "docs/trackers/ic".into(),
+        kind: "files".into(),
+        level: None,
+    }];
+    m.sections.clear();
+    m.columns.clear();
+    let text = "## IC-10 — Cluster ten\n\n**Status:** open\nBody.\n";
+    let files_source = || {
+        let mut s = source("docs/trackers/ic/IC-10.md", text);
+        s.kind = SourceKind::Whole;
+        s.fixed_stem = Some("ic-10".into());
+        s
+    };
+    let p = plan_with(
+        &m,
+        vec![files_source()],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        None,
+    );
+    assert_eq!(p.review.renamed_keys, Vec::<String>::new());
+
+    m.overrides
+        .insert("ic-10".into(), slug_override("cluster-ten"));
+    let p = plan_with(
+        &m,
+        vec![files_source()],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        None,
+    );
+    no_problems(&p);
+    assert_eq!(
+        p.review.renamed_keys,
+        vec!["ic-10: overrides.ic-10.slug changes the key of docs/trackers/ic/IC-10.md from ic-10 to 2026-08-10-cluster-ten. A [[ic-10]] citation then stops resolving, and check does not look for one."]
+    );
+}
+
 /// Breaks if a range is lost, doubled or given to the wrong owner, or if a section with no
 /// `sections` entry gets a default owner.
 #[test]
