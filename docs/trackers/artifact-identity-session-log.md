@@ -114,21 +114,21 @@ entry_high_water_W: 13
 | F-12 | 2026-11-12 | low | review-gap | fixed-verified | **No review ran tests/result_caps, so an unannotated cap constant reached the first full gate** — `CHECKOUTS_LISTED_MAX`; fixed in 6eef416c2 |
 | F-13 | 2026-11-12 | med | shared-checkout | promoted-to-bug-tracker | **Landing Plan B1 took four gates because the base moved twice and a peer's LSP external-write tests fail intermittently** — branch 2 of 6 lane runs, clean `experiments` 1 of 6; cause not found |
 | F-14 | 2026-11-12 | med | plan-prose | open | **Key-space census after the B1 exclusions: 26 duplicate-key groups (54 files), 17 invalid-key files, 9 of them not renamable** — 14 groups are plan and spec pairs kept in scope; the spec does not yet say so |
-| F-15 | 2026-11-12 | med | architectural | open | **Shadow diff of experiments HEAD: the closed grammar sees 26 of the old catalog's 3812 file-grain edges; the rest is migration work, not a builder defect** — 4764 of 4770 only-old edge rows have a text form the grammar does not read; 4924 Unexplained of 5678 rows |
+| F-15 | 2026-11-12 | med | architectural | mitigated | **Shadow diff of experiments HEAD: the closed grammar sees 26 of the old catalog's 3812 file-grain edges; the rest is migration work, not a builder defect** — 4764 of 4770 only-old edge rows have a text form the grammar does not read; 4924 Unexplained of 5678 rows |
 | F-16 | 2026-11-13 | med | shared-checkout | mitigated | **A background gate ran while an implementer edited the same worktree, so its green could not be trusted** — the output carries no commit id; discarded and rerun on an untouched tree |
-| F-17 | 2026-11-14 | med | plan-prose | open | **The A-R2 writability probe trips the read-door source gate** — `OpenOptions::new` in `src/librarian/util.rs` counts as a raw read; Task 1 Step 4 does not run that test |
-| F-18 | 2026-11-14 | med | plan-prose | open | **An atomic replace needs a writable directory; the plan calls the new refusal a failed write and mis-predicts its test as already green** — in-place `fs::write` needs only the file's permission |
-| F-19 | 2026-11-14 | high | architectural | open | **Plan C3's age eviction deletes the vectors of stable content** — the stamp and marker skips mean a stable file's rows are never hit, so they age out at 90 days |
-| F-20 | 2026-11-14 | med | plan-prose | open | **Plan C3 R5 understates the cold-cache hole: every stamped artifact is unqueued, not 26.6% of chunks** — the cache starts empty for the whole corpus; the scout's "first reindex embeds it anyway" is refuted |
-| F-21 | 2026-11-14 | med | plan-prose | open | **Plan C3 Task 2's text-scan guard does not survive rustfmt** — the chained call is about 113 columns, so `.with_vector_cache(model, ` matches 0 times after formatting |
-| F-22 | 2026-11-14 | med | plan-prose | open | **Plan C3 contradicts two SQLite documents: WITHOUT ROWID with 3 KB blobs, and "delete the file at any time"** — withoutrowid.html § 4; howtocorrupt.html § 2.5 |
-| F-23 | 2026-11-14 | low | plan-prose | open | **Plan C3: five small drifts between its text and the code** — guide claims a model switch-back reads the cache; R11 "one extra embed" ignores concurrency; a failed open is sticky; two tests cannot fail as named |
-| F-24 | 2026-11-14 | med | plan-prose | open | **Plan C3 Task 1: four store tests pass on the broken build they should catch** — the flush counter is kept by the caller of the write, so a per-row commit stays at 1; symmetric tally inputs; WAL unpinned; only a short blob tested |
-| F-25 | 2026-11-14 | high | plan-prose | open | **Plan D renames and rewrites markdown that code, harnesses and mdBook read by path, and can create a key collision** — `include_str!` targets, `.github` templates, `_TEMPLATE.md`, two `render_prompt.md` to one key, SUMMARY.md links |
-| F-26 | 2026-11-14 | high | plan-prose | open | **Plan D drops augmentation params outside the entry collection with no report line** — also unshown fields of body-defined entries and a stale sidecar's newer shape; Task 8 asserts no derived row |
-| F-27 | 2026-11-14 | med | plan-prose | open | **Plan D's plan of the committed export misreports exported observations and renamed documents as unrecoverable** — `splice_event` refuses the duplicate id; old `rel_path`s miss HEAD; the e2e checks writes, not the tally |
-| F-28 | 2026-11-14 | med | plan-prose | open | **Plan D's citation rewrite can write the wrong bytes or guess** — lowercase-only qualifier regex vs its own `My_Notes:F-2` test; merged Text runs across escapes; tokens inside URLs; history maps a deleted file's id by key equality |
-| F-29 | 2026-11-14 | low | plan-prose | open | **Plan D: nine smaller drifts between its text and the code** — a byte-for-byte stamp test vs `frontmatter::write`; fence length; a refusal with no command; two dry runs reading two catalogs; no side-file re-check; report overwritten |
+| F-17 | 2026-11-14 | med | plan-prose | fixed-verified | **The A-R2 writability probe trips the read-door source gate** — `OpenOptions::new` in `src/librarian/util.rs` counts as a raw read; Task 1 Step 4 does not run that test |
+| F-18 | 2026-11-14 | med | plan-prose | fixed-verified | **An atomic replace needs a writable directory; the plan calls the new refusal a failed write and mis-predicts its test as already green** — in-place `fs::write` needs only the file's permission |
+| F-19 | 2026-11-14 | high | architectural | fixed-verified | **Plan C3's age eviction deletes the vectors of stable content** — the stamp and marker skips mean a stable file's rows are never hit, so they age out at 90 days |
+| F-20 | 2026-11-14 | med | plan-prose | mitigated | **Plan C3 R5 understates the cold-cache hole: every stamped artifact is unqueued, not 26.6% of chunks** — the cache starts empty for the whole corpus; the scout's "first reindex embeds it anyway" is refuted |
+| F-21 | 2026-11-14 | med | plan-prose | fixed-verified | **Plan C3 Task 2's text-scan guard does not survive rustfmt** — the chained call is about 113 columns, so `.with_vector_cache(model, ` matches 0 times after formatting |
+| F-22 | 2026-11-14 | med | plan-prose | fixed-verified | **Plan C3 contradicts two SQLite documents: WITHOUT ROWID with 3 KB blobs, and "delete the file at any time"** — withoutrowid.html § 4; howtocorrupt.html § 2.5 |
+| F-23 | 2026-11-14 | low | plan-prose | fixed-verified | **Plan C3: five small drifts between its text and the code** — guide claims a model switch-back reads the cache; R11 "one extra embed" ignores concurrency; a failed open is sticky; two tests cannot fail as named |
+| F-24 | 2026-11-14 | med | plan-prose | fixed-verified | **Plan C3 Task 1: four store tests pass on the broken build they should catch** — the flush counter is kept by the caller of the write, so a per-row commit stays at 1; symmetric tally inputs; WAL unpinned; only a short blob tested |
+| F-25 | 2026-11-14 | high | plan-prose | mitigated | **Plan D renames and rewrites markdown that code, harnesses and mdBook read by path, and can create a key collision** — `include_str!` targets, `.github` templates, `_TEMPLATE.md`, two `render_prompt.md` to one key, SUMMARY.md links |
+| F-26 | 2026-11-14 | high | plan-prose | fixed-verified | **Plan D drops augmentation params outside the entry collection with no report line** — also unshown fields of body-defined entries and a stale sidecar's newer shape; Task 8 asserts no derived row |
+| F-27 | 2026-11-14 | med | plan-prose | mitigated | **Plan D's plan of the committed export misreports exported observations and renamed documents as unrecoverable** — `splice_event` refuses the duplicate id; old `rel_path`s miss HEAD; the e2e checks writes, not the tally |
+| F-28 | 2026-11-14 | med | plan-prose | mitigated | **Plan D's citation rewrite can write the wrong bytes or guess** — lowercase-only qualifier regex vs its own `My_Notes:F-2` test; merged Text runs across escapes; tokens inside URLs; history maps a deleted file's id by key equality |
+| F-29 | 2026-11-14 | low | plan-prose | mitigated | **Plan D: nine smaller drifts between its text and the code** — a byte-for-byte stamp test vs `frontmatter::write`; fence length; a refusal with no command; two dry runs reading two catalogs; no side-file re-check; report overwritten |
 | F-30 | 2026-11-14 | high | review-gap | fixed-verified | **Plan D Task 1: the side-file refusal misses a symlinked catalog path, so an immutable open reads stale rows silently** — SQLite keeps `-wal` beside the symlink target; measured 0 rows read vs 1 held |
 
 ## Wins Index
@@ -665,6 +665,10 @@ Codified so the Index column means the same thing across sessions.
 
 **Fix:** open. Plan B amends the spec's "Open for the operator" section with a recommended answer for each item, then plans from the amended spec. The scout and review reports are the evidence.
 
+**Status:** open
+
+**Sweep 2026-11-16:** Built on integration: `contrib/**` outside the key space (`01c57d013`), builder inputs from the commit only (`f6aca6c4f`), the vector cache (`013113b7f`, `18dc50fcc`), and cites written as grammar text (`2694348ea`). Not built, and assigned to Plans E4 to E8 by the Plan E scout rulings of 2026-11-15: the three-signal guard, `entry_reservation`, `catalog_meta`, `graft` and `prune_missing`, `file-provenance.py`, and the old indexer's worktree refusal. The row stays open until E4 to E8 build them.
+
 ## W-6 — An independent Opus review of the scout report corrected the guard, the entry points and the slice order
 
 **Valid:** dated 2026-11-11
@@ -799,6 +803,8 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Status:** open
 
+**Sweep 2026-11-16:** The spec (design lines 289 and 379) still puts dated plan and spec pairs outside the key space. The committed `key-space.toml` keeps them in. No ruling settles the conflict. Plan D freezes the 9 unrenamable files (D-R26) and reports every key collision (D-R14) (`c14fe1820`, `4fb5ab77c`). The sweep reports that only 6 of the 14 groups are plan and spec pairs, not 14; the controller did not re-count them.
+
 **Valid:** dated 2026-11-12
 
 **Rests on:** A migration is sized from the key space it will run against, not from a count taken before the scope was set.
@@ -844,6 +850,10 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 - 26 duplicate-key groups and 17 invalid-key documents exclude those documents from key resolution (see F-14).
 - Resolve the six suspected items above before Plan E reads from the derived index.
 
+**Status:** mitigated
+
+**Sweep 2026-11-16:** The cutover rewrite is built (`c14fe1820`). The 64 malformed rows have a ruling: no derived-side cause rules, revisit after the Plan D dry run. The six suspected items are still unresolved and are not on the E4 duty list.
+
 ## W-9 — Independent Opus review of the Plan C scout before any plan was written
 
 **Valid:** dated 2026-11-12
@@ -881,6 +891,8 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 **Severity:** med
 
 **Status:** mitigated
+
+**Sweep 2026-11-16:** Only the process rule guards this: run a gate only when no implementer holds an open round on that worktree. `scripts/gate.sh` still does not print the commit or the dirty state it ran on. Its only `git` call is line 69 (`git rev-parse --show-toplevel`).
 
 **Rests on:** a green result is evidence for the tree it ran on; a gate that does not print the commit it built cannot prove which tree that was.
 
@@ -920,7 +932,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** med
 
-**Status:** open
+**Status:** fixed-verified
+
+**Sweep 2026-11-16:** Fixed in `4bae72783`. The probe is `refuse_unwritable_existing` in `src/util/fs.rs`, outside the read-door gate's scan. The sweep ran the gate test and the probe tests at `56dd96fe3`: 10 passed on a clean tree.
 
 **Rests on:** a source gate that judges spelling counts every new spelling of its pattern, whatever the intent.
 
@@ -946,7 +960,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** med
 
-**Status:** open
+**Status:** fixed-verified
+
+**Sweep 2026-11-16:** Fixed in `4bae72783` and `0f26f04fd`. Ruling A-R7 accepts the lost capability and names its cost. `write_catalogued_file` documents it (`src/librarian/util.rs:108-122`). The read-only-directory test (`util.rs:911-946`) passes at `56dd96fe3`.
 
 **Rests on:** an atomic replace changes the permission a write needs from the file to its directory.
 
@@ -990,7 +1006,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** high
 
-**Status:** open
+**Status:** fixed-verified
+
+**Sweep 2026-11-16:** Plan C3 shipped with no eviction (C3-R4) and no `last_used` column, and a test pins that (`013113b7f`, `vector_cache.rs:642`). The cache file only grows, as the manual says. A later eviction must avoid this trap (C3 state doc, follow-up 2).
 
 **Rests on:** an LRU clock advances only on reads, and a cache behind a skip is never read.
 
@@ -1014,7 +1032,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** med
 
-**Status:** open
+**Status:** mitigated
+
+**Sweep 2026-11-16:** The plan's R5 text and the manual now state the whole hole (`9714ec4c2`). The cold cache itself remains: it is empty for every artifact embedded before C3 (`indexer.rs:672-697`). It is accepted under ruling C3-R5. One `reembed=true` reindex per project, or the seeding follow-up, fills it. Plan D's state doc makes that a precondition of the cutover rebuild. No bug file carries it.
 
 **Rests on:** a cache filled only on the embed path holds nothing that the skip in front of that path keeps out.
 
@@ -1038,7 +1058,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** med
 
-**Status:** open
+**Status:** fixed-verified
+
+**Sweep 2026-11-16:** Fixed in `18dc50fcc`. Each construction site binds the cache before the chain (`mod.rs:411`, `:706`). The guard counts `.with_vector_cache(model, cache)` (`embedding.rs:1133`), a short line that rustfmt leaves alone. `rustfmt --check` exits 0.
 
 **Rests on:** a source-text gate must survive the formatter that the gate itself runs.
 
@@ -1062,7 +1084,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** med
 
-**Status:** open
+**Status:** fixed-verified
+
+**Sweep 2026-11-16:** The cache table is a plain rowid table, pinned by a test (`013113b7f`, `vector_cache.rs:624-643`). The manual and the guide say to stop every codescout process, then delete the three files. A guide test refuses 'at any time' (`9714ec4c2`, `src/prompts/mod.rs:4188`).
 
 **Rests on:** a storage choice cites the engine's own guidance, not the shape of the previous table.
 
@@ -1091,7 +1115,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** low
 
-**Status:** open
+**Status:** fixed-verified
+
+**Sweep 2026-11-16:** All five items are fixed (`18b9e3c2e`, `9714ec4c2`, `013113b7f`, `8c80a17ca`, `b2e3469bb`). One residual: no test makes an open fail with SQLITE_BUSY. The recovery path does not depend on the cause, and a corrupt-file test covers it (`vector_cache.rs:242-256`). Ruling: the status stays fixed-verified, because the missing test checks the cause and the recovery is tested.
 
 **Rests on:** a negative assertion is evidence only in a fixture where the other branch is reachable.
 
@@ -1131,7 +1157,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** med
 
-**Status:** open
+**Status:** fixed-verified
+
+**Sweep 2026-11-16:** All four test gaps are closed in `69bb3af22`: the trigger atomicity oracle, asymmetric tally inputs, a WAL read-back through a second connection, and a `zeroblob(20)` case.
 
 **Rests on:** A test is evidence only for the failures it can express (`docs/conventions/testing-discipline.md`).
 
@@ -1157,7 +1185,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** high
 
-**Status:** open
+**Status:** mitigated
+
+**Sweep 2026-11-16:** All three findings are fixed in the cutover (`c14fe1820`, `4fb5ab77c`, `db0576417`): a file that code, a dot directory or mdBook reads is frozen, and a rename onto a held key is refused. Two parked gaps remain. Config in `.json` or `.txt` files does not freeze a file (I1-a, a ledger Ruling; no such case exists in this repository). Code that builds a path by join is not seen (accepted in Task 4).
 
 **Rests on:** `src/librarian/identity/key.rs:127` (`key_of` refuses `_` and `.` stems); `.codescout/key-space.toml` exclude list read this session.
 
@@ -1181,7 +1211,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** high
 
-**Status:** open
+**Status:** fixed-verified
+
+**Sweep 2026-11-16:** Params outside the entry collection are reported by key name (`f63957625`). A defined entry names the fields its text lacks. A differing sidecar is reported as shape drift and never overwritten. The derived index has `event` and `augmentation` tables (`04e2ef5c7`). The cutover e2e test asserts the exported rows (`df6a1f5b1`). The derived `event` table is tested only in the build tests (`src/librarian/derived/build.rs:1370`, `:1426`).
 
 **Rests on:** Spec § The store boundary ("Nothing in the catalog lacks [a committed home]") and the plan's D-R7.
 
@@ -1205,7 +1237,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** med
 
-**Status:** open
+**Status:** mitigated
+
+**Sweep 2026-11-16:** All three findings are fixed (`4fb5ab77c`, `ef33f2315`, `16938991e`), and the e2e test asserts the post-commit tally (`df6a1f5b1`). Two parked cases still make a later plan report a new item: a note with a reference definition (C1-c, bug `28c8a999b2f3132b`) and a held observation whose bytes changed after export (M52).
 
 **Rests on:** Plan D Review Focus line 1 and D-R10 (a plan is a function of `HEAD` and the old catalog).
 
@@ -1229,7 +1263,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** med
 
-**Status:** open
+**Status:** mitigated
+
+**Sweep 2026-11-16:** All four findings are fixed (`0f80a8a6f`, `c14fe1820`): an uppercase qualifier is reported, escapes and URLs are never rewritten, and history binds an id only to its own path. One case still guesses: an id whose rename destination was later deleted and reused maps to the new file (T4-M10, `head_path` in `src/librarian/cutover/history.rs`). The sweep found it by reading the code and did not run it. Only the final review's park list names it, and no `Ruling:` line does.
 
 **Rests on:** D-R7 ("ambiguous ... reported, never guessed") and spec § The citation grammar.
 
@@ -1253,7 +1289,9 @@ The branch failed in 2 of 6 lane runs and `experiments` failed in 1 of 6, which 
 
 **Severity:** low
 
-**Status:** open
+**Status:** mitigated
+
+**Sweep 2026-11-16:** All nine drifts are fixed in code and tests (`b8c897911`, `b77e49679`, `5ed828ae8`, `6ba948ecd`). One parked race remains: two worktrees that export at the same time can replace one report (M57, a Task 8 Ruling).
 
 **Rests on:** Plan D Global Constraints (no absolute path, STE refusals) and D-R1 (one text format per writer).
 
