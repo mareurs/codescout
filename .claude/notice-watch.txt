@@ -1,0 +1,8 @@
+# Files whose change other sessions of this repository may depend on.
+# Read by session-bridge's commit backup scan. One globset pattern per line.
+Cargo.toml
+scripts/**
+.claude/**
+.codescout/project.toml
+.pre-commit-config.yaml
+CLAUDE.md
