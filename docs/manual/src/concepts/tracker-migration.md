@@ -103,9 +103,10 @@ key that settles it.
 
 ### Source frontmatter
 
-Each entry gets new frontmatter with its own `kind`, `status` and `title`. Every other key of
-the source frontmatter is lost with the source. `columns` reads index rows only, so it maps no
-frontmatter key.
+Each entry gets new frontmatter. The planner does not read the source frontmatter. An entry takes
+its title from its heading and its status from the status source. So every key of the source
+frontmatter is lost with the source. This includes `kind`, `status` and `title`. `columns` reads
+index rows only, so it maps no frontmatter key.
 
 The commands list each lost key with its value:
 
@@ -201,4 +202,4 @@ code differs from it in these places. The code is right.
 - **`overrides` also takes `slug`.** The spec lists `status`, `created`, `closed` and `revisit_by` for the key. An override `slug` comes first in the entry-name order, so it resolves a name collision.
 - **`title_alias` writes no field.** The spec does not say what it does. The cell stays in the `**Index row:**` line.
 - **`index_table` can name a source.** The spec has one line number. The table form names the source too, so it settles two sources with a table at one line.
-- **No frontmatter key maps through `columns`.** The spec says that old keys map through `columns` or are listed as dropped. `columns` reads index rows only, so the commands list every source key but `kind`, `status` and `title` as dropped.
+- **No frontmatter key maps through `columns`.** The spec says that old keys map through `columns` or are listed as dropped. `columns` reads index rows only, so the commands list every source key as dropped, `kind`, `status` and `title` included.

@@ -266,7 +266,7 @@ pub fn plan_migration(input: &MigrationInput) -> MigrationPlan {
         };
         if let Some(fm) = &sp.frontmatter {
             ranges.push(range(fm, Owner::Frontmatter));
-            // The entry frontmatter replaces it: list each key that no entry keeps (review C1).
+            // The planner reads none of it: list every key (review C1).
             for k in dropped_frontmatter(&s.text) {
                 review.dropped.push(dropped_frontmatter_line(&s.path, &k));
             }

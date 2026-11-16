@@ -1116,8 +1116,8 @@ closed = "terminal"
 
 /// Final review C1 (scenario A). The entry frontmatter replaces the source frontmatter, so
 /// inventory, apply and check each list every source key that no entry keeps, with its value,
-/// and the check stays clean. Breaks if a key is dropped silently on any of the three, or if
-/// `kind`, `status` or `title` is listed.
+/// and the check stays clean. Breaks if a key is dropped silently on any of the three, `kind`,
+/// `status` and `title` included.
 #[test]
 fn a_files_source_lists_the_frontmatter_keys_it_drops() {
     let r = repo(&[(IC1_PATH, IC1), (IC2_PATH, IC2)]);
@@ -1129,23 +1129,37 @@ fn a_files_source_lists_the_frontmatter_keys_it_drops() {
     assert_eq!(
         inv["sources"][0]["dropped_frontmatter"],
         json!([
+            {"key": "kind", "value": "tracker"},
             {"key": "owners", "value": ["marius"]},
+            {"key": "status", "value": "active"},
             {"key": "tags", "value": ["defect-classes", "blast-radius"]},
+            {"key": "title", "value": "blast radius exceeds visibility"},
             {"key": "topic", "value": "issue clusters"},
         ]),
         "{inv}"
     );
     assert_eq!(
         inv["sources"][1]["dropped_frontmatter"],
-        json!([{"key": "tags", "value": ["defect-classes"]}]),
+        json!([
+            {"key": "kind", "value": "tracker"},
+            {"key": "status", "value": "active"},
+            {"key": "tags", "value": ["defect-classes"]},
+            {"key": "title", "value": "gate keyed on unobservable event"},
+        ]),
         "{inv}"
     );
 
     let dropped = [
+        format!("{IC1_PATH} frontmatter kind: \"tracker\""),
         format!("{IC1_PATH} frontmatter owners: [\"marius\"]"),
+        format!("{IC1_PATH} frontmatter status: \"active\""),
         format!("{IC1_PATH} frontmatter tags: [\"defect-classes\",\"blast-radius\"]"),
+        format!("{IC1_PATH} frontmatter title: \"blast radius exceeds visibility\""),
         format!("{IC1_PATH} frontmatter topic: \"issue clusters\""),
+        format!("{IC2_PATH} frontmatter kind: \"tracker\""),
+        format!("{IC2_PATH} frontmatter status: \"active\""),
         format!("{IC2_PATH} frontmatter tags: [\"defect-classes\"]"),
+        format!("{IC2_PATH} frontmatter title: \"gate keyed on unobservable event\""),
     ];
     let (code, out) = apply(&r, CLUSTERS_MAPPING);
     assert_eq!(code, 0, "apply: {out}");

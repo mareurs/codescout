@@ -951,6 +951,28 @@ Body three.
         assert_eq!(run(&f).review.dropped, vec![owners]);
     }
 
+    /// Follow-up to final review C1: a plan that lacks a source's `status` and `title` keys (the
+    /// planner reads none of them) must not hide them. Breaks if the check skips those two keys.
+    #[test]
+    fn a_source_status_and_title_missing_from_the_plan_are_added_to_review() {
+        let mut f = fx();
+        let source = f.sources[X].replace(
+            "title: X log\n",
+            "{status: active, title: Something else}\n",
+        );
+        f.sources.insert(X.into(), source);
+        f.plan.review.dropped = vec![];
+        let r = run(&f);
+        assert_eq!(r.blocking, vec![], "{:#?}", r.blocking);
+        assert_eq!(
+            r.review.dropped,
+            vec![
+                "docs/trackers/x.md frontmatter status: \"active\"",
+                "docs/trackers/x.md frontmatter title: \"Something else\"",
+            ]
+        );
+    }
+
     /// (a) The planner wrote F-1 from a body that lacks line 16. The plan's `writes` hold that
     /// faulty text and the disk holds it too: only a body recomputed from the source finds it.
     /// Breaks if the body item compares with `plan.writes`, or is skipped.

@@ -1022,6 +1022,7 @@ async fn a_fact_the_cutover_cannot_home_is_listed_as_dropped() {
     assert_eq!(
         json_of(&out)["review"]["dropped"],
         json!([
+            "docs/trackers/x.md frontmatter title: \"X log\"",
             "a note event on docs/trackers/x.md is not carried (no committed home yet: not a \
              single-writer document)"
         ])
@@ -1031,7 +1032,10 @@ async fn a_fact_the_cutover_cannot_home_is_listed_as_dropped() {
     let (_dir, env) = with_catalog(&w, false);
     let out = apply_with(&w, BASE, true, false, &env).await;
     assert_eq!(out.code, 0, "{}", out.stdout);
-    assert_eq!(json_of(&out)["review"]["dropped"], json!([]));
+    assert_eq!(
+        json_of(&out)["review"]["dropped"],
+        json!(["docs/trackers/x.md frontmatter title: \"X log\""])
+    );
 }
 
 /// The repository after a first apply, committed on 2026-09-01.
@@ -1111,7 +1115,7 @@ async fn apply_output_lists_exact_paths() {
             "already_applied": [],
             "review": {
                 "derived_dates": ["F-1: status_since", "F-2: status_since"],
-                "dropped": [],
+                "dropped": ["docs/trackers/x.md frontmatter title: \"X log\""],
                 "skipped_rewrites": [
                     "F-1: 1 rewritten, skipped 1 in link text, 0 in URLs, 0 next to ( or !"
                 ],
@@ -1135,8 +1139,9 @@ async fn apply_output_lists_exact_paths() {
             "Written: 3 files: {F1_PATH}, {F2_PATH}, {README}.\n\
              Deleted: 2 files: {SIDECAR}, {X}.\n\
              Already applied: 0 files.\n\
-             Review: 2 derived dates, 0 dropped items, 1 record with skipped rewrites, \
-             0 row-only records, 0 records with no index row, 0 status disagreements.\n"
+             Review: 2 derived dates, 1 dropped item, 1 record with skipped rewrites, \
+             0 row-only records, 0 records with no index row, 0 status disagreements.\n\
+             Dropped: docs/trackers/x.md frontmatter title: \"X log\".\n"
         )
     );
 }
@@ -1177,8 +1182,9 @@ fn the_text_outputs_name_every_dropped_item() {
     let out = inventory(&f, &["docs/trackers/ic"], "files", false);
     assert_eq!(out.code, 0, "{}", out.stdout);
     assert!(
-        out.stdout
-            .contains("- Frontmatter keys that no entry keeps: owners [\"marius\"].\n"),
+        out.stdout.contains(
+            "- Frontmatter keys that no entry keeps: owners [\"marius\"], title \"one\".\n"
+        ),
         "{}",
         out.stdout
     );

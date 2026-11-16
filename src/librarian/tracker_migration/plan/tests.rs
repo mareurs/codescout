@@ -552,7 +552,10 @@ fn existing_mode_adds_only_missing_tokens_and_refuses_a_changed_one() {
     assert!(matches!(&range_of(&p, "F-1").owner, Owner::Record { entry, .. } if entry == F1_PATH));
     assert_eq!(
         p.review.dropped,
-        vec!["docs/trackers/x.md lines 4-12 (\"# X log\")"]
+        vec![
+            "docs/trackers/x.md frontmatter title: \"X log\"",
+            "docs/trackers/x.md lines 4-12 (\"# X log\")"
+        ]
     );
 
     let p = plan_with(
@@ -638,8 +641,8 @@ fn a_files_source_keeps_its_lowercase_stem() {
 }
 
 /// Final review C1: the entry frontmatter replaces the source frontmatter. Breaks if a source
-/// key that no entry keeps is not listed in `review.dropped` with its value, or if `kind`,
-/// `status` or `title` (which the entry frontmatter replaces) is listed.
+/// key is not listed in `review.dropped` with its value, `kind`, `status` and `title` included:
+/// the planner reads none of them.
 #[test]
 fn source_frontmatter_keys_no_entry_keeps_are_listed_as_dropped() {
     let mut m = mapping();
@@ -659,15 +662,18 @@ fn source_frontmatter_keys_no_entry_keeps_are_listed_as_dropped() {
     assert_eq!(
         p.review.dropped,
         vec![
+            "docs/trackers/ic/IC-10.md frontmatter kind: \"tracker\"",
             "docs/trackers/ic/IC-10.md frontmatter owners: [\"marius\"]",
+            "docs/trackers/ic/IC-10.md frontmatter status: \"active\"",
             "docs/trackers/ic/IC-10.md frontmatter tags: [\"defect-classes\",\"blast-radius\"]",
+            "docs/trackers/ic/IC-10.md frontmatter title: \"cluster ten\"",
             "docs/trackers/ic/IC-10.md frontmatter topic: \"issue clusters\"",
         ]
     );
-    // TRACKER's frontmatter holds only `title`, which the readme replaces.
+    // TRACKER's frontmatter holds only `title`; the planner does not read it, so it is listed.
     assert_eq!(
         plan(&mapping(), TRACKER).review.dropped,
-        Vec::<String>::new()
+        vec!["docs/trackers/x.md frontmatter title: \"X log\""]
     );
 }
 
@@ -791,7 +797,10 @@ fn a_section_the_inventory_never_listed_needs_a_sections_entry() {
     assert_eq!(range_of(&p, "R-9b").lines, 17..=18);
     assert_eq!(
         p.review.dropped,
-        vec!["docs/trackers/x.md lines 19-21 (\"### Notes\")"]
+        vec![
+            "docs/trackers/x.md frontmatter title: \"X log\"",
+            "docs/trackers/x.md lines 19-21 (\"### Notes\")"
+        ]
     );
     assert_eq!(p.review.no_row, vec!["R-9b"]);
 }
