@@ -1,12 +1,13 @@
 ---
 id: da6b6a00432b1736
 kind: bug
-status: open
+status: fixed
 title: 'BUG: the three worktree_store_tests of #34 fail in the lean gate lane, because their fixture needs the HTTP embed transport that --no-default-features removes'
 owners:
 - marius
 tags:
 - cluster/repro-env-diverges-from-gate-env
+closed: 2026-11-16
 opened: 2026-11-16
 severity: medium
 ---
@@ -58,19 +59,24 @@ The gate output of the candidate run (job `@bg_00000001`, 2026-11-16), the repro
 
 ## Fix
 
-Gate the test module with `#[cfg(feature = "remote-embed")]` at its `mod` declaration in `src/tools/semantic.rs`, as the other transport-dependent modules do. The lean lane then skips these tests, and the default lane keeps them. If the worktree behaviour must also be proven in a lean build, add a fixture that needs no embedder.
+The module declaration in `src/tools/semantic/mod.rs` is now `#[cfg(all(test, feature = "remote-embed"))]`, as the other transport-dependent modules do. The lean lane skips these tests, and the default lane keeps them. A lean-build proof of the worktree behaviour would need a fixture that needs no embedder. This fix does not add one.
+
+## Fix provenance
+
+- **SHA:** `0e53e96ab` (`experiments`)
+- **patch-id:** `b480eb0bdbf7f2a20883039e29a4969e5a60e4ca`
 
 ## Tests added
 
-None.
+None. The existing three `worktree_store_tests` are the regression check. Measured 2026-11-16 after the fix: `cargo test --lib -- worktree_store_tests` passes 3 of 3 in the default lane, and `cargo nextest run --workspace --no-default-features` passes 11035 of 11035.
 
 ## Workarounds
 
-None for the gate: the LEAN lane stays red until the module is gated. A local run of the default lane passes these tests.
+None are needed after `0e53e96ab`. Before it, the LEAN lane stayed red, and a local run of the default lane passed these tests.
 
 ## Resume
 
-Open. Medium severity: it keeps `scripts/gate.sh` red on `experiments` for every session that gates there.
+Fixed by `0e53e96ab`. The full `./scripts/gate.sh` has not run on the fix. Archive after a green gate.
 
 ## References
 
