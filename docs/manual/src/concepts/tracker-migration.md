@@ -15,8 +15,9 @@ A flat tracker is one markdown file with many records. A lifecycle collection is
 folder with one file per entry. `codescout trackers` moves the first into the second.
 An agent drafts a mapping file. The user approves it. `apply` then does the move.
 
-The `migrating-trackers` skill will drive these commands. It is part of Plan L-E2, a
-separate and later plan. Until then, you run the commands yourself.
+The `migrating-trackers` skill of the `codescout-companion` plugin (marketplace
+`sdd-misc-plugins`) drives these commands. It migrates one tracker at a time. You approve the
+mapping and the result. You can still run the commands by hand.
 
 The commands never commit. You commit the result.
 

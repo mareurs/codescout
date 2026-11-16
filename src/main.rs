@@ -287,9 +287,13 @@ enum Commands {
     /// Move a flat tracker into a lifecycle collection, one tracker at a time. `trackers
     /// inventory <path>...` reads the sources at `HEAD` and prints their records, sections,
     /// possible records, status values, index rows, and every file that names a source
-    /// (`--json` for the full report). It writes nothing. `apply` and `check` are not built yet.
-    /// Exits 0 on success, 2 and prints one line with the reason when it cannot run (no git
-    /// repository, a source that is not in `HEAD`).
+    /// (`--json` for the full report). It writes nothing. `trackers apply <mapping>` writes the
+    /// collection the mapping describes and deletes the sources; a second run with the same
+    /// mapping writes nothing. `trackers check <mapping>` re-plans from `HEAD`, compares every
+    /// entry with its source lines, writes nothing and takes no lock. The commands never commit:
+    /// commit the result yourself. Exits 0 on success (for `check`, clean), 1 when `apply`
+    /// refuses or `check` finds the migration not clean, 2 and prints one line with the reason
+    /// when it cannot run (no git repository, a source that is not in `HEAD`).
     Trackers(codescout::cli::trackers::TrackersArgs),
 
     /// Read-only query: which active constitution rules apply to a given

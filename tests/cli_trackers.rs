@@ -290,6 +290,19 @@ const S_F2: &str = "docs/trackers/ledgers/session-log/archive/2026-07-03-lost-bu
 const S_W1: &str = "docs/trackers/ledgers/session-log/archive/2026-07-05-fast-symbols.md";
 const S_README: &str = "docs/trackers/ledgers/session-log/readme.md";
 
+#[test]
+fn trackers_help_names_no_unbuilt_subcommand() {
+    let out = Command::new(env!("CARGO_BIN_EXE_codescout"))
+        .args(["trackers", "--help"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "trackers --help failed:\n{text}");
+    assert!(!text.contains("not built yet"), "stale help text:\n{text}");
+    assert!(text.contains("apply"), "help omits apply:\n{text}");
+    assert!(text.contains("check"), "help omits check:\n{text}");
+}
+
 /// The skill's loop on a session log: inventory, a mapping, apply, check. Breaks if the
 /// inventory misses a record, the index or a section; if apply writes an entry per index row or
 /// per section instead of per record, misses a record, files a terminal entry live, changes a
