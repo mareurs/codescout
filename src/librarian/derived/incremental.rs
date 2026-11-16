@@ -24,7 +24,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::build::{
-    rebuild, BuildInput, BuildReport, ChangeCounts, DocMetadata, EntryRow, ParsedDocument, Parser,
+    rebuild, BuildInput, BuildReport, ChangeCounts, DocMetadata, EntryRow, EventRow,
+    ParsedDocument, Parser,
 };
 use crate::git::{diff_tree_to_tree, DiffStatus};
 use crate::librarian::catalog::chunk::ChunkRow;
@@ -85,7 +86,27 @@ struct CitationJson {
 /// The facts of a parse that no column above holds. No field is an `Option` or carries a serde
 /// default, so a row written before a fact existed does not decode and is a cache miss (E2-R3).
 #[derive(Serialize, Deserialize)]
-struct FactsJson {}
+struct FactsJson {
+    events: Vec<EventJson>,
+}
+
+/// An event section as the cache holds it: [`EventRow`] field for field.
+#[derive(Serialize, Deserialize)]
+struct EventJson {
+    heading_line: u32,
+    end_line: u32,
+    event_id: String,
+    kind: String,
+    created_at_ms: i64,
+    author: Option<String>,
+    anchor_commit: Option<String>,
+    head_commit: Option<String>,
+    parent: Option<String>,
+    resolves: Option<String>,
+    source_json: Option<String>,
+    mutates: Vec<String>,
+    payload_json: String,
+}
 
 /// A chunk without its `artifact_id`, which is the document's own `rel_path`.
 #[derive(Serialize, Deserialize)]
@@ -212,13 +233,32 @@ pub(super) fn encode(products: &ParsedDocument) -> serde_json::Result<Stored> {
             content_hash: c.content_hash.clone(),
         })
         .collect();
+    let events: Vec<EventJson> = products
+        .events
+        .iter()
+        .map(|e| EventJson {
+            heading_line: e.heading_line,
+            end_line: e.end_line,
+            event_id: e.event_id.clone(),
+            kind: e.kind.clone(),
+            created_at_ms: e.created_at_ms,
+            author: e.author.clone(),
+            anchor_commit: e.anchor_commit.clone(),
+            head_commit: e.head_commit.clone(),
+            parent: e.parent.clone(),
+            resolves: e.resolves.clone(),
+            source_json: e.source_json.clone(),
+            mutates: e.mutates.clone(),
+            payload_json: e.payload_json.clone(),
+        })
+        .collect();
     Ok(Stored {
         parse_note: products.parse_note.clone(),
         metadata_json: serde_json::to_string(&metadata)?,
         entries_json: serde_json::to_string(&entries)?,
         citations_json: serde_json::to_string(&citations)?,
         chunks_json: serde_json::to_string(&chunks)?,
-        facts_json: serde_json::to_string(&FactsJson {})?,
+        facts_json: serde_json::to_string(&FactsJson { events })?,
     })
 }
 
@@ -230,7 +270,7 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
     let entries: Vec<EntryJson> = serde_json::from_str(&stored.entries_json).ok()?;
     let citations: Vec<CitationJson> = serde_json::from_str(&stored.citations_json).ok()?;
     let chunks: Vec<ChunkJson> = serde_json::from_str(&stored.chunks_json).ok()?;
-    let FactsJson {} = serde_json::from_str(&stored.facts_json).ok()?;
+    let FactsJson { events } = serde_json::from_str(&stored.facts_json).ok()?;
     let repo_of = |repo: Option<String>| match repo {
         None => Some(None),
         Some(name) => RepoName::parse(&name).ok().map(Some),
@@ -292,6 +332,24 @@ pub(super) fn decode(rel_path: &str, stored: &Stored) -> Option<ParsedDocument> 
                 entry_parts: c.entry_parts,
                 content: c.content,
                 content_hash: c.content_hash,
+            })
+            .collect(),
+        events: events
+            .into_iter()
+            .map(|e| EventRow {
+                heading_line: e.heading_line,
+                end_line: e.end_line,
+                event_id: e.event_id,
+                kind: e.kind,
+                created_at_ms: e.created_at_ms,
+                author: e.author,
+                anchor_commit: e.anchor_commit,
+                head_commit: e.head_commit,
+                parent: e.parent,
+                resolves: e.resolves,
+                source_json: e.source_json,
+                mutates: e.mutates,
+                payload_json: e.payload_json,
             })
             .collect(),
     })
@@ -1314,6 +1372,68 @@ mod tests {
         assert!(parsed.is_empty(), "the bad rows were replaced by good ones");
     }
 
+    /// A row written before a fact existed has no field for it: `{}` is what `FactsJson` was before
+    /// `events`. It must not read back as "no events" (E2-R3: the tasks that add a fact do not
+    /// bump `PARSER_VERSION`, so a miss is all that keeps an old test database honest).
+    // mutation M4: `decode` ignores `facts_json` (reads no events from it, and no error).
+    #[test]
+    fn a_cache_row_without_the_events_fact_is_a_miss() {
+        let notes = notes_document(&[("n-1", "note", serde_json::json!({"text": "kept"}))]);
+        let h = history(&[&[REPO_TOML, ("docs/a.md", "# A\n"), ("docs/notes.md", &notes)]]);
+        let mut conn = open_in_memory().unwrap();
+        build_at(&mut conn, &h, 0);
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1,
+            "the fixture's build stores its event"
+        );
+        let stored: Vec<String> = conn
+            .prepare("SELECT facts_json FROM parse_cache ORDER BY rel_path")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            stored.iter().any(|f| f.contains("n-1")),
+            "the notes document's facts hold its event: {stored:?}"
+        );
+        conn.execute(
+            "UPDATE parse_cache SET facts_json = '{}' WHERE rel_path = 'docs/notes.md'",
+            [],
+        )
+        .unwrap();
+
+        let (_, parsed) = update_recording(&mut conn, &h, 0, 0, PARSER_VERSION);
+
+        assert_eq!(parsed, strings(&["docs/notes.md"]));
+        assert_eq!(dump_all(&conn), fresh_dump(&h, 0));
+    }
+
+    /// A document that holds `events` (id, kind, payload) as committed `###` sections under its
+    /// `## Events` heading.
+    fn notes_document(events: &[(&str, &str, serde_json::Value)]) -> String {
+        use crate::librarian::catalog::event_text::{render_event_section, EventText};
+        let mut doc = "# Notes\n\n## Events\n\n".to_owned();
+        for (id, kind, payload) in events {
+            doc.push_str(&render_event_section(&EventText {
+                id: (*id).to_owned(),
+                kind: (*kind).to_owned(),
+                created_at_ms: 1_794_637_800_000,
+                author: Some("alice".to_owned()),
+                anchor_commit: None,
+                head_commit: None,
+                parent: None,
+                resolves: None,
+                source: None,
+                mutates: Vec::new(),
+                payload: payload.clone(),
+            }));
+        }
+        doc
+    }
+
     /// A parse corpus that exercises every part of a `ParsedDocument`.
     fn corpus() -> Vec<(&'static str, String)> {
         let long = format!(
@@ -1374,6 +1494,19 @@ mod tests {
                 "docs/specs/bare.md",
                 "# Bare\n\nThe decision in R-43 settles this, and so does R-44.\n".to_owned(),
             ),
+            // Event sections under `## Events`, one per payload form: a note's blockquote and a
+            // verdict's fenced payload. The parse stores them as events, with whole-document lines.
+            (
+                "docs/notes.md",
+                notes_document(&[
+                    ("n-1", "note", serde_json::json!({"text": "first\nsecond"})),
+                    (
+                        "v-1",
+                        "verdict",
+                        serde_json::json!({"outcome": "go", "score": 1.5}),
+                    ),
+                ]),
+            ),
         ]
     }
 
@@ -1429,10 +1562,34 @@ mod tests {
         );
     }
 
+    /// The corpus must keep event sections of both payload forms: the digest below covers `events`
+    /// only if some pinned text has them.
+    #[test]
+    fn the_pinned_corpus_has_events_of_both_payload_forms() {
+        let rules = corpus_rules();
+        let (rel_path, text) = corpus()
+            .into_iter()
+            .find(|(rel_path, _)| *rel_path == "docs/notes.md")
+            .unwrap();
+        let parsed = parse_document(rel_path, &text, &rules);
+        let payloads: Vec<&str> = parsed
+            .events
+            .iter()
+            .map(|e| e.payload_json.as_str())
+            .collect();
+        assert_eq!(
+            payloads,
+            [
+                r#"{"text":"first\nsecond"}"#,
+                r#"{"outcome":"go","score":1.5}"#
+            ]
+        );
+    }
+
     /// The pinned digest of the corpus's parse. When this fails, the parse of some text changed
     /// (or the shape the cache stores did): bump `PARSER_VERSION`, so that no cached row from
     /// the old logic is read, and then set this to the new digest.
-    const CORPUS_DIGEST: &str = "796df5b64bfd8ba4320368ca817ae47b539174f379a95cb441a82e779b43308b";
+    const CORPUS_DIGEST: &str = "66ea86e45fc774c157e4e778b5197d7d65ab3ddbd6491512893dfa4f30d88deb";
 
     #[test]
     fn the_parse_of_a_pinned_corpus_is_tied_to_parser_version() {

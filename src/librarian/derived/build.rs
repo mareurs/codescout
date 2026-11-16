@@ -30,6 +30,7 @@ use sha2::{Digest, Sha256};
 use super::incremental::{self, CacheKey, Parsed};
 use super::scan::{blob_text, scan_commit, ScannedFile};
 use crate::librarian::catalog::chunk::{build_chunks, ChunkRow};
+use crate::librarian::catalog::event_text::{parse_event_sections_spanned, EventSpan, EventText};
 use crate::librarian::classify::{
     classify, default_rules, load_rules, CompiledRule, PROJECT_RULES_REL,
 };
@@ -417,6 +418,27 @@ pub struct EntryRow {
     pub end_line: u32,
 }
 
+/// One event section of a document: where it sits (file lines) and the event the text holds.
+/// `source_json` and `payload_json` are `serde_json::to_string` of the parsed values (key order as
+/// written); `mutates` is a JSON array of the forms on the section's `**Mutates:**` line. Events
+/// are keyed by `(rel_path, heading_line)`, so two sections with one id are two rows (E2-R7).
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventRow {
+    pub heading_line: u32,
+    pub end_line: u32,
+    pub event_id: String,
+    pub kind: String,
+    pub created_at_ms: i64,
+    pub author: Option<String>,
+    pub anchor_commit: Option<String>,
+    pub head_commit: Option<String>,
+    pub parent: Option<String>,
+    pub resolves: Option<String>,
+    pub source_json: Option<String>,
+    pub mutates: Vec<String>,
+    pub payload_json: String,
+}
+
 /// Everything one document's text and path give, whatever else is in the tree. Resolution is not
 /// here: an edge's resolution depends on every other document, so it is computed over the whole
 /// tree after all documents are parsed. This is what the parse cache holds.
@@ -428,6 +450,8 @@ pub struct ParsedDocument {
     pub citations: Vec<Citation>,
     /// `chunk_id` is filled by [`chunk_id`]; `artifact_id` is the document's `rel_path`.
     pub chunks: Vec<ChunkRow>,
+    /// The event sections, in document order.
+    pub events: Vec<EventRow>,
 }
 
 /// Parse one document: a pure function of its path, its text and the rules.
@@ -435,7 +459,8 @@ pub struct ParsedDocument {
 /// A frontmatter block that does not parse is not an error: the document is indexed with no
 /// frontmatter, its whole text as the body, and `parse_note = "frontmatter_error"`. Entries and
 /// citations are read from the whole text (both skip a valid frontmatter block themselves);
-/// chunks are cut from the body and carry file lines.
+/// chunks are cut from the body and carry file lines. Event sections are read from the whole text
+/// and carry file lines too.
 pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> ParsedDocument {
     let (fm, body, parse_note) = match frontmatter::parse(text) {
         Ok((fm, body)) => (fm, body, None),
@@ -461,12 +486,41 @@ pub fn parse_document(rel_path: &str, text: &str, rules: &[CompiledRule]) -> Par
             chunk
         })
         .collect();
+    let events = parse_event_sections_spanned(text)
+        .into_iter()
+        .map(|(event, span)| event_row(event, span))
+        .collect();
     ParsedDocument {
         metadata,
         parse_note,
         entries,
         citations,
         chunks,
+        events,
+    }
+}
+
+/// The row of one event section. The source and the payload are stored as `serde_json::to_string`
+/// of the parsed values (key order as written, `preserve_order`), the `mutates` forms as a list
+/// that [`store_document`] writes as a JSON array (E2-R7).
+fn event_row(event: EventText, span: EventSpan) -> EventRow {
+    EventRow {
+        heading_line: span.heading_line,
+        end_line: span.end_line,
+        event_id: event.id,
+        kind: event.kind,
+        created_at_ms: event.created_at_ms,
+        author: event.author,
+        anchor_commit: event.anchor_commit,
+        head_commit: event.head_commit,
+        parent: event.parent,
+        resolves: event.resolves,
+        source_json: event.source.map(|source| {
+            serde_json::to_string(&source).expect("two strings and a JSON value always serialize")
+        }),
+        mutates: event.mutates,
+        payload_json: serde_json::to_string(&event.payload)
+            .expect("a JSON value always serializes"),
     }
 }
 
@@ -557,7 +611,8 @@ fn derive_metadata(
     }
 }
 
-/// Write one document's rows (document, entries, edges, chunks) and count them.
+/// Write one document's rows (document, entries, events, edges, chunks) and count them; the
+/// report has no count for events.
 fn store_document(
     conn: &Connection,
     doc: &Document,
@@ -612,6 +667,30 @@ fn store_document(
             entry.end_line
         ])?;
         report.entries += 1;
+    }
+
+    for event in &parsed.events {
+        conn.prepare_cached(
+            "INSERT INTO event (rel_path, heading_line, end_line, event_id, kind, created_at_ms, \
+             author, anchor_commit, head_commit, parent, resolves, source_json, mutates, \
+             payload_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        )?
+        .execute(params![
+            doc.rel_path,
+            event.heading_line,
+            event.end_line,
+            event.event_id,
+            event.kind,
+            event.created_at_ms,
+            event.author,
+            event.anchor_commit,
+            event.head_commit,
+            event.parent,
+            event.resolves,
+            event.source_json,
+            json_array(&event.mutates),
+            event.payload_json,
+        ])?;
     }
 
     for (ord, citation) in parsed.citations.iter().enumerate() {
@@ -836,6 +915,214 @@ mod tests {
         let report = build_commit(&mut conn, repo).unwrap();
         assert_report_matches_tables(&conn, &report);
         (conn, report)
+    }
+    /// An event as a committed section, rendered by the writer.
+    fn event_text(
+        id: &str,
+        kind: &str,
+        mutates: &[&str],
+        payload: serde_json::Value,
+    ) -> crate::librarian::catalog::event_text::EventText {
+        crate::librarian::catalog::event_text::EventText {
+            id: id.to_owned(),
+            kind: kind.to_owned(),
+            created_at_ms: 1_794_637_800_000,
+            author: Some("alice".to_owned()),
+            anchor_commit: None,
+            head_commit: None,
+            parent: None,
+            resolves: None,
+            source: None,
+            mutates: mutates.iter().map(|m| (*m).to_owned()).collect(),
+            payload,
+        }
+    }
+
+    fn section(e: &crate::librarian::catalog::event_text::EventText) -> String {
+        crate::librarian::catalog::event_text::render_event_section(e)
+    }
+
+    /// `(event_id, kind, created_at_ms, mutates, payload_json, heading_line, end_line)` of every
+    /// `event` row, by heading line.
+    type EventCells = (String, String, i64, String, String, i64, i64);
+
+    fn event_cells(conn: &Connection) -> Vec<EventCells> {
+        conn.prepare(
+            "SELECT event_id, kind, created_at_ms, mutates, payload_json, heading_line, end_line \
+             FROM event ORDER BY heading_line",
+        )
+        .unwrap()
+        .query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    // mutation: store `mutates.join(" ")` instead of the JSON array.
+    #[test]
+    fn event_sections_become_event_rows() {
+        let note = event_text(
+            "n-1",
+            "note",
+            &["[[b]]"],
+            serde_json::json!({"text": "first\nsecond"}),
+        );
+        let verdict = event_text(
+            "v-1",
+            "verdict",
+            &[],
+            serde_json::json!({"outcome": "go", "score": 1.5}),
+        );
+        let doc = format!(
+            "---\ntitle: Notes\n---\n# Notes\n\n## Events\n\n{}{}\n## Later\n\ntext\n",
+            section(&note),
+            section(&verdict)
+        );
+        let headings: Vec<i64> = doc
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.starts_with("### "))
+            .map(|(i, _)| i as i64 + 1)
+            .collect();
+        let later = doc.lines().position(|l| l == "## Later").unwrap() as i64 + 1;
+        let (_dir, repo) = fixture(&[("docs/notes.md", &doc)]);
+
+        let (conn, _) = built(&repo);
+
+        assert_eq!(
+            event_cells(&conn),
+            vec![
+                (
+                    "n-1".to_owned(),
+                    "note".to_owned(),
+                    1_794_637_800_000,
+                    r#"["[[b]]"]"#.to_owned(),
+                    r#"{"text":"first\nsecond"}"#.to_owned(),
+                    headings[0],
+                    headings[1] - 1
+                ),
+                (
+                    "v-1".to_owned(),
+                    "verdict".to_owned(),
+                    1_794_637_800_000,
+                    "[]".to_owned(),
+                    r#"{"outcome":"go","score":1.5}"#.to_owned(),
+                    headings[1],
+                    later - 1
+                ),
+            ]
+        );
+    }
+
+    /// The columns an event row may leave empty, and the source, round-trip through the build.
+    #[test]
+    fn an_events_optional_fields_and_source_are_stored() {
+        let mut full = event_text("n-2", "note", &[], serde_json::json!({"text": "x"}));
+        full.anchor_commit = Some("a1".to_owned());
+        full.head_commit = Some("h2".to_owned());
+        full.parent = Some("p3".to_owned());
+        full.resolves = Some("r4".to_owned());
+        full.source = Some(crate::librarian::catalog::event_text::EventSource {
+            kind: "url".to_owned(),
+            uri: "https://example.invalid/x".to_owned(),
+            payload: Some(serde_json::json!({"k": 1})),
+        });
+        let mut bare = event_text("n-3", "note", &[], serde_json::json!({"text": "y"}));
+        bare.author = None;
+        let doc = format!("# D\n\n## Events\n\n{}{}", section(&full), section(&bare));
+        let (_dir, repo) = fixture(&[("docs/d.md", &doc)]);
+
+        let (conn, _) = built(&repo);
+
+        type Cells = Vec<Option<String>>;
+        let cells: Vec<(String, Cells)> = conn
+            .prepare(
+                "SELECT event_id, author, anchor_commit, head_commit, parent, resolves, \
+                 source_json FROM event ORDER BY heading_line",
+            )
+            .unwrap()
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    (1..7)
+                        .map(|i| r.get::<_, Option<String>>(i))
+                        .collect::<Result<Cells, _>>()?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let s = |v: &str| Some(v.to_owned());
+        assert_eq!(
+            cells,
+            vec![
+                (
+                    "n-2".to_owned(),
+                    vec![
+                        s("alice"),
+                        s("a1"),
+                        s("h2"),
+                        s("p3"),
+                        s("r4"),
+                        s(r#"{"kind":"url","uri":"https://example.invalid/x","payload":{"k":1}}"#)
+                    ]
+                ),
+                ("n-3".to_owned(), vec![None, None, None, None, None, None]),
+            ]
+        );
+    }
+
+    // mutation: key `event` on `(rel_path, event_id)`.
+    #[test]
+    fn one_id_twice_is_two_event_rows() {
+        let one = event_text("same", "note", &[], serde_json::json!({"text": "one"}));
+        let two = event_text("same", "note", &[], serde_json::json!({"text": "two"}));
+        let doc = format!("# D\n\n## Events\n\n{}{}", section(&one), section(&two));
+        let (_dir, repo) = fixture(&[("docs/d.md", &doc)]);
+
+        let (conn, _) = built(&repo);
+
+        let cells = event_cells(&conn);
+        assert_eq!(cells.len(), 2, "{cells:?}");
+        assert_eq!(cells[0].0, cells[1].0, "one id");
+        assert_ne!(cells[0].5, cells[1].5, "two heading lines");
+        assert_ne!(cells[0].4, cells[1].4, "two payloads");
+    }
+
+    // mutation: drop `event` from `DERIVED_TABLES`.
+    #[test]
+    fn a_rebuild_replaces_the_event_rows() {
+        let e = event_text("n-1", "note", &[], serde_json::json!({"text": "gone soon"}));
+        let with = format!("# D\n\n## Events\n\n{}", section(&e));
+        let (_dir, repo) = fixture(&[("docs/d.md", &with)]);
+        let (mut conn, _) = built(&repo);
+        assert_eq!(count(&conn, "event"), 1);
+        let parent = open_commit(&repo, "HEAD").unwrap();
+        let second = crate::librarian::derived::testkit::commit_files(
+            &repo,
+            &[("docs/d.md", b"# D\n".as_slice())],
+            &[&parent],
+            "drop the event",
+        );
+        let commit = open_commit(&repo, &second.to_string()).unwrap();
+
+        build_full(
+            &mut conn,
+            &BuildInput::from_commit(&repo, &commit, Path::new(ROOT)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(count(&conn, "event"), 0, "a stale event row survived");
     }
 
     /// A document's whole row, in column order.
@@ -1808,6 +2095,24 @@ mod tests {
                  [[trackers:T-1]], [[bug-log:B-1]], [[dup1]], [[dup1:D-1]], [[Bad_Name]]\n",
             ),
             text("docs/b.md", "# B\n"),
+            text(
+                "docs/notes.md",
+                &format!(
+                    "# Notes\n\n## Events\n\n{}{}",
+                    section(&event_text(
+                        "n-1",
+                        "note",
+                        &[],
+                        serde_json::json!({"text": "first\nsecond"})
+                    )),
+                    section(&event_text(
+                        "v-1",
+                        "verdict",
+                        &[],
+                        serde_json::json!({"outcome": "go", "score": 1.5})
+                    ))
+                ),
+            ),
             text("docs/Bad_Name.md", "# Bad\n\n## F-9 — still indexed\n"),
             text("docs/0123456789abcdef.md", "# Hex\n"),
             text("docs/broken.md", "---\nkind: [unterminated\n---\n# Broken\n"),
@@ -1839,7 +2144,7 @@ mod tests {
     /// rows, the edges cover several kinds, and a document has more than one chunk.
     fn assert_corpus_is_not_vacuous(dump: &std::collections::BTreeMap<String, Vec<Vec<String>>>) {
         for table in [
-            "checkout", "document", "entry", "edge", "chunk", "problem", "skipped",
+            "checkout", "document", "entry", "edge", "chunk", "problem", "skipped", "event",
         ] {
             assert!(!dump[table].is_empty(), "the corpus gives {table} no rows");
         }
