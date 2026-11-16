@@ -261,11 +261,12 @@ enum Commands {
     /// derived catalog. Three subcommands: `cutover plan` is the dry run (it prints what would
     /// move and what could not, and writes nothing); `cutover export` writes the plan into the
     /// working tree and keeps the report beside the old catalog; `cutover build` builds the new
-    /// catalog from `HEAD` in the file `.codescout/derived.db` of this checkout, and refuses while
-    /// a plan of `HEAD` would still change a file, so run it after the commit. Each checkout has
-    /// its own file. A second `build` rebuilds the same file. Git must ignore the file: add the
-    /// line `/.codescout/derived.db*` to `.gitignore` or to the repository's `info/exclude`. The
-    /// tool never commits, stages or moves anything in git: commit the exported files yourself.
+    /// catalog from `HEAD` in the file `.codescout/derived.db` in the git root of this checkout,
+    /// and refuses while a plan of `HEAD` would still change a file, so run it after the commit.
+    /// Each checkout has its own file. A second `build` rebuilds the same file. Git must ignore
+    /// the file: add the line `/.codescout/derived.db*` to `.gitignore` or to the repository's
+    /// `info/exclude`. The tool never commits, stages or moves anything in git: commit the
+    /// exported files yourself.
     /// The old catalog is `--old-db`, else `LIBRARIAN_DB`, else `librarian/catalog.db` in the
     /// local data directory. It is opened read-only and never changed. A `derived.db` beside the
     /// old catalog is unused: delete it. Give `--old-root <path>` (repeatable, absolute) for each
@@ -281,12 +282,13 @@ enum Commands {
     /// catalog that already exists or a project write lock that is held (or whose file cannot be
     /// opened); or, for `build`, an export that is not committed yet, a `HEAD` that moved after
     /// the plan, a repository that does not ignore `.codescout/derived.db` and its side files, a
-    /// link at `.codescout` or at one of those files, on Unix a file with more than one hard
-    /// link, a file that git tracks (run `git rm --cached` on it, then commit), a `.codescout`
+    /// link at `.codescout` or at one of those files, a directory at one of those files, on Unix
+    /// a file with more than one hard link, a file that git tracks (run `git rm --cached` on it,
+    /// then commit), a `.codescout`
     /// that is not a directory of this checkout, a `.codescout/derived.db` that is not a new
     /// catalog or was made by a newer codescout, a checkout whose `.codescout` directory cannot
-    /// be written, or a `.codescout` file, a git index or an ignore rule that the tool cannot
-    /// inspect.
+    /// be written, or a state in which the tool cannot inspect `.codescout` or one of the files,
+    /// cannot read the git index, or cannot tell whether git ignores the file.
     Cutover(codescout::cli::cutover::CutoverArgs),
 
     /// Read-only query: which active constitution rules apply to a given
