@@ -22,9 +22,10 @@ pub fn derived_catalog_in(checkout_root: &Path) -> std::path::PathBuf {
 const BUSY_TIMEOUT_MS: i64 = 5000;
 
 /// Every table of schema version 2. All rows are deterministic: no default is a clock or a random
-/// value. Every table except `checkout` (one row), `history_meta` (one row) and `problem` (a rowid
-/// table) has a natural key naming its rows, not a generated id; `dump_all` sorts the rows of every
-/// table it dumps, so no dump depends on a rowid or an insert order.
+/// value. Every table except `checkout` (one row), `history_meta` (one row by the writer's
+/// convention, which the schema does not enforce) and `problem` (a rowid table) has a natural key
+/// naming its rows, not a generated id; `dump_all` sorts the rows of every table it dumps, so no
+/// dump depends on a rowid or an insert order.
 ///
 /// `skipped` is keyed on `(rel_path, reason)`: a lossy `not_utf8` path (U+FFFD is valid UTF-8) can
 /// equal a real path's `rel_path`, so `rel_path` alone is not unique.
@@ -43,7 +44,7 @@ const BUSY_TIMEOUT_MS: i64 = 5000;
 /// `worktree_layer` records the working-tree files laid over a commit.
 ///
 /// `parse_cache.metadata_json` is the document's `kind`, `status`, `title`, ... as parsed;
-/// `parse_cache.facts_json` holds the facts the parse reads beside them.
+/// `parse_cache.facts_json` holds the facts the parse produces that no other column holds.
 const SCHEMA_SQL: &str = r#"
 CREATE TABLE checkout (
     root         TEXT NOT NULL,
@@ -287,7 +288,7 @@ fn init_schema(conn: &Connection, path: Option<&Path>) -> rusqlite::Result<()> {
     } else if found != SCHEMA_VERSION {
         // Older than this build: only a file that is exactly the v1 tables is derived data this
         // build may drop. Anything else is refused as "not a new catalog", never as "newer".
-        if found != 1 || table_set(&tx)? != V1_TABLES {
+        if found != 1 || !is_exactly_version_1(&tx)? {
             return Err(refuse_older(found, path));
         }
         for table in V1_TABLES {
@@ -299,14 +300,22 @@ fn init_schema(conn: &Connection, path: Option<&Path>) -> rusqlite::Result<()> {
     tx.commit()
 }
 
-/// The names of the file's tables, sorted, without SQLite's own.
-fn table_set(conn: &Connection) -> rusqlite::Result<Vec<String>> {
-    conn.prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
-         ORDER BY name",
-    )?
-    .query_map([], |r| r.get(0))?
-    .collect()
+/// Whether the file holds exactly the version-1 schema: every `sqlite_master` entry (SQLite's own
+/// `sqlite_%` entries aside) is one of the eight [`V1_TABLES`], each once. Version 1 made tables
+/// only, so a view, a trigger or an index is another program's object.
+fn is_exactly_version_1(conn: &Connection) -> rusqlite::Result<bool> {
+    let entries: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' \
+             ORDER BY name",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(entries.len() == V1_TABLES.len()
+        && entries
+            .iter()
+            .zip(V1_TABLES)
+            .all(|((kind, name), expected)| kind == "table" && name == expected))
 }
 
 /// The refusal of a file below this build's schema that the rebuild does not take. `SQLITE_NOTADB`,
@@ -715,6 +724,212 @@ mod tests {
         assert!(
             std::fs::read(&path).unwrap() == before,
             "a refused open leaves the file byte-for-byte unchanged"
+        );
+    }
+
+    /// Open `path`, expect the refusal of an older file, and check that the file is untouched.
+    fn assert_older_file_refused(path: &Path, what: &str) {
+        let before = std::fs::read(path).unwrap();
+        let err = open(path).expect_err(what);
+        assert_eq!(
+            err.sqlite_error_code(),
+            Some(rusqlite::ErrorCode::NotADatabase),
+            "{what}: {err}"
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains(&path.display().to_string()),
+            "{what}: the refusal names the path as spelled: {text}"
+        );
+        assert!(
+            std::fs::read(path).unwrap() == before,
+            "{what}: a refused open leaves the file byte-for-byte unchanged"
+        );
+    }
+
+    // mutation: compare the table names only, not every schema entry.
+    #[test]
+    fn a_version_1_file_holding_another_schema_object_is_refused_and_left_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        // Version 1 created tables only (no view, trigger or explicit index), so each of these
+        // is another program's object, and an index of a v1 table is no exception.
+        let cases = [
+            (
+                "a view named like a v2 table",
+                "CREATE VIEW event AS SELECT 1 AS x;",
+            ),
+            ("an unrelated view", "CREATE VIEW zz AS SELECT 1 AS x;"),
+            (
+                "an index of a v1 table",
+                "CREATE INDEX document_x ON document (x);",
+            ),
+            (
+                "a trigger",
+                "CREATE TRIGGER tg AFTER INSERT ON document BEGIN SELECT 1; END;",
+            ),
+        ];
+        for (i, (what, sql)) in cases.into_iter().enumerate() {
+            let path = dir.path().join(format!("case{i}.db"));
+            older_file(&path, 1, &V1_TABLES);
+            Connection::open(&path).unwrap().execute_batch(sql).unwrap();
+            assert_older_file_refused(&path, what);
+            let raw = Connection::open(&path).unwrap();
+            assert_eq!(user_version(&raw), 1, "{what}");
+        }
+    }
+
+    // mutation: compare the number of tables only.
+    #[test]
+    fn a_version_1_file_with_as_many_tables_under_other_names_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("derived.db");
+        let mut tables: Vec<&str> = V1_TABLES.into_iter().filter(|t| *t != "skipped").collect();
+        tables.push("notes");
+        assert_eq!(tables.len(), V1_TABLES.len());
+        older_file(&path, 1, &tables);
+        assert_older_file_refused(&path, "same count, one name changed");
+    }
+
+    // mutation: refuse only a version above 0 (a negative version holding the v1 tables falls
+    // through to the rebuild).
+    #[test]
+    fn a_negative_user_version_holding_the_version_1_tables_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("derived.db");
+        older_file(&path, -1, &V1_TABLES);
+        assert_older_file_refused(&path, "version -1 over the v1 tables");
+    }
+
+    /// The DDL a real version-1 file was made with, as committed at 725eea39a.
+    const V1_SCHEMA_SQL: &str = r#"
+CREATE TABLE checkout (
+    root         TEXT NOT NULL,
+    repo_name    TEXT NOT NULL,
+    name_source  TEXT NOT NULL,
+    rules_source TEXT NOT NULL,
+    commit_sha   TEXT NOT NULL
+);
+CREATE TABLE document (
+    rel_path   TEXT NOT NULL PRIMARY KEY,
+    "key"      TEXT,
+    key_error  TEXT,
+    kind       TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    title      TEXT,
+    owners     TEXT NOT NULL,
+    tags       TEXT NOT NULL,
+    topic      TEXT,
+    time_scope TEXT,
+    confidence REAL NOT NULL,
+    sha256     TEXT NOT NULL,
+    owner_key  TEXT,
+    parse_note TEXT
+) WITHOUT ROWID;
+CREATE TABLE entry (
+    rel_path     TEXT NOT NULL,
+    token        TEXT NOT NULL,
+    level        INTEGER NOT NULL,
+    heading_line INTEGER NOT NULL,
+    end_line     INTEGER NOT NULL,
+    PRIMARY KEY (rel_path, token, heading_line)
+) WITHOUT ROWID;
+CREATE TABLE edge (
+    src_rel_path TEXT NOT NULL,
+    ord          INTEGER NOT NULL,
+    line         INTEGER NOT NULL,
+    kind         TEXT NOT NULL,
+    target_repo  TEXT,
+    target_key   TEXT,
+    target_token TEXT,
+    dst_key      TEXT,
+    PRIMARY KEY (src_rel_path, ord)
+) WITHOUT ROWID;
+CREATE TABLE chunk (
+    chunk_id     TEXT NOT NULL PRIMARY KEY,
+    rel_path     TEXT NOT NULL,
+    chunk_ix     INTEGER NOT NULL,
+    start_line   INTEGER NOT NULL,
+    end_line     INTEGER NOT NULL,
+    entry_token  TEXT,
+    entry_part   INTEGER,
+    entry_parts  INTEGER,
+    content      TEXT NOT NULL,
+    content_hash TEXT NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE problem (
+    kind      TEXT NOT NULL,
+    "key"     TEXT,
+    rel_paths TEXT NOT NULL
+);
+CREATE TABLE skipped (
+    rel_path TEXT NOT NULL,
+    reason   TEXT NOT NULL,
+    PRIMARY KEY (rel_path, reason)
+) WITHOUT ROWID;
+CREATE TABLE parse_cache (
+    sha256         TEXT NOT NULL,
+    rel_path       TEXT NOT NULL,
+    rules_hash     TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    parse_note     TEXT,
+    metadata_json  TEXT NOT NULL,
+    entries_json   TEXT NOT NULL,
+    citations_json TEXT NOT NULL,
+    chunks_json    TEXT NOT NULL,
+    PRIMARY KEY (sha256, rel_path, rules_hash, parser_version)
+) WITHOUT ROWID;
+"#;
+
+    // mutation: leave a version-1 file as it is (return before the drop).
+    #[test]
+    fn a_real_version_1_file_in_wal_mode_with_rows_is_rebuilt_empty_and_then_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("derived.db");
+        {
+            let raw = Connection::open(&path).unwrap();
+            let mode: String = raw
+                .pragma_update_and_check(None, "journal_mode", "WAL", |r| r.get(0))
+                .unwrap();
+            assert_eq!(mode, "wal");
+            raw.execute_batch(V1_SCHEMA_SQL).unwrap();
+            raw.execute_batch(
+                "INSERT INTO document (rel_path, \"key\", kind, status, owners, tags, confidence, \
+                 sha256) VALUES ('docs/a.md', 'k-a', 'spec', 'draft', '[]', '[]', 0.5, 'abc'); \
+                 INSERT INTO edge (src_rel_path, ord, line, kind) VALUES ('docs/a.md', 0, 1, 'file'); \
+                 INSERT INTO skipped (rel_path, reason) VALUES ('z.md', 'symlink'); \
+                 INSERT INTO parse_cache VALUES ('abc', 'docs/a.md', 'r', '1', NULL, '{}', '[]', \
+                 '[]', '[]'); \
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        }
+
+        let conn = open(&path).expect("a real v1 file is rebuilt");
+        assert_eq!(user_version(&conn), 2);
+        assert_eq!(table_names(&conn), V2_TABLES);
+        for table in V2_TABLES {
+            let rows: i64 = conn
+                .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(rows, 0, "{table} is empty after the rebuild");
+        }
+        assert!(column_names(&conn, "edge").contains(&"rel".to_owned()));
+        assert!(column_names(&conn, "parse_cache").contains(&"facts_json".to_owned()));
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+        let after_first = master_snapshot(&conn);
+        drop(conn);
+
+        let conn = open(&path).unwrap();
+        assert_eq!(user_version(&conn), 2);
+        assert_eq!(
+            master_snapshot(&conn),
+            after_first,
+            "a second open changes nothing"
         );
     }
 
