@@ -2419,13 +2419,21 @@ async fn read_file_binary_content_does_not_panic() {
 #[tokio::test]
 async fn tree_nonexistent_path_errors() {
     let ctx = test_ctx().await;
-    let result = Tree
+    // This test used to assert that the listing was empty ("WalkBuilder returns empty for
+    // nonexistent paths"), which pinned the very defect its name denies: a mistyped path was
+    // indistinguishable from an empty directory. A missing path is now a recoverable refusal.
+    let err = Tree
         .call(json!({ "path": "/nonexistent/directory" }), &ctx)
         .await
-        .unwrap();
-    // WalkBuilder returns empty for nonexistent paths
-    let entries = result["entries"].as_array().unwrap();
-    assert!(entries.is_empty());
+        .expect_err("a path that does not exist must be refused, not listed as empty");
+    let refusal = err
+        .downcast_ref::<crate::tools::RecoverableError>()
+        .unwrap_or_else(|| panic!("a missing path is recoverable, got: {err:#}"));
+    assert!(
+        refusal.message.contains("path not found"),
+        "got: {}",
+        refusal.message
+    );
 }
 
 #[tokio::test]

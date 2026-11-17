@@ -10,8 +10,8 @@ time_scope: open-ended
 entry_prefix:
 - F
 - W
-entry_high_water_F: 240
-entry_high_water_W: 159
+entry_high_water_F: 241
+entry_high_water_W: 160
 ---
 
 # Session Log — Bug-Fix Work Stream
@@ -91,6 +91,7 @@ entry_high_water_W: 159
 | F-208 | 2026-11-01 | low | plan-drift | fixed-verified | **A bug record's guessed cause for a remedy that did not clear a refusal pointed at a row state, and the cause was the lookup running again** — `581b05bbe41134f3`: the remedy's reset then add makes the row `retained`, and a named add clears a `retained` row and runs the file-level write lookup again on an unchanged record; fixed in `300cb29ea`. |
 |----|------|---------:|----------|--------|-------|
 | F-240 | 2026-11-14 | med | measurement | fixed-verified | **A join script's windows began two hours early because datetime.timestamp() on a naive UTC value assumes local time** — the listed overlapping jobs began 90 minutes before the row; fixed with timedelta and checked against date -u; result in bug 20927ccfe293c34e. |
+| F-241 | 2026-11-17 | med | scout-scope | fixed-verified | **The pre-edit scout grepped for callers of `max_depth: 0` but not for tests asserting an empty listing for a missing path; one test pinned the defect and cost a gate cycle** — see docs/issues/2026-11-17-tree-answers-empty-for-a-missing-path-a-file-and-max-depth-zero.md. |
 | F-238 | 2026-11-12 | med | process | open | **A confirmation run executed my mutant binary because a scratch build shared the slot with the real tree** — 16 tests failed in all 20 iterations; the baked-in manifest path and the test count gave it away; with-slot evicts by checkout, not by --manifest-path. |
 | F-237 | 2026-11-12 | med | measurement | promoted-to-bug-tracker | **A load job I ran on the shared host overlapped the timeouts that a later decision counted** — all three timed_out rows of 2026-11-12 fall in my burn.py windows, two more beside other sessions' gates; coincidence, not shown as cause; bug 20927ccfe293c34e. |
 | F-239 | 2026-11-14 | low | plan-prose | mitigated | **The atomic-write-door plan names no refusal from `atomic_write`'s protected-config check, states a door signature the code does not have, and counts references as call sites** — recon before Task 1; none blocks the plan; ruling R1 in the SDD ledger. |
@@ -318,6 +319,7 @@ entry_high_water_W: 159
 |----|------|-------:|---------|----------------|--------|
 | W-158 | 2026-11-08 | med | **Send input-shaping fixes to a stronger-model reviewer who runs the new test red against the reverted change.** The first-segment fix for the oversized memory anchor query was rejected for a heading-only query. | `6a89e8366` would have merged and `cross_embed_memory` would have searched with a heading-only query for such memories; the number of such memories was not measured. | validated |
 | W-159 | 2026-11-11 | med | **A pre-edit scout found that `TargetRenamed` carries a name path (`Agent/new`), which the planned `renamed_name_path(name_path, new_name)` hint would have prefixed twice.** Bug `c9abdc5134bebce1`. | Inferred, not run: a hint giving `Agent/Agent/new` as the second call's `symbol=` for every nested target; 17 of 46 measured refusals target a `tests/...` symbol. | validated |
+| W-160 | 2026-11-17 | med | **A pre-edit scout found that the missing-path refusal `tree` lacked already existed as a shared helper (`describe_neighbours_of_missing`), so the fix reused it, and found the reason not to reuse `resolve_read_path_for` whole (it changes the `"."` case).** See docs/issues/2026-11-17-tree-answers-empty-for-a-missing-path-a-file-and-max-depth-zero.md. | Inferred, not run: a third copy of the existence check and its wording in two functions, no neighbour naming, and a changed `"."` behaviour with no active project. | validated |
 | W-153 | 2026-10-31 | med | **A scout of the gate pool's test runner found that only CI runs `tests/gate-slot.sh`, through a hit the default grep hid.** Re-running a negative search with `include_hidden=true` before planning on it. | Inferred: a plan that trusted gate-green for the pool tests and read real `/sys/block/zram*` in CI. Observed: 23 files without `.github/workflows/ci.yml`, 27 with it. | validated |
 | W-151 | 2026-10-14 | med | **A plan to create a default file when absent would have written into the real home directory from six tests that leave the path field unset.** Reading every caller of the seam with the field `None`, not only the production caller. | Inferred: green on a machine where the file exists, silent file creation on a clean runner. Observed: six `db`-only `LibrarianEnv` blocks in `src/server.rs`. | validated |
 | W-152 | 2026-10-31 | med | **A write-side fix was verified live on a record I could restore byte for byte.** Clean in git, one call, read the diff, restore, clean again; then the `unverified:` caveat was discharged. | Inferred: gate-green read as live-verified on a server that predated the fix, or a real bug left closed by the probe. Observed: `closed: 2026-10-31` written by a status-only call, `git status` empty after the restore. | validated |
@@ -18478,6 +18480,28 @@ Also seen, not a gap: background children run in their own process group (`proce
 
 
 **Status:** fixed-verified — the corrected window was checked against the clock and against the listed jobs of one row; the first table was never recorded.
+
+## F-241 — The pre-edit scout looked for callers of the changed behaviour but not for tests that assert it — one existing test pinned the defect and cost a 12-minute gate cycle
+
+**Valid:** dated 2026-11-17
+
+**Observed:** fixing `tree` (a missing path, a file path and `max_depth=0` answered as an empty listing), the scout read `list_dir_impl`, `glob_impl`, the schema and grepped for callers passing `max_depth: 0`. It did not grep for tests asserting an empty listing for a missing path. The first full gate was red in both lanes on exactly one test, `tools::edit_file::tests::tree_nonexistent_path_errors`: named for the intended contract, but its body asserted `entries.is_empty()` under the comment "WalkBuilder returns empty for nonexistent paths". The new behaviour was correct; the test fixed the defect in place, so the old suite was green for it.
+
+**Cost:** one full gate cycle (12 min) plus a second one after the test was rewritten. The failure was one line, named the test, and was cheap to read; the cost was the late discovery.
+
+**Fix:** rewrote the test to assert the refusal its name states and left the history in a comment; the second gate was green on both lanes (11041 and 11139 passed). Before changing behaviour, grep the tests for the behaviour being removed (`is_empty()` next to a missing-path comment), not only for the callers of the input.
+
+**Counterfactual for the next scout:** `grep "nonexistent" src/tools/edit_file/tests.rs` before the edit finds it in one call.
+
+## W-160 — A pre-edit scout found that the missing-path refusal `tree` lacked already existed as a shared helper, so the fix reused it instead of adding a third copy
+
+**Valid:** dated 2026-11-17
+
+**Pattern:** before writing the check, read how the sibling tools refuse the same input. `symbols` resolves a path through `resolve_read_path_for`, which tests existence and builds a `RecoverableError` whose hint comes from `describe_neighbours_of_missing` (`src/fs/mod.rs`); `read_file` has its own `not_found_hint`. `tree` called only `validate_read_path` and handed a missing root to a walker that swallows its error.
+
+**Counterfactual:** inferred, not run: a new `if !path.exists()` with freshly worded text inside `list_dir_impl` and again in `glob_impl`, a third phrasing of "path not found" beside the two that exist, and no neighbour naming. Reading the two symbols first gave the exact message shape (`path not found: <path>`), the reusable `describe_neighbours_of_missing`, and the reason not to reuse `resolve_read_path_for` whole: it special-cases `"."` through `require_project_root_for`, which would have changed behaviour with no active project. So only the helper was reused and `validate_read_path` stayed as it was.
+
+**Status:** validated
 
 ## Template for new entries
 
