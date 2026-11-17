@@ -92,12 +92,23 @@ async fn list_dir_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         project_root.as_deref(),
         &security,
     )?;
+    let path = require_directory(path)?;
     let recursive = parse_bool_param(&input["recursive"]);
     let include_hidden = input
         .get("include_hidden")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let explicit_max_depth = optional_u64_param(&input, "max_depth").map(|d| d as usize);
+    if explicit_max_depth == Some(0) {
+        // The schema declares `minimum: 1`. A zero-depth walk yields only the root, which the
+        // listing filters out, so it used to be answered as "(empty directory)".
+        return Err(RecoverableError::with_hint(
+            "max_depth must be at least 1",
+            "1 lists the children of `path` only (the default); omit it, or pass recursive=true \
+             for deeper levels.",
+        )
+        .into());
+    }
     let guard = OutputGuard::from_input(&input);
 
     // Determine requested depth:
@@ -277,6 +288,36 @@ fn withheld_note_truncated(lead: &str, body: &str, never: &str) -> String {
     )
 }
 
+/// A `path` argument must name a directory that exists.
+///
+/// The walker swallows the error of a root it cannot open and yields nothing for a file, so
+/// without this check a mistyped path and a file path both came back as `(empty directory)`
+/// (listing) or `0 files` (glob) — a wrong answer shaped like a right one. A missing path is
+/// refused the way `symbols` and `read_file` refuse it, naming what exists beside it.
+fn require_directory(path: std::path::PathBuf) -> Result<std::path::PathBuf> {
+    if !path.exists() {
+        let mut hint = String::from("Call tree on the parent directory to see what exists there.");
+        if let Some(neighbours) = crate::fs::describe_neighbours_of_missing(&path) {
+            hint.push(' ');
+            hint.push_str(&neighbours);
+        }
+        return Err(RecoverableError::with_hint(
+            format!("path not found: {}", path.display()),
+            hint,
+        )
+        .into());
+    }
+    if !path.is_dir() {
+        return Err(RecoverableError::with_hint(
+            format!("not a directory: {}", path.display()),
+            "tree lists directories. Use read_file(path) to read this file or symbols(path) to \
+             list its symbols.",
+        )
+        .into());
+    }
+    Ok(path)
+}
+
 /// Glob search under `path`.
 ///
 /// **Hidden entries are admitted into the walk and classified afterwards, rather than
@@ -314,6 +355,7 @@ async fn glob_impl(input: Value, ctx: &ToolContext) -> Result<Value> {
         project_root.as_deref(),
         &security,
     )?;
+    let search_path = require_directory(search_path)?;
     let max = optional_u64_param(&input, "limit").unwrap_or(100) as usize;
     let include_hidden = input
         .get("include_hidden")
@@ -1027,5 +1069,104 @@ mod tests {
             text.contains("foo.rs") && text.contains("bar.rs"),
             "text must list both matched files, got: {text}"
         );
+    }
+
+    /// The message and hint a caller would read from a recoverable refusal. Fails the test
+    /// if the refusal is a fatal error instead, since that aborts sibling calls in a turn.
+    fn said(err: &anyhow::Error) -> (String, String) {
+        let e = err
+            .downcast_ref::<RecoverableError>()
+            .unwrap_or_else(|| panic!("expected a RecoverableError, got: {err:#}"));
+        (e.message.clone(), e.hint().unwrap_or_default().to_string())
+    }
+
+    /// A path that does not exist used to list as `(empty directory)` in both modes: the walker
+    /// swallows the error of a missing root, so the caller could not tell a typo from an empty
+    /// directory. `symbols` and `read_file` already refuse such a path and name its neighbours.
+    #[tokio::test]
+    async fn a_missing_path_is_refused_naming_the_nearest_existing_directory() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("services")).unwrap();
+        let missing = dir.path().join("absent");
+        let missing = missing.to_str().unwrap();
+
+        for input in [
+            json!({ "path": missing }),
+            json!({ "path": missing, "glob": "*.rs" }),
+        ] {
+            let err = Tree
+                .call(input.clone(), &ctx)
+                .await
+                .expect_err(&format!("a missing path must not list as empty: {input}"));
+            let (message, hint) = said(&err);
+            assert!(message.contains("path not found"), "got: {message}");
+            assert!(
+                hint.contains("Nearest existing directory"),
+                "the hint must say what exists, got: {hint}"
+            );
+        }
+    }
+
+    /// A file is not a directory: the walker yields only the root itself, which the listing
+    /// filters out, so a file path used to come back as `(empty directory)` / `0 files`.
+    #[tokio::test]
+    async fn a_file_path_is_refused_as_not_a_directory() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let file = file.to_str().unwrap();
+
+        for input in [
+            json!({ "path": file }),
+            json!({ "path": file, "glob": "*.rs" }),
+        ] {
+            let err = Tree
+                .call(input.clone(), &ctx)
+                .await
+                .expect_err(&format!("a file path must not list as empty: {input}"));
+            let (message, hint) = said(&err);
+            assert!(message.contains("not a directory"), "got: {message}");
+            assert!(
+                hint.contains("read_file") && hint.contains("symbols"),
+                "the hint must point at the tools that read a file, got: {hint}"
+            );
+        }
+    }
+
+    /// The schema declares `max_depth` with `minimum: 1`; zero used to be accepted and
+    /// answered `(empty directory)` for a directory that is not empty.
+    #[tokio::test]
+    async fn max_depth_zero_is_refused_like_the_schema_minimum() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("foo.rs"), "").unwrap();
+
+        let err = Tree
+            .call(
+                json!({ "path": dir.path().to_str().unwrap(), "max_depth": 0 }),
+                &ctx,
+            )
+            .await
+            .expect_err("max_depth=0 lists nothing, so it must be refused, not answered as empty");
+        let (message, _) = said(&err);
+        assert!(message.contains("max_depth"), "got: {message}");
+    }
+
+    /// Guard against over-fixing: a directory that exists and is empty is still an empty
+    /// listing, not an error. Passes before and after the change.
+    #[tokio::test]
+    async fn an_existing_empty_directory_still_lists_as_empty() {
+        let ctx = test_ctx().await;
+        let dir = tempdir().unwrap();
+
+        let result = Tree
+            .call(json!({ "path": dir.path().to_str().unwrap() }), &ctx)
+            .await
+            .expect("an empty directory is a valid listing");
+
+        assert_eq!(result["entries"].as_array().map(|a| a.len()), Some(0));
+        assert_eq!(format_list_dir(&result), "(empty directory)");
     }
 }
