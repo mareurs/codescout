@@ -1,10 +1,11 @@
 ---
 id: '8c9a21b468d38b9f'
 kind: bug
-status: open
+status: fixed
 title: 'BUG: tree answers "(empty directory)" / "0 files" for a missing path, a file path and max_depth=0'
 tags:
 - cluster/unclassified
+closed: 2026-11-17
 opened: 2026-11-17
 ---
 
@@ -52,7 +53,12 @@ Calls in Symptom. Failing first run of the new tests (before the fix), each pani
 
 Not fixed here: `limit=0`, which is shared output-guard handling across tools (`symbols`, `semantic_search`) and needs its own change.
 
-Fix commit: not committed yet.
+Fix commit: `e616031e2` on `experiments-albert` (SHA and patch-id under Fix provenance).
+
+## Fix provenance
+
+- **SHA:** `e616031e2` (`experiments-albert`)
+- **patch-id:** `65af1b044bdf`
 
 ## Tests added
 `src/tools/tree.rs`: `a_missing_path_is_refused_naming_the_nearest_existing_directory` (:1085), `a_file_path_is_refused_as_not_a_directory` (:1112), `max_depth_zero_is_refused_like_the_schema_minimum` (:1139), and a guard that must keep passing, `an_existing_empty_directory_still_lists_as_empty` (:1158). Each of the first three fails before the change and passes after (both modes in the first two). `src/tools/edit_file/tests.rs`: `tree_nonexistent_path_errors` rewritten to assert the refusal it is named for.
@@ -61,7 +67,8 @@ Fix commit: not committed yet.
 Check the path with `symbols(path)` or `read_file` before trusting an empty `tree` answer.
 
 ## Resume
-Commit when asked; then write `## Fix provenance` with the SHA and `git patch-id --stable` of the commit, set `status: fixed` and `closed:`, and move to `docs/issues/archive/` with `doc(action="move")`. Open a separate bug for `limit=0`.
+
+N/A — fixed. Open a separate bug for `limit=0`, which this change does not cover.
 
 ## References
 `src/tools/tree.rs`, `src/fs/mod.rs` (`describe_neighbours_of_missing`), field finding A-005 (experiments-albert feedback).
