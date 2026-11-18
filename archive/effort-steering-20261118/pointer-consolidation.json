@@ -1,0 +1,385 @@
+{
+  "groups": [
+    {
+      "key": "2026-11-04-hint-authority-effort-comparison",
+      "paths": [
+        "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md",
+        "docs/trackers/effort-steering/plans/2026-11-04-hint-authority-effort-comparison.md"
+      ],
+      "keep": "docs/trackers/effort-steering/plans/2026-11-04-hint-authority-effort-comparison.md",
+      "remove": [
+        "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md"
+      ]
+    },
+    {
+      "key": "2026-11-04-hint-authority-functional-pilot",
+      "paths": [
+        "docs/research/2026-11-04-hint-authority-functional-pilot.md",
+        "docs/trackers/effort-steering/reports/2026-11-04-hint-authority-functional-pilot.md"
+      ],
+      "keep": "docs/trackers/effort-steering/reports/2026-11-04-hint-authority-functional-pilot.md",
+      "remove": [
+        "docs/research/2026-11-04-hint-authority-functional-pilot.md"
+      ]
+    },
+    {
+      "key": "2026-11-04-worker-context-verification",
+      "paths": [
+        "docs/research/2026-11-04-worker-context-verification.md",
+        "docs/trackers/effort-steering/reports/2026-11-04-worker-context-verification.md"
+      ],
+      "keep": "docs/trackers/effort-steering/reports/2026-11-04-worker-context-verification.md",
+      "remove": [
+        "docs/research/2026-11-04-worker-context-verification.md"
+      ]
+    },
+    {
+      "key": "2026-11-05-agent-background-continuation",
+      "paths": [
+        "docs/research/2026-11-05-agent-background-continuation.md",
+        "docs/superpowers/plans/2026-11-05-agent-background-continuation.md"
+      ],
+      "keep": "docs/superpowers/plans/2026-11-05-agent-background-continuation.md",
+      "remove": [
+        "docs/research/2026-11-05-agent-background-continuation.md"
+      ]
+    },
+    {
+      "key": "2026-11-05-complete-workflow-calibration",
+      "paths": [
+        "docs/research/2026-11-05-complete-workflow-calibration.md",
+        "docs/superpowers/plans/2026-11-05-complete-workflow-calibration.md"
+      ],
+      "keep": "docs/superpowers/plans/2026-11-05-complete-workflow-calibration.md",
+      "remove": [
+        "docs/research/2026-11-05-complete-workflow-calibration.md"
+      ]
+    },
+    {
+      "key": "2026-11-05-effort-steering-situation",
+      "paths": [
+        "docs/research/2026-11-05-effort-steering-situation.md",
+        "docs/trackers/effort-steering/reports/2026-11-05-effort-steering-situation.md"
+      ],
+      "keep": "docs/trackers/effort-steering/reports/2026-11-05-effort-steering-situation.md",
+      "remove": [
+        "docs/research/2026-11-05-effort-steering-situation.md"
+      ]
+    },
+    {
+      "key": "2026-11-05-verified-worker-composition",
+      "paths": [
+        "docs/research/2026-11-05-verified-worker-composition.md",
+        "docs/superpowers/plans/2026-11-05-verified-worker-composition.md"
+      ],
+      "keep": "docs/superpowers/plans/2026-11-05-verified-worker-composition.md",
+      "remove": [
+        "docs/research/2026-11-05-verified-worker-composition.md"
+      ]
+    },
+    {
+      "key": "2026-11-05-verified-worker-runtime",
+      "paths": [
+        "docs/research/2026-11-05-verified-worker-runtime.md",
+        "docs/superpowers/plans/2026-11-05-verified-worker-runtime.md",
+        "docs/trackers/effort-steering/reports/2026-11-05-verified-worker-runtime.md"
+      ],
+      "keep": "docs/trackers/effort-steering/reports/2026-11-05-verified-worker-runtime.md",
+      "remove": [
+        "docs/research/2026-11-05-verified-worker-runtime.md",
+        "docs/superpowers/plans/2026-11-05-verified-worker-runtime.md"
+      ]
+    },
+    {
+      "key": "2026-11-06-prospective-grader-policy",
+      "paths": [
+        "docs/research/2026-11-06-prospective-grader-policy.md",
+        "docs/superpowers/plans/2026-11-06-prospective-grader-policy.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-prospective-grader-policy.md"
+      ],
+      "keep": "docs/trackers/effort-steering/plans/2026-11-06-prospective-grader-policy.md",
+      "remove": [
+        "docs/research/2026-11-06-prospective-grader-policy.md",
+        "docs/superpowers/plans/2026-11-06-prospective-grader-policy.md"
+      ]
+    },
+    {
+      "key": "2026-11-06-semantic-contract-adapter",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-adapter.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-adapter.md"
+      ],
+      "keep": "docs/superpowers/plans/2026-11-06-semantic-contract-adapter.md",
+      "remove": [
+        "docs/research/2026-11-06-semantic-contract-adapter.md"
+      ]
+    },
+    {
+      "key": "2026-11-06-semantic-contract-controller",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-controller.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-controller.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-controller.md"
+      ],
+      "keep": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-controller.md",
+      "remove": [
+        "docs/research/2026-11-06-semantic-contract-controller.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-controller.md"
+      ]
+    },
+    {
+      "key": "2026-11-06-semantic-contract-plugin-binding",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-plugin-binding.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-plugin-binding.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-plugin-binding.md"
+      ],
+      "keep": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-plugin-binding.md",
+      "remove": [
+        "docs/research/2026-11-06-semantic-contract-plugin-binding.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-plugin-binding.md"
+      ]
+    },
+    {
+      "key": "2026-11-06-semantic-contract-runtime",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-runtime.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-runtime.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-runtime.md",
+        "docs/trackers/effort-steering/reports/2026-11-06-semantic-contract-runtime.md"
+      ],
+      "keep": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-runtime.md",
+      "remove": [
+        "docs/research/2026-11-06-semantic-contract-runtime.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-runtime.md",
+        "docs/trackers/effort-steering/reports/2026-11-06-semantic-contract-runtime.md"
+      ]
+    },
+    {
+      "key": "2026-11-06-semantic-contract-wire",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-wire.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-wire.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-wire.md"
+      ],
+      "keep": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-wire.md",
+      "remove": [
+        "docs/research/2026-11-06-semantic-contract-wire.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-wire.md"
+      ]
+    },
+    {
+      "key": "2026-11-07-baseline-first-oracle",
+      "paths": [
+        "docs/research/2026-11-07-baseline-first-oracle.md",
+        "docs/superpowers/plans/2026-11-07-baseline-first-oracle.md"
+      ],
+      "keep": "docs/superpowers/plans/2026-11-07-baseline-first-oracle.md",
+      "remove": [
+        "docs/research/2026-11-07-baseline-first-oracle.md"
+      ]
+    },
+    {
+      "key": "2026-11-07-blind-contrast-verifier",
+      "paths": [
+        "docs/research/2026-11-07-blind-contrast-verifier.md",
+        "docs/superpowers/plans/2026-11-07-blind-contrast-verifier.md"
+      ],
+      "keep": "docs/superpowers/plans/2026-11-07-blind-contrast-verifier.md",
+      "remove": [
+        "docs/research/2026-11-07-blind-contrast-verifier.md"
+      ]
+    },
+    {
+      "key": "2026-11-07-differential-oracle",
+      "paths": [
+        "docs/research/2026-11-07-differential-oracle.md",
+        "docs/superpowers/plans/2026-11-07-differential-oracle.md"
+      ],
+      "keep": "docs/superpowers/plans/2026-11-07-differential-oracle.md",
+      "remove": [
+        "docs/research/2026-11-07-differential-oracle.md"
+      ]
+    },
+    {
+      "key": "2026-11-08-oracle-uncertainty-resolution",
+      "paths": [
+        "docs/research/2026-11-08-oracle-uncertainty-resolution.md",
+        "docs/superpowers/plans/2026-11-08-oracle-uncertainty-resolution.md"
+      ],
+      "keep": "docs/superpowers/plans/2026-11-08-oracle-uncertainty-resolution.md",
+      "remove": [
+        "docs/research/2026-11-08-oracle-uncertainty-resolution.md"
+      ]
+    },
+    {
+      "key": "2026-11-09-onboarding-readiness-audit",
+      "paths": [
+        "docs/research/2026-11-09-onboarding-readiness-audit.md",
+        "docs/trackers/effort-steering/reports/2026-11-09-onboarding-readiness-audit.md"
+      ],
+      "keep": "docs/trackers/effort-steering/reports/2026-11-09-onboarding-readiness-audit.md",
+      "remove": [
+        "docs/research/2026-11-09-onboarding-readiness-audit.md"
+      ]
+    }
+  ],
+  "remove": [
+    {
+      "path": "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md",
+      "id": "c3836cf55c7b4b87",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-04-hint-authority-effort-comparison.md",
+      "key": "2026-11-04-hint-authority-effort-comparison"
+    },
+    {
+      "path": "docs/research/2026-11-04-hint-authority-functional-pilot.md",
+      "id": "f789fec3ea4737ba",
+      "canonical_pointer": "docs/trackers/effort-steering/reports/2026-11-04-hint-authority-functional-pilot.md",
+      "key": "2026-11-04-hint-authority-functional-pilot"
+    },
+    {
+      "path": "docs/research/2026-11-04-worker-context-verification.md",
+      "id": "c7aa0fa96d0484fd",
+      "canonical_pointer": "docs/trackers/effort-steering/reports/2026-11-04-worker-context-verification.md",
+      "key": "2026-11-04-worker-context-verification"
+    },
+    {
+      "path": "docs/research/2026-11-05-agent-background-continuation.md",
+      "id": "7447904928197ebf",
+      "canonical_pointer": "docs/superpowers/plans/2026-11-05-agent-background-continuation.md",
+      "key": "2026-11-05-agent-background-continuation"
+    },
+    {
+      "path": "docs/research/2026-11-05-complete-workflow-calibration.md",
+      "id": "d7d2a509aa58c121",
+      "canonical_pointer": "docs/superpowers/plans/2026-11-05-complete-workflow-calibration.md",
+      "key": "2026-11-05-complete-workflow-calibration"
+    },
+    {
+      "path": "docs/research/2026-11-05-effort-steering-situation.md",
+      "id": "c5dc7388ef84e4b5",
+      "canonical_pointer": "docs/trackers/effort-steering/reports/2026-11-05-effort-steering-situation.md",
+      "key": "2026-11-05-effort-steering-situation"
+    },
+    {
+      "path": "docs/research/2026-11-05-verified-worker-composition.md",
+      "id": "0185b660ea701471",
+      "canonical_pointer": "docs/superpowers/plans/2026-11-05-verified-worker-composition.md",
+      "key": "2026-11-05-verified-worker-composition"
+    },
+    {
+      "path": "docs/research/2026-11-05-verified-worker-runtime.md",
+      "id": "328a44811943317e",
+      "canonical_pointer": "docs/trackers/effort-steering/reports/2026-11-05-verified-worker-runtime.md",
+      "key": "2026-11-05-verified-worker-runtime"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-05-verified-worker-runtime.md",
+      "id": "ef4f575ec0760ac0",
+      "canonical_pointer": "docs/trackers/effort-steering/reports/2026-11-05-verified-worker-runtime.md",
+      "key": "2026-11-05-verified-worker-runtime"
+    },
+    {
+      "path": "docs/research/2026-11-06-prospective-grader-policy.md",
+      "id": "a812bb15c2d91b80",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-prospective-grader-policy.md",
+      "key": "2026-11-06-prospective-grader-policy"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-06-prospective-grader-policy.md",
+      "id": "93c543c96e2d7766",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-prospective-grader-policy.md",
+      "key": "2026-11-06-prospective-grader-policy"
+    },
+    {
+      "path": "docs/research/2026-11-06-semantic-contract-adapter.md",
+      "id": "5fed013334eb8739",
+      "canonical_pointer": "docs/superpowers/plans/2026-11-06-semantic-contract-adapter.md",
+      "key": "2026-11-06-semantic-contract-adapter"
+    },
+    {
+      "path": "docs/research/2026-11-06-semantic-contract-controller.md",
+      "id": "816523a4aa18e4dc",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-controller.md",
+      "key": "2026-11-06-semantic-contract-controller"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-06-semantic-contract-controller.md",
+      "id": "7b38d45d1bb07e12",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-controller.md",
+      "key": "2026-11-06-semantic-contract-controller"
+    },
+    {
+      "path": "docs/research/2026-11-06-semantic-contract-plugin-binding.md",
+      "id": "ecfa1bfc3103c793",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-plugin-binding.md",
+      "key": "2026-11-06-semantic-contract-plugin-binding"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-06-semantic-contract-plugin-binding.md",
+      "id": "dd4f8b4f57d9c59c",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-plugin-binding.md",
+      "key": "2026-11-06-semantic-contract-plugin-binding"
+    },
+    {
+      "path": "docs/research/2026-11-06-semantic-contract-runtime.md",
+      "id": "b29efd60d862d8fc",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-runtime.md",
+      "key": "2026-11-06-semantic-contract-runtime"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-06-semantic-contract-runtime.md",
+      "id": "d36dd9faa8682607",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-runtime.md",
+      "key": "2026-11-06-semantic-contract-runtime"
+    },
+    {
+      "path": "docs/trackers/effort-steering/reports/2026-11-06-semantic-contract-runtime.md",
+      "id": "20da31b72242257c",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-runtime.md",
+      "key": "2026-11-06-semantic-contract-runtime"
+    },
+    {
+      "path": "docs/research/2026-11-06-semantic-contract-wire.md",
+      "id": "102abe33732e2918",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-wire.md",
+      "key": "2026-11-06-semantic-contract-wire"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-06-semantic-contract-wire.md",
+      "id": "d25ae1f4beca1f9c",
+      "canonical_pointer": "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-wire.md",
+      "key": "2026-11-06-semantic-contract-wire"
+    },
+    {
+      "path": "docs/research/2026-11-07-baseline-first-oracle.md",
+      "id": "bf3e845faf0b862a",
+      "canonical_pointer": "docs/superpowers/plans/2026-11-07-baseline-first-oracle.md",
+      "key": "2026-11-07-baseline-first-oracle"
+    },
+    {
+      "path": "docs/research/2026-11-07-blind-contrast-verifier.md",
+      "id": "323832c9f7e4015f",
+      "canonical_pointer": "docs/superpowers/plans/2026-11-07-blind-contrast-verifier.md",
+      "key": "2026-11-07-blind-contrast-verifier"
+    },
+    {
+      "path": "docs/research/2026-11-07-differential-oracle.md",
+      "id": "7fe8365ee7e7e602",
+      "canonical_pointer": "docs/superpowers/plans/2026-11-07-differential-oracle.md",
+      "key": "2026-11-07-differential-oracle"
+    },
+    {
+      "path": "docs/research/2026-11-08-oracle-uncertainty-resolution.md",
+      "id": "6fb64036149fee6b",
+      "canonical_pointer": "docs/superpowers/plans/2026-11-08-oracle-uncertainty-resolution.md",
+      "key": "2026-11-08-oracle-uncertainty-resolution"
+    },
+    {
+      "path": "docs/research/2026-11-09-onboarding-readiness-audit.md",
+      "id": "5c93c746240eeea1",
+      "canonical_pointer": "docs/trackers/effort-steering/reports/2026-11-09-onboarding-readiness-audit.md",
+      "key": "2026-11-09-onboarding-readiness-audit"
+    }
+  ]
+}

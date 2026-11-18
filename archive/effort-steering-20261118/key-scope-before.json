@@ -1,0 +1,238 @@
+{
+  "checked": true,
+  "mode": "staged",
+  "exit_code": 1,
+  "in_space": 2683,
+  "outside_count": 222,
+  "problems": [
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-04-hint-authority-effort-comparison",
+      "paths": [
+        "docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md",
+        "docs/trackers/effort-steering/plans/2026-11-04-hint-authority-effort-comparison.md"
+      ],
+      "message": "the key 2026-11-04-hint-authority-effort-comparison is held by 2 documents (docs/superpowers/plans/2026-11-04-hint-authority-effort-comparison.md, docs/trackers/effort-steering/plans/2026-11-04-hint-authority-effort-comparison.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-04-hint-authority-functional-pilot",
+      "paths": [
+        "docs/research/2026-11-04-hint-authority-functional-pilot.md",
+        "docs/trackers/effort-steering/reports/2026-11-04-hint-authority-functional-pilot.md"
+      ],
+      "message": "the key 2026-11-04-hint-authority-functional-pilot is held by 2 documents (docs/research/2026-11-04-hint-authority-functional-pilot.md, docs/trackers/effort-steering/reports/2026-11-04-hint-authority-functional-pilot.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-04-worker-context-verification",
+      "paths": [
+        "docs/research/2026-11-04-worker-context-verification.md",
+        "docs/trackers/effort-steering/reports/2026-11-04-worker-context-verification.md"
+      ],
+      "message": "the key 2026-11-04-worker-context-verification is held by 2 documents (docs/research/2026-11-04-worker-context-verification.md, docs/trackers/effort-steering/reports/2026-11-04-worker-context-verification.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-05-agent-background-continuation",
+      "paths": [
+        "docs/research/2026-11-05-agent-background-continuation.md",
+        "docs/superpowers/plans/2026-11-05-agent-background-continuation.md"
+      ],
+      "message": "the key 2026-11-05-agent-background-continuation is held by 2 documents (docs/research/2026-11-05-agent-background-continuation.md, docs/superpowers/plans/2026-11-05-agent-background-continuation.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-05-complete-workflow-calibration",
+      "paths": [
+        "docs/research/2026-11-05-complete-workflow-calibration.md",
+        "docs/superpowers/plans/2026-11-05-complete-workflow-calibration.md"
+      ],
+      "message": "the key 2026-11-05-complete-workflow-calibration is held by 2 documents (docs/research/2026-11-05-complete-workflow-calibration.md, docs/superpowers/plans/2026-11-05-complete-workflow-calibration.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-05-effort-steering-situation",
+      "paths": [
+        "docs/research/2026-11-05-effort-steering-situation.md",
+        "docs/trackers/effort-steering/reports/2026-11-05-effort-steering-situation.md"
+      ],
+      "message": "the key 2026-11-05-effort-steering-situation is held by 2 documents (docs/research/2026-11-05-effort-steering-situation.md, docs/trackers/effort-steering/reports/2026-11-05-effort-steering-situation.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-05-verified-worker-composition",
+      "paths": [
+        "docs/research/2026-11-05-verified-worker-composition.md",
+        "docs/superpowers/plans/2026-11-05-verified-worker-composition.md"
+      ],
+      "message": "the key 2026-11-05-verified-worker-composition is held by 2 documents (docs/research/2026-11-05-verified-worker-composition.md, docs/superpowers/plans/2026-11-05-verified-worker-composition.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-05-verified-worker-runtime",
+      "paths": [
+        "docs/research/2026-11-05-verified-worker-runtime.md",
+        "docs/superpowers/plans/2026-11-05-verified-worker-runtime.md",
+        "docs/trackers/effort-steering/reports/2026-11-05-verified-worker-runtime.md"
+      ],
+      "message": "the key 2026-11-05-verified-worker-runtime is held by 3 documents (docs/research/2026-11-05-verified-worker-runtime.md, docs/superpowers/plans/2026-11-05-verified-worker-runtime.md, docs/trackers/effort-steering/reports/2026-11-05-verified-worker-runtime.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-06-prospective-grader-policy",
+      "paths": [
+        "docs/research/2026-11-06-prospective-grader-policy.md",
+        "docs/superpowers/plans/2026-11-06-prospective-grader-policy.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-prospective-grader-policy.md"
+      ],
+      "message": "the key 2026-11-06-prospective-grader-policy is held by 3 documents (docs/research/2026-11-06-prospective-grader-policy.md, docs/superpowers/plans/2026-11-06-prospective-grader-policy.md, docs/trackers/effort-steering/plans/2026-11-06-prospective-grader-policy.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-06-semantic-contract-adapter",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-adapter.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-adapter.md"
+      ],
+      "message": "the key 2026-11-06-semantic-contract-adapter is held by 2 documents (docs/research/2026-11-06-semantic-contract-adapter.md, docs/superpowers/plans/2026-11-06-semantic-contract-adapter.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-06-semantic-contract-controller",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-controller.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-controller.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-controller.md"
+      ],
+      "message": "the key 2026-11-06-semantic-contract-controller is held by 3 documents (docs/research/2026-11-06-semantic-contract-controller.md, docs/superpowers/plans/2026-11-06-semantic-contract-controller.md, docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-controller.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-06-semantic-contract-plugin-binding",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-plugin-binding.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-plugin-binding.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-plugin-binding.md"
+      ],
+      "message": "the key 2026-11-06-semantic-contract-plugin-binding is held by 3 documents (docs/research/2026-11-06-semantic-contract-plugin-binding.md, docs/superpowers/plans/2026-11-06-semantic-contract-plugin-binding.md, docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-plugin-binding.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-06-semantic-contract-runtime",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-runtime.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-runtime.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-runtime.md",
+        "docs/trackers/effort-steering/reports/2026-11-06-semantic-contract-runtime.md"
+      ],
+      "message": "the key 2026-11-06-semantic-contract-runtime is held by 4 documents (docs/research/2026-11-06-semantic-contract-runtime.md, docs/superpowers/plans/2026-11-06-semantic-contract-runtime.md, docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-runtime.md, docs/trackers/effort-steering/reports/2026-11-06-semantic-contract-runtime.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-06-semantic-contract-wire",
+      "paths": [
+        "docs/research/2026-11-06-semantic-contract-wire.md",
+        "docs/superpowers/plans/2026-11-06-semantic-contract-wire.md",
+        "docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-wire.md"
+      ],
+      "message": "the key 2026-11-06-semantic-contract-wire is held by 3 documents (docs/research/2026-11-06-semantic-contract-wire.md, docs/superpowers/plans/2026-11-06-semantic-contract-wire.md, docs/trackers/effort-steering/plans/2026-11-06-semantic-contract-wire.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-07-baseline-first-oracle",
+      "paths": [
+        "docs/research/2026-11-07-baseline-first-oracle.md",
+        "docs/superpowers/plans/2026-11-07-baseline-first-oracle.md"
+      ],
+      "message": "the key 2026-11-07-baseline-first-oracle is held by 2 documents (docs/research/2026-11-07-baseline-first-oracle.md, docs/superpowers/plans/2026-11-07-baseline-first-oracle.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-07-blind-contrast-verifier",
+      "paths": [
+        "docs/research/2026-11-07-blind-contrast-verifier.md",
+        "docs/superpowers/plans/2026-11-07-blind-contrast-verifier.md"
+      ],
+      "message": "the key 2026-11-07-blind-contrast-verifier is held by 2 documents (docs/research/2026-11-07-blind-contrast-verifier.md, docs/superpowers/plans/2026-11-07-blind-contrast-verifier.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-07-differential-oracle",
+      "paths": [
+        "docs/research/2026-11-07-differential-oracle.md",
+        "docs/superpowers/plans/2026-11-07-differential-oracle.md"
+      ],
+      "message": "the key 2026-11-07-differential-oracle is held by 2 documents (docs/research/2026-11-07-differential-oracle.md, docs/superpowers/plans/2026-11-07-differential-oracle.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-08-oracle-uncertainty-resolution",
+      "paths": [
+        "docs/research/2026-11-08-oracle-uncertainty-resolution.md",
+        "docs/superpowers/plans/2026-11-08-oracle-uncertainty-resolution.md"
+      ],
+      "message": "the key 2026-11-08-oracle-uncertainty-resolution is held by 2 documents (docs/research/2026-11-08-oracle-uncertainty-resolution.md, docs/superpowers/plans/2026-11-08-oracle-uncertainty-resolution.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    },
+    {
+      "kind": "duplicate_key",
+      "key": "2026-11-09-onboarding-readiness-audit",
+      "paths": [
+        "docs/research/2026-11-09-onboarding-readiness-audit.md",
+        "docs/trackers/effort-steering/reports/2026-11-09-onboarding-readiness-audit.md"
+      ],
+      "message": "the key 2026-11-09-onboarding-readiness-audit is held by 2 documents (docs/research/2026-11-09-onboarding-readiness-audit.md, docs/trackers/effort-steering/reports/2026-11-09-onboarding-readiness-audit.md); rename all but one, or exclude a subtree in .codescout/key-space.toml"
+    }
+  ],
+  "key_space": {
+    "revision": "the index",
+    "file": ".codescout/key-space.toml",
+    "present": true,
+    "no_commit": false,
+    "patterns": [
+      "contrib",
+      ".claude",
+      "docs/trackers/ecc-integration/evidence",
+      "docs/evals/data/2026-09-24-review-model-vs-context/runs",
+      "tests/fixtures",
+      "tests/librarian/fixtures",
+      "tests/librarian/audit_doc_refs/fixtures",
+      ".codescout/projects",
+      ".codescout/memories",
+      ".buddy",
+      "docs/trackers/albert-feedback"
+    ]
+  },
+  "compared_with": {
+    "in_space": 2719,
+    "outside_count": 221,
+    "key_space": {
+      "revision": "HEAD",
+      "file": ".codescout/key-space.toml",
+      "present": true,
+      "no_commit": false,
+      "patterns": [
+        "contrib",
+        ".claude",
+        "docs/trackers/ecc-integration/evidence",
+        "docs/evals/data/2026-09-24-review-model-vs-context/runs",
+        "tests/fixtures",
+        "tests/librarian/fixtures",
+        "tests/librarian/audit_doc_refs/fixtures",
+        ".codescout/projects",
+        ".codescout/memories",
+        ".buddy",
+        "docs/trackers/albert-feedback"
+      ]
+    }
+  },
+  "unreadable": 0,
+  "notes": [],
+  "raw_report": {
+    "external_path": "/home/marius/archives/codescout/effort-steering-20261118/key-scope-before.json.full.json",
+    "sha256": "d8f76fbfa06606d28f1025be9e4df02fbccc2ab4438d19d0ea7433ad41d1a222",
+    "omitted_from_git": [
+      "outside: unrelated excluded document names"
+    ]
+  }
+}

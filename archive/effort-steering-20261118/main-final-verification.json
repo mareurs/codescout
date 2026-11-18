@@ -1,0 +1,18 @@
+{
+  "exact_cleanup_paths": 219,
+  "staged_cleanup_changes": 219,
+  "excluded_staged_paths_preserved": [
+    ".codescout/memories/bug-triage-2026-10-27.md",
+    "docs/issues/2026-11-04-shared-checkout-gate-red-during-hint-authority-audit.md"
+  ],
+  "main_tracker_files": 15,
+  "main_tracker_bytes": 11851,
+  "catalog_rows_in_tracker": 15,
+  "all_tracker_rows_archived": true,
+  "whitespace_check": "passed",
+  "own_paths_staged_exactly": true,
+  "key_gate_new_problems": 0,
+  "main_cleanup_commit": "1c32e66810ddf766331beff993f1adf2c378563c",
+  "committed_changed_paths": 219,
+  "remaining_task_status_entries": 0
+}

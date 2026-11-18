@@ -38,3 +38,9 @@ Use a separate worktree or clone for recovery. Restore experimental code from `r
 Tar members were read back and hashed without extracting or retargeting them. Absolute paths, symlink targets and sealed capsule contents were preserved. Moving a capsule does not make its old runtime paths portable. Do not rewrite sealed evidence to make old registrations appear runnable. Transient `__pycache__` directories and `.pyc` files were excluded; they are not experiment evidence.
 
 Main cleanup retains only a short archive index and compatibility pointers for older document paths. Product bug records and unrelated sessions' work remain in the main checkout. No model efficacy claim, old history rewrite, or merge into a production branch is part of this archive.
+
+## Main checkout retirement completed
+
+[Completion receipt](retirement-complete.json) records the local cleanup commit, external custody hashes and final checks. [The cleanup patch](main-cleanup.patch) preserves the documentation-only main change without publishing its unrelated ancestor commits. [Final main verification](main-final-verification.json) confirms that the task paths are committed, the non-task staged entries were preserved and the remaining tracker documents are archived pointers.
+
+The current filename-key gate caught redundant aliases. An isolated index replay reproduced 19 new key problems; consolidating 26 redundant pointers reduced them to zero, and the real index and commit hooks then passed. [The mapping](pointer-consolidation.json) records retained and retired aliases. Historical filenames and artifact identifiers remain unchanged in this storage branch as evidence; they are not a live catalog migration.

@@ -1,0 +1,59 @@
+{
+  "checked": true,
+  "mode": "staged",
+  "exit_code": 0,
+  "in_space": 2657,
+  "outside_count": 222,
+  "problems": [],
+  "key_space": {
+    "revision": "the index",
+    "file": ".codescout/key-space.toml",
+    "present": true,
+    "no_commit": false,
+    "patterns": [
+      "contrib",
+      ".claude",
+      "docs/trackers/ecc-integration/evidence",
+      "docs/evals/data/2026-09-24-review-model-vs-context/runs",
+      "tests/fixtures",
+      "tests/librarian/fixtures",
+      "tests/librarian/audit_doc_refs/fixtures",
+      ".codescout/projects",
+      ".codescout/memories",
+      ".buddy",
+      "docs/trackers/albert-feedback"
+    ]
+  },
+  "compared_with": {
+    "in_space": 2719,
+    "outside_count": 221,
+    "key_space": {
+      "revision": "HEAD",
+      "file": ".codescout/key-space.toml",
+      "present": true,
+      "no_commit": false,
+      "patterns": [
+        "contrib",
+        ".claude",
+        "docs/trackers/ecc-integration/evidence",
+        "docs/evals/data/2026-09-24-review-model-vs-context/runs",
+        "tests/fixtures",
+        "tests/librarian/fixtures",
+        "tests/librarian/audit_doc_refs/fixtures",
+        ".codescout/projects",
+        ".codescout/memories",
+        ".buddy",
+        "docs/trackers/albert-feedback"
+      ]
+    }
+  },
+  "unreadable": 0,
+  "notes": [],
+  "raw_report": {
+    "external_path": "/home/marius/archives/codescout/effort-steering-20261118/key-scope-final.json.full.json",
+    "sha256": "acc9e9d5f8d6a4e39617217e584e769f51cf99db1137ea514f2bf40f04b2fba8",
+    "omitted_from_git": [
+      "outside: unrelated excluded document names"
+    ]
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "completed_at": "2026-11-18T11:04:21.555272+00:00",
+  "archive_payload_commits": [
+    "a1182ca93296f2d495cebef8bea68b93e902bb16",
+    "2f4919522a9eceee4e58ad4c740dd85f596b3faa"
+  ],
+  "main_cleanup_commit_local": "1c32e66810ddf766331beff993f1adf2c378563c",
+  "main_cleanup_patch": "main-cleanup.patch",
+  "main_branch_pushed": false,
+  "custody_source_path_records": 6879,
+  "external_capsule_files": [
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/closed-paid-pilot-20261111/evidence.tar.gz",
+      "bytes": 2584835393,
+      "sha256": "42d8f9a0ca4d95eccd177761d9aeb7a3db1d289644e06787b471aa9f977b4fb8"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/contract-resources-20261111/evidence.tar.gz",
+      "bytes": 301383544,
+      "sha256": "07fca37fce6f3afc7976d1d3d8defc4c07996bb7cc0e26722b6fd7081dfe8860"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/disk-runtime-checkpoint-20261111/evidence.tar.gz",
+      "bytes": 1330356694,
+      "sha256": "d5c81f93a75b644505329ae9c65c2a03213d95cd5ce327d0ffeedae1ed6759ce"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/headroom-admission-20261111/evidence.tar.gz",
+      "bytes": 4951515050,
+      "sha256": "2d115e5e6092fe3dcceaa146a82ef567b608e6876ecbbecee86ecb01e8be7948"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/paid-budget-stop-20261111/evidence.tar.gz",
+      "bytes": 503072529,
+      "sha256": "18c1665382759b1e8cb27c7663aa6da63f4b9c40a1c43588b0c54d2afe82a014"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/persistent-native-admission-20261111/evidence.tar.gz",
+      "bytes": 7041278551,
+      "sha256": "ccdc360d73de3bac91c53c908d770837b618e1a385da5a1cabe62032e12a7ca4"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/shared-public-runtime-20261110/final-verification-v2.tar.gz",
+      "bytes": 254750617,
+      "sha256": "2dd6bb3d81257f768aa2cfd9e3c978e3bc97608f095678ef84e441cd5efbb5da"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/research/data/2026-11-05-external-onboarding-admission-evidence.tar.gz",
+      "bytes": 73605618,
+      "sha256": "8ccfd8fecbcc4d4b839e6d41d9e505abd62ea52843372cfabf2f205752fac315"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/legacy-resident.tar.gz",
+      "bytes": 51992483,
+      "sha256": "71243f3a730cb59fd71850d389fe6f006574ce99dc418951e8dd694ee2570c77",
+      "members": 4875
+    }
+  ],
+  "additional_external_custody": [
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/main-index-before.patch",
+      "bytes": 506980,
+      "sha256": "033f5b1f56779fd9895b1d7e3a8f9cd1f219cca00cc526bbea0a2de66354dd8b"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/main-index-before.z",
+      "bytes": 840345,
+      "sha256": "1ea4f0b56357add9b66ca4a7c20f36146be58348078a9de33fe00b3183be2273"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/main-retirement-progress.jsonl",
+      "bytes": 366658,
+      "sha256": "895ae9cbed867bfe2e2d2270fd179f78ec6ec165ed4362aa3e70d3d6867105af"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/supplement-retirement-progress.jsonl",
+      "bytes": 45484,
+      "sha256": "2e29eb745c84cb431e149cf7db0b0e3b2fcbf9029eb94f39202342856b28f9b0"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/research-history.bundle",
+      "bytes": 40016909,
+      "sha256": "4a17be94e97b8e73c2199511fba516d7da11fa835785d8a4a95e8276f72b52c4"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/key-scope-before.json.full.json",
+      "bytes": 40314,
+      "sha256": "d8f76fbfa06606d28f1025be9e4df02fbccc2ab4438d19d0ea7433ad41d1a222"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/key-scope-probe-after.json.full.json",
+      "bytes": 29942,
+      "sha256": "acc9e9d5f8d6a4e39617217e584e769f51cf99db1137ea514f2bf40f04b2fba8"
+    },
+    {
+      "path": "/home/marius/archives/codescout/effort-steering-20261118/key-scope-final.json.full.json",
+      "bytes": 29942,
+      "sha256": "acc9e9d5f8d6a4e39617217e584e769f51cf99db1137ea514f2bf40f04b2fba8"
+    }
+  ],
+  "validation": {
+    "primary_before_retirement": "verification.json",
+    "primary_retained_after_retirement": "post-retirement-primary-verification.json",
+    "supplement_before_retirement": "supplemental-verification.json",
+    "main_final": "main-final-verification.json",
+    "key_gate_before_new_problems": 19,
+    "key_gate_after_new_problems": 0,
+    "key_gate_after_unreadable": 0,
+    "archive_base_full_gate": "gate-results.json"
+  },
+  "limits": [
+    "Research remains paused and mechanism quality remains unvalidated.",
+    "Capsule bytes are local on this machine, not uploaded by this branch.",
+    "Registered absolute runtime paths were retired, not retargeted. Restoring evidence does not establish readiness to launch a model run.",
+    "Product issue records, other sessions' staged content, Docker resources and old research worktrees were not removed.",
+    "The archive base full gate passed with local OpenSSL 3.5.1. Main cleanup changed documentation only and was verified by custody, catalog, path, key-space and commit hooks."
+  ]
+}
