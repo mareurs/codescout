@@ -4,6 +4,7 @@ Research is **paused**. This is a preservation branch, not a product integration
 
 ## Start here
 
+- **[Where the files are](FILE-LOCATIONS.md)**: exact external paths, capsule sizes and SHA-256 values, original-file recovery map, and relocation instructions.
 - [Experiment index](../../docs/trackers/effort-steering/README.md): historical synthesis, caveats and roadmap. Dates inside it remain historical.
 - [Custody manifest](custody-manifest.json): original source, SHA-256, byte count, mode, storage destination and tar member for each preserved input.
 - [Verification](verification.json): custody comparison and recursive credential-pattern scan. This scan is limited to its named patterns; it is not proof that every possible secret is absent.
