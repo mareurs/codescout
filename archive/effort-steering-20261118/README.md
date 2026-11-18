@@ -34,6 +34,8 @@ This location is on the same machine. Publishing this branch does **not** upload
 
 ## Recovery and limits
 
+[Scratch cleanup receipt](scratch-cleanup-20261118.json) records the later removal of 67 Rust build caches, three redundant imported rootfs exports, three stopped containers and six superseded image tags. Sources, logs, results, manifests and the external custody archive were retained. Original compiled-cache bytes cannot now be reverified; rebuilding and fresh qualification are required before any future run. Research remains paused.
+
 Use a separate worktree or clone for recovery. Restore experimental code from `research-tools.tar.gz`; the custody manifest and `research-status.z` identify the retained source and WIP paths, and `research-uncommitted.patch` preserves the tracked delta against the recorded research HEAD. The archive branch's product sources are its published base; they are not a tested integration of this experimental code.
 
 Tar members were read back and hashed without extracting or retargeting them. Absolute paths, symlink targets and sealed capsule contents were preserved. Moving a capsule does not make its old runtime paths portable. Do not rewrite sealed evidence to make old registrations appear runnable. Transient `__pycache__` directories and `.pyc` files were excluded; they are not experiment evidence.

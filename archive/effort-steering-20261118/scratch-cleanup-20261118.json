@@ -1,0 +1,907 @@
+{
+  "recorded_at": "2026-11-18T11:39:21.226062+00:00",
+  "session": "codex:01a15ca9-f939-7603-acb5-01c6b02f68e2",
+  "scope": "Retired effort-steering native preparation caches and known stopped/superseded Docker resources only. Research remains paused.",
+  "source_root": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112",
+  "deletion_plan": [
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-public-v2/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 95641600,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-public-v3/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746422272,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-public-v4/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746422272,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-public-v4/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1272004608,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-common-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746422272,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-common-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1272004608,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/private-preparation-v1/reference-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746631168,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/private-preparation-v1/reference-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1272623104,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v3-baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746422272,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v3-baseline-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1272004608,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v3-reference-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746631168,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v3-reference-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1272623104,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v4-reference-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746631168,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v4-reference-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1272623104,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v4-baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746422272,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v4-baseline-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1272004608,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/baseline-public-v3/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 96698368,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/baseline-public-v4/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 415850496,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/baseline-public-v4/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 628965376,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/common-baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 415850496,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/common-baseline-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 628965376,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-format-compatibility-v1/fixture/target",
+      "allocated_bytes_du": 4096,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-format-compatibility-v1/build/target",
+      "allocated_bytes_du": 7589888,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-format-compatibility-v2/fixture/target",
+      "allocated_bytes_du": 4096,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-format-compatibility-v2/build/target",
+      "allocated_bytes_du": 7589888,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-junit-host-diagnostics-v1/fixture/target",
+      "allocated_bytes_du": 4096,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-junit-host-diagnostics-v1/build/target",
+      "allocated_bytes_du": 7589888,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-junit-host-diagnostics-v2/fixture/target",
+      "allocated_bytes_du": 4096,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-junit-host-diagnostics-v2/build/target",
+      "allocated_bytes_du": 8134656,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/insta-readonly-oracle-control-v1/fixture/target",
+      "allocated_bytes_du": 4096,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/insta-readonly-oracle-control-v1/build/target",
+      "allocated_bytes_du": 87121920,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/final-baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 415850496,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/final-baseline-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 628965376,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/final-reference-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 415891456,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/final-reference-public-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 629043200,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 484925440,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/baseline-public-v2/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3772055552,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/baseline-public-v2/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 6065942528,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/final-public-baseline-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3772055552,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/final-public-baseline-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 6065942528,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/final-public-reference-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3772071936,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/final-public-reference-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 6065983488,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/baseline-public-v2/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3442098176,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/baseline-public-cargo-v3-v1/commands/ordinary/build/target",
+      "allocated_bytes_du": 3944304640,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/baseline-public-cargo-v3-v1/commands/broader/build/target",
+      "allocated_bytes_du": 12899450880,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/final-public-baseline-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3944304640,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/final-public-baseline-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 12899450880,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/final-public-reference-v1/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3944435712,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/final-public-reference-v1/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1167699968,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/private-diagnostic-reference-support-v1/commands/private-support-diagnostic/build/target",
+      "allocated_bytes_du": 3988721664,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/private-diagnostic-reference-fixtures-v2/commands/private-support-diagnostic/build/target",
+      "allocated_bytes_du": 12928765952,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3772055552,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 6065942528,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3772071936,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 6065995776,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3944304640,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 12899450880,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 3944435712,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 12928765952,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746422272,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1272004608,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 746631168,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 1273548800,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 415850496,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 628965376,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/ordinary/commands/public-ordinary/build/target",
+      "allocated_bytes_du": 415891456,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/broader/commands/public-broader/build/target",
+      "allocated_bytes_du": 629133312,
+      "kind": "rust-build-cache"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/volume-free-image-v1/rootfs.tar",
+      "kind": "imported-rootfs-export",
+      "bytes": 8685256192,
+      "allocated_bytes_du": 8685256704,
+      "recorded_sha256": "e2cb2a7cb63613f3764a38f400ab47d882c575c16574cb7f53836f5897d8fef1",
+      "image": "sha256:2660681be4995b30482e1fcbddba22f9b9958575ab1b09d960c438afe0bd890d"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/volume-free-image-v1/rootfs.tar",
+      "kind": "imported-rootfs-export",
+      "bytes": 41654747136,
+      "allocated_bytes_du": 41654747136,
+      "recorded_sha256": "175c8fedd4ca4e2abe9d2bef087fb6f474ac3e71fa9438e13d594d304d1d26a8",
+      "image": "sha256:fe010055c558becc0cee3ba7d5b6bd7712ca8d9226532b0e2afa3ca65658521f"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/volume-free-image-v1/rootfs.tar",
+      "kind": "imported-rootfs-export",
+      "bytes": 15370286080,
+      "allocated_bytes_du": 15370289152,
+      "recorded_sha256": "de224a0bbeafdb50c0349ef88159bdec7797d4dce204e250f7fdfa4870cc115b",
+      "image": "sha256:c0a3218f3b689265e265443c69dd67487de926fc1f897d902aad52907dbc260c"
+    }
+  ],
+  "deletion_results": [
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-public-v2/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:02.635789+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-public-v3/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:02.688743+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-public-v4/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:02.867865+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-public-v4/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:03.721074+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-common-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:04.089911+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/baseline-common-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:04.280057+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/private-preparation-v1/reference-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:04.630987+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/private-preparation-v1/reference-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:04.818569+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v3-baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:05.176154+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v3-baseline-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:05.374754+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v3-reference-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:05.736648+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v3-reference-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:07.004345+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v4-reference-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:07.412754+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v4-reference-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:07.749995+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v4-baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:08.508389+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-v4-baseline-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:09.579599+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/baseline-public-v3/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:09.926470+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/baseline-public-v4/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:09.982159+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/baseline-public-v4/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.271893+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/common-baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.503210+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/common-baseline-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.638229+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-format-compatibility-v1/fixture/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.805588+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-format-compatibility-v1/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.806604+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-format-compatibility-v2/fixture/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.810612+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-format-compatibility-v2/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.811486+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-junit-host-diagnostics-v1/fixture/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.815086+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-junit-host-diagnostics-v1/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.815569+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-junit-host-diagnostics-v2/fixture/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.819522+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/nextest-junit-host-diagnostics-v2/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.821311+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/insta-readonly-oracle-control-v1/fixture/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.826154+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/insta-readonly-oracle-control-v1/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.827055+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/final-baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:11.843118+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/final-baseline-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:12.248405+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/final-reference-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:12.520057+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/final-reference-public-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:12.645883+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/baseline-public-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:12.837214+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/baseline-public-v2/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:13.675654+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/baseline-public-v2/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:16.523612+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/final-public-baseline-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:18.616215+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/final-public-baseline-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:23.416393+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/final-public-reference-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:27.069927+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/final-public-reference-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:29.762536+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/baseline-public-v2/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:31.530065+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/baseline-public-cargo-v3-v1/commands/ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:33.311270+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/baseline-public-cargo-v3-v1/commands/broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:34.834908+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/final-public-baseline-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:37.965990+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/final-public-baseline-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:39.479418+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/final-public-reference-v1/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:42.661123+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/final-public-reference-v1/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:44.408655+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/private-diagnostic-reference-support-v1/commands/private-support-diagnostic/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:44.813403+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/private-diagnostic-reference-fixtures-v2/commands/private-support-diagnostic/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:46.732710+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:50.044733+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:55.656774+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:36:58.985824+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:01.507598+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:03.734740+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:05.653322+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:07.733958+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:09.103185+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:11.396563+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:11.548658+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:12.101051+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:12.227658+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:12.787064+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:12.868363+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/ordinary/commands/public-ordinary/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:13.265662+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/broader/commands/public-broader/build/target",
+      "kind": "rust-build-cache",
+      "at": "2026-11-18T11:37:13.344650+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/volume-free-image-v1/rootfs.tar",
+      "kind": "imported-rootfs-export",
+      "at": "2026-11-18T11:37:13.462328+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/volume-free-image-v1/rootfs.tar",
+      "kind": "imported-rootfs-export",
+      "at": "2026-11-18T11:37:15.162477+00:00",
+      "deleted": true
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/nearai__ironclaw-6724/volume-free-image-v1/rootfs.tar",
+      "kind": "imported-rootfs-export",
+      "at": "2026-11-18T11:37:21.410264+00:00",
+      "deleted": true
+    }
+  ],
+  "docker_cleanup": [
+    {
+      "kind": "container",
+      "id": "be7c2d9af0df669b96c31e0745faeb06b8ee553d710e4b8b33d910e44fd0bbe6",
+      "name": "/effort-protocol-8780951a0277438b92294da9fe1ce3cf",
+      "returncode": 0,
+      "stdout": "be7c2d9af0df669b96c31e0745faeb06b8ee553d710e4b8b33d910e44fd0bbe6\n",
+      "stderr": ""
+    },
+    {
+      "kind": "container",
+      "id": "5c403ea774f3f5d1e3f77f078ab7379ffa905c8d66b78aeb9bceb6032f29936d",
+      "name": "/effort-protocol-33e3adc923034ec98f279b3c89d80485",
+      "returncode": 0,
+      "stdout": "5c403ea774f3f5d1e3f77f078ab7379ffa905c8d66b78aeb9bceb6032f29936d\n",
+      "stderr": ""
+    },
+    {
+      "kind": "container",
+      "id": "02b93630cfc4810c2b808716a7eed380d7284767acf35941e424cf2f51f52b9e",
+      "name": "/hfa-native-48062c6d624b4076bc786cab8c225a9b",
+      "returncode": 0,
+      "stdout": "02b93630cfc4810c2b808716a7eed380d7284767acf35941e424cf2f51f52b9e\n",
+      "stderr": ""
+    },
+    {
+      "kind": "image-tag",
+      "tag": "effort-feedback-source:pnpm-cache-v2-63431edcd7da",
+      "id": "sha256:303c6f33ffc302d6df803cbd02effb1174ff8bff2d01c8a4df8d840265cec6c8",
+      "returncode": 0,
+      "stdout": "Untagged: effort-feedback-source:pnpm-cache-v2-63431edcd7da\nDeleted: sha256:303c6f33ffc302d6df803cbd02effb1174ff8bff2d01c8a4df8d840265cec6c8\n",
+      "stderr": ""
+    },
+    {
+      "kind": "image-tag",
+      "tag": "effort-feedback-source:pnpm-cache-v3-63431edcd7da",
+      "id": "sha256:0961131566af01f51d5f0d7c72446d3cd455319882fdffdfa5a263ec991a5352",
+      "returncode": 0,
+      "stdout": "Untagged: effort-feedback-source:pnpm-cache-v3-63431edcd7da\nDeleted: sha256:0961131566af01f51d5f0d7c72446d3cd455319882fdffdfa5a263ec991a5352\n",
+      "stderr": ""
+    },
+    {
+      "kind": "image-tag",
+      "tag": "effort-feedback-base:arrow-rs-7783-common-v3-20261112",
+      "id": "sha256:a3816ccc24e238a0c04c9c6617c119692ea10c435345c4c0fcf7425b4e9fe5ff",
+      "returncode": 0,
+      "stdout": "Untagged: effort-feedback-base:arrow-rs-7783-common-v3-20261112\nDeleted: sha256:a3816ccc24e238a0c04c9c6617c119692ea10c435345c4c0fcf7425b4e9fe5ff\n",
+      "stderr": ""
+    },
+    {
+      "kind": "image-tag",
+      "tag": "effort-feedback-base:arrow-rs-7783-gitlinks-20261112",
+      "id": "sha256:5105ac56e8ce1dcf32d41393481e7d90b1d345fad6d3f6c070b807bc633f05fe",
+      "returncode": 0,
+      "stdout": "Untagged: effort-feedback-base:arrow-rs-7783-gitlinks-20261112\nDeleted: sha256:5105ac56e8ce1dcf32d41393481e7d90b1d345fad6d3f6c070b807bc633f05fe\n",
+      "stderr": ""
+    },
+    {
+      "kind": "image-tag",
+      "tag": "effort-feedback-deps:arrow-rs-7783-readable-20261112",
+      "id": "sha256:7f47d367554a441e75ddea046e2f73ff9ace6a8feaf558524fe4ab1c2273b05a",
+      "returncode": 0,
+      "stdout": "Untagged: effort-feedback-deps:arrow-rs-7783-readable-20261112\nDeleted: sha256:7f47d367554a441e75ddea046e2f73ff9ace6a8feaf558524fe4ab1c2273b05a\n",
+      "stderr": ""
+    },
+    {
+      "kind": "image-tag",
+      "tag": "effort-feedback-deps:arrow-rs-7783-20261112",
+      "id": "sha256:90638f6be60ecefa5ef6e7872650b3e05c924ddca9534dcdecac188c25983e77",
+      "returncode": 0,
+      "stdout": "Untagged: effort-feedback-deps:arrow-rs-7783-20261112\nDeleted: sha256:90638f6be60ecefa5ef6e7872650b3e05c924ddca9534dcdecac188c25983e77\n",
+      "stderr": ""
+    }
+  ],
+  "filesystem": {
+    "before": {
+      "filesystem": "/dev/nvme0n1p2",
+      "size_bytes": 1999323004928,
+      "used_bytes": 1816220839936,
+      "available_bytes": 166924800000,
+      "use_percent": "92%"
+    },
+    "after": {
+      "filesystem": "/dev/nvme0n1p2",
+      "size_bytes": 1999323004928,
+      "used_bytes": 1665855406080,
+      "available_bytes": 316245000192,
+      "use_percent": "85%"
+    },
+    "available_bytes_increase": 149320200192,
+    "interpretation": "Observed net free-space change on shared Btrfs; not a sum of Docker image sizes or proof of exclusive reclaimed extents.",
+    "btrfs_after_host": "WARNING: cannot read detailed chunk info, per-device usage will not be shown, run as root\nOverall:\n    Device size:\t\t     1999323004928\n    Device allocated:\t\t     1981047373824\n    Device unallocated:\t\t       18275631104\n    Device missing:\t\t                 0\n    Device slack:\t\t                 0\n    Used:\t\t\t     1665419272192\n    Free (estimated):\t\t      316146524160\t(min: 307008708608)\n    Free (statfs, df):\t\t      316145475584\n    Data ratio:\t\t\t              1.00\n    Metadata ratio:\t\t              2.00\n    Global reserve:\t\t         536870912\t(used: 0)\n    Multiple profiles:\t\t                no\n\nData,single: Size:1911170269184, Used:1613299376128 (84.41%)\n\nMetadata,DUP: Size:34904997888, Used:26059685888 (74.66%)\n\nSystem,DUP: Size:33554432, Used:262144 (0.78%)\n\n"
+  },
+  "verification": {
+    "all_70_planned_paths_absent": true,
+    "all_deletions_succeeded": true,
+    "imported_rootfs_images_retained": 3,
+    "protected_archive_regular_files_compared_by_size_mtime_inode": 6206,
+    "protected_archive_stat_changes": 0,
+    "four_task_source_Cargo_toml_and_manifests_present": true,
+    "native_preparation_du_before_bytes": 252053929984,
+    "native_preparation_du_after_bytes": 18296295424,
+    "new_capsule_content_hashes_computed": false
+  },
+  "preserved": [
+    "/home/marius/archives/codescout/effort-steering-20261118",
+    "All four task source directories, source manifests, registrations, logs, results and retained non-cache inputs under source_root",
+    "Three imported volume-free image IDs from projection.json",
+    "All Docker volumes, active containers and unrelated images",
+    "Other resident scratch roots, including evidence-cohort-20261110; their source/evidence/cache boundaries were not proven by this cleanup"
+  ],
+  "limits": [
+    "67 compiled Rust target directories and three redundant rootfs export byte streams are no longer available. Their original byte-for-byte build-tree re-verification is unavailable; historical receipts and source inputs remain. Rebuild and requalification are required before a future run.",
+    "Process scan found no matching references in readable processes, but many kernel/foreign processes could not be fully inspected. Docker running-container mounts had no reference to source_root.",
+    "du reports allocated blocks and can count shared/reflinked extents repeatedly; do not treat its reduction as physical space recovered.",
+    "Btrfs per-device detail was unavailable without root. The host-view report showed Device missing 0; sandbox-only /dev warnings were excluded from the host measurement."
+  ],
+  "local_full_report_directory": "/home/marius/.cache/cc-tmp/effort-steering-cleanup-20261118"
+}
