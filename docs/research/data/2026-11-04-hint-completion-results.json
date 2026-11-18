@@ -1,0 +1,154 @@
+{
+  "status": "terminal_and_grade_reconstructed",
+  "fingerprint": "0ef13885b2c5021225fd6551df6b7990480c4110808e2f41fd8c96ff0c715355",
+  "driver_sha256": "36519026b390aba010244a79a95407d6a4cbe6b038add2aceb07ca19c01a5cd6",
+  "cells": [
+    {
+      "cell": 0,
+      "effort": "low",
+      "declaration": false,
+      "session_id": "ab3f8854-e2ed-4cf0-85c5-e1931b0a4464",
+      "cost_usd": "0.40236020000000006",
+      "workflow_completed": true,
+      "terminal": {
+        "is_error": false,
+        "subtype": "success"
+      },
+      "budget_stop": null,
+      "transport_errors": [],
+      "patch_accepted": true,
+      "grade_exit_code": 0,
+      "grade_groups": [
+        {
+          "filter": "hfa_acceptance",
+          "exit_code": 0,
+          "test_summaries": [
+            {
+              "status": "ok",
+              "passed": 2,
+              "failed": 0
+            }
+          ]
+        },
+        {
+          "filter": "librarian::catalog::chunk::",
+          "exit_code": 0,
+          "test_summaries": [
+            {
+              "status": "ok",
+              "passed": 9,
+              "failed": 0
+            }
+          ]
+        },
+        {
+          "filter": "librarian::indexer::tests::",
+          "exit_code": 0,
+          "test_summaries": [
+            {
+              "status": "ok",
+              "passed": 38,
+              "failed": 0
+            }
+          ]
+        }
+      ],
+      "wall_s": 75.41935101617128,
+      "requests": 16,
+      "forwarded": 16,
+      "hint_then_edit": true,
+      "cleanup": [
+        {
+          "name": "hfa-native-c100ddfe56674cba9d91269710d6c54d",
+          "absent": true
+        },
+        {
+          "name": "hfa-native-a6e607fe12d24476a4b352dbdfaec0bb",
+          "absent": true
+        }
+      ]
+    },
+    {
+      "cell": 1,
+      "effort": "xhigh",
+      "declaration": false,
+      "session_id": "0f31f116-bd92-4d45-94d2-1e31464ba8f8",
+      "cost_usd": "0.5673488000000001",
+      "workflow_completed": true,
+      "terminal": {
+        "is_error": false,
+        "subtype": "success"
+      },
+      "budget_stop": null,
+      "transport_errors": [],
+      "patch_accepted": true,
+      "grade_exit_code": 0,
+      "grade_groups": [
+        {
+          "filter": "hfa_acceptance",
+          "exit_code": 0,
+          "test_summaries": [
+            {
+              "status": "ok",
+              "passed": 2,
+              "failed": 0
+            }
+          ]
+        },
+        {
+          "filter": "librarian::catalog::chunk::",
+          "exit_code": 0,
+          "test_summaries": [
+            {
+              "status": "ok",
+              "passed": 9,
+              "failed": 0
+            }
+          ]
+        },
+        {
+          "filter": "librarian::indexer::tests::",
+          "exit_code": 0,
+          "test_summaries": [
+            {
+              "status": "ok",
+              "passed": 38,
+              "failed": 0
+            }
+          ]
+        }
+      ],
+      "wall_s": 449.63472666498274,
+      "requests": 20,
+      "forwarded": 20,
+      "hint_then_edit": true,
+      "cleanup": [
+        {
+          "name": "hfa-native-5f8a060f38b84394b730aea1581356e1",
+          "absent": true
+        },
+        {
+          "name": "hfa-native-303e807ffc634d0f9380083969a8b10a",
+          "absent": true
+        }
+      ]
+    }
+  ],
+  "new_model_cost_usd": "0.96970900000000016",
+  "prior_pilot_cost_usd": "1.60655589999999997",
+  "pilot_total_usd": "2.57626490000000013",
+  "thread_total_usd": "31.797419199999999964",
+  "remaining_pilot_cap_usd": "1.42373509999999987",
+  "remaining_thread_cap_usd": "8.202580800000000036",
+  "successful_cli_turns": 2,
+  "accepted_patches": 2,
+  "metric_caveat": "Raw workflow_completed flags measure CLI turn success; they do not witness settled background jobs or all required public checks. See bf167b83c0166a24.",
+  "low_full_verification_settled": false,
+  "validation_protocol_evidence": "2026-11-04-hint-completion-validation-protocol.json",
+  "limits": "One exposed task, one sample per effort, declaration fixed absent; diagnostic only.",
+  "full_required_public_checks_verified": 0,
+  "public_verification_by_effort": {
+    "low": false,
+    "xhigh": false
+  }
+}

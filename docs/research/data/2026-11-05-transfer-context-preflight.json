@@ -1,0 +1,85 @@
+{
+  "provider_calls": 0,
+  "onboarding_calls": 0,
+  "results": [
+    {
+      "instance_id": "nushell__nushell-18863",
+      "image": "sab-arm-nushell__nushell-18863:f9b0fc9f8",
+      "image_id": "sha256:3767f31b9b1a3288ad7132740dcff712737d5e855029079a4171a8065a2040ef",
+      "bundle_sha256": "575ee49c5cc40a861ec961a1fb440ae4fef5ebd25796d3f33e2e71a2f0799aba",
+      "existing_prescan_control": "pass",
+      "existing_prescan_hit_count": 0,
+      "existing_prescan_reasons": [],
+      "actual_context_probe": {
+        "cwd": "/testbed",
+        "instruction_files": [
+          {
+            "path": "/testbed/CLAUDE.md",
+            "present": true,
+            "bytes": 1656,
+            "sha256": "f220ecee66c680cdef9e380140b8d58ab93fe354f6abf3e77aaf6ef30b44c772"
+          },
+          {
+            "path": "/testbed/AGENTS.md",
+            "present": true,
+            "bytes": 1656,
+            "sha256": "f220ecee66c680cdef9e380140b8d58ab93fe354f6abf3e77aaf6ef30b44c772"
+          },
+          {
+            "path": "/testbed/.codescout/system-prompt.md",
+            "present": false
+          },
+          {
+            "path": "/testbed/.codescout/project.toml",
+            "present": false
+          }
+        ],
+        "memory_markdown_paths": []
+      },
+      "probe_exit_code": 0,
+      "probe_container_id": "cf3ed22641f56d490832fcce1bc9b144048cee8ba2a59c7c4f55f10c0cf0033b",
+      "probe_container_absent": true,
+      "admitted_for_model_runs": false
+    },
+    {
+      "instance_id": "rust-lang__rust-analyzer-22992",
+      "image": "sab-arm-rust-lang__rust-analyzer-22992:f9b0fc9f8",
+      "image_id": "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+      "bundle_sha256": "92927edf7dc1f50f83a0a7c036cfa387a41101e8b2bfd40c06e195cb634cf15f",
+      "existing_prescan_control": "pass",
+      "existing_prescan_hit_count": 0,
+      "existing_prescan_reasons": [],
+      "actual_context_probe": {
+        "cwd": "/testbed",
+        "instruction_files": [
+          {
+            "path": "/testbed/CLAUDE.md",
+            "present": true,
+            "bytes": 3503,
+            "sha256": "b4ee9a7c36bf387ed9295627d6c5bb38efbac6015dd058599cbbc5f6843cb8e9"
+          },
+          {
+            "path": "/testbed/AGENTS.md",
+            "present": true,
+            "bytes": 3503,
+            "sha256": "b4ee9a7c36bf387ed9295627d6c5bb38efbac6015dd058599cbbc5f6843cb8e9"
+          },
+          {
+            "path": "/testbed/.codescout/system-prompt.md",
+            "present": false
+          },
+          {
+            "path": "/testbed/.codescout/project.toml",
+            "present": false
+          }
+        ],
+        "memory_markdown_paths": []
+      },
+      "probe_exit_code": 0,
+      "probe_container_id": "d1a704d59a8d85a6a9e681a856113af21c9c39c156d231e410436d687c5126c8",
+      "probe_container_absent": true,
+      "admitted_for_model_runs": false
+    }
+  ],
+  "limits": "Stored prescan metadata is not a fresh full oracle-isolation attestation. File presence/hash is not proof of model delivery or reusable knowledge suitability. External cache inventory and actual native wire qualification remain pending."
+}

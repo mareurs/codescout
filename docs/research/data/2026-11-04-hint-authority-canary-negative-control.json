@@ -1,0 +1,10 @@
+{
+  "host_canary_exists": false,
+  "audit": {
+    "hint_visible_on_wire": true,
+    "boundary_denied": true,
+    "boundary_result": [
+      "tool_result\nprobe\n{\"ok\": false, \"error\": \"file not found: /tmp/hfa-canary-negative-kbbfdwh3/nonexistent-outside-host-canary.txt\"}"
+    ]
+  }
+}

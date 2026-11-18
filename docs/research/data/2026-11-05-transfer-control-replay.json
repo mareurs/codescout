@@ -1,0 +1,259 @@
+{
+  "method": "existing isolated parser and verdict replay on full saved logs",
+  "provider_calls": 0,
+  "tasks": [
+    {
+      "control_sha256": "5e79742da836d831213a05ce308b11324abf3a794ad59610e07110642f87b61f",
+      "current_base": {
+        "examples": [
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_do_not_clobber_last_with_table_expand_hook",
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_from_str_length_do_not_clobber_last"
+        ],
+        "expected": 8622,
+        "missing": 0,
+        "not_passing": 2,
+        "pass": false
+      },
+      "current_expected_control": {
+        "expected": 8622,
+        "expected_not_passing_at_gold": 0,
+        "f2p_passing_at_base": 0,
+        "gold_repeat_mismatch": {
+          "count": 0,
+          "names": []
+        },
+        "ok": true,
+        "reasons": []
+      },
+      "current_gold": {
+        "examples": [],
+        "expected": 8622,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "current_plus_dropped_expected": 8628,
+      "current_repeat": {
+        "examples": [],
+        "expected": 8622,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "dropped_f2p": [
+        "target/debug/deps/nu_protocol-d20ff0ed6890b6be::last_result::tests::error_only_detects_error_value",
+        "target/debug/deps/nu_protocol-d20ff0ed6890b6be::last_result::tests::error_only_detects_nonempty_error_list",
+        "target/debug/deps/nu_protocol-d20ff0ed6890b6be::last_result::tests::error_only_rejects_mixed_list",
+        "target/debug/deps/tests-2e583041d2627a9c::commands::table::collapse_expand::table_expand_nested_error_list_does_not_rethrow",
+        "target/debug/deps/tests-b7e6894743b0a1f5::completions::external_completer_override_display_value",
+        "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_only_list_stream_does_not_clobber_last"
+      ],
+      "dropped_passing_gold": true,
+      "dropped_passing_repeat": true,
+      "f2p": [
+        "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_do_not_clobber_last_with_table_expand_hook",
+        "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_from_str_length_do_not_clobber_last"
+      ],
+      "instance_id": "nushell__nushell-18863",
+      "logs": {
+        "base": {
+          "bytes": 674117,
+          "counts": {
+            "fail": 5,
+            "pass": 8621,
+            "skip": 98
+          },
+          "not_pass_or_skip": {
+            "target/debug/deps/tests-2e583041d2627a9c::commands::table::collapse_expand::table_expand_nested_error_list_does_not_rethrow": "fail",
+            "target/debug/deps/tests-4fbd39043900655d::plugin_persistence::plugin_process_exits_when_nushell_exits": "fail",
+            "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_only_list_stream_does_not_clobber_last": "fail",
+            "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_do_not_clobber_last_with_table_expand_hook": "fail",
+            "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_from_str_length_do_not_clobber_last": "fail"
+          },
+          "sha256": "effb3b939769c932cb580b196692f66ae0a2a2b0e75b0ff9143e1e3ee668d12a"
+        },
+        "gold": {
+          "bytes": 650999,
+          "counts": {
+            "fail": 1,
+            "pass": 8628,
+            "skip": 98
+          },
+          "not_pass_or_skip": {
+            "target/debug/deps/tests-4fbd39043900655d::plugin_persistence::plugin_process_exits_when_nushell_exits": "fail"
+          },
+          "sha256": "b6f68a9821956fba38f23980e11c06dd1dfca6038d7d51cffa970a75ef336196"
+        },
+        "gold-repeat": {
+          "bytes": 648085,
+          "counts": {
+            "fail": 1,
+            "pass": 8629,
+            "skip": 98
+          },
+          "not_pass_or_skip": {
+            "target/debug/deps/tests-4fbd39043900655d::plugin_persistence::plugin_process_exits_when_nushell_exits": "fail"
+          },
+          "sha256": "c7d754063adc5d40f5afb667809a75a04b3fec21df64676bc82fd3c974102aea"
+        }
+      },
+      "p2p_count": 8620,
+      "parser_sha256": "6348ec74a6b0ff87d7690580c8e69af9a69732734c3aa3ee5b5b6573e52c9e2f",
+      "record_sha256": "8bb14b9ac8bd98d78f3ae2e3776a523b64d826269a79277058ea2677f5344114",
+      "steps": [
+        {
+          "name": "base:rebuild",
+          "returncode": 0
+        },
+        {
+          "name": "base:test[0]",
+          "returncode": 101
+        },
+        {
+          "name": "base:print[0]",
+          "returncode": 0
+        },
+        {
+          "name": "gold:rebuild",
+          "returncode": 0
+        },
+        {
+          "name": "gold:test[0]",
+          "returncode": 101
+        },
+        {
+          "name": "gold:print[0]",
+          "returncode": 0
+        },
+        {
+          "name": "gold-repeat:test[0]",
+          "returncode": 101
+        },
+        {
+          "name": "gold-repeat:print[0]",
+          "returncode": 0
+        }
+      ],
+      "stored_expected": 8628
+    },
+    {
+      "control_sha256": "698df486a0c8a500e24e792ab63632dd1ff4544fe41bb4c3831e02d5feb9ed98",
+      "current_base": {
+        "examples": [
+          "target/debug/deps/hir_ty-37ecad9565756443::tests::regression::regression_22820"
+        ],
+        "expected": 8182,
+        "missing": 0,
+        "not_passing": 1,
+        "pass": false
+      },
+      "current_expected_control": {
+        "expected": 8182,
+        "expected_not_passing_at_gold": 0,
+        "f2p_passing_at_base": 0,
+        "gold_repeat_mismatch": {
+          "count": 0,
+          "names": []
+        },
+        "ok": true,
+        "reasons": []
+      },
+      "current_gold": {
+        "examples": [],
+        "expected": 8182,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "current_plus_dropped_expected": 8183,
+      "current_repeat": {
+        "examples": [],
+        "expected": 8182,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "dropped_f2p": [
+        "target/debug/deps/hir_ty-37ecad9565756443::tests::regression::rpit_function_with_non_trivial_anon_const"
+      ],
+      "dropped_passing_gold": true,
+      "dropped_passing_repeat": true,
+      "f2p": [
+        "target/debug/deps/hir_ty-37ecad9565756443::tests::regression::regression_22820"
+      ],
+      "instance_id": "rust-lang__rust-analyzer-22992",
+      "logs": {
+        "base": {
+          "bytes": 580430,
+          "counts": {
+            "fail": 2,
+            "pass": 8181,
+            "skip": 10
+          },
+          "not_pass_or_skip": {
+            "target/debug/deps/hir_ty-37ecad9565756443::tests::regression::regression_22820": "fail",
+            "target/debug/deps/hir_ty-37ecad9565756443::tests::regression::rpit_function_with_non_trivial_anon_const": "fail"
+          },
+          "sha256": "9e16ff2b98df64c1b930b426c21afcf0b6026b8603c785987ff3f789ab633699"
+        },
+        "gold": {
+          "bytes": 580139,
+          "counts": {
+            "pass": 8183,
+            "skip": 10
+          },
+          "not_pass_or_skip": {},
+          "sha256": "1b4906df27f7359c55243f87ec5544d2ed481203271196bf04981c6a1d9dd8b9"
+        },
+        "gold-repeat": {
+          "bytes": 579562,
+          "counts": {
+            "pass": 8183,
+            "skip": 10
+          },
+          "not_pass_or_skip": {},
+          "sha256": "f206909fc1253bf817a2dee4f70f32e6f66398df9174be9c57f26cf27cf8d9ee"
+        }
+      },
+      "p2p_count": 8181,
+      "parser_sha256": "6348ec74a6b0ff87d7690580c8e69af9a69732734c3aa3ee5b5b6573e52c9e2f",
+      "record_sha256": "25d70755edd1d3073af9ea2520d08331089ef36aa157ff6ce488323aa7e2ba68",
+      "steps": [
+        {
+          "name": "base:rebuild",
+          "returncode": 0
+        },
+        {
+          "name": "base:test[0]",
+          "returncode": 101
+        },
+        {
+          "name": "base:print[0]",
+          "returncode": 0
+        },
+        {
+          "name": "gold:rebuild",
+          "returncode": 0
+        },
+        {
+          "name": "gold:test[0]",
+          "returncode": 0
+        },
+        {
+          "name": "gold:print[0]",
+          "returncode": 0
+        },
+        {
+          "name": "gold-repeat:test[0]",
+          "returncode": 0
+        },
+        {
+          "name": "gold-repeat:print[0]",
+          "returncode": 0
+        }
+      ],
+      "stored_expected": 8183
+    }
+  ],
+  "test_executions": 0
+}

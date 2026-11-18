@@ -1,0 +1,143 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-semantic-contract-wire-evidence.tar.gz",
+  "sha256": "57a27b5aba7fb5e73530baf39fc49899b486d46b1c2289ce38cfa72e809af885",
+  "bytes": 5106660,
+  "payload_files": 977,
+  "manifest_files": 1,
+  "all_payloads_reopened_and_hash_verified": true,
+  "closure": {
+    "utc": "2026-11-06T14:00:05.706123+00:00",
+    "cases": [
+      {
+        "index": 0,
+        "arm_id": "nushell__nushell-18863--low-control",
+        "captured_requests": 6,
+        "cleanup": [
+          {
+            "name": "hfa-native-6cbb23f189e44524aff0421e78cb1a72",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-6cbb23f189e44524aff0421e78cb1a72\n",
+            "absent": true
+          },
+          {
+            "name": "hfa-native-abc32cd6a6f0434a9c939a71243d1f36",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-abc32cd6a6f0434a9c939a71243d1f36\n",
+            "absent": true
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "arm_id": "rust-lang__rust-analyzer-22992--xhigh-control",
+        "captured_requests": 6,
+        "cleanup": [
+          {
+            "name": "hfa-native-1cfa2221f58a4cfd866c8f3f6ed2be75",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-1cfa2221f58a4cfd866c8f3f6ed2be75\n",
+            "absent": true
+          },
+          {
+            "name": "hfa-native-dcaaddcafc504a21a54eceebd68efffb",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-dcaaddcafc504a21a54eceebd68efffb\n",
+            "absent": true
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "arm_id": "nushell__nushell-18863--low-contract",
+        "captured_requests": 6,
+        "cleanup": [
+          {
+            "name": "hfa-native-afd685727ada4d24955ed8210cf3c66e",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-afd685727ada4d24955ed8210cf3c66e\n",
+            "absent": true
+          },
+          {
+            "name": "hfa-native-de14ce0c69b245aaa3cfe0e1d60f8cc4",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-de14ce0c69b245aaa3cfe0e1d60f8cc4\n",
+            "absent": true
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "arm_id": "rust-lang__rust-analyzer-22992--low-control",
+        "captured_requests": 6,
+        "cleanup": [
+          {
+            "name": "hfa-native-faaf747ff482480ab4a4b96a78d1fc13",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-faaf747ff482480ab4a4b96a78d1fc13\n",
+            "absent": true
+          },
+          {
+            "name": "hfa-native-6b38fe7ca2d84c24a6d4aba45004d8ac",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-6b38fe7ca2d84c24a6d4aba45004d8ac\n",
+            "absent": true
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "arm_id": "nushell__nushell-18863--xhigh-control",
+        "captured_requests": 6,
+        "cleanup": [
+          {
+            "name": "hfa-native-650a522981d142ecb60d4c62cc1928a2",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-650a522981d142ecb60d4c62cc1928a2\n",
+            "absent": true
+          },
+          {
+            "name": "hfa-native-c9fbf3ef55c442df8ac0ae8f45b6cdb3",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-c9fbf3ef55c442df8ac0ae8f45b6cdb3\n",
+            "absent": true
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "arm_id": "rust-lang__rust-analyzer-22992--low-contract",
+        "captured_requests": 6,
+        "cleanup": [
+          {
+            "name": "hfa-native-46ee3bef50864634b24e3a0a3125ef5e",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-46ee3bef50864634b24e3a0a3125ef5e\n",
+            "absent": true
+          },
+          {
+            "name": "hfa-native-7b3795ea977b4b2db30a5076beabec30",
+            "inspect_exit_code": 1,
+            "stderr": "error: no such object: hfa-native-7b3795ea977b4b2db30a5076beabec30\n",
+            "absent": true
+          }
+        ]
+      }
+    ],
+    "actual_cli_cases": 6,
+    "captured_request_files": 36,
+    "protected_hash_populations_rechecked": {
+      "prepared_hashes": 5886,
+      "source_hashes": 39,
+      "parent_hashes": 4
+    },
+    "real_prepared_arms_unstarted": true,
+    "provider_calls": 0,
+    "credential_reads": 0,
+    "onboarding_calls": 0,
+    "synthetic_cost_usd": "0",
+    "daemon_inventory_exit_code": 0,
+    "prospective_full_plugin_identity": false,
+    "launch_admitted": false,
+    "limits": "Synthetic delivery fixtures only, no model behavior or full-public-suite/repair evidence. Full plugin prospective identity remains unestablished."
+  }
+}

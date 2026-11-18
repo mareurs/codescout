@@ -1,0 +1,175 @@
+{
+  "scope": "Audit only; frozen results/logs/parser bytes unchanged; not prospective live parser qualification.",
+  "rows": [
+    {
+      "task": "nushell__nushell-18863",
+      "effort": "low",
+      "log": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/private-grader/low-a6931258/grade.log",
+      "log_sha256": "92b553288c39d3761f713fec25ecd795ac9bddde679b686a54cd104a4435e10d",
+      "record_sha256": "8bb14b9ac8bd98d78f3ae2e3776a523b64d826269a79277058ea2677f5344114",
+      "bundle_sha256": "575ee49c5cc40a861ec961a1fb440ae4fef5ebd25796d3f33e2e71a2f0799aba",
+      "parsed_status_keys": 0,
+      "split_lines": 0,
+      "crash_line": "          collect2: fatal error: ld terminated with signal 7 [Bus error], core dumped",
+      "prospective_zero_status_crash": true,
+      "original": {
+        "pass": false,
+        "expected": 8622,
+        "not_passing": 8622,
+        "missing": 8622,
+        "examples": [
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_do_not_clobber_last_with_table_expand_hook",
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_from_str_length_do_not_clobber_last",
+          "doctest:nu_cmd_base::crates/nu-cmd-base/src/wrap_call.rs - wrap_call::WrapCall (line 12)",
+          "doctest:nu_cmd_base::crates/nu-cmd-base/src/wrap_call.rs - wrap_call::WrapCall (line 33)",
+          "doctest:nu_cmd_lang::crates/nu-cmd-lang/src/core_commands/version.rs - core_commands::version::VERSION (line 18) - compile",
+          "doctest:nu_cmd_lang::crates/nu-cmd-lang/src/core_commands/version.rs - core_commands::version::VERSION_NU_FEATURES (line 42) - compile",
+          "doctest:nu_command::crates/nu-command/src/network/tls/impl_rustls.rs - network::tls::impl_tls::NuCryptoProvider (line 33)",
+          "doctest:nu_config::crates/nu-config/src/paths.rs - paths::ConfigPath (line 17)",
+          "doctest:nu_engine::crates/nu-engine/src/closure_eval.rs - closure_eval::ClosureEval (line 20) - compile",
+          "doctest:nu_engine::crates/nu-engine/src/closure_eval.rs - closure_eval::ClosureEval (line 35) - compile"
+        ]
+      },
+      "adjusted": {
+        "pass": false,
+        "expected": 8622,
+        "not_passing": 8622,
+        "missing": 8622,
+        "examples": [
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_do_not_clobber_last_with_table_expand_hook",
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::error_values_from_str_length_do_not_clobber_last",
+          "doctest:nu_cmd_base::crates/nu-cmd-base/src/wrap_call.rs - wrap_call::WrapCall (line 12)",
+          "doctest:nu_cmd_base::crates/nu-cmd-base/src/wrap_call.rs - wrap_call::WrapCall (line 33)",
+          "doctest:nu_cmd_lang::crates/nu-cmd-lang/src/core_commands/version.rs - core_commands::version::VERSION (line 18) - compile",
+          "doctest:nu_cmd_lang::crates/nu-cmd-lang/src/core_commands/version.rs - core_commands::version::VERSION_NU_FEATURES (line 42) - compile",
+          "doctest:nu_command::crates/nu-command/src/network/tls/impl_rustls.rs - network::tls::impl_tls::NuCryptoProvider (line 33)",
+          "doctest:nu_config::crates/nu-config/src/paths.rs - paths::ConfigPath (line 17)",
+          "doctest:nu_engine::crates/nu-engine/src/closure_eval.rs - closure_eval::ClosureEval (line 20) - compile",
+          "doctest:nu_engine::crates/nu-engine/src/closure_eval.rs - closure_eval::ClosureEval (line 35) - compile"
+        ]
+      },
+      "recovered": []
+    },
+    {
+      "task": "rust-lang__rust-analyzer-22992",
+      "effort": "xhigh",
+      "log": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/private-grader/xhigh-d46ba5de/grade.log",
+      "log_sha256": "4bea8b262c12c40b18d80f3c28ca52e11d287d819e345a1327c4e569195a5a97",
+      "record_sha256": "25d70755edd1d3073af9ea2520d08331089ef36aa157ff6ce488323aa7e2ba68",
+      "bundle_sha256": "92927edf7dc1f50f83a0a7c036cfa387a41101e8b2bfd40c06e195cb634cf15f",
+      "parsed_status_keys": 8194,
+      "split_lines": 0,
+      "crash_line": null,
+      "prospective_zero_status_crash": false,
+      "original": {
+        "pass": true,
+        "expected": 8182,
+        "not_passing": 0,
+        "missing": 0,
+        "examples": []
+      },
+      "adjusted": {
+        "pass": true,
+        "expected": 8182,
+        "not_passing": 0,
+        "missing": 0,
+        "examples": []
+      },
+      "recovered": []
+    },
+    {
+      "task": "nushell__nushell-18863",
+      "effort": "xhigh",
+      "log": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--xhigh/private-grader/xhigh-786d4b39/grade.log",
+      "log_sha256": "6306bd0909201c7b5bde321d30c3869864046657a86828a75ae5b29634b20db5",
+      "record_sha256": "8bb14b9ac8bd98d78f3ae2e3776a523b64d826269a79277058ea2677f5344114",
+      "bundle_sha256": "575ee49c5cc40a861ec961a1fb440ae4fef5ebd25796d3f33e2e71a2f0799aba",
+      "parsed_status_keys": 8724,
+      "split_lines": 1,
+      "crash_line": null,
+      "prospective_zero_status_crash": false,
+      "original": {
+        "pass": false,
+        "expected": 8622,
+        "not_passing": 2,
+        "missing": 1,
+        "examples": [
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::bare_external_with_inherited_stdout_does_not_capture",
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::mixed_str_length_result_does_replace_last"
+        ]
+      },
+      "adjusted": {
+        "pass": false,
+        "expected": 8622,
+        "not_passing": 1,
+        "missing": 0,
+        "examples": [
+          "target/debug/deps/tests-b7e6894743b0a1f5::last_result::mixed_str_length_result_does_replace_last"
+        ]
+      },
+      "recovered": [
+        {
+          "key": "target/debug/deps/tests-b7e6894743b0a1f5::last_result::bare_external_with_inherited_stdout_does_not_capture",
+          "status": "pass",
+          "line": 3725,
+          "raw": "should_not_overwrite_lasttest last_result::bare_external_with_inherited_stdout_does_not_capture ... ok"
+        }
+      ]
+    },
+    {
+      "task": "rust-lang__rust-analyzer-22992",
+      "effort": "low",
+      "log": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--low/private-grader/low-badd54e6/grade.log",
+      "log_sha256": "c69424b541ed9220f2f11dd162f5f6ec8034d6779e368c27b7591291ef864fd3",
+      "record_sha256": "25d70755edd1d3073af9ea2520d08331089ef36aa157ff6ce488323aa7e2ba68",
+      "bundle_sha256": "92927edf7dc1f50f83a0a7c036cfa387a41101e8b2bfd40c06e195cb634cf15f",
+      "parsed_status_keys": 8193,
+      "split_lines": 0,
+      "crash_line": null,
+      "prospective_zero_status_crash": false,
+      "original": {
+        "pass": true,
+        "expected": 8182,
+        "not_passing": 0,
+        "missing": 0,
+        "examples": []
+      },
+      "adjusted": {
+        "pass": true,
+        "expected": 8182,
+        "not_passing": 0,
+        "missing": 0,
+        "examples": []
+      },
+      "recovered": []
+    }
+  ],
+  "protected_files_before_after": {
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/results.json": "e28e9eac4c326d6bebe4109336cd1594a712cd3374b041d41ad299ff602059da",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/private-grader/low-a6931258/grade.log": "92b553288c39d3761f713fec25ecd795ac9bddde679b686a54cd104a4435e10d",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/private-grade.json": "221ebc7bc85e55140db7774bb43e9c4b61d3bb9c98536d0b05c7a38b5c036d52",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/candidate.patch": "789cb6fa483752b1472f61d03e07e83d4ec03bb2686b8d1b86a46cd74080fd97",
+    "/home/marius/work/claude/setup-ab-data/fresh-tasks/nushell__nushell-18863/bundle.json": "575ee49c5cc40a861ec961a1fb440ae4fef5ebd25796d3f33e2e71a2f0799aba",
+    "/home/marius/work/claude/setup-ab-data/fresh-tasks/nushell__nushell-18863/build/record.json": "8bb14b9ac8bd98d78f3ae2e3776a523b64d826269a79277058ea2677f5344114",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/private-grader/xhigh-d46ba5de/grade.log": "4bea8b262c12c40b18d80f3c28ca52e11d287d819e345a1327c4e569195a5a97",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/private-grade.json": "e78ce97475ab5dadafd23e9ef31b3681e1362a6823767ea92b6c3bc16c3b61bf",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/candidate.patch": "03c41141df392ed8869f13844d036ccdfe460b477bddb816a56932cfa7660376",
+    "/home/marius/work/claude/setup-ab-data/fresh-tasks/rust-lang__rust-analyzer-22992/bundle.json": "92927edf7dc1f50f83a0a7c036cfa387a41101e8b2bfd40c06e195cb634cf15f",
+    "/home/marius/work/claude/setup-ab-data/fresh-tasks/rust-lang__rust-analyzer-22992/build/record.json": "25d70755edd1d3073af9ea2520d08331089ef36aa157ff6ce488323aa7e2ba68",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--xhigh/private-grader/xhigh-786d4b39/grade.log": "6306bd0909201c7b5bde321d30c3869864046657a86828a75ae5b29634b20db5",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--xhigh/private-grade.json": "5b13b30d9abdb109835618a3965cb78d4598e3bab71d1486f6ce4952d3579bb8",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--xhigh/candidate.patch": "c26bb739afb9e3134567c545c8596c7b48db39a8fa5e3f84f853c07473393435",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--low/private-grader/low-badd54e6/grade.log": "c69424b541ed9220f2f11dd162f5f6ec8034d6779e368c27b7591291ef864fd3",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--low/private-grade.json": "95e83f7c81ecc4c9462d6161e7118584de20191694b97757aba325afbe7bdc29",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--low/candidate.patch": "358bb559f3c8362435e43b69493ab62c8c1b65ab36a7d22898950ed73f8418a6"
+  },
+  "analysis_source_sha256": {
+    "/home/marius/work/claude/codescout.worktrees/grader-validity/tools/setup-ab-eval/audit_reparse.py": "1ca9eeeb8f950e1e91666537e464c78df2c5fb4e88bf716b43a376530d2dbb65",
+    "/home/marius/work/claude/codescout.worktrees/grader-validity/tools/setup-ab-eval/multilang_grade.py": "ade0ed4daae160f466871f1dee1b41fb03e8bbd7cc32d5049701240981c5dbcf",
+    "/home/marius/work/claude/codescout.worktrees/grader-validity/tools/setup-ab-eval/multilang_tasks.py": "6289795cf832588ea9c26c123c8522cc221d64970bbcaf48295152ff38c341b4"
+  },
+  "old_cohort_verdicts_overwritten": false,
+  "model_provider_calls": 0,
+  "native_regrades": 0,
+  "existing_nulow_diagnostic": "Already closed @bg_000000f7, 2F2P fail/8620P2P pass/missing0; not repeated."
+}

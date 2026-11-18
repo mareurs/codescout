@@ -1,0 +1,50 @@
+{
+  "tasks": [
+    {
+      "id": "nushell__nushell-18863",
+      "actual_cli_requests_audited": 17,
+      "tool_use_ids_with_results": 15,
+      "all_tool_result_blocks_non_error": true,
+      "recon_skill_invoked_and_body_in_wire": true,
+      "global_and_project_ordered_visible_content_each_request": true,
+      "host_path_denied": true,
+      "native_connections": 2,
+      "all_native_launches_resource_profile": {
+        "cpus": 4,
+        "memory_gib": 24,
+        "pids_limit": 4096
+      },
+      "native_jobs_delivered": 1,
+      "continuations": 1,
+      "terminal_cost_usd": "0",
+      "provider_calls": 0,
+      "credential_reads": 0,
+      "all_recorded_containers_independently_absent": true,
+      "result_sha256": "2298759b7ac5a15fe238e7eda7f59efb783205e8eedcab570a826ac0fabbc7c9"
+    },
+    {
+      "id": "rust-lang__rust-analyzer-22992",
+      "actual_cli_requests_audited": 17,
+      "tool_use_ids_with_results": 15,
+      "all_tool_result_blocks_non_error": true,
+      "recon_skill_invoked_and_body_in_wire": true,
+      "global_and_project_ordered_visible_content_each_request": true,
+      "host_path_denied": true,
+      "native_connections": 2,
+      "all_native_launches_resource_profile": {
+        "cpus": 4,
+        "memory_gib": 24,
+        "pids_limit": 4096
+      },
+      "native_jobs_delivered": 1,
+      "continuations": 1,
+      "terminal_cost_usd": "0",
+      "provider_calls": 0,
+      "credential_reads": 0,
+      "all_recorded_containers_independently_absent": true,
+      "result_sha256": "a42c3b88229a790fff832af33f506ffc0f42c9c9d12207e0287ba687d7927302"
+    }
+  ],
+  "paid_admitted": false,
+  "limits": "Synthetic provider responses and marker public check only; no semantic/reference or final-patch preservation qualification, no LLM author/repair quality."
+}

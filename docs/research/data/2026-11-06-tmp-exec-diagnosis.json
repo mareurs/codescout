@@ -1,0 +1,328 @@
+{
+  "utc": "2026-11-06T07:06:29.626059+00:00",
+  "scope": "Zero-provider isolated temporary-execution diagnosis; campaign actor unchanged",
+  "log_scan": [
+    {
+      "arm": "nushell__nushell-18863--low",
+      "files_scanned": 16,
+      "space_matching_lines": 0,
+      "permission_matching_lines": 0,
+      "hits": []
+    },
+    {
+      "arm": "rust-lang__rust-analyzer-22992--xhigh",
+      "files_scanned": 19,
+      "space_matching_lines": 0,
+      "permission_matching_lines": 18,
+      "hits": [
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/background-logs/1.log",
+          "line": 8404,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/background-logs/1.log",
+          "line": 8441,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-0/1.log",
+          "line": 8353,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-0/1.log",
+          "line": 8390,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-1/1.log",
+          "line": 8353,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-1/1.log",
+          "line": 8390,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-2/1.log",
+          "line": 8353,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-2/1.log",
+          "line": 8390,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-3/1.log",
+          "line": 8353,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-3/1.log",
+          "line": 8390,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-4/1.log",
+          "line": 8353,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-4/1.log",
+          "line": 8390,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-5/1.log",
+          "line": 8353,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-5/1.log",
+          "line": 8390,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-6/1.log",
+          "line": 8353,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-6/1.log",
+          "line": 8390,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-7/1.log",
+          "line": 8353,
+          "text": "  Permission denied (os error 13)"
+        },
+        {
+          "file": "rust-lang__rust-analyzer-22992--xhigh/verification-7/1.log",
+          "line": 8390,
+          "text": "  Permission denied (os error 13)"
+        }
+      ]
+    }
+  ],
+  "paired_executable_probe": {
+    "utc": "2026-11-06T07:04:14.386524+00:00",
+    "results": [
+      {
+        "label": "registered",
+        "image": "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+        "tmpfs": "rw,size=1g,uid=1000,gid=1000",
+        "exit_code": 0,
+        "stdout": "{\"mount\": [\"2926 2916 0:301 / /tmp rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=1048576k,uid=1000,gid=1000,inode64,huge=advise\"], \"file_mode\": \"0o755\", \"file_size\": 43432, \"available_bytes\": 1073696768, \"exec\": {\"errno\": 13, \"error\": \"[Errno 13] Permission denied: '/tmp/exec-probe'\"}}\n",
+        "stderr": ""
+      },
+      {
+        "label": "exec-control",
+        "image": "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+        "tmpfs": "rw,exec,size=1g,uid=1000,gid=1000",
+        "exit_code": 0,
+        "stdout": "{\"mount\": [\"2926 2916 0:301 / /tmp rw,nosuid,nodev,relatime - tmpfs tmpfs rw,size=1048576k,uid=1000,gid=1000,inode64,huge=advise\"], \"file_mode\": \"0o755\", \"file_size\": 43432, \"available_bytes\": 1073696768, \"exec\": {\"returncode\": 0, \"stderr\": \"\"}}\n",
+        "stderr": ""
+      }
+    ]
+  },
+  "paired_doctest_probe": {
+    "payload": "import pathlib,subprocess,json,os\np=pathlib.Path('/tmp/diagnostic.rs');p.write_text('/// ```\\n/// assert_eq!(2 + 2, 4);\\n/// ```\\npub fn example() {}\\n')\nresults={}\nfor name,argv in [('version',['rustdoc','--version']),('doctest',['rustdoc','--test',str(p)])]:\n try:\n  q=subprocess.run(argv,cwd='/tmp',capture_output=True,text=True,timeout=25);results[name]={'argv':argv,'exit_code':q.returncode,'stdout':q.stdout,'stderr':q.stderr}\n except Exception as e:results[name]={'error':repr(e)}\nprint(json.dumps(results))\n",
+    "results": [
+      {
+        "label": "registered",
+        "tmpfs": "rw,size=1g,uid=1000,gid=1000",
+        "image": "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+        "exit_code": 0,
+        "stdout": "{\"version\": {\"argv\": [\"rustdoc\", \"--version\"], \"exit_code\": 0, \"stdout\": \"rustdoc 1.90.0 (1159e78c4 2025-09-14)\\n\", \"stderr\": \"\"}, \"doctest\": {\"argv\": [\"rustdoc\", \"--test\", \"/tmp/diagnostic.rs\"], \"exit_code\": 101, \"stdout\": \"\\nrunning 1 test\\ntest diagnostic.rs - example (line 1) ... FAILED\\n\\nfailures:\\n\\n---- diagnostic.rs - example (line 1) stdout ----\\nCouldn't run the test: Permission denied (os error 13) - maybe your tempdir is mounted with noexec?\\n\\nfailures:\\n    diagnostic.rs - example (line 1)\\n\\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s\\n\\n\", \"stderr\": \"\"}}\n",
+        "stderr": ""
+      },
+      {
+        "label": "exec-control",
+        "tmpfs": "rw,exec,size=1g,uid=1000,gid=1000",
+        "image": "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+        "exit_code": 0,
+        "stdout": "{\"version\": {\"argv\": [\"rustdoc\", \"--version\"], \"exit_code\": 0, \"stdout\": \"rustdoc 1.90.0 (1159e78c4 2025-09-14)\\n\", \"stderr\": \"\"}, \"doctest\": {\"argv\": [\"rustdoc\", \"--test\", \"/tmp/diagnostic.rs\"], \"exit_code\": 0, \"stdout\": \"\\nrunning 1 test\\ntest diagnostic.rs - example (line 1) ... ok\\n\\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s\\n\\n\", \"stderr\": \"\"}}\n",
+        "stderr": ""
+      }
+    ]
+  },
+  "source_logs": [
+    {
+      "arm": "nushell__nushell-18863--low",
+      "path": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/verification-5/1.log",
+      "sha256": "a8210928f1f1091617fef2577f124fc4549d0d1d5b394d7c181aaad7e0f9d69d",
+      "line_count": 9966,
+      "excerpts": [
+        {
+          "line": 7008,
+          "context_start": 7004,
+          "text": "   `----\n  help: `~/test_cococo` is neither a Nushell built-in or a known external\n        command\n\ntest commands::run_external::external_command_expand_tilde::case_1_bare ... FAILED\ntest commands::run_external::external_command_expand_tilde::case_3_run_external ... FAILED\ntest commands::run_external::external_command_expand_tilde::case_2_caret ... FAILED\n"
+        },
+        {
+          "line": 7009,
+          "context_start": 7005,
+          "text": "  help: `~/test_cococo` is neither a Nushell built-in or a known external\n        command\n\ntest commands::run_external::external_command_expand_tilde::case_1_bare ... FAILED\ntest commands::run_external::external_command_expand_tilde::case_3_run_external ... FAILED\ntest commands::run_external::external_command_expand_tilde::case_2_caret ... FAILED\n\ngroup serial, deps[nu], running 6 tests"
+        },
+        {
+          "line": 7010,
+          "context_start": 7006,
+          "text": "        command\n\ntest commands::run_external::external_command_expand_tilde::case_1_bare ... FAILED\ntest commands::run_external::external_command_expand_tilde::case_3_run_external ... FAILED\ntest commands::run_external::external_command_expand_tilde::case_2_caret ... FAILED\n\ngroup serial, deps[nu], running 6 tests\ntest commands::job::job_list_shows_pids ... ok"
+        },
+        {
+          "line": 7150,
+          "context_start": 7146,
+          "text": "}\n\n\nfailures:\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_1_bare\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_3_run_external\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_2_caret\n"
+        },
+        {
+          "line": 7151,
+          "context_start": 7147,
+          "text": "\n\nfailures:\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_1_bare\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_3_run_external\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_2_caret\n\ntest result: FAILED. 2894 passed; 3 failed; 35 ignored; 0 filtered out; across 30 groups, finished in 34.61s"
+        },
+        {
+          "line": 7152,
+          "context_start": 7148,
+          "text": "\nfailures:\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_1_bare\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_3_run_external\n    deps[cococo, nu]: commands::run_external::external_command_expand_tilde::case_2_caret\n\ntest result: FAILED. 2894 passed; 3 failed; 35 ignored; 0 filtered out; across 30 groups, finished in 34.61s\n"
+        },
+        {
+          "line": 9781,
+          "context_start": 9777,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests nu_cmd_base\nall doctests ran in 1.69s; merged doctests compilation took 1.67s\nerror: doctest failed, to rerun pass `-p nu-cmd-base --doc`\n   Doc-tests nu_cmd_extra\n\nrunning 0 tests"
+        },
+        {
+          "line": 9790,
+          "context_start": 9786,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests nu_cmd_lang\nall doctests ran in 0.77s; merged doctests compilation took 0.75s\nerror: doctest failed, to rerun pass `-p nu-cmd-lang --doc`\n   Doc-tests nu_cmd_plugin\n\nrunning 0 tests"
+        },
+        {
+          "line": 9805,
+          "context_start": 9801,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests nu_command\nall doctests ran in 3.59s; merged doctests compilation took 3.51s\nerror: doctest failed, to rerun pass `-p nu-command --doc`\n   Doc-tests nu_config\nall doctests ran in 0.34s; merged doctests compilation took 0.33s\nerror: doctest failed, to rerun pass `-p nu-config --doc`"
+        },
+        {
+          "line": 9808,
+          "context_start": 9804,
+          "text": "all doctests ran in 3.59s; merged doctests compilation took 3.51s\nerror: doctest failed, to rerun pass `-p nu-command --doc`\n   Doc-tests nu_config\nall doctests ran in 0.34s; merged doctests compilation took 0.33s\nerror: doctest failed, to rerun pass `-p nu-config --doc`\n   Doc-tests nu_derive_value\nall doctests ran in 0.20s; merged doctests compilation took 0.19s\nerror: doctest failed, to rerun pass `-p nu-derive-value --doc`"
+        },
+        {
+          "line": 9811,
+          "context_start": 9807,
+          "text": "all doctests ran in 0.34s; merged doctests compilation took 0.33s\nerror: doctest failed, to rerun pass `-p nu-config --doc`\n   Doc-tests nu_derive_value\nall doctests ran in 0.20s; merged doctests compilation took 0.19s\nerror: doctest failed, to rerun pass `-p nu-derive-value --doc`\n   Doc-tests nu_engine\nall doctests ran in 0.72s; merged doctests compilation took 0.71s\nerror: doctest failed, to rerun pass `-p nu-engine --doc`"
+        },
+        {
+          "line": 9814,
+          "context_start": 9810,
+          "text": "all doctests ran in 0.20s; merged doctests compilation took 0.19s\nerror: doctest failed, to rerun pass `-p nu-derive-value --doc`\n   Doc-tests nu_engine\nall doctests ran in 0.72s; merged doctests compilation took 0.71s\nerror: doctest failed, to rerun pass `-p nu-engine --doc`\n   Doc-tests nu_experimental\nall doctests ran in 0.23s; merged doctests compilation took 0.22s\nerror: doctest failed, to rerun pass `-p nu-experimental --doc`"
+        },
+        {
+          "line": 9817,
+          "context_start": 9813,
+          "text": "all doctests ran in 0.72s; merged doctests compilation took 0.71s\nerror: doctest failed, to rerun pass `-p nu-engine --doc`\n   Doc-tests nu_experimental\nall doctests ran in 0.23s; merged doctests compilation took 0.22s\nerror: doctest failed, to rerun pass `-p nu-experimental --doc`\n   Doc-tests nu_explore\n\nrunning 0 tests"
+        },
+        {
+          "line": 9832,
+          "context_start": 9828,
+          "text": "\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\nall doctests ran in 0.40s; merged doctests compilation took 0.39s\nerror: doctest failed, to rerun pass `-p nu-glob --doc`\n   Doc-tests nu_heavy_utils\nall doctests ran in 0.91s; merged doctests compilation took 0.89s\nerror: doctest failed, to rerun pass `-p nu-heavy-utils --doc`"
+        },
+        {
+          "line": 9835,
+          "context_start": 9831,
+          "text": "all doctests ran in 0.40s; merged doctests compilation took 0.39s\nerror: doctest failed, to rerun pass `-p nu-glob --doc`\n   Doc-tests nu_heavy_utils\nall doctests ran in 0.91s; merged doctests compilation took 0.89s\nerror: doctest failed, to rerun pass `-p nu-heavy-utils --doc`\n   Doc-tests nu_json\nall doctests ran in 0.69s; merged doctests compilation took 0.68s\nerror: doctest failed, to rerun pass `-p nu-json --doc`"
+        },
+        {
+          "line": 9838,
+          "context_start": 9834,
+          "text": "all doctests ran in 0.91s; merged doctests compilation took 0.89s\nerror: doctest failed, to rerun pass `-p nu-heavy-utils --doc`\n   Doc-tests nu_json\nall doctests ran in 0.69s; merged doctests compilation took 0.68s\nerror: doctest failed, to rerun pass `-p nu-json --doc`\n   Doc-tests nu_lsp\n\nrunning 0 tests"
+        },
+        {
+          "line": 9859,
+          "context_start": 9855,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests nu_path\nall doctests ran in 0.63s; merged doctests compilation took 0.63s\nerror: doctest failed, to rerun pass `-p nu-path --doc`\n   Doc-tests nu_plugin\nall doctests ran in 10.19s; merged doctests compilation took 10.16s\nerror: doctest failed, to rerun pass `-p nu-plugin --doc`"
+        },
+        {
+          "line": 9862,
+          "context_start": 9858,
+          "text": "all doctests ran in 0.63s; merged doctests compilation took 0.63s\nerror: doctest failed, to rerun pass `-p nu-path --doc`\n   Doc-tests nu_plugin\nall doctests ran in 10.19s; merged doctests compilation took 10.16s\nerror: doctest failed, to rerun pass `-p nu-plugin --doc`\n   Doc-tests nu_plugin_core\n\nrunning 0 tests"
+        },
+        {
+          "line": 9877,
+          "context_start": 9873,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests nu_plugin_protocol\nall doctests ran in 0.70s; merged doctests compilation took 0.69s\nerror: doctest failed, to rerun pass `-p nu-plugin-protocol --doc`\n   Doc-tests nu_plugin_test_support\nall doctests ran in 1.38s; merged doctests compilation took 1.35s\nerror: doctest failed, to rerun pass `-p nu-plugin-test-support --doc`"
+        },
+        {
+          "line": 9880,
+          "context_start": 9876,
+          "text": "all doctests ran in 0.70s; merged doctests compilation took 0.69s\nerror: doctest failed, to rerun pass `-p nu-plugin-protocol --doc`\n   Doc-tests nu_plugin_test_support\nall doctests ran in 1.38s; merged doctests compilation took 1.35s\nerror: doctest failed, to rerun pass `-p nu-plugin-test-support --doc`\n   Doc-tests nu_protocol\n\nrunning 1 test"
+        },
+        {
+          "line": 9889,
+          "context_start": 9885,
+          "text": "\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s\n\nall doctests ran in 1.27s; merged doctests compilation took 1.16s\nerror: doctest failed, to rerun pass `-p nu-protocol --doc`\n   Doc-tests nu_std\n\nrunning 0 tests"
+        },
+        {
+          "line": 9910,
+          "context_start": 9906,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests nu_term_grid\nall doctests ran in 0.31s; merged doctests compilation took 0.30s\nerror: doctest failed, to rerun pass `-p nu-term-grid --doc`\n   Doc-tests nu_test_support_macros\n\nrunning 0 tests"
+        },
+        {
+          "line": 9919,
+          "context_start": 9915,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests nu_utils\nall doctests ran in 0.34s; merged doctests compilation took 0.34s\nerror: doctest failed, to rerun pass `-p nu-utils --doc`\n   Doc-tests nu_plugin_example\n\nrunning 0 tests"
+        },
+        {
+          "line": 9940,
+          "context_start": 9936,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests nuon\nall doctests ran in 0.30s; merged doctests compilation took 0.30s\nerror: doctest failed, to rerun pass `-p nuon --doc`\n   Doc-tests testbins\n\nrunning 0 tests"
+        }
+      ],
+      "native_argv_sha256": "999a81b1726d04e3653a7fd64d71b642ebaa731024ceb34de73df8737c4d24e3",
+      "tmpfs": "/tmp:rw,size=1g,uid=1000,gid=1000",
+      "user": "1000:1000"
+    },
+    {
+      "arm": "rust-lang__rust-analyzer-22992--xhigh",
+      "path": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/verification-7/1.log",
+      "sha256": "b1f50bfc65b5c59a2e20541002ebb9fed322a836a5a4ef27b080a0910217634a",
+      "line_count": 8775,
+      "excerpts": [
+        {
+          "line": 8353,
+          "context_start": 8349,
+          "text": "Caused by:\n  could not execute process `/tmp/testdir/180311_8/target/debug/build/foo-e85a3758b1e019ca/build-script-build` (never executed)\n\nCaused by:\n  Permission denied (os error 13)\n\n\n"
+        },
+        {
+          "line": 8390,
+          "context_start": 8386,
+          "text": "Caused by:\n  could not execute process `/tmp/testdir/180311_40_symlink/target/debug/build/foo-e85a3758b1e019ca/build-script-build` (never executed)\n\nCaused by:\n  Permission denied (os error 13)\n\n\n"
+        },
+        {
+          "line": 8722,
+          "context_start": 8718,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests la_arena\nall doctests ran in 0.20s; merged doctests compilation took 0.20s\nerror: doctest failed, to rerun pass `-p la-arena --doc`\n   Doc-tests line_index\n\nrunning 0 tests"
+        },
+        {
+          "line": 8737,
+          "context_start": 8733,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests lsp_server\nall doctests ran in 0.97s; merged doctests compilation took 0.97s\nerror: doctest failed, to rerun pass `-p lsp-server --doc`\n   Doc-tests macros\n\nrunning 0 tests"
+        },
+        {
+          "line": 8764,
+          "context_start": 8760,
+          "text": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Doc-tests text_size\nall doctests ran in 0.18s; merged doctests compilation took 0.18s\nerror: doctest failed, to rerun pass `-p text-size --doc`\n   Doc-tests ungrammar\n\nrunning 0 tests"
+        }
+      ],
+      "native_argv_sha256": "dd0aeefb2846042dad9cf874f1082c9d67a37779730b5edc2cb4ffa26d2d27b8",
+      "tmpfs": "/tmp:rw,size=1g,uid=1000,gid=1000",
+      "user": "1000:1000"
+    }
+  ],
+  "live_actor_readonly": {
+    "container_id": "0e48be9ddf324fc9896e0e11304584bc01543e5ee023e531d11dc55577e30f6b",
+    "exit_code": 0,
+    "stdout": "{\"tmp_mounts\": [\"2566 2492 0:176 / /tmp rw,nosuid,nodev,noexec,relatime - tmpfs tmpfs rw,size=1048576k,uid=1000,gid=1000,inode64,huge=advise\"], \"space\": {\"/tmp\": {\"available_bytes\": 1071345664}, \"/testbed\": {\"available_bytes\": 93337649152}}}\n",
+    "stderr": ""
+  }
+}

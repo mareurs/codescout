@@ -1,0 +1,143 @@
+[
+  {
+    "mode": "negative",
+    "lifecycle": {
+      "status": "incomplete",
+      "error": "ValueError: continuation limit reached with undelivered jobs",
+      "session_id": "17dc7792-9078-4fee-b5f9-6d396c14d20e",
+      "client_pid": 1892553,
+      "exit_code": -9,
+      "continuations": 0,
+      "cost_usd": "0",
+      "cost_is_final": false,
+      "turns": 1,
+      "jobs": [
+        {
+          "handle": "@bg_00000001",
+          "record": "/tmp/codescout-bg/1-ce34d437-bg_00000001.json",
+          "delivered": false
+        }
+      ],
+      "all_jobs_succeeded": false
+    },
+    "forwarded": 0,
+    "transport_errors": [],
+    "native_connections": 2,
+    "native_original_handle_read": false,
+    "job_owner": null,
+    "job_marker_exists": false,
+    "agent_continuation_marker_exists": false,
+    "cleanup": [
+      {
+        "name": "hfa-native-2a91ccd21bfd4cc58fe88d2e741e3551",
+        "absent": true,
+        "remove_exit_code": null
+      },
+      {
+        "name": "hfa-native-4f6a2427a2df459ba8f7f9d34f057474",
+        "absent": true,
+        "remove_exit_code": 1
+      }
+    ]
+  },
+  {
+    "mode": "success",
+    "lifecycle": {
+      "status": "settled",
+      "error": null,
+      "session_id": "38208687-ba90-482e-ac37-3ef4926a5a4d",
+      "client_pid": 1899820,
+      "exit_code": 0,
+      "continuations": 1,
+      "cost_usd": "0",
+      "cost_is_final": true,
+      "turns": 2,
+      "jobs": [
+        {
+          "handle": "@bg_00000001",
+          "record": "/tmp/codescout-bg/1-2ad4a1b7-bg_00000001.json",
+          "delivered": true,
+          "outcome": {
+            "handle": "@bg_00000001",
+            "state": "exited",
+            "exit_code": 0,
+            "error": null,
+            "command": "sleep 8; printf 'LIFECYCLE_NATIVE_343d382defda47e781aa90fcd6cd0c7e\\n'; touch lifecycle-job-finished.txt; exit 0"
+          }
+        }
+      ],
+      "all_jobs_succeeded": true
+    },
+    "forwarded": 0,
+    "transport_errors": [],
+    "native_connections": 2,
+    "native_original_handle_read": true,
+    "job_owner": {
+      "name": "hfa-native-fcd7c69ed6d24d8bafe6183db105d6b8"
+    },
+    "job_marker_exists": true,
+    "agent_continuation_marker_exists": true,
+    "cleanup": [
+      {
+        "name": "hfa-native-7c8b423131ba47a59a22a913241035d4",
+        "absent": true,
+        "remove_exit_code": null
+      },
+      {
+        "name": "hfa-native-fcd7c69ed6d24d8bafe6183db105d6b8",
+        "absent": true,
+        "remove_exit_code": null
+      }
+    ]
+  },
+  {
+    "mode": "failed",
+    "lifecycle": {
+      "status": "settled",
+      "error": null,
+      "session_id": "27ebbf7d-25be-4849-929d-f1aa23d71405",
+      "client_pid": 1910871,
+      "exit_code": 0,
+      "continuations": 1,
+      "cost_usd": "0",
+      "cost_is_final": true,
+      "turns": 2,
+      "jobs": [
+        {
+          "handle": "@bg_00000001",
+          "record": "/tmp/codescout-bg/1-f3304a77-bg_00000001.json",
+          "delivered": true,
+          "outcome": {
+            "handle": "@bg_00000001",
+            "state": "exited",
+            "exit_code": 7,
+            "error": null,
+            "command": "sleep 8; printf 'LIFECYCLE_NATIVE_78ff2c77b0df4ead91f317ac50a7d4ef\\n'; touch lifecycle-job-finished.txt; exit 7"
+          }
+        }
+      ],
+      "all_jobs_succeeded": false
+    },
+    "forwarded": 0,
+    "transport_errors": [],
+    "native_connections": 2,
+    "native_original_handle_read": true,
+    "job_owner": {
+      "name": "hfa-native-a63996a5ec634bf2b1682b5d6cefdfb4"
+    },
+    "job_marker_exists": true,
+    "agent_continuation_marker_exists": true,
+    "cleanup": [
+      {
+        "name": "hfa-native-a3290c2f4cae4bfea0f1e217ad53d888",
+        "absent": true,
+        "remove_exit_code": null
+      },
+      {
+        "name": "hfa-native-a63996a5ec634bf2b1682b5d6cefdfb4",
+        "absent": true,
+        "remove_exit_code": 1
+      }
+    ]
+  }
+]

@@ -1,0 +1,43 @@
+{
+  "rule": "Exclude IDs with run-directory names in the current fresh-screen namespace; select lowest numeric PR per repository among records declaring nonempty F2P and P2P, before reading model outcome values.",
+  "source": "/home/marius/work/claude/setup-ab-data/fresh-build/records.jsonl",
+  "source_sha256": "4516b1da35e7e1cb4dd188011f07c0fc891d06cf543fcf390906c0926d859157",
+  "record_lines": 9,
+  "exposure_namespace": "/home/marius/work/claude/setup-ab-data/fresh-screen/live-screen/runs",
+  "record_ids_with_run_directory": [
+    "rust-lang__rust-analyzer-23586"
+  ],
+  "selected": [
+    {
+      "instance_id": "nushell__nushell-18863",
+      "repo": "nushell/nushell",
+      "pull_number": "18863",
+      "base_commit": "b1341d87305292decafa604a4eee8a153d013f8f",
+      "created_at": "2026-08-19T14:10:20Z",
+      "problem_statement_sha256": "1f48fd88a6643bb5a741fc763c34dbdfa3859ea74f3606c7076236f1b3d8d14e",
+      "image_name": "sab-fresh-nushell__nushell-18863:b2",
+      "image_present": true,
+      "image_id": "sha256:e317a8e791bfa1f546ab9b58af244ba0844311fef0019306042522d5f68d81b2",
+      "f2p_declared_count": 2,
+      "p2p_declared_count": 8620,
+      "admitted_for_model_runs": false
+    },
+    {
+      "instance_id": "rust-lang__rust-analyzer-22992",
+      "repo": "rust-lang/rust-analyzer",
+      "pull_number": "22992",
+      "base_commit": "983e906e23cf0cfd645910025bd9436818688d78",
+      "created_at": "2026-08-01T21:39:02Z",
+      "problem_statement_sha256": "288500fa5c6e5e1229fce9a68da37878399d1f499dafca98f2d9879e83f3bd5e",
+      "image_name": "sab-fresh-rust-lang__rust-analyzer-22992:b2",
+      "image_present": true,
+      "image_id": "sha256:b3df4c943af162ec27e038ed6b80557ae8764e869e43402ea96c477d876066c9",
+      "f2p_declared_count": 1,
+      "p2p_declared_count": 8181,
+      "admitted_for_model_runs": false
+    }
+  ],
+  "outcome_values_read": false,
+  "provider_calls": 0,
+  "limits": "Run-directory presence establishes exposure in that namespace only. Declared test sets are not re-executed controls. Native runtime, full instruction delivery, context suitability/reuse, oracle isolation and whole-workflow budget/deadline admission remain pending."
+}

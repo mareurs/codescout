@@ -1,0 +1,31 @@
+{
+  "path": "/home/marius/work/claude/codescout/docs/research/data/2026-11-05-cold-public-profile-evidence.tar.gz",
+  "sha256": "b9b0673268bcb724beb71c2e8679e9f7dbaaa552ce10e54a9ba6835f38c878de",
+  "payload_sha256": {
+    "control/preparation-manifest.json": "6d019fd675ce27545362d8753edd1bbc3203848119e8fd82ff82b48ae8734be0",
+    "control/candidate-before.json": "bc02efdacde99715a903a49ae629b014b5f4480db92fb5f27fdfd5af00d260a2",
+    "control/launch.json": "e0ca384b05de27076ebca6a0effd36bb91bc07653accfabcefe3c778f69041dd",
+    "control/mcp-launch-control.json": "19fd5af47fc3eebece2a6210422c52d881d41ff5229498412df940757e77bb07",
+    "control/server.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "control/server.stderr": "843c8a2c2fbf9bf97279896f199bbfa94f81a040746310793e35cd5a332399d5",
+    "control/record-owner.json": "96f182057e492e44ea2194dfcc168450562f8913ee3d4c02c07139cbc03c44dc",
+    "control/cold-resource-witness.json": "a9e31a761bb271821ffd1e4e5daab8edd092090cc7365434ff13f1f3535fa20b",
+    "control/public-worker-identities.jsonl": "241c98ffc842954f220eb7300454619e0f5cf040d519db7e37e61217dcfb1090",
+    "control/cpu-probe.log": "699f9374c265fb463c4ffef685ec0aab75b43ab3495222bbad3c9481c118183e",
+    "control/public-verification.json": "8cc4ad8a0a4d79a196499a5fa212367a15b99c1c1a13a5298b1d9af5743fb264",
+    "control/candidate-after.json": "00abfb35f0071b1bbb5e062adb09d399ed7b475ba9bb0b757ab5f6f2fa6b403d",
+    "control/result.json": "f1b68bb29a1015971b2d40c59f7f1935577e9c2162a2aafbb84c001d1afe3fae",
+    "control/cold-control-preflight.json": "f9ffac0b9f80c6f5a3376b89094ca158b2975051dd5b877644b80cdb6c13c90a",
+    "control/independent-readback.json": "d7a7b4411735a07d39b0301d18f61fcafcb15bbc06099d55b87b434e06696698",
+    "control/verification-0/0.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "control/verification-0/1.log": "847f9b6690df5c1aaffc2cae8c83ef8155c964b755e1267071524d8caf1856bd",
+    "control/verification-0/2.log": "5029893ea288dbf56fa47ce9a792abb2928ec2da5ae1e288dd8ccd83d6fcbe68",
+    "control/verification-0/3.log": "cc16fc72cda4d7996270eb1cb766e7971748c6e8ac28c1847b9dcd15c0265708",
+    "control/verification-0/receipt.json": "8cc4ad8a0a4d79a196499a5fa212367a15b99c1c1a13a5298b1d9af5743fb264",
+    "scripts/qualify-public-profile-cold-01a15ca9-20261105.py": "69b15f1d2aa30b3b8b954b709e02cb757d3ef9140d50d124a245857696c2c311",
+    "scripts/verified-public-profile-01a15ca9-20261105.py": "3369ee8d629ff14155deccc96a5021d2b3a1d3a641bc483c8cf29f830d65b7f4",
+    "scripts/verify-cold-public-profile-01a15ca9-20261105.py": "5f88874f4adcf471de678c4ddd9b0c6e8d5a88cece7b302841e3e91975878f47",
+    "job.json": "39c1fbe31a46ff1fa6c068101231fad8b64221a4ba72ab76106bf64086a91acb"
+  },
+  "every_payload_verified": true
+}

@@ -1,0 +1,27 @@
+{
+  "source": "Observed run_command stdout from the bounded same-image probes in this session; transcription, not a provider/model evaluation.",
+  "image": "sha256:9acb0723bebf03a036640c747c3a3f1d33afcdffe9be00587fcb0041079cce2b",
+  "cpu_without_quota": {
+    "rust_parallelism": 64,
+    "cpu_max": "max 100000",
+    "pids_max": 512
+  },
+  "cpu_with_quota": {
+    "rust_parallelism": 2,
+    "cpu_max": "200000 100000",
+    "pids_max": 512
+  },
+  "reaping_without_init": {
+    "parent_pid": 1,
+    "grandchild_pid": 8,
+    "state": "Z",
+    "ppid": 1
+  },
+  "reaping_with_init": {
+    "parent_pid": 7,
+    "grandchild_pid": 9,
+    "state": "absent",
+    "ppid": null
+  },
+  "original_tmp_mount": "rw,nosuid,nodev,noexec,relatime,size=1048576k,uid=1000,gid=1000,inode64,huge=advise"
+}

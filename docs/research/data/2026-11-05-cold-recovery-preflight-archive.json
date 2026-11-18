@@ -1,0 +1,7 @@
+{
+  "phase": "preflight",
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-05-cold-recovery-preflight-evidence.tar.gz",
+  "sha256": "765ae0f4bbe356fdaa821e3aeff69e6824a42e5bd39ca5dd0e0702428f965b9a",
+  "payload_files": 471,
+  "every_payload_hash_verified": true
+}

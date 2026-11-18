@@ -1,0 +1,10 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-semantic-contract-adapter-evidence.tar.gz",
+  "sha256": "76d403de40b4917c02a4900be555606b5cdf5a2c76c0ecd58a4f635a7edf77a6",
+  "bytes": 6288759,
+  "verified_payloads": 2518,
+  "verified_manifest": true,
+  "retained_reused_snapshot_files": 991,
+  "paid_admission": false,
+  "provider_calls": 0
+}

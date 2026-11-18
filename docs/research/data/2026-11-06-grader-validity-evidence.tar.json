@@ -1,0 +1,15 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-grader-validity-evidence.tar.gz",
+  "sha256": "9b992b4d7841f54a42a88323ef9cdbe169a87e9db839c71613720a6018fcf422",
+  "bytes": 1694700,
+  "payload_files": 189,
+  "manifest_files": 1,
+  "all_payloads_reopened_verified": true,
+  "source_commit": "a2ffc143266c5e828afd7d8ef2ceb665318df49f",
+  "patch_id": "6d3afca0f9ca24e2ccc9032c5aea79f418b64b7c",
+  "protected_unique_files": 17,
+  "review_manifest_payloads_rehashed": 144,
+  "provider_calls": 0,
+  "native_regrades": 0,
+  "prospective_live_admission": false
+}

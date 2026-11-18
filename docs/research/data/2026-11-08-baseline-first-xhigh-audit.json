@@ -1,0 +1,186 @@
+{
+  "time": "2026-11-07T23:20:35.094059+00:00",
+  "scope": "Independent raw-log/resource/hash audit; no model/native regrade",
+  "registration_sha256": "a208758385ce7a449ab83d5d96f50b06243945a2c6d6391a349d1411eda5efb8",
+  "results_sha256": "e1df2ead23878de3022fbdf29bead62bc64d12fc4a43ad667c200dd55e3bbed5",
+  "rows": [
+    {
+      "label": "baseline",
+      "raw_statuses": {
+        "contrast_failed_last_pipeline_stores_no_error_value": "fail",
+        "contrast_valid_last_transform_is_still_stored": "pass",
+        "contrast_failed_last_pipeline_leaves_ans_fetchable": "fail",
+        "contrast_invalid_ops_on_last_still_report_errors": "pass"
+      },
+      "sample_rows": 24,
+      "final_sample": true,
+      "minimum_sampled_host_available_gib": 50.295310974121094,
+      "oom_kills": 0,
+      "cargo_build_jobs_1_proof": true,
+      "fresh_container_absent": true,
+      "log_hashes": [
+        "f6f827e688919124f1f3ed099030f2167d1974b3ecf0fea0c5523633056a4fce",
+        "fae5cfde61c8d48e90cfc59dec949b8e85a8267af598923ab4ed98db33f77e14"
+      ]
+    },
+    {
+      "label": "low-control",
+      "raw_statuses": {
+        "contrast_failed_last_pipeline_stores_no_error_value": "pass",
+        "contrast_invalid_ops_on_last_still_report_errors": "pass",
+        "contrast_valid_last_transform_is_still_stored": "pass",
+        "contrast_failed_last_pipeline_leaves_ans_fetchable": "pass"
+      },
+      "sample_rows": 24,
+      "final_sample": true,
+      "minimum_sampled_host_available_gib": 49.956668853759766,
+      "oom_kills": 0,
+      "cargo_build_jobs_1_proof": true,
+      "fresh_container_absent": true,
+      "log_hashes": [
+        "1615eacca8d17e9a7850599524fa24627f5d3cb9a592c2a381ea617b5240b84a",
+        "8ca11d6eb3e067f46b2d0ce2ed9a2da1c98fea77057ff13d85bb28abba188bec"
+      ]
+    },
+    {
+      "label": "reference",
+      "raw_statuses": {
+        "contrast_failed_last_pipeline_stores_no_error_value": "pass",
+        "contrast_valid_last_transform_is_still_stored": "pass",
+        "contrast_failed_last_pipeline_leaves_ans_fetchable": "pass",
+        "contrast_invalid_ops_on_last_still_report_errors": "pass"
+      },
+      "sample_rows": 26,
+      "final_sample": true,
+      "minimum_sampled_host_available_gib": 48.02226638793945,
+      "oom_kills": 0,
+      "cargo_build_jobs_1_proof": true,
+      "fresh_container_absent": true,
+      "log_hashes": [
+        "c8c5208571c0cdbb8f1ba5b9c97a34eec8e051e1801a572fdf224d5ce963b932",
+        "933a065e7972c9aaaa003ba37b2cec395471fc6cd729d314b6a0b311e048f011"
+      ]
+    }
+  ],
+  "contracts": {
+    "low": {
+      "clauses": [
+        {
+          "id": "r1",
+          "kind": "requirement",
+          "basis": "Issue: after `$ans.last | str length` fails with only_supports_this_input_type, `$ans` is broken. maybe_store_last_result only skips bare $ans expressions, so the failing pipeline's output (error values) replaces `.last`. On baseline `$ans.last` becomes a list of Error values (observed). Expected: `$ans` and its `.last` remain the prior valid result, both for value and streamed sources.",
+          "source_evidence": [
+            "crates/nu-cli/src/util.rs:maybe_store_last_result",
+            "crates/nu-protocol/src/last_result.rs:block_is_bare_last_result_with"
+          ],
+          "test_names": [
+            "contrast_invalid_op_on_ans_last_keeps_ans_intact",
+            "contrast_invalid_op_on_streamed_ans_last_keeps_ans_intact"
+          ]
+        },
+        {
+          "id": "p1",
+          "kind": "preservation",
+          "basis": "A valid transform of `$ans.last` (e.g. `| first`) must still update the stored last result; existing test transform_of_last_updates_store covers the same behavior.",
+          "source_evidence": [
+            "crates/nu-cli/tests/last_result.rs:transform_of_last_updates_store"
+          ],
+          "test_names": [
+            "contrast_valid_transform_of_ans_last_still_stores"
+          ]
+        },
+        {
+          "id": "u1",
+          "kind": "unresolved",
+          "basis": "Whether `$ans.last` should ever hold a partially-successful stream with some error items, or how errors should be surfaced/stored, is not specified by the issue.",
+          "source_evidence": [
+            "crates/nu-cli/src/util.rs:store_list_stream_prefix"
+          ],
+          "test_names": []
+        }
+      ]
+    },
+    "xhigh": {
+      "clauses": [
+        {
+          "id": "r1",
+          "kind": "requirement",
+          "basis": "Issue: with max_last_result_size > 0, a failing `$ans.last | str length` (only_supports_this_input_type on record rows) makes a later `$ans` raise the same error; expected behavior is that fetching `$ans` is not broken. Baseline trace: `str length` returns a per-item Value::error rather than Err, so the stream only fails when printed; `maybe_store_last_result` -> `store_list_stream_prefix` has already stored those error items into `$ans.last` (maybe_store_last_result is documented as storing 'the successful interactive pipeline result'). Rendering `$ans` with the default display_output branch `table -e` (wide terminal) then expands `last` and raises the stored error. Observed on baseline: `$ans | table -e` evaluated via eval_block returns Err(OnlySupportsThisInputType { exp_input_type: \"string\", wrong_type: \"record<a: int>\" }) after the failing line. The test asserts only that `$ans` renders without error; it does not assert what `$ans.last` holds. eval_source's exit code is not usable here because it returns 0 even when rendering `$ans` printed the error.",
+          "source_evidence": [
+            "crates/nu-cli/src/util.rs:maybe_store_last_result",
+            "crates/nu-cli/src/util.rs:store_list_stream_prefix",
+            "crates/nu-cli/src/util.rs:evaluate_parsed_block",
+            "crates/nu-command/src/strings/str_/length.rs:action",
+            "crates/nu-protocol/src/engine/stack.rs:last_result_pipeline_data",
+            "crates/nu-protocol/src/config/hooks.rs:Hooks::default"
+          ],
+          "test_names": [
+            "contrast_failed_last_pipeline_leaves_ans_fetchable"
+          ]
+        },
+        {
+          "id": "r2",
+          "kind": "requirement",
+          "basis": "The same defect observed at the stored value: on baseline, after `[{a: 1} {a: 2}]` then `$ans.last | str length`, `$ans.last` is List([Error(OnlySupportsThisInputType), Error(OnlySupportsThisInputType)]). A failed line is not a 'successful interactive pipeline result' (doc of maybe_store_last_result) and the existing test error_does_not_overwrite shows failed lines are not meant to put a failure into `$ans`. The test asserts only that `$ans` contains no Value::Error anywhere after the failed line; it is agnostic to whether the previous `.last`, an empty/partial value, or no `last` is kept.",
+          "source_evidence": [
+            "crates/nu-cli/src/util.rs:store_list_stream_prefix",
+            "crates/nu-protocol/src/engine/stack.rs:store_last_result_raw",
+            "crates/nu-cli/tests/last_result.rs:error_does_not_overwrite"
+          ],
+          "test_names": [
+            "contrast_failed_last_pipeline_stores_no_error_value"
+          ]
+        },
+        {
+          "id": "p1",
+          "kind": "preservation",
+          "basis": "Invalid operations on `$ans.last` must keep failing, and failures that already behave correctly must stay so. Observed on baseline: `$ans.last | first | str length` (single-value failure) exits nonzero, leaves `$ans.last` equal to the earlier list, and `$ans` still renders under `table -e`; the streamed `$ans.last | str length` line itself still exits nonzero. A repair that swallows the error or clears `.last` on every failure would regress this (compare existing test error_does_not_overwrite for top-level errors).",
+          "source_evidence": [
+            "crates/nu-cli/src/util.rs:evaluate_parsed_block",
+            "crates/nu-cli/src/util.rs:eval_source",
+            "crates/nu-cli/tests/last_result.rs:error_does_not_overwrite"
+          ],
+          "test_names": [
+            "contrast_invalid_ops_on_last_still_report_errors"
+          ]
+        },
+        {
+          "id": "p2",
+          "kind": "preservation",
+          "basis": "Successful transforms of `$ans.last` that flow through a list stream must still be stored and `$ans` must still render. Observed on baseline: after `[\"a\" \"bcd\"]`, `$ans.last | str length` exits 0, `$ans.last` becomes [1 3] and `$ans | table -e` renders. Guards against a repair that stops storing stream results or drops them whenever any error check is added. Related existing behavior: transform_of_last_updates_store and truncated_list_prefix_respects_byte_budget.",
+          "source_evidence": [
+            "crates/nu-cli/src/util.rs:store_list_stream_prefix",
+            "crates/nu-cli/tests/last_result.rs:transform_of_last_updates_store"
+          ],
+          "test_names": [
+            "contrast_valid_last_transform_is_still_stored"
+          ]
+        },
+        {
+          "id": "u1",
+          "kind": "unresolved",
+          "basis": "What `$ans.last` should hold after the failed stream line is not stated by the issue. Plausible, incompatible outcomes: the previous result kept (as a failed top-level line does today and as the single-value failure does), an empty or partial prefix of the stream, or no `last` field at all (so a later `$ans.last` would be a missing-column error). Public evidence only requires `$ans` not to be broken, so no assertion is made.",
+          "source_evidence": [
+            "crates/nu-cli/src/util.rs:store_list_stream_prefix",
+            "crates/nu-protocol/src/engine/stack.rs:clear_last_result_payload",
+            "crates/nu-cli/tests/last_result.rs:error_does_not_overwrite"
+          ],
+          "test_names": []
+        },
+        {
+          "id": "u2",
+          "kind": "unresolved",
+          "basis": "The issue says the reporter can so far reproduce only with only_supports_this_input_type. A baseline probe (not kept as a test) showed the same stored-error mechanism for other failing streams, e.g. `$ans.last | each {|x| error make {msg: boom}}` and `[{a: 1}] | str length` as a first line, but expected behavior for those, and for streams with both valid and failing items, is not stated, so no assertion is made.",
+          "source_evidence": [
+            "crates/nu-cli/src/util.rs:store_list_stream_prefix"
+          ],
+          "test_names": []
+        }
+      ]
+    }
+  },
+  "wrong_repair_rejected": false,
+  "reference_retained": true,
+  "scientific_decision": "NO-GO for baseline-only oracle authoring on this development case; not a general low-vs-xhigh capability claim",
+  "provider_calls": 0
+}

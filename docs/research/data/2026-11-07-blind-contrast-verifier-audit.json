@@ -1,0 +1,70 @@
+{
+  "task_role": "one_exposed_development_control",
+  "tests": [
+    "contrast_error_value_result_keeps_ans_readable",
+    "contrast_error_inside_stream_keeps_ans_readable"
+  ],
+  "rows": [
+    {
+      "variant": "baseline",
+      "statuses": {
+        "contrast_error_value_result_keeps_ans_readable": "pass",
+        "contrast_error_inside_stream_keeps_ans_readable": "fail"
+      },
+      "all_pass": false,
+      "wall_seconds": 108.36336929025128,
+      "cgroup_probes": 12
+    },
+    {
+      "variant": "low-control",
+      "statuses": {
+        "contrast_error_value_result_keeps_ans_readable": "pass",
+        "contrast_error_inside_stream_keeps_ans_readable": "pass"
+      },
+      "all_pass": true,
+      "wall_seconds": 101.99151240475476,
+      "cgroup_probes": 11
+    },
+    {
+      "variant": "low-contract",
+      "statuses": {
+        "contrast_error_value_result_keeps_ans_readable": "pass",
+        "contrast_error_inside_stream_keeps_ans_readable": "pass"
+      },
+      "all_pass": true,
+      "wall_seconds": 109.19938843511045,
+      "cgroup_probes": 12
+    },
+    {
+      "variant": "xhigh-control",
+      "statuses": {
+        "contrast_error_value_result_keeps_ans_readable": "pass",
+        "contrast_error_inside_stream_keeps_ans_readable": "pass"
+      },
+      "all_pass": true,
+      "wall_seconds": 99.2982699694112,
+      "cgroup_probes": 11
+    },
+    {
+      "variant": "reference",
+      "statuses": {
+        "contrast_error_value_result_keeps_ans_readable": "pass",
+        "contrast_error_inside_stream_keeps_ans_readable": "fail"
+      },
+      "all_pass": false,
+      "wall_seconds": 95.98238642886281,
+      "cgroup_probes": 11
+    }
+  ],
+  "wrong_patches_rejected": 0,
+  "wrong_patch_variants": 3,
+  "reference_retained": false,
+  "verifier_cost_usd": "0.2291159",
+  "invalid_attempt_cost_usd": "0.1780582",
+  "series_known_subtotal_usd": "62.153943199999999054",
+  "test_patch_sha256": "55e155775730175ce246d5a7b8dd194d549765d3b43d90a7c67e4f03eb960b45",
+  "private_feedback_to_verifier": false,
+  "all_five_cells_valid": true,
+  "all_owned_eval_containers_absent": true,
+  "audit_native_reruns": 0
+}

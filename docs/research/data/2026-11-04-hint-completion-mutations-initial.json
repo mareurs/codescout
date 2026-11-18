@@ -1,0 +1,80 @@
+[
+  {
+    "mutation": "forget_prior",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "FE.F.\n======================================================================\nERROR: test_before_start_reserve_blocks_without_a_paid_call (test_driver.CompletionTests.test_before_start_reserve_blocks_without_a_paid_call)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 58, in test_before_start_reserve_blocks_without_a_paid_call\n    result = driver.execute_pair(root, Decimal('3.1'), lambda: 'fp')\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/driver.py\", line 60, in execute_pair\n    raw = json.loads((root / label / 'stdout.json').read_text())\n                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^\n  File \"/usr/lib/python3.14/pathlib/__init__.py\", line 787, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.14/pathlib/__init__.py\", line 771, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpbiibxc_9/completion-0/stdout.json'\n\n======================================================================\nFAIL: test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade (test_driver.CompletionTests.test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 38, in test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade\n    self.assertEqual(seen, [('low', False, False, Decimal('2.4')),\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n                            ('xhigh', False, False, Decimal('2.2'))])\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [('low', False, False, Decimal('4')), ('xhigh', False, False, Decimal('3.8'))] != [('low', False, False, Decimal('2.4')), ('xhigh', False, False, Decimal('2.2'))]\n\nFirst differing element 0:\n('low', False, False, Decimal('4'))\n('low', False, False, Decimal('2.4'))\n\n- [('low', False, False, Decimal('4')), ('xhigh', False, False, Decimal('3.8'))]\n?                                                                        ^ ^\n\n+ [('low', False, False, Decimal('2.4')), ('xhigh', False, False, Decimal('2.2'))]\n?                                 ++                                       ^ ^\n\n\n======================================================================\nFAIL: test_grade_failure_keeps_known_cost_and_exclusive_marker_blocks_reentry (test_driver.CompletionTests.test_grade_failure_keeps_known_cost_and_exclusive_marker_blocks_reentry)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 71, in test_grade_failure_keeps_known_cost_and_exclusive_marker_blocks_reentry\n    self.assertEqual(Decimal(ledger['pilot_cost_usd']), Decimal('1.8'))\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Decimal('0.2') != Decimal('1.8')\n\n----------------------------------------------------------------------\nRan 5 tests in 0.006s\n\nFAILED (failures=2, errors=1)\n"
+  },
+  {
+    "mutation": "reset_balance",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "F....\n======================================================================\nFAIL: test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade (test_driver.CompletionTests.test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 38, in test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade\n    self.assertEqual(seen, [('low', False, False, Decimal('2.4')),\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n                            ('xhigh', False, False, Decimal('2.2'))])\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [('low', False, False, Decimal('4')), ('xhigh', False, False, Decimal('4'))] != [('low', False, False, Decimal('2.4')), ('xhigh', False, False, Decimal('2.2'))]\n\nFirst differing element 0:\n('low', False, False, Decimal('4'))\n('low', False, False, Decimal('2.4'))\n\n- [('low', False, False, Decimal('4')), ('xhigh', False, False, Decimal('4'))]\n?                                                                        ^\n\n+ [('low', False, False, Decimal('2.4')), ('xhigh', False, False, Decimal('2.2'))]\n?                                 ++                                       ^^^\n\n\n----------------------------------------------------------------------\nRan 5 tests in 0.005s\n\nFAILED (failures=1)\n"
+  },
+  {
+    "mutation": "trust_terminal_identity",
+    "exit_code": 0,
+    "result": "survived",
+    "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.004s\n\nOK\n"
+  },
+  {
+    "mutation": "skip_cost_match",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "....F\n======================================================================\nFAIL: test_unknown_cost_and_terminal_mismatch_each_block_the_second_run (test_driver.CompletionTests.test_unknown_cost_and_terminal_mismatch_each_block_the_second_run) (flags={'wrong_cost': True})\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 49, in test_unknown_cost_and_terminal_mismatch_each_block_the_second_run\n    with self.assertRaises(ValueError):\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 5 tests in 0.006s\n\nFAILED (failures=1)\n"
+  },
+  {
+    "mutation": "skip_unknown",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "....F\n======================================================================\nFAIL: test_unknown_cost_and_terminal_mismatch_each_block_the_second_run (test_driver.CompletionTests.test_unknown_cost_and_terminal_mismatch_each_block_the_second_run) (flags={'unknown': True})\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 49, in test_unknown_cost_and_terminal_mismatch_each_block_the_second_run\n    with self.assertRaises(ValueError):\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 5 tests in 0.005s\n\nFAILED (failures=1)\n"
+  },
+  {
+    "mutation": "grade_dependent",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "F....\n======================================================================\nFAIL: test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade (test_driver.CompletionTests.test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 38, in test_actual_pair_carries_prior_cost_and_decreases_balance_independent_of_grade\n    self.assertEqual(seen, [('low', False, False, Decimal('2.4')),\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n                            ('xhigh', False, False, Decimal('2.2'))])\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [('low', False, False, Decimal('2.4'))] != [('low', False, False, Decimal('2.4')), ('xhigh', False, False, Decimal('2.2'))]\n\nSecond list contains 1 additional elements.\nFirst extra element 1:\n('xhigh', False, False, Decimal('2.2'))\n\n- [('low', False, False, Decimal('2.4'))]\n+ [('low', False, False, Decimal('2.4')), ('xhigh', False, False, Decimal('2.2'))]\n\n----------------------------------------------------------------------\nRan 5 tests in 0.004s\n\nFAILED (failures=1)\n"
+  },
+  {
+    "mutation": "nonexclusive_marker",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "...F.\n======================================================================\nFAIL: test_grade_failure_keeps_known_cost_and_exclusive_marker_blocks_reentry (test_driver.CompletionTests.test_grade_failure_keeps_known_cost_and_exclusive_marker_blocks_reentry)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 74, in test_grade_failure_keeps_known_cost_and_exclusive_marker_blocks_reentry\n    self.assertEqual(len(seen), 1)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^\nAssertionError: 2 != 1\n\n----------------------------------------------------------------------\nRan 5 tests in 0.005s\n\nFAILED (failures=1)\n"
+  },
+  {
+    "mutation": "skip_attempt_preflight",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "..E..\n======================================================================\nERROR: test_failed_preflight_blocks_before_any_model_call (test_driver.CompletionTests.test_failed_preflight_blocks_before_any_model_call)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/test_driver.py\", line 81, in test_failed_preflight_blocks_before_any_model_call\n    driver.execute_pair(root, Decimal('1.6'),\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^\n                        lambda: (_ for _ in ()).throw(ValueError('stale')))\n                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/hfa-completion-review/tools/hint_authority_completion/driver.py\", line 60, in execute_pair\n    raw = json.loads((root / label / 'stdout.json').read_text())\n                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^\n  File \"/usr/lib/python3.14/pathlib/__init__.py\", line 787, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.14/pathlib/__init__.py\", line 771, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpjj6wo123/completion-0/stdout.json'\n\n----------------------------------------------------------------------\nRan 5 tests in 0.008s\n\nFAILED (errors=1)\n"
+  },
+  {
+    "mutation": "skip_driver_binding",
+    "exit_code": 0,
+    "result": "survived",
+    "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.004s\n\nOK\n"
+  },
+  {
+    "mutation": "skip_plan_binding",
+    "exit_code": 0,
+    "result": "survived",
+    "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.004s\n\nOK\n"
+  },
+  {
+    "mutation": "skip_canary",
+    "exit_code": 0,
+    "result": "survived",
+    "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.004s\n\nOK\n"
+  },
+  {
+    "mutation": "skip_qualification",
+    "exit_code": 0,
+    "result": "survived",
+    "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.004s\n\nOK\n"
+  },
+  {
+    "mutation": "ignore_transport_exhaustion",
+    "exit_code": 0,
+    "result": "survived",
+    "output": ".....\n----------------------------------------------------------------------\nRan 5 tests in 0.004s\n\nOK\n"
+  }
+]

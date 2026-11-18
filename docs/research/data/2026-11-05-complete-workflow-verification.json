@@ -1,0 +1,63 @@
+{
+  "verified": true,
+  "complete_pair": false,
+  "cohort_status": "aborted_after_low_deadline_before_xhigh",
+  "fingerprint": "faf053c592896d9bdabb98ec554258a4584abdfdf89e4c04bee0b87a9bfa739a",
+  "paid_arms": 1,
+  "completed_workflows": 0,
+  "accepted_workflows": 0,
+  "private_patch_passes": 1,
+  "new_model_cost_usd": "0.4249394",
+  "thread_cost_usd": "32.222358599999999964",
+  "thread_remaining_within_40": "7.777641400000000036",
+  "original_pilot_cost_usd": "2.57626490000000013",
+  "low": {
+    "model_requests": 19,
+    "cli_terminal_events": 1,
+    "workflow_wall_s": 1801.1547937230207,
+    "workflow_error": "TimeoutError: lifecycle deadline exceeded",
+    "public_checks_executed": 0,
+    "private_named_tests": [
+      {
+        "filter": "hfa_acceptance",
+        "passed_named_tests": 2,
+        "log_sha256": "bf3c6a29d7d7f6194b9894770dba7cfd0a25e50f517c98b9d1b98ab1ab474cf9"
+      },
+      {
+        "filter": "librarian::catalog::chunk::",
+        "passed_named_tests": 9,
+        "log_sha256": "ec9d33f20c99d837d471955aca2da9b6800d98b7e0e9d9cf81ab34051b73e9ee"
+      },
+      {
+        "filter": "librarian::indexer::tests::",
+        "passed_named_tests": 38,
+        "log_sha256": "ec985ff859064ac3e843c24d53d2febd0a47429165667507b9524bb6ea9e2383"
+      }
+    ],
+    "context_valid": true,
+    "patch_sha256": "d13ca0a8b5d3b334755cba0d605f5737a098ecd299814b147f7d85f6ec435719",
+    "receipt_sha256": "6c8e2bae4346568aeb8c5239e16ea51d146d88ffa1fb4ac01ec942a8b7e151ac"
+  },
+  "cleanup_inspections": [
+    {
+      "identity": "dc0b645643c2f6cb432e68e1a9e05a80db4e9e582b74f6592bfa6e12daf3efe9",
+      "exit_code": 1,
+      "stderr": "error: no such object: dc0b645643c2f6cb432e68e1a9e05a80db4e9e582b74f6592bfa6e12daf3efe9\n"
+    },
+    {
+      "identity": "hfa-native-0c87dd8fa8744f58b12d651eb8390f6b",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-0c87dd8fa8744f58b12d651eb8390f6b\n"
+    },
+    {
+      "identity": "hfa-native-ba1d7a577bef40199050bb76d121529a",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-ba1d7a577bef40199050bb76d121529a\n"
+    }
+  ],
+  "admission_withdrawn": true,
+  "withdrawal_issue": "f458f9840337469e",
+  "background_identity_gap": "39785443931155d4: mocked replacement accepted; actual LOW samples show one ID, not continuous attestation",
+  "evidence_limit": "Native background full log was not copied before container cleanup; only earlier tail observations remain. No public verification ran.",
+  "inference_limit": "Patch passes private tests, but workflow was deadline-censored. No low/xhigh quality/cost or generic transfer comparison."
+}

@@ -1,0 +1,9 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-05-external-prepared-entry-evidence.tar.gz",
+  "archive_sha256": "b79a6b03bb17580bd219b426b9f1dcc5dc48bdb6dbc32dbef0add4e10b2764fa",
+  "actual_regular_payload_files_verified": 326,
+  "payload_bytes": 6613107,
+  "archive_bytes": 1638301,
+  "source_commit": "c1d51c446c5712b6a09c82e358f5ffbda834923c",
+  "limits": "Closed adapter/wire/reference/review/gate and static author preparation only. Live authors, private controls and default index results are not closed or included. No model weights, Docker images, live DBs, native/client profiles or real credential file. Private controller archive must never be mounted into an author or repair actor."
+}

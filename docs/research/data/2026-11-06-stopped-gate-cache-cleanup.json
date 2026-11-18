@@ -1,0 +1,13 @@
+{
+  "target": "/home/marius/.cache/codescout-gate/slot-0/debug",
+  "lease_path": "/home/marius/.cache/codescout-gate/slot-0.lock",
+  "lease_inode_before": 268,
+  "processes_referencing_target": [],
+  "du_allocated_bytes": 20685115392,
+  "root_available_before": 22605533184,
+  "preserved": "source, diagnostic/research evidence, all images/volumes/containers and original cohort; only stopped gate debug cache removed",
+  "causal_reclaimed_space_claim": false,
+  "target_absent": true,
+  "lease_inode_after": 268,
+  "root_available_after": 34503839744
+}

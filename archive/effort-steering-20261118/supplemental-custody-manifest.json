@@ -1,0 +1,1131 @@
+{
+  "captured_at": "2026-11-18T10:40:42.624826+00:00",
+  "reason": "Final sweep: original historical data outside the consolidated tracker and remaining full experiment plans/specs",
+  "files": [
+    {
+      "path": "docs/research/2026-11-06-own-cache-cleanup-followup.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 4168,
+      "mode": 420,
+      "sha256": "802f08a3649b228e701aa5036028b5fd2206fb55d571eb46ca8031f6fa0d39e8",
+      "storage": "git",
+      "destination": "docs/research/2026-11-06-own-cache-cleanup-followup.md"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-authority-budget-fix-gate.log.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 251798,
+      "mode": 420,
+      "sha256": "4b4c70f20e96a0cfcb2e587f390c72db8aa9fe3847887e46ad21ad3d2df23012",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-authority-budget-fix-gate.log.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-authority-budget-mutations-initial.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 8849,
+      "mode": 420,
+      "sha256": "0d8e37716e5a6c2c275bbf81146be56613b7b4d6c2cd0626d7d142c8d7b7ff31",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-authority-budget-mutations-initial.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-authority-budget-mutations-recheck.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5112,
+      "mode": 420,
+      "sha256": "33852fdedf4bf0731e26b8b75e3c69a07675790842ad82600c041bb73a9ae68d",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-authority-budget-mutations-recheck.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-authority-canary-negative-control.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 292,
+      "mode": 420,
+      "sha256": "64a6b7c83a2103b726a4302a3806500db03dc263eafa0d19c04dafc1ea0f89f0",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-authority-canary-negative-control.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-authority-requalification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3611,
+      "mode": 420,
+      "sha256": "f00dffb638e9a60fc4774bce86257623d99a41c610e000bd18157a365437c644",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-authority-requalification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-completion-gate.log.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 249295,
+      "mode": 420,
+      "sha256": "60daec507f587dcc9821344cc443e7cd6972ae92d65e2a7af4d7157820377c08",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-completion-gate.log.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-completion-mutations-initial.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 12630,
+      "mode": 420,
+      "sha256": "f187ae24ae07eb4796746e207ec41294b0083d13857f5cc24ce280787e44a734",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-completion-mutations-initial.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-completion-mutations-recheck.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 8308,
+      "mode": 420,
+      "sha256": "494b7b7d1d07179c68fea03dc7b2abf9493218112dacdd7df9eaa0aa4ad996df",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-completion-mutations-recheck.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-completion-results.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 4211,
+      "mode": 420,
+      "sha256": "3b07dc4c0df5a921d298518b4affddffc7837a7841a116bc27a8470b3f401d93",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-completion-results.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-hint-completion-validation-protocol.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 7877,
+      "mode": 420,
+      "sha256": "75eaa0f8cdab51122776fc735b2e99caa8f9fc70b5ec857ed7af340983b416f1",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-hint-completion-validation-protocol.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-native-build-provenance.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5889757,
+      "mode": 420,
+      "sha256": "7b9cc96c195aa38f1f6ae3598a09df83a59cb67a738fbe9adebac271f0ce12ad",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-native-build-provenance.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-native-readiness-recheck.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 38042,
+      "mode": 420,
+      "sha256": "3b2e57109e7957cd4ef921828dc5df3dedca7c165307bc4748cc29ed168390ac",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-native-readiness-recheck.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-04-worker-context-verification.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5715233,
+      "mode": 420,
+      "sha256": "341fc013894825a8676169f362d6ffe4dc66f22124eaa392a528139821f63f22",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-04-worker-context-verification.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-action-budget-adjudication-archive.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 329,
+      "mode": 420,
+      "sha256": "ea8524541d52e2834ad746cf315211e7e36fe5008cfee40a32c1b59b08715225",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-action-budget-adjudication-archive.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-action-budget-adjudication-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 270455,
+      "mode": 420,
+      "sha256": "5bb489a63843be810bb5ded207258fe4ab6ff8c279706cbd2494548244927497",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-action-budget-adjudication-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-action-budget-final-archive.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 283,
+      "mode": 420,
+      "sha256": "8a28f7567bd8f6b39c4a57f5d729874d6984be6d7fb26245dd783986bd4ded81",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-action-budget-final-archive.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-action-budget-final-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 12190297,
+      "mode": 420,
+      "sha256": "5a9c571c6d1d926a645d0409a3910f7766fa246debb59d49198eafa7176d14b8",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-action-budget-final-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-action-budget-preflight-archive.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 291,
+      "mode": 420,
+      "sha256": "e9d567ad9ae095d52cfbb5c52246a31c570c2116804c616e68697c06a43e445e",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-action-budget-preflight-archive.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-action-budget-preflight-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 6453850,
+      "mode": 420,
+      "sha256": "a4999bc43558388acf9a8af00857b3b9502866baa22d2263eef25ab651f3218f",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-action-budget-preflight-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-agent-lifecycle-gate.log.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 251869,
+      "mode": 420,
+      "sha256": "26fddb04e974e08d423a77561ffe15bf4e0dfd1cdb84efd4111b7609551fc20e",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-agent-lifecycle-gate.log.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-agent-lifecycle-mutations-initial.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5796,
+      "mode": 420,
+      "sha256": "a11e63a440495d5a51ceaf4dfcb877b89de869f319139402ef9fba6f7d9baffd",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-agent-lifecycle-mutations-initial.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-agent-lifecycle-mutations-recheck.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 6419,
+      "mode": 420,
+      "sha256": "af8d513d20d8157ddeea89587c6128cca83f494c575631d352e1af1ac69aa011",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-agent-lifecycle-mutations-recheck.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-agent-lifecycle-results.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3902,
+      "mode": 420,
+      "sha256": "2f727e8ef5b9788e96ef77dd80fdd4b57df2a4aa13f56da8a87923c7a0e775d1",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-agent-lifecycle-results.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-agent-lifecycle-verification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 2402,
+      "mode": 420,
+      "sha256": "0e6851d47d92abb419a2bade2d07bef959baf015d514aae2355f8ec8ed52e349",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-agent-lifecycle-verification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-cold-public-profile-archive.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 2818,
+      "mode": 420,
+      "sha256": "8e72370dd079c8d84ebe4f88fc002331fbd083ee9610c60d84679649f365a722",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-cold-public-profile-archive.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-cold-public-profile-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 668562,
+      "mode": 420,
+      "sha256": "b9b0673268bcb724beb71c2e8679e9f7dbaaa552ce10e54a9ba6835f38c878de",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-cold-public-profile-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-cold-public-profile-verification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 2401,
+      "mode": 420,
+      "sha256": "d7a7b4411735a07d39b0301d18f61fcafcb15bbc06099d55b87b434e06696698",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-cold-public-profile-verification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-cold-recovery-final-archive.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 283,
+      "mode": 420,
+      "sha256": "242e6ff305a231cc03cf9650bbe6b648fc4519508de091cca87e0f18d20f4e80",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-cold-recovery-final-archive.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-cold-recovery-final-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 9284291,
+      "mode": 420,
+      "sha256": "7ee89423633505746820ea6e5e9fe35efd13a02a8e78fac20560823831cd05d7",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-cold-recovery-final-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-cold-recovery-preflight-archive.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 291,
+      "mode": 420,
+      "sha256": "396b6cfdc86c44bf664aea82635887ef93cb38d9bfed7ad10397fe4286425c1c",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-cold-recovery-preflight-archive.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-cold-recovery-preflight-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 4901511,
+      "mode": 420,
+      "sha256": "765ae0f4bbe356fdaa821e3aeff69e6824a42e5bd39ca5dd0e0702428f965b9a",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-cold-recovery-preflight-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-complete-workflow-archive.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 727,
+      "mode": 420,
+      "sha256": "9b2f8da7367958e40193e3da50d37b76c7fc9982ee99aa12c8675e80b2c169ce",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-complete-workflow-archive.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-complete-workflow-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5167570,
+      "mode": 420,
+      "sha256": "35e6b5523aaf29f3ef896c3bcc31d9e3623bb1b581782c4b272f6301cee835c8",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-complete-workflow-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-complete-workflow-gate.log.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 248952,
+      "mode": 420,
+      "sha256": "aa8388bd600ee55f128fbb98073c4f6d3cb634ef5f2181a0b6a596ed18f03179",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-complete-workflow-gate.log.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-complete-workflow-preflight.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 681,
+      "mode": 420,
+      "sha256": "1a1fc6b4473d9a60c0a3064cf13bc090e880a0034043c78ecb56f007e359e4e4",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-complete-workflow-preflight.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-complete-workflow-results.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 9448,
+      "mode": 420,
+      "sha256": "bee74400e5bfbc3dc2456a8fbab9265788d91c9e0b0d0dabf2f29c564befcc82",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-complete-workflow-results.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-complete-workflow-verification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 2644,
+      "mode": 420,
+      "sha256": "e7ce67dd59d4e93569d62e00340a0ec501e05de75bed17835c2949205e4a29e5",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-complete-workflow-verification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-external-onboarding-admission-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 73605618,
+      "mode": 420,
+      "sha256": "8ccfd8fecbcc4d4b839e6d41d9e505abd62ea52843372cfabf2f205752fac315",
+      "storage": "external",
+      "destination": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/research/data/2026-11-05-external-onboarding-admission-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-external-onboarding-admission-preservation.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 744767,
+      "mode": 420,
+      "sha256": "9e1a655699669a5a72131069f37d73b09c1029c18f11523cc383b07cc87c55cf",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-external-onboarding-admission-preservation.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-external-prepared-entry-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1638301,
+      "mode": 420,
+      "sha256": "b79a6b03bb17580bd219b426b9f1dcc5dc48bdb6dbc32dbef0add4e10b2764fa",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-external-prepared-entry-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-external-prepared-entry-preservation.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 729,
+      "mode": 420,
+      "sha256": "4ace9c40de6d57712364c317f64f212e17c3ae9b28c5648e8180ea5cb437aae7",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-external-prepared-entry-preservation.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-external-transfer-admission-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 2262547,
+      "mode": 420,
+      "sha256": "85888bb3d2b948d2986c3616a1f5b48476bba05a579de6ec082f0b01bdbbd88b",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-external-transfer-admission-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-native-resource-probe-observations.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 783,
+      "mode": 420,
+      "sha256": "b461f1d96c5f17d292b51929b5c74461d1b8f2c8c9d074b209599e65456d2e2c",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-native-resource-probe-observations.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-public-profile-final-verification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 7465,
+      "mode": 420,
+      "sha256": "912e9b3fec1e2d6ce0231901e4cc777f45267c6778e03cfdba7ce36ff3858ddd",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-public-profile-final-verification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-public-profile-final.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1381769,
+      "mode": 420,
+      "sha256": "6e197b71805837f9e5cda1c0d6ed296811c761f00c4ca201bfeb5bd29a6ece49",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-public-profile-final.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-public-profile-reference-v1.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 123640,
+      "mode": 420,
+      "sha256": "49cec5bcbc782b62315c4e6839c7e1a4e111e6c74c9d0c308a173e4f2b6a8e0d",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-public-profile-reference-v1.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-public-profile-v2-and-xhigh.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1439912,
+      "mode": 420,
+      "sha256": "997f9e5dd6ab311bdef677fdd702483aeb28e76e41f1247d6e21a61fca87da22",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-public-profile-v2-and-xhigh.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-transfer-admission-manifest.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5454,
+      "mode": 420,
+      "sha256": "f41ba887cf6835a5531ce37379ca40aac355226c81335e65040838ade1c72704",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-transfer-admission-manifest.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-transfer-candidate-selection.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 2195,
+      "mode": 420,
+      "sha256": "fca421bae55cc30c53d894186c62982f44cc9e18e3fbdf29ca4ef8dcce5128e5",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-transfer-candidate-selection.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-transfer-cli-wire-audit.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1807,
+      "mode": 420,
+      "sha256": "ddea2f0ef864911819d677c68d91adfb2ab261cf73faaaf6a2a7bc84521169aa",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-transfer-cli-wire-audit.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-transfer-context-preflight.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3170,
+      "mode": 420,
+      "sha256": "2beae70d28dedfd7d40cc479c39b7ccf0c119b2edbff21cb0eb0a8e23eb184e8",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-transfer-context-preflight.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-transfer-control-replay.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 8518,
+      "mode": 420,
+      "sha256": "3324ac6a801735b51aa6d5217ecbc28aee1abf0a6f0d92da5af1f91870935aad",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-transfer-control-replay.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-transfer-public-controls.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3821,
+      "mode": 420,
+      "sha256": "a13e64c33fdd8f9fca8ef2a6558329efade2ab4825a426b2bed42e94004542f4",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-transfer-public-controls.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-runtime-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3812475,
+      "mode": 420,
+      "sha256": "9d76aba72de8a72c1928ba88665754a1c9f3145005fb459882440bca5292b2ef",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-runtime-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-runtime-gate.log.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 249078,
+      "mode": 420,
+      "sha256": "1a41bd4543b66f1ed8034d30e5b0546c650639acaf8c1fe13dbc09af5419e799",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-runtime-gate.log.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-runtime-verification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 9071,
+      "mode": 420,
+      "sha256": "cdcb0f36713e1daaed507ea24db665c6570743a668577d982bb003d62d1ee0b8",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-runtime-verification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-worker-gate.log.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 258475,
+      "mode": 420,
+      "sha256": "1ab5da317175d6a1972dcc0b256ce808d9caf03b32a66e3c5698ad00e8a1d9c1",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-worker-gate.log.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-worker-mutations-initial.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 8062,
+      "mode": 420,
+      "sha256": "ae8cacad61591772a3cfc95a22c388c0e3c8cf196fd2fb57a8e1585b283e6a0f",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-worker-mutations-initial.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-worker-mutations-recheck.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 8166,
+      "mode": 420,
+      "sha256": "b60c795baf1b1fbf362465ab698e157e4233adbcf0f9a19c63591d0253c4f014",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-worker-mutations-recheck.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-worker-results.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 12389,
+      "mode": 420,
+      "sha256": "fb92c6dc58b2ec8f522aa0e94d088a7dd9efa71877e3e0936b8df8374c8cf19c",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-worker-results.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-worker-v2-results.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 12681,
+      "mode": 420,
+      "sha256": "fd0f7a5b180fcd772f1d4ef7fcca16786d4b2d6a73fd5487d9473de078a73f88",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-worker-v2-results.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-worker-v2-verification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3008,
+      "mode": 420,
+      "sha256": "aca50311da5fb32a261f29a77255d0ae9152bf369868e319503d5cb09f1002cd",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-worker-v2-verification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-verified-worker-verification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3008,
+      "mode": 420,
+      "sha256": "450035ff1f8be1de8d321565cc02c39f37215ff10fd556726dbcbab3fdd513a5",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-verified-worker-verification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-workflow-calibration-inventory.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3712,
+      "mode": 420,
+      "sha256": "ff5dc88dad8e7da4961c5dda9594c44a113c306e0b1f599e71cb5b3370553b6c",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-workflow-calibration-inventory.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-workflow-calibration-runtime-inventory.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5560,
+      "mode": 420,
+      "sha256": "557dd32bd07c190d3a4aa9a8d43cae7833c472b58be63139225a691dd15b9fe7",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-workflow-calibration-runtime-inventory.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-workflow-xhigh-verification.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 654,
+      "mode": 420,
+      "sha256": "c5e6e97bc399858ec32eac7ee48bddfca670eeff646744a15d1ae085a4a04ca6",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-workflow-xhigh-verification.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-05-xhigh-expost-public-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 666281,
+      "mode": 420,
+      "sha256": "f7c7ba9d4f207d203b9806b2f31ef3cd41bf3d4b4ddfd1809bcdc81179eb74eb",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-05-xhigh-expost-public-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-disk-cleanup-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 8974214,
+      "mode": 420,
+      "sha256": "f52c8d98bba780e1a6885049004f24a25ed94c5f443b2acc4fbb1eaf968ba131",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-disk-cleanup-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-disk-cleanup-preservation.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3001,
+      "mode": 420,
+      "sha256": "8766e4f4c15689002235f46b8337716ab057889ec7e447895dee590931b91224",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-disk-cleanup-preservation.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-executable-native-baseline-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 211918,
+      "mode": 420,
+      "sha256": "a6f224468b952c814988dc784f1bf036d02ad71aea1ba22ab3408b0bfc405f38",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-executable-native-baseline-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-executable-native-baseline-evidence.tar.gz.receipt.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 2745,
+      "mode": 420,
+      "sha256": "56fcaaf6269723bd446920abfeb87538a5454cdb56325dc19bcf905a3af2450c",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-executable-native-baseline-evidence.tar.gz.receipt.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-executable-tmp-preflight-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 27520,
+      "mode": 420,
+      "sha256": "12faf888791d504237117f455876f4962af9b4ad94700cdd2ad74f835c2a4796",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-executable-tmp-preflight-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-final-tmp-alias-controls.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 4842,
+      "mode": 420,
+      "sha256": "0838697d9d4e5b755e1fe3e98d6a66eb7648b40dce6f4b1b3d3abd6a7965b079",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-final-tmp-alias-controls.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-grader-validity-audit-v2.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 11424,
+      "mode": 420,
+      "sha256": "d324d0b5b2230ee977e6188d7f3f2c2451c1e355e928689ed74638dbe5824cd0",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-grader-validity-audit-v2.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-grader-validity-audit.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 11424,
+      "mode": 420,
+      "sha256": "2221fee48b54ee56e0040be7bbd4676f802494747c6ad41b4b72af6bf70657b4",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-grader-validity-audit.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-grader-validity-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1694700,
+      "mode": 420,
+      "sha256": "9b992b4d7841f54a42a88323ef9cdbe169a87e9db839c71613720a6018fcf422",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-grader-validity-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-grader-validity-evidence.tar.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 588,
+      "mode": 420,
+      "sha256": "2bfdb81bc82c0c52101159641da8e1404be698b6f12d11e860e1fa3360c7be00",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-grader-validity-evidence.tar.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-own-cache-cleanup-followup-closure.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 252856,
+      "mode": 420,
+      "sha256": "9cefd8fd24f34e86e8d611c33a4d5c11d0762ab8ef4465897466d090e45193a2",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-own-cache-cleanup-followup-closure.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-own-cache-cleanup-followup-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3210924,
+      "mode": 420,
+      "sha256": "b442d400cd366c81f17edbb767bf5985d952c27964c5b0f757fead5f21f7d17a",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-own-cache-cleanup-followup-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-own-cache-cleanup-followup-preservation.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 453,
+      "mode": 420,
+      "sha256": "0cb4fe53cddda90e43211f09c931eaaf37bee85e4e13aad1c649a6d3dae3ee99",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-own-cache-cleanup-followup-preservation.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-private-grade-disk-audit-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 33232147,
+      "mode": 420,
+      "sha256": "89dfc97b0d7a901d4da3f37a9beb5576e7fe7d36f319cfdce8ddbf986367f518",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-private-grade-disk-audit-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-private-grade-disk-audit-evidence.tar.gz.receipt.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 390,
+      "mode": 420,
+      "sha256": "4f3dcf498f1fcf97d7d8ba8d8c87ef6b2d7e1b6d4378c1279042bf8d0f2fd8cb",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-private-grade-disk-audit-evidence.tar.gz.receipt.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-prospective-grader-policy-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 14758129,
+      "mode": 420,
+      "sha256": "2bc2fc8706b4b4d7c3d302e6b6cdd0b832704903db3bd4fe4ba4b23e7cf17fbc",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-prospective-grader-policy-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-adapter-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 6288759,
+      "mode": 420,
+      "sha256": "76d403de40b4917c02a4900be555606b5cdf5a2c76c0ecd58a4f635a7edf77a6",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-adapter-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-adapter-evidence.tar.gz.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 375,
+      "mode": 420,
+      "sha256": "14ae797d11962aa3811ff5020e60deb17d90cb6f9d63b752cb49997cf5492620",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-adapter-evidence.tar.gz.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-controller-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1435871,
+      "mode": 420,
+      "sha256": "ab510fd377c8173bbbfd2675c14bbffa53d4904aa7b88ea67f19db13ce94b899",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-controller-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-controller-evidence.tar.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1656,
+      "mode": 420,
+      "sha256": "499fd9ef3476a4d26ab08b3ec2ef694c991c21d463cd70d868cd9454c49ea6cf",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-controller-evidence.tar.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-plugin-binding-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 934156,
+      "mode": 420,
+      "sha256": "b199c56eb21747aa90fe878c792bc319eb19b1093e87f6b0fb0ab83cf39c1192",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-plugin-binding-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-plugin-binding-evidence.tar.gz.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1388,
+      "mode": 420,
+      "sha256": "23ba93de92e246cf6e33081228cbae1e17f4883ba2a03aa4cacb9e4a6a818483",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-plugin-binding-evidence.tar.gz.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-preparation-evidence.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 431,
+      "mode": 420,
+      "sha256": "5d9f4725d7768f9a59d47e09cb5a03c7049fb918f3393afd02bcb3cbedd7b21d",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-preparation-evidence.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-preparation-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 245506,
+      "mode": 420,
+      "sha256": "f796140a42a00f2d83e91fe55c1d2be373f4fe7ec652616acbda99649966e089",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-preparation-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-runtime-evidence.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 729,
+      "mode": 420,
+      "sha256": "f83a1d7eb2011f9da9532806cd79be6c13616a1f44b2f2d2588fc592524a0721",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-runtime-evidence.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-runtime-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 1548697,
+      "mode": 420,
+      "sha256": "ae333e71ab057e185f62746bbec7de854a5a7a64804e77aa3508eef28fdf3628",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-runtime-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-wire-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5106660,
+      "mode": 420,
+      "sha256": "57a27b5aba7fb5e73530baf39fc49899b486d46b1c2289ce38cfa72e809af885",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-wire-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-semantic-contract-wire-evidence.tar.gz.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 4988,
+      "mode": 420,
+      "sha256": "139f7c11631b7f252de6e29ccc7df67c6126706757ea4a39d2187e851aac2202",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-semantic-contract-wire-evidence.tar.gz.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-stopped-gate-cache-cleanup.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 554,
+      "mode": 420,
+      "sha256": "155dd345ad686768f42283e59b98c2819733723ee11262be9d61032151cf694f",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-stopped-gate-cache-cleanup.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-06-tmp-exec-diagnosis.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 21492,
+      "mode": 420,
+      "sha256": "18243378597a8e1c186ff2ee0d83034f5621112c804cd7be38b6b26c6b7ee578",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-06-tmp-exec-diagnosis.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-baseline-first-controller-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 296876,
+      "mode": 420,
+      "sha256": "b4bbef977fa7799afc81d2b7de2dacafb678bdf14068cf3ae57d7fa25e32ab12",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-baseline-first-controller-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-baseline-first-partial-audit.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 10102,
+      "mode": 420,
+      "sha256": "897c4af153c2c70fd201bb0e9c23023e8421e7d2bc8d5542101f94dbdf8c0eaa",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-baseline-first-partial-audit.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-blind-contrast-verifier-audit.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 2144,
+      "mode": 420,
+      "sha256": "acb7e17770066c2748f32066dfb3d348643471672f5735df13a29d14667a54d4",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-blind-contrast-verifier-audit.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-blind-contrast-verifier-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 146305,
+      "mode": 420,
+      "sha256": "a12dd34af4b43fa0b3a6f3843c381405eec0e1b9291da19c56ff7a76ac434d8a",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-blind-contrast-verifier-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-differential-observations.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 3895,
+      "mode": 420,
+      "sha256": "6090afb9e000253f05220de80dc544d67dac21a4de8f58344b1184588a317038",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-differential-observations.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-differential-oracle-audit.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 6890,
+      "mode": 420,
+      "sha256": "9cbaffad925bdf52c3b1942628dedfe5762c56d42297a201eef8399f94c2a196",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-differential-oracle-audit.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-differential-oracle-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 74077,
+      "mode": 420,
+      "sha256": "b35b3ff0347ff1526b86ca7ca5698f90cd52541183459887ceae6a58e9fff63e",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-differential-oracle-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-native-probe-compatibility-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 8594667,
+      "mode": 420,
+      "sha256": "dc72f66cab884553b7352282c43f773b91add73f3ab1d7edfe48d2b76a50b057",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-native-probe-compatibility-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-native-probe-compatibility-evidence.tar.gz.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 373,
+      "mode": 420,
+      "sha256": "99cc602bda21ae8b4aae8a948aeb98c6bd82795a2a46b936ddedecfc5b5b6e19",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-native-probe-compatibility-evidence.tar.gz.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-semantic-contract-actor-diagnosis.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 11277,
+      "mode": 420,
+      "sha256": "970a09150cffe207163fb97bd437e373322e074c6b00789043cb2560f9e68242",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-semantic-contract-actor-diagnosis.md"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-semantic-contract-pilot-audit.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 30685,
+      "mode": 420,
+      "sha256": "7a2fc906c3d0b08605cebba9a1aa5b67b60703fb83c239833a88ec6b907a2dfd",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-semantic-contract-pilot-audit.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-07-semantic-contract-source-diagnosis.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 9609,
+      "mode": 420,
+      "sha256": "f75527dc6afedcdae595382583322b6bb2f831fba07cdaa0abe68aa9fdee7dbf",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-07-semantic-contract-source-diagnosis.md"
+    },
+    {
+      "path": "docs/research/data/2026-11-08-baseline-first-scientific-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 41770,
+      "mode": 420,
+      "sha256": "49cabdd3aa4c4fed4bdb2b73410845a90841296a2290bf579bfaa8eeea98890a",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-08-baseline-first-scientific-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-08-baseline-first-xhigh-audit.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 10711,
+      "mode": 420,
+      "sha256": "d1ca6cbeb9cd2b4a0079b4479d83e4f33470a66b8c82b645af622ba9b5191d0b",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-08-baseline-first-xhigh-audit.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-08-oracle-uncertainty-audit.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 6646,
+      "mode": 420,
+      "sha256": "4def69a367bcc0b051361c0b5bb2515f4b53053ec9fecb9fa22ddff80eb4d0b3",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-08-oracle-uncertainty-audit.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-08-oracle-uncertainty-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 54061,
+      "mode": 420,
+      "sha256": "f1cfe2046e824a2269fbd29f6353f8bf5d142aaa0ba871da9c24aa6f3dbe629e",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-08-oracle-uncertainty-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-09-onboarding-readiness-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 115023,
+      "mode": 420,
+      "sha256": "3fd8732734ad8092408bed196f98a2b07135728c1986573bf638464bc85cbbd7",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-09-onboarding-readiness-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-09-onboarding-readiness-final-evidence.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 361432,
+      "mode": 420,
+      "sha256": "68e0350e907a66cbe01e2c9dbefba1c40ec9efb7f2870e09aae77431b7f4df04",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-09-onboarding-readiness-final-evidence.tar.gz"
+    },
+    {
+      "path": "docs/research/data/2026-11-09-onboarding-readiness-final-manifest.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 7926,
+      "mode": 420,
+      "sha256": "b33a4369d43e8df6c5f6d2c0fbae4db8bb0112e76298af461b66245b563fb9e5",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-09-onboarding-readiness-final-manifest.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-09-onboarding-readiness-manifest.json",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 6939,
+      "mode": 420,
+      "sha256": "4799999ea613161e5ea4f381b76454c6896064a825364180c95f3b54f33baff1",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-09-onboarding-readiness-manifest.json"
+    },
+    {
+      "path": "docs/research/data/2026-11-11-usage-stats-scripts.tar.gz",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 86785,
+      "mode": 420,
+      "sha256": "ae12649de76e45cbd699e01673908c592948f18b67d1649d8e0c6da62a4dd8e6",
+      "storage": "git",
+      "destination": "docs/research/data/2026-11-11-usage-stats-scripts.tar.gz"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-05-agent-background-continuation.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5105,
+      "mode": 420,
+      "sha256": "74ed36f56b8ecfc717a0420167cfbe0fa1380085472ab203ba32e737e84a13f0",
+      "storage": "git",
+      "destination": "docs/superpowers/plans/2026-11-05-agent-background-continuation.md"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-11-05-verified-worker-composition.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 4573,
+      "mode": 420,
+      "sha256": "7b548d0a3fb5416eb93d7bb119743896ed58f4c5c8f320f387eb6ff97dac9a4c",
+      "storage": "git",
+      "destination": "docs/superpowers/plans/2026-11-05-verified-worker-composition.md"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-06-semantic-contract-adapter-design.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 6369,
+      "mode": 420,
+      "sha256": "64f6eb168be47bb3d8f7c2675dde8fc5b0bf0e037748605e73557ca410abc4fb",
+      "storage": "git",
+      "destination": "docs/superpowers/specs/2026-11-06-semantic-contract-adapter-design.md"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-06-semantic-contract-pilot-design.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 19975,
+      "mode": 420,
+      "sha256": "395606bc8077887260f3986d798ff060f43c78f9db1532cb551f79a1dd926fcf",
+      "storage": "git",
+      "destination": "docs/superpowers/specs/2026-11-06-semantic-contract-pilot-design.md"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-07-baseline-first-oracle-design.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 5404,
+      "mode": 420,
+      "sha256": "3a1bef55c72e9b002c59e6bcfa91537bf761672d3288276420edc28ac9e0eb1f",
+      "storage": "git",
+      "destination": "docs/superpowers/specs/2026-11-07-baseline-first-oracle-design.md"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-11-08-oracle-uncertainty-resolution-design.md",
+      "source_root": "/home/marius/work/claude/codescout",
+      "bytes": 6070,
+      "mode": 420,
+      "sha256": "39ea056d6e9ab0bd797034bbb61118709d0b54094087b48676977ec0024e1a61",
+      "storage": "git",
+      "destination": "docs/superpowers/specs/2026-11-08-oracle-uncertainty-resolution-design.md"
+    }
+  ]
+}

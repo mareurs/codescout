@@ -1,0 +1,101 @@
+{
+  "registration": {
+    "provider_calls": 0,
+    "onboarding_calls": 0,
+    "purpose": "public baseline, no hidden test patch",
+    "cpus": 4,
+    "memory": "24g",
+    "pids_limit": 4096,
+    "command_timeout_s": 1800,
+    "task_order": [
+      "nushell__nushell-18863",
+      "rust-lang__rust-analyzer-22992"
+    ],
+    "tasks": [
+      {
+        "id": "nushell__nushell-18863",
+        "image": "sha256:3767f31b9b1a3288ad7132740dcff712737d5e855029079a4171a8065a2040ef",
+        "commands": [
+          "cargo build --offline",
+          "cargo test --offline --workspace --no-fail-fast -- --skip plugin_persistence::plugin_process_exits_when_nushell_exits"
+        ]
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22992",
+        "image": "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+        "commands": [
+          "cargo build --offline",
+          "RUN_SLOW_TESTS=1 cargo +stable test --offline --no-fail-fast -- --nocapture"
+        ]
+      }
+    ],
+    "nushell_skip_reason": "This existing public test fails in saved base/gold/gold-repeat controls and is outside selected P2P; skip fixed before fresh executions. Does not change private expected sets.",
+    "limitations": "New baseline public controls only. No native MCP, actual model-context delivery or cold 12GiB worker qualification claimed."
+  },
+  "results": [
+    {
+      "id": "nushell__nushell-18863",
+      "image": "sha256:3767f31b9b1a3288ad7132740dcff712737d5e855029079a4171a8065a2040ef",
+      "commands": [
+        "cargo build --offline",
+        "cargo test --offline --workspace --no-fail-fast -- --skip plugin_persistence::plugin_process_exits_when_nushell_exits"
+      ],
+      "steps": [
+        {
+          "command": "cargo build --offline",
+          "exit_code": 0,
+          "timeout": false,
+          "wall_s": 10.631510630715638,
+          "log_sha256": "f24cc5bdd58ea55685fb12f81dece6625f62f7ec15e1d56996ec15f1b25c9846",
+          "log_bytes": 173
+        },
+        {
+          "command": "cargo test --offline --workspace --no-fail-fast -- --skip plugin_persistence::plugin_process_exits_when_nushell_exits",
+          "exit_code": 0,
+          "timeout": false,
+          "wall_s": 572.0835391879082,
+          "log_sha256": "f13a37d1de6760e8fa3ebfb9070cdcf342b19979baccb61e32d111bd4637e561",
+          "log_bytes": 669521
+        }
+      ],
+      "container_id": "e912bc4dbfb64d3b04316d4107a5fd091b3398b14416faa0f7576d23c8df4b0f",
+      "oom_killed": false,
+      "remove_exit_code": 0,
+      "container_absent": true,
+      "wall_s": 602.5429005008191,
+      "public_baseline_pass": true
+    },
+    {
+      "id": "rust-lang__rust-analyzer-22992",
+      "image": "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+      "commands": [
+        "cargo build --offline",
+        "RUN_SLOW_TESTS=1 cargo +stable test --offline --no-fail-fast -- --nocapture"
+      ],
+      "steps": [
+        {
+          "command": "cargo build --offline",
+          "exit_code": 0,
+          "timeout": false,
+          "wall_s": 8.67980179330334,
+          "log_sha256": "f8d7418e3031b196483e9223414a23b4e833d331500810461e0fc26016aa0431",
+          "log_bytes": 282
+        },
+        {
+          "command": "RUN_SLOW_TESTS=1 cargo +stable test --offline --no-fail-fast -- --nocapture",
+          "exit_code": 0,
+          "timeout": false,
+          "wall_s": 187.16512902267277,
+          "log_sha256": "ae4fe869959546c9f0f31cb850a49372d0da989b52ae282f926f37707c5aa199",
+          "log_bytes": 582200
+        }
+      ],
+      "container_id": "95b8a23b1f5e5f5d463a6d70862f67f21763491b6a82d80564640ee007dc8390",
+      "oom_killed": false,
+      "remove_exit_code": 0,
+      "container_absent": true,
+      "wall_s": 206.7788968118839,
+      "public_baseline_pass": true
+    }
+  ]
+}

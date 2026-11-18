@@ -1,0 +1,11 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-own-cache-cleanup-followup-evidence.tar.gz",
+  "sha256": "b442d400cd366c81f17edbb767bf5985d952c27964c5b0f757fead5f21f7d17a",
+  "payload_file_count": 10,
+  "archive_bytes": 3210924,
+  "removed_cache_allocated_bytes": 21486379008,
+  "removed_directory_count": 20,
+  "preserved_file_or_link_records": 52683,
+  "protected_file_count": 118,
+  "root_available_gib_now": 57.86
+}

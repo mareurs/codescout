@@ -1,0 +1,31 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-semantic-contract-controller-evidence.tar.gz",
+  "sha256": "ab510fd377c8173bbbfd2675c14bbffa53d4904aa7b88ea67f19db13ce94b899",
+  "bytes": 1435871,
+  "payload_records": 342,
+  "manifest_records": 1,
+  "all_payloads_reopened_verified": true,
+  "current_registered_hash_records": 5967,
+  "historical_prepared_paths_rehashed": 5886,
+  "old_cost_files_rehashed": 16,
+  "original_v1_changed_source_preserved": [
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-controller-20261106/campaign.py",
+      "old_sha256": "997bda59edf8c1df48c0ef890fe152db69eb74e998db02fa3bd4e7f6db91bf69",
+      "preserved": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-controller-20261106/source-v1/041-campaign.py"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-controller-20261106/freeze-controller.py",
+      "old_sha256": "efdfb23b3f8e93bb08371048ea60dceba54d5c6ee6720e39ce134264e078d555",
+      "preserved": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-controller-20261106/source-v1/042-freeze-controller.py"
+    },
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-controller-20261106/test_campaign.py",
+      "old_sha256": "ff660ee9cb520c28d06330375509905e61656f16bcc30ec5be674e6be35c02c8",
+      "preserved": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-controller-20261106/source-v1/044-test_campaign.py"
+    }
+  ],
+  "no_actual_arm_started": true,
+  "provider_calls": 0,
+  "paid_admission": false
+}

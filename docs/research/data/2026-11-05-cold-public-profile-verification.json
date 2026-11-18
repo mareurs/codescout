@@ -1,0 +1,58 @@
+{
+  "qualified": true,
+  "cold_target": true,
+  "cpu_quota": 4,
+  "memory_bytes": 12884901888,
+  "workflow_timeout_s": 3600,
+  "check_timeout_s": 1800,
+  "provider_cost_usd": "0",
+  "public_checks": [
+    {
+      "id": "format",
+      "command": "cargo fmt"
+    },
+    {
+      "id": "clippy",
+      "command": "cargo clippy --workspace --all-targets --features local-embed -- -D warnings"
+    },
+    {
+      "id": "lean",
+      "command": "cargo test --workspace --no-default-features"
+    },
+    {
+      "id": "default",
+      "command": "cargo test --workspace"
+    }
+  ],
+  "public_passed": true,
+  "public_wall_s": 634.6421497459523,
+  "cleanup_absent": true,
+  "generated_artifacts": {
+    ".codescout/embeddings/.gitignore": "c59ba3d6c148340d0fc7aec8d39e3351c8e97b72a930d4609f4c2449affaa3fc",
+    ".codescout/embeddings/hint-authority-diagnostic.db": "ec32dab638a0302787e251e9d8356e5d6a54db84c7a6eabd78f95b588abe5013",
+    ".codescout/write.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "source_files_unchanged": true,
+  "source_commit": "c278effb9b36259480e079051d16238d66314e8e",
+  "resource_witness_sha256": "a9e31a761bb271821ffd1e4e5daab8edd092090cc7365434ff13f1f3535fa20b",
+  "target_witness": "Absent before first command; CPU probe creates only standalone probe files, no Cargo dependency cache.",
+  "actual_logs": {
+    "format": {
+      "path": "/home/marius/.cache/codescout-resident/codescout/public-profile-cold-20261105-v1/verification-0/0.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "clippy": {
+      "path": "/home/marius/.cache/codescout-resident/codescout/public-profile-cold-20261105-v1/verification-0/1.log",
+      "sha256": "847f9b6690df5c1aaffc2cae8c83ef8155c964b755e1267071524d8caf1856bd"
+    },
+    "lean": {
+      "path": "/home/marius/.cache/codescout-resident/codescout/public-profile-cold-20261105-v1/verification-0/2.log",
+      "sha256": "5029893ea288dbf56fa47ce9a792abb2928ec2da5ae1e288dd8ccd83d6fcbe68"
+    },
+    "default": {
+      "path": "/home/marius/.cache/codescout-resident/codescout/public-profile-cold-20261105-v1/verification-0/3.log",
+      "sha256": "cc16fc72cda4d7996270eb1cb766e7971748c6e8ac28c1847b9dcd15c0265708"
+    }
+  },
+  "limits": "Known reference only; combined resource/deadline bundle; not paid model quality or independent CPU/memory causality."
+}

@@ -1,0 +1,149 @@
+{
+  "time": "2026-11-08T15:23:38.561258+00:00",
+  "author_audit": {
+    "author_valid": true,
+    "actual_forwarded_request_files": 16,
+    "wire_efforts": {
+      "low": 16
+    },
+    "wire_models": {
+      "claude-sonnet-5-5": 16
+    },
+    "one_native_connection": true,
+    "runtime_oom_kills": 0,
+    "fresh_container_absent": true,
+    "workflow_settled": true,
+    "cost_usd": "0.2943323",
+    "cost_is_final": true,
+    "original_low_plus_followup_oracle_author_cost_usd": "0.5858154",
+    "prior_xhigh_oracle_author_cost_usd": "1.4046817999999996",
+    "known_series_usd": "64.401093499999998654",
+    "original_unresolved_hold_usd": "4",
+    "candidate_sha256": "015c0279b34853e37e80bab6ff06ddba1dc46d696e651a311f559bc74225cb92",
+    "test_patch_sha256": "98cd26333163fd8ce2f795eb3c0baf337ab1ece59384402268718047a9a84803",
+    "contract_sha256": "3f77d05304ba61d8c6cf3b94f66478ba1cce44219b91a445b8eec264398e545b",
+    "all_frozen_sha256": "2e26708cdf6c38c1fea646b58102117d89163bc2dd80904f23f6dc33190a486e",
+    "evaluation": "not_started",
+    "receipt_sha256": "a43ded118445c7ec304f656a26f4e096074a7649360d1dd94e37e24c37e4f55b"
+  },
+  "evaluation_results_sha256": "0e40b7564de2836cd0378c9cab4b84efb301db4606bf2ae7d3a55329c5511568",
+  "evaluation_registration_sha256": "7fc2dfe288249918e640b0293f00cc9214106fa0cdf59fd03e0b292ffc02067a",
+  "rows": [
+    {
+      "label": "baseline",
+      "raw_statuses": {
+        "contrast_valid_transform_of_ans_last_still_stores": "pass",
+        "contrast_invalid_op_on_ans_last_keeps_ans_intact": "fail",
+        "contrast_invalid_op_on_streamed_ans_last_keeps_ans_intact": "fail",
+        "contrast_valid_str_length_on_ans_last_strings_stores": "pass"
+      },
+      "resource_sample_rows": 27,
+      "final_sample_present": true,
+      "minimum_sampled_host_available_gib": 32.900604248046875,
+      "oom_kills": 0,
+      "compile_env_proof": true,
+      "fresh_container_absent": true,
+      "log_sha256": [
+        "2168fd65d542eea06ebd361d5d0adaa18ee71d41c804428d3c2e5b3ea9c08306",
+        "191e8961604247464b9196dd0cc9455a2096c530b79b004dd005435178637e04"
+      ]
+    },
+    {
+      "label": "low-control",
+      "raw_statuses": {
+        "contrast_valid_transform_of_ans_last_still_stores": "pass",
+        "contrast_valid_str_length_on_ans_last_strings_stores": "pass",
+        "contrast_invalid_op_on_streamed_ans_last_keeps_ans_intact": "pass",
+        "contrast_invalid_op_on_ans_last_keeps_ans_intact": "pass"
+      },
+      "resource_sample_rows": 30,
+      "final_sample_present": true,
+      "minimum_sampled_host_available_gib": 26.108078002929688,
+      "oom_kills": 0,
+      "compile_env_proof": true,
+      "fresh_container_absent": true,
+      "log_sha256": [
+        "8e944d5e9f1e185ea5c82fcc79c998e3a3c9e003b94ae3ec5e9f0446edd42e48",
+        "a2ca219f4ac226a83a6e2d35dfcd2cce89885d5992b3a78f5bb06aaf7bc78d11"
+      ]
+    },
+    {
+      "label": "reference",
+      "raw_statuses": {
+        "contrast_valid_transform_of_ans_last_still_stores": "pass",
+        "contrast_invalid_op_on_streamed_ans_last_keeps_ans_intact": "pass",
+        "contrast_valid_str_length_on_ans_last_strings_stores": "pass",
+        "contrast_invalid_op_on_ans_last_keeps_ans_intact": "pass"
+      },
+      "resource_sample_rows": 33,
+      "final_sample_present": true,
+      "minimum_sampled_host_available_gib": 30.649093627929688,
+      "oom_kills": 0,
+      "compile_env_proof": true,
+      "fresh_container_absent": true,
+      "log_sha256": [
+        "eb61c2c88b5fbcb5244411bd52760eb94b67c7bc2d27212af48a0a3fc92c0fc1",
+        "33491ebf434d1a9c16bc7d7b2e9b0d7aa7c3eb700b9604a045dfa9e6690ce81c"
+      ]
+    }
+  ],
+  "decision": {
+    "status": "unresolved",
+    "reference_retained": true,
+    "baseline_preserved": true,
+    "requirement_distinction": true,
+    "wrong_repair_rejected": false
+  },
+  "public_probe_trace_sha256": "ec4ae47fb7c08d3bd5a30c951aa4a42be6fb8c0eae2f020fce5c0d4d741e7f05",
+  "contract": {
+    "clauses": [
+      {
+        "id": "r1",
+        "kind": "requirement",
+        "basis": "Issue: after `$ans.last | str length` fails per-item with only_supports_this_input_type, `$ans` is broken. Baseline observation: `$ans.last` becomes List[Error, Error] (both value-sourced and stream-sourced previous results); a following `$ans` re-evaluation re-raises. Issue's expected behavior: fetching `$ans` should not be broken, so the prior valid last result must stay readable.",
+        "source_evidence": [
+          "crates/nu-cli/src/util.rs:maybe_store_last_result",
+          "crates/nu-cli/src/util.rs:store_list_stream_prefix",
+          "crates/nu-protocol/src/last_result.rs:block_is_bare_last_result_with"
+        ],
+        "test_names": [
+          "contrast_invalid_op_on_ans_last_keeps_ans_intact",
+          "contrast_invalid_op_on_streamed_ans_last_keeps_ans_intact"
+        ]
+      },
+      {
+        "id": "p1",
+        "kind": "preservation",
+        "basis": "A valid transform of `$ans.last` (`| first`) still updates the stored last result (existing test transform_of_last_updates_store).",
+        "source_evidence": [
+          "crates/nu-cli/tests/last_result.rs:transform_of_last_updates_store"
+        ],
+        "test_names": [
+          "contrast_valid_transform_of_ans_last_still_stores"
+        ]
+      },
+      {
+        "id": "p2",
+        "kind": "preservation",
+        "basis": "Observed on baseline: `$ans.last | str length` over a list of strings succeeds and stores [1,3]; the fix must not stop storing successful results of the same command.",
+        "source_evidence": [
+          "crates/nu-cli/src/util.rs:maybe_store_last_result"
+        ],
+        "test_names": [
+          "contrast_valid_str_length_on_ans_last_strings_stores"
+        ]
+      },
+      {
+        "id": "u1",
+        "kind": "unresolved",
+        "basis": "Baseline observations: pipelines that fail with a raised Err (`$ans.last | get nope`, `$ans.last | first | str length`, `1 | str length`, `[1 2] | str length`) already leave `.last` unchanged; only streams containing Error values get stored. The issue does not say whether a non-$ans pipeline yielding Error items (or a partly-successful stream) should be stored, nor how the fix should be keyed (skip storing any error-containing stream vs. only ones derived from $ans). Contract incomplete here; no assertions.",
+        "source_evidence": [
+          "crates/nu-cli/src/util.rs:store_list_stream_prefix"
+        ],
+        "test_names": []
+      }
+    ]
+  },
+  "scientific_result": "NO-GO: unresolved and wrong repair not rejected; no same-case prompt retry",
+  "native_or_model_rerun_for_audit": false
+}

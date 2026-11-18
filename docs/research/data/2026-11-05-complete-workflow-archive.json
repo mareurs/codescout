@@ -1,0 +1,19 @@
+{
+  "archive": "docs/research/data/2026-11-05-complete-workflow-evidence.tar.gz",
+  "sha256": "35e6b5523aaf29f3ef896c3bcc31d9e3623bb1b581782c4b272f6301cee835c8",
+  "payload_files": 485,
+  "every_payload_hash_verified": true,
+  "job": {
+    "schema": 1,
+    "handle": "@bg_00000067",
+    "command": "python3 -B tools/hint_authority_workflow/driver.py --paid /home/marius/.cache/codescout-resident/codescout/complete-workflow-calibration-20261105",
+    "server_pid": 455879,
+    "job_pid": 1971081,
+    "state": "exited",
+    "exit_code": 1,
+    "error": null,
+    "started_at": "2026-11-05T12:27:02.275776052+00:00",
+    "finished_at": "2026-11-05T13:03:31.334037029+00:00",
+    "log_path": "/tmp/codescout-bg-7qSMxM.log"
+  }
+}

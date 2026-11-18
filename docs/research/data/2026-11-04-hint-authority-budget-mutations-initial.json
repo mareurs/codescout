@@ -1,0 +1,50 @@
+[
+  {
+    "mutation": "server_fixed_one",
+    "exit_code": 1,
+    "result": "killed",
+    "output": ".........FF.............\n======================================================================\nFAIL: test_actual_first_cutoff_is_admitted_against_remaining_campaign_money (test_campaign_budget.CampaignBudgetTests.test_actual_first_cutoff_is_admitted_against_remaining_campaign_money)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_campaign_budget.py\", line 45, in test_actual_first_cutoff_is_admitted_against_remaining_campaign_money\n    self.assertEqual(status,200)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: 400 != 200\n\n======================================================================\nFAIL: test_paid_proxy_cannot_default_to_an_implicit_budget (test_campaign_budget.CampaignBudgetTests.test_paid_proxy_cannot_default_to_an_implicit_budget)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_campaign_budget.py\", line 87, in test_paid_proxy_cannot_default_to_an_implicit_budget\n    with self.assertRaises(ValueError):server(pathlib.Path(d),EXPECTED,False,[])\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n----------------------------------------------------------------------\nRan 24 tests in 2.092s\n\nFAILED (failures=2)\n"
+  },
+  {
+    "mutation": "ordinary_reset_four",
+    "exit_code": 1,
+    "result": "killed",
+    "output": ".......F................\n======================================================================\nFAIL: test_regular_loop_passes_remaining_total_after_every_actual_cost (test_budget_wiring.BudgetWiringTests.test_regular_loop_passes_remaining_total_after_every_actual_cost)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_budget_wiring.py\", line 35, in test_regular_loop_passes_remaining_total_after_every_actual_cost\n    self.assertEqual(seen,[Decimal('3.5'),Decimal('3.3'),Decimal('3.1'),Decimal('2.9')])\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [Decimal('4'), Decimal('4'), Decimal('4'), Decimal('4')] != [Decimal('3.5'), Decimal('3.3'), Decimal('3.1'), Decimal('2.9')]\n\nFirst differing element 0:\nDecimal('4')\nDecimal('3.5')\n\n- [Decimal('4'), Decimal('4'), Decimal('4'), Decimal('4')]\n?           ^             ^             ^             ^\n\n+ [Decimal('3.5'), Decimal('3.3'), Decimal('3.1'), Decimal('2.9')]\n?           ^^^             ^^^             ^^^             ^^^\n\n\n----------------------------------------------------------------------\nRan 24 tests in 2.522s\n\nFAILED (failures=1)\n"
+  },
+  {
+    "mutation": "resume_reset_four",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "........F...............\n======================================================================\nFAIL: test_resume_loop_uses_the_same_remaining_balance_policy (test_budget_wiring.BudgetWiringTests.test_resume_loop_uses_the_same_remaining_balance_policy)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_budget_wiring.py\", line 46, in test_resume_loop_uses_the_same_remaining_balance_policy\n    self.assertEqual(seen,[Decimal('3.5'),Decimal('3.3'),Decimal('3.1'),Decimal('2.9')])\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [Decimal('4'), Decimal('4'), Decimal('4'), Decimal('4')] != [Decimal('3.5'), Decimal('3.3'), Decimal('3.1'), Decimal('2.9')]\n\nFirst differing element 0:\nDecimal('4')\nDecimal('3.5')\n\n- [Decimal('4'), Decimal('4'), Decimal('4'), Decimal('4')]\n?           ^             ^             ^             ^\n\n+ [Decimal('3.5'), Decimal('3.3'), Decimal('3.1'), Decimal('2.9')]\n?           ^^^             ^^^             ^^^             ^^^\n\n\n----------------------------------------------------------------------\nRan 24 tests in 2.170s\n\nFAILED (failures=1)\n"
+  },
+  {
+    "mutation": "one_drops_balance",
+    "exit_code": 0,
+    "result": "survived",
+    "output": "........................\n----------------------------------------------------------------------\nRan 24 tests in 2.250s\n\nOK\n"
+  },
+  {
+    "mutation": "budget_as_transport",
+    "exit_code": 1,
+    "result": "killed",
+    "output": "...........F............\n======================================================================\nFAIL: test_real_campaign_exhaustion_never_reaches_generation_or_becomes_transport_error (test_campaign_budget.CampaignBudgetTests.test_real_campaign_exhaustion_never_reaches_generation_or_becomes_transport_error)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_campaign_budget.py\", line 64, in test_real_campaign_exhaustion_never_reaches_generation_or_becomes_transport_error\n    self.assertEqual(s.errors,[])\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^\nAssertionError: Lists differ: ['Campaign budget cannot reserve the next request'] != []\n\nFirst list contains 1 additional elements.\nFirst extra element 0:\n'Campaign budget cannot reserve the next request'\n\n- ['Campaign budget cannot reserve the next request']\n+ []\n\n----------------------------------------------------------------------\nRan 24 tests in 2.126s\n\nFAILED (failures=1)\n"
+  },
+  {
+    "mutation": "pending_bypassed",
+    "exit_code": 1,
+    "result": "killed",
+    "output": ".FFF........F...........\n======================================================================\nFAIL: test_input_and_output_both_reserve_cost_before_any_call (test_budget.BudgetTests.test_input_and_output_both_reserve_cost_before_any_call)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_budget.py\", line 10, in test_input_and_output_both_reserve_cost_before_any_call\n    with self.assertRaises(ValueError):b.reserve(1,1)\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n======================================================================\nFAIL: test_unknown_or_exhausted_usage_cannot_admit_another_call (test_budget.BudgetTests.test_unknown_or_exhausted_usage_cannot_admit_another_call)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_budget.py\", line 20, in test_unknown_or_exhausted_usage_cannot_admit_another_call\n    with self.assertRaises(ValueError):x.reserve(1,1)\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n======================================================================\nFAIL: test_usage_above_reservation_remains_blocked (test_budget.BudgetTests.test_usage_above_reservation_remains_blocked)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_budget.py\", line 24, in test_usage_above_reservation_remains_blocked\n    with self.assertRaises(ValueError):b.reserve(1,1)\n         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: ValueError not raised\n\n======================================================================\nFAIL: test_unknown_pending_cost_remains_fatal (test_campaign_budget.CampaignBudgetTests.test_unknown_pending_cost_remains_fatal)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/tmp/hfa-budget-review/tools/hint_authority_pilot/test_campaign_budget.py\", line 78, in test_unknown_pending_cost_remains_fatal\n    self.assertEqual(status,400)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^\nAssertionError: 200 != 400\n\n----------------------------------------------------------------------\nRan 24 tests in 2.084s\n\nFAILED (failures=4)\n"
+  },
+  {
+    "mutation": "receipt_loses_stop",
+    "exit_code": 0,
+    "result": "survived",
+    "output": "........................\n----------------------------------------------------------------------\nRan 24 tests in 2.086s\n\nOK\n"
+  },
+  {
+    "mutation": "receipt_false_completion",
+    "exit_code": 0,
+    "result": "survived",
+    "output": "........................\n----------------------------------------------------------------------\nRan 24 tests in 2.093s\n\nOK\n"
+  }
+]

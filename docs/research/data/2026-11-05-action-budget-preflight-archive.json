@@ -1,0 +1,7 @@
+{
+  "phase": "preflight",
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-05-action-budget-preflight-evidence.tar.gz",
+  "sha256": "a4999bc43558388acf9a8af00857b3b9502866baa22d2263eef25ab651f3218f",
+  "payload_files": 463,
+  "every_payload_hash_verified": true
+}

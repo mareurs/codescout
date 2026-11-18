@@ -1,0 +1,374 @@
+[
+  {
+    "mode": "success",
+    "receipt": {
+      "session_id": "b0bd6391-348d-4f24-8ee8-a7cedde19996",
+      "scripted": true,
+      "cost_usd": "0",
+      "exit_code": 0,
+      "terminal": {
+        "is_error": false,
+        "subtype": "success"
+      },
+      "wall_s": 43.186138042248785,
+      "requests": 19,
+      "forwarded": 0,
+      "transport_errors": [],
+      "campaign_available_usd": "0",
+      "budget_stop": null,
+      "upper_usage_cost": "0",
+      "unknown_provider_cost": false,
+      "cost_coverage": {
+        "forwarded_at_terminal": 0,
+        "forwarded_total": 0
+      },
+      "cli_turn_success": true,
+      "lifecycle": {
+        "status": "settled",
+        "error": null,
+        "session_id": "b0bd6391-348d-4f24-8ee8-a7cedde19996",
+        "client_pid": 19306,
+        "exit_code": 0,
+        "continuations": 1,
+        "cost_usd": "0",
+        "cost_is_final": true,
+        "turns": 2,
+        "jobs": [
+          {
+            "handle": "@bg_00000001",
+            "record": "/tmp/codescout-bg/1-6edca098-bg_00000001.json",
+            "delivered": true,
+            "outcome": {
+              "handle": "@bg_00000001",
+              "state": "exited",
+              "exit_code": 0,
+              "error": null,
+              "command": "sleep 2; printf WORKFLOW_BACKGROUND_FINISHED"
+            }
+          }
+        ],
+        "all_jobs_succeeded": true
+      },
+      "public_verification": {
+        "round": 0,
+        "manifest_sha256": "e7df71abb96a79356fd19cf01152ba51f6d1ad1c1ba322e67d82058b4b55aa83",
+        "status": "completed",
+        "passed": true,
+        "checks": [
+          {
+            "id": "format",
+            "command": "printf FORMAT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/success/verification-0/0.log"
+          },
+          {
+            "id": "compile",
+            "command": "printf COMPILE",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/success/verification-0/1.log"
+          },
+          {
+            "id": "lean",
+            "command": "printf LEAN",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/success/verification-0/2.log"
+          },
+          {
+            "id": "default",
+            "command": "printf DEFAULT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/success/verification-0/3.log"
+          }
+        ],
+        "error": null
+      },
+      "cleanup_error": null,
+      "workflow_completed": true,
+      "hint_then_edit": true,
+      "scripted_steps": 10,
+      "actor": "/tmp/hfa-fb2070853e1b478c9dfbdeed39d733fc/project"
+    },
+    "rounds": [
+      {
+        "round": 0,
+        "manifest_sha256": "e7df71abb96a79356fd19cf01152ba51f6d1ad1c1ba322e67d82058b4b55aa83",
+        "status": "completed",
+        "passed": true,
+        "checks": [
+          {
+            "id": "format",
+            "command": "printf FORMAT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/success/verification-0/0.log"
+          },
+          {
+            "id": "compile",
+            "command": "printf COMPILE",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/success/verification-0/1.log"
+          },
+          {
+            "id": "lean",
+            "command": "printf LEAN",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/success/verification-0/2.log"
+          },
+          {
+            "id": "default",
+            "command": "printf DEFAULT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/success/verification-0/3.log"
+          }
+        ],
+        "error": null
+      }
+    ]
+  },
+  {
+    "mode": "repair",
+    "receipt": {
+      "session_id": "f6d6e671-c789-495a-b8a7-15adeb1c8b46",
+      "scripted": true,
+      "cost_usd": "0",
+      "exit_code": 0,
+      "terminal": {
+        "is_error": false,
+        "subtype": "success"
+      },
+      "wall_s": 40.454131252132356,
+      "requests": 21,
+      "forwarded": 0,
+      "transport_errors": [],
+      "campaign_available_usd": "0",
+      "budget_stop": null,
+      "upper_usage_cost": "0",
+      "unknown_provider_cost": false,
+      "cost_coverage": {
+        "forwarded_at_terminal": 0,
+        "forwarded_total": 0
+      },
+      "cli_turn_success": true,
+      "lifecycle": {
+        "status": "settled",
+        "error": null,
+        "session_id": "f6d6e671-c789-495a-b8a7-15adeb1c8b46",
+        "client_pid": 33496,
+        "exit_code": 0,
+        "continuations": 2,
+        "cost_usd": "0",
+        "cost_is_final": true,
+        "turns": 3,
+        "jobs": [
+          {
+            "handle": "@bg_00000001",
+            "record": "/tmp/codescout-bg/1-59ef0409-bg_00000001.json",
+            "delivered": true,
+            "outcome": {
+              "handle": "@bg_00000001",
+              "state": "exited",
+              "exit_code": 0,
+              "error": null,
+              "command": "sleep 2; printf WORKFLOW_BACKGROUND_FINISHED"
+            }
+          }
+        ],
+        "all_jobs_succeeded": true
+      },
+      "public_verification": {
+        "round": 1,
+        "manifest_sha256": "abb6fd285cc2bd526fffaf2358ec4df39870455ecad5b942ab81f790afdc4b11",
+        "status": "completed",
+        "passed": true,
+        "checks": [
+          {
+            "id": "format",
+            "command": "printf FORMAT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-1/0.log"
+          },
+          {
+            "id": "compile",
+            "command": "test -f workflow-repaired.txt",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-1/1.log"
+          },
+          {
+            "id": "lean",
+            "command": "printf LEAN",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-1/2.log"
+          },
+          {
+            "id": "default",
+            "command": "printf DEFAULT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-1/3.log"
+          }
+        ],
+        "error": null
+      },
+      "cleanup_error": null,
+      "workflow_completed": true,
+      "hint_then_edit": true,
+      "scripted_steps": 11,
+      "actor": "/tmp/hfa-61eb3a9618a2491685545e3959ea64ea/project"
+    },
+    "rounds": [
+      {
+        "round": 0,
+        "manifest_sha256": "abb6fd285cc2bd526fffaf2358ec4df39870455ecad5b942ab81f790afdc4b11",
+        "status": "completed",
+        "passed": false,
+        "checks": [
+          {
+            "id": "format",
+            "command": "printf FORMAT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-0/0.log"
+          },
+          {
+            "id": "compile",
+            "command": "test -f workflow-repaired.txt",
+            "exit_code": 1,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-0/1.log"
+          },
+          {
+            "id": "lean",
+            "command": "printf LEAN",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-0/2.log"
+          },
+          {
+            "id": "default",
+            "command": "printf DEFAULT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-0/3.log"
+          }
+        ],
+        "error": null
+      },
+      {
+        "round": 1,
+        "manifest_sha256": "abb6fd285cc2bd526fffaf2358ec4df39870455ecad5b942ab81f790afdc4b11",
+        "status": "completed",
+        "passed": true,
+        "checks": [
+          {
+            "id": "format",
+            "command": "printf FORMAT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-1/0.log"
+          },
+          {
+            "id": "compile",
+            "command": "test -f workflow-repaired.txt",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-1/1.log"
+          },
+          {
+            "id": "lean",
+            "command": "printf LEAN",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-1/2.log"
+          },
+          {
+            "id": "default",
+            "command": "printf DEFAULT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/repair/verification-1/3.log"
+          }
+        ],
+        "error": null
+      }
+    ]
+  },
+  {
+    "mode": "unknown",
+    "receipt": {
+      "session_id": "50fc12df-9387-42b9-b6a6-ebe0f06c8637",
+      "scripted": true,
+      "cost_usd": "0",
+      "exit_code": -9,
+      "terminal": {
+        "is_error": false,
+        "subtype": "success"
+      },
+      "wall_s": 36.20955748623237,
+      "requests": 19,
+      "forwarded": 0,
+      "transport_errors": [],
+      "campaign_available_usd": "0",
+      "budget_stop": null,
+      "upper_usage_cost": "0",
+      "unknown_provider_cost": false,
+      "cost_coverage": {
+        "forwarded_at_terminal": 0,
+        "forwarded_total": 0
+      },
+      "cli_turn_success": true,
+      "lifecycle": {
+        "status": "incomplete",
+        "error": "TimeoutExpired: Command '['docker', 'exec', '-w', '/testbed', '57a200a1b98756bda2d66fc5a0f03ff3f85f82187f55bab6fdadbaf379834242', '/bin/bash', '-c', 'sleep 10']' timed out after 0.2 seconds",
+        "session_id": "50fc12df-9387-42b9-b6a6-ebe0f06c8637",
+        "client_pid": 44175,
+        "exit_code": -9,
+        "continuations": 1,
+        "cost_usd": "0",
+        "cost_is_final": false,
+        "turns": 2,
+        "jobs": [
+          {
+            "handle": "@bg_00000001",
+            "record": "/tmp/codescout-bg/1-4bdfa128-bg_00000001.json",
+            "delivered": true,
+            "outcome": {
+              "handle": "@bg_00000001",
+              "state": "exited",
+              "exit_code": 0,
+              "error": null,
+              "command": "sleep 2; printf WORKFLOW_BACKGROUND_FINISHED"
+            }
+          }
+        ],
+        "all_jobs_succeeded": false
+      },
+      "public_verification": {
+        "round": 0,
+        "manifest_sha256": "760b6fcbdd9e792a96ed05d38c5113536ad82251498ad67251c4b07528cdf4e0",
+        "status": "incomplete",
+        "passed": false,
+        "checks": [
+          {
+            "id": "format",
+            "command": "printf FORMAT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/unknown/verification-0/0.log"
+          }
+        ],
+        "error": "TimeoutExpired: Command '['docker', 'exec', '-w', '/testbed', '57a200a1b98756bda2d66fc5a0f03ff3f85f82187f55bab6fdadbaf379834242', '/bin/bash', '-c', 'sleep 10']' timed out after 0.2 seconds"
+      },
+      "cleanup_error": null,
+      "workflow_completed": false,
+      "hint_then_edit": true,
+      "scripted_steps": 10,
+      "actor": "/tmp/hfa-2cc43f95295c48ad8cc9aff1a906a421/project"
+    },
+    "rounds": [
+      {
+        "round": 0,
+        "manifest_sha256": "760b6fcbdd9e792a96ed05d38c5113536ad82251498ad67251c4b07528cdf4e0",
+        "status": "incomplete",
+        "passed": false,
+        "checks": [
+          {
+            "id": "format",
+            "command": "printf FORMAT",
+            "exit_code": 0,
+            "log": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v2/unknown/verification-0/0.log"
+          }
+        ],
+        "error": "TimeoutExpired: Command '['docker', 'exec', '-w', '/testbed', '57a200a1b98756bda2d66fc5a0f03ff3f85f82187f55bab6fdadbaf379834242', '/bin/bash', '-c', 'sleep 10']' timed out after 0.2 seconds"
+      }
+    ]
+  }
+]

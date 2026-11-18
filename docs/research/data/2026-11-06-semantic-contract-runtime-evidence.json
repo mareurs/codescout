@@ -1,0 +1,20 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-semantic-contract-runtime-evidence.tar.gz",
+  "sha256": "ae333e71ab057e185f62746bbec7de854a5a7a64804e77aa3508eef28fdf3628",
+  "bytes": 1548697,
+  "payload_files": 475,
+  "manifest_files": 1,
+  "all_payloads_reopened_and_hash_verified": true,
+  "closure": {
+    "utc": "2026-11-06T13:56:17.293140+00:00",
+    "arms": 6,
+    "clone_payload_files_rehashed": 5850,
+    "source_inode_population": 1950,
+    "all_devices_and_inodes_disjoint": true,
+    "all_native_configs_revalidated": true,
+    "frozen_inputs_and_executed_source_backups_unchanged": true,
+    "launch_admitted": false,
+    "actual_cli_wire_proof": false,
+    "provider_calls": 0
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-07-native-probe-compatibility-evidence.tar.gz",
+  "sha256": "dc72f66cab884553b7352282c43f773b91add73f3ab1d7edfe48d2b76a50b057",
+  "bytes": 8594667,
+  "verified_payloads": 323,
+  "verified_manifest": true,
+  "retained_reused_snapshot_files": 991,
+  "qualified": true,
+  "paid_admission": false
+}

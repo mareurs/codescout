@@ -1,0 +1,105 @@
+{
+  "verified": true,
+  "root": "/home/marius/.cache/codescout-resident/codescout/verified-worker-20261105-v1",
+  "cells": [
+    {
+      "mode": "success",
+      "session_id": "8a214136-fb8c-42ac-ae94-4a9f2f6f4bee",
+      "cli_turns": 2,
+      "continuations": 1,
+      "workflow_completed": true,
+      "verification_rounds": [
+        {
+          "status": "completed",
+          "passed": true,
+          "exit_codes": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "repair",
+      "session_id": "1b50c22e-1b13-4e5e-9b6d-967f1b33f869",
+      "cli_turns": 3,
+      "continuations": 2,
+      "workflow_completed": true,
+      "verification_rounds": [
+        {
+          "status": "completed",
+          "passed": false,
+          "exit_codes": [
+            0,
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "status": "completed",
+          "passed": true,
+          "exit_codes": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "unknown",
+      "session_id": "b95cbae0-b0c0-485c-943b-339ff93289e7",
+      "cli_turns": 2,
+      "continuations": 1,
+      "workflow_completed": false,
+      "verification_rounds": [
+        {
+          "status": "incomplete",
+          "passed": false,
+          "exit_codes": [
+            0
+          ]
+        }
+      ]
+    }
+  ],
+  "owned_containers": [
+    {
+      "name": "hfa-native-3f0f0a185fbc40e2aedc838422ddca18",
+      "absent": true
+    },
+    {
+      "name": "hfa-native-da9794f0ec1c4d238793689d2003c8be",
+      "absent": true
+    },
+    {
+      "name": "hfa-native-455a2febad09489a9331d87f45a43df3",
+      "absent": true
+    },
+    {
+      "name": "hfa-native-28a457d71db643c883955a2352d5ef19",
+      "absent": true
+    },
+    {
+      "name": "hfa-native-c3509055da884032828ab807d5565d7a",
+      "absent": true
+    },
+    {
+      "name": "hfa-native-41dd296ddeb44df8858d1bb6421b9f2d",
+      "absent": true
+    }
+  ],
+  "new_provider_cost_usd": "0",
+  "source_hashes": {
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/session.py": "30830a908adc90732f6beec301e3be822480fa5fe6ffe79cbe5f53521d0a6cd4",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/workflow.py": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/verification.py": "f66b367e018a7380a3ac6129029671337a8c9f8113e7cc1897d953ee822bc277",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/qualify_workflow.py": "68e6fd9618b8a2dfd28f132b37c9d0aa045137c60792faa403de98df65d05b00",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/run.py": "b9e5d3e15b654a229de6ee8f38619d45c18bbe1bbeeb3c7f2196ee158fcc8a08"
+  },
+  "scope": "Scripted lifecycle/public-check composition controls; not Rust repair quality or unscripted model learning."
+}

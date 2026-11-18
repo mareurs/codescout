@@ -1,0 +1,77 @@
+{
+  "all_checks_passed": true,
+  "scope": "One exposed development task and one saved wrong proposal; independent raw named-status and resource/cleanup audit, no model/native rerun",
+  "matrix": [
+    {
+      "label": "baseline",
+      "statuses": {
+        "contrast_failed_scalar_op_keeps_previous_payload": "pass",
+        "contrast_error_in_stream_not_stored": "fail",
+        "contrast_str_length_on_records_does_not_poison_ans": "fail"
+      },
+      "resource_sample_rows": 11,
+      "min_sampled_host_available_gib": 35.42724609375,
+      "final_sample_present": true
+    },
+    {
+      "label": "low-control",
+      "statuses": {
+        "contrast_failed_scalar_op_keeps_previous_payload": "pass",
+        "contrast_str_length_on_records_does_not_poison_ans": "pass",
+        "contrast_error_in_stream_not_stored": "pass"
+      },
+      "resource_sample_rows": 11,
+      "min_sampled_host_available_gib": 34.91559600830078,
+      "final_sample_present": true
+    },
+    {
+      "label": "reference",
+      "statuses": {
+        "contrast_failed_scalar_op_keeps_previous_payload": "pass",
+        "contrast_str_length_on_records_does_not_poison_ans": "pass",
+        "contrast_error_in_stream_not_stored": "fail"
+      },
+      "resource_sample_rows": 12,
+      "min_sampled_host_available_gib": 34.05294418334961,
+      "final_sample_present": true
+    }
+  ],
+  "wrong_proposals_rejected": 0,
+  "wrong_proposals_evaluated": 1,
+  "qualified_reference_retained": false,
+  "model_cost_usd": "0.2566531",
+  "series_known_subtotal_usd": "62.410596299999999054",
+  "prior_unresolved_reserve_usd": "4",
+  "actual_model_requests_low": 16,
+  "native_author_connections": 1,
+  "original_proposal_diff_preserved": true,
+  "fresh_owned_container_absence_checks": 4,
+  "bindings": {
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/admit_recovery_once.py": "25f5ef8ccdaf9404ede7ad26d78a45f1fdb04ff196d0fd0dcaea7019fa874543",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/registration.json": "902c0a2faf395c36e5828d795ca0c7327a7baa377bcc82a03b56f3fbc1c2000f",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/run_verifier_recovery.py": "a8ad37e44fc55922d54ac01f4773bbaaeadabf0c58d6d78ec938d87b5d7e1268",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/runtime_compat.py": "28a2a6c7f67a14c592d2ec054a91a946b780a732e0583d659264b3912a13afcb",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/runtime-compat-check.json": "4804a90b183f49b788955d2642d3996e2b496c3cbd0c360622be01859a0a6eeb",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/supervision_headroom.py": "513b1db42bc0b6fda9674894e5d3db91477e06d7cd6b163d2713807383812330",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/verifier/compat-stdio/stdio.py": "d8b341fd31ccda49ab2cacb45a8400d3c190998d4903aa24cc8b29f4df42a1b4",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/evaluate_oracle_v2.py": "355e13dd93e14d8712f009f959288de2c1de7c84427db34b291630df99b71a08",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/fixture-source-gate-process.json": "ee458d45e6403f120fe4eaedf3a8cf33a35c802b62fb2640dff309126fd8558c",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/legacy-startup-probe/receipt.json": "ba0e271f33b03ed65b49e05dc88df15a6d586a899d8b15c4b238a1c1066df6f3",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/legacy-startup-probe/supervision-final.json": "c56e88370cf58fcc37465ae6ebaaac23034a898e9c464dbd32266e042860e542",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/legacy-startup-probe/cleanup.json": "3cc7d5b2318525f0bf19955109a6ddb4e52df41d92f0648313baf408005a3101",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/oracle-evaluation/generated-tests.patch": "bcdc9df52946b77107726014517be2fa4152a76f4fe92962ce72ba71296d5776",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/verifier/candidate.patch": "09282e733b1eaef993dcbba1c57d437c77d86aea75c56da7d40bf7406e0424af",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/oracle_decisions.json": "3d6b9485b2f08a6b7f4d0f739decc991f62f55aa65cb0794edc58bbabeb1a9af",
+    "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-followup-20261107/evaluate_v3.py": "b8f49bc59d0b1a5e1fbcd94c47f217b6e06ea813b773aa7abb8bab210178cf44",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/verifier/receipt.json": "32cc8bef797dcebe4a42357dc961465bd5afb737d3f26d660b344341cdfad394",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/verifier/supervision-final.json": "a50bc499a73554a818105d0c259b0ad24673e1434be15750224831ed5e4a2160",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/oracle-evaluation/evaluation-v3-baseline/resource-samples.jsonl": "7c7ca5405f1152dcd5b27e5a873d2fca819242eb14f9de2ac3a942c58b8f712e",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/oracle-evaluation/evaluation-v3-baseline/absence.json": "7adbe000683f17094ba3fc0339d3da913de218fba496b4011bbb1d6a4773d4dd",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/oracle-evaluation/evaluation-v3-low-control/resource-samples.jsonl": "d023697b052b70b23526fd4d0eca86b5d1a843a165aa587e0e857c0b690220d6",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/oracle-evaluation/evaluation-v3-low-control/absence.json": "96237ced221037be7f485856880ed268861d021ea785bb46e2616ca45248e6d9",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/oracle-evaluation/evaluation-v3-reference/resource-samples.jsonl": "088d488377490145735a2ebab2cb4aaecd639703b6f84d4d79dc001e9fc1686d",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/oracle-evaluation/evaluation-v3-reference/absence.json": "350d81669ef45421af8b3c8a17a7cdd0c1607073831b770424742e2734d99bbb",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-control/candidate.patch": "2fdd4ff1fe86e786a68c6f704fa25957f7319511b7c37022d1a0e04fefd23db4",
+    "/home/marius/work/claude/setup-ab-data/fresh-tasks/nushell__nushell-18863/build/gold.patch": "870d5069920d740cbd841a2a0dd7fc7f521259c0e76cab71c46a346132b7b980"
+  }
+}

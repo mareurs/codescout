@@ -1,0 +1,22 @@
+{
+  "preflight_passed": true,
+  "fingerprint": "faf053c592896d9bdabb98ec554258a4584abdfdf89e4c04bee0b87a9bfa739a",
+  "provider_calls": 0,
+  "source_head": "c278effb9b36259480e079051d16238d66314e8e",
+  "gate": {
+    "schema": 1,
+    "handle": "@bg_00000063",
+    "command": "./scripts/gate.sh --check",
+    "server_pid": 455879,
+    "job_pid": 1188477,
+    "state": "exited",
+    "exit_code": 0,
+    "error": null,
+    "started_at": "2026-11-05T12:10:01.266859732+00:00",
+    "finished_at": "2026-11-05T12:24:30.056906831+00:00",
+    "log_path": "/tmp/codescout-bg-LXFNdt.log"
+  },
+  "allocation_usd": "8",
+  "arm_cap_usd": "4",
+  "prior_thread_cost_usd": "31.797419199999999964"
+}

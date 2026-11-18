@@ -1,0 +1,37 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-semantic-contract-plugin-binding-evidence.tar.gz",
+  "sha256": "b199c56eb21747aa90fe878c792bc319eb19b1093e87f6b0fb0ab83cf39c1192",
+  "bytes": 934156,
+  "payload_files": 224,
+  "manifest_files": 1,
+  "all_payloads_reopened_and_hash_verified": true,
+  "closure": {
+    "utc": "2026-11-06T14:19:33.584053+00:00",
+    "protected_hash_populations": {
+      "input_hashes": 13,
+      "source_hashes": 39,
+      "prepared_hashes": 5886,
+      "parent_hashes": 4
+    },
+    "plugin_identity_still_matches_prospective_manifest": true,
+    "plugin_files": 142,
+    "plugin_directories": 38,
+    "cleanup": [
+      {
+        "name": "hfa-native-d1327f1f6dfd4267be43efe0068b31c9",
+        "inspect_exit_code": 1,
+        "stderr": "error: no such object: hfa-native-d1327f1f6dfd4267be43efe0068b31c9\n",
+        "absent": true
+      },
+      {
+        "name": "hfa-native-75bf3c371f954b49b0aa1b806eee2e89",
+        "inspect_exit_code": 1,
+        "stderr": "error: no such object: hfa-native-75bf3c371f954b49b0aa1b806eee2e89\n",
+        "absent": true
+      }
+    ],
+    "limits": "One new common-plugin synthetic smoke only. Six historical cases not rerun. Missing historical full-plugin provenance retained. Paid grader/controller admission remains false.",
+    "provider_calls": 0,
+    "launch_admitted": false
+  }
+}

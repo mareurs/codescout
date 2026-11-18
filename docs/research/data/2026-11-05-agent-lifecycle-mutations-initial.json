@@ -1,0 +1,225 @@
+{
+  "sha256": "abfde7e9d2a2a35f9866fa1418a695285bbca5c016814a3320fc1bac80015c90",
+  "runs": [
+    {
+      "name": "baseline",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.964s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "drop_schema_guard",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 2.009s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "drop_reuse_guard",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.975s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "drop_tool_name_guard",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.925s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "drop_record_error_guard",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.922s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "ignore_text_payload",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.940s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "only_first_pending",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.917s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "accept_failed_cli_turn",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.925s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "sum_cumulative_cost",
+      "returncode": 1,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.928s",
+        "",
+        "FAILED (failures=1)"
+      ]
+    },
+    {
+      "name": "drop_handle_validation",
+      "returncode": 1,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.919s",
+        "",
+        "FAILED (failures=1)"
+      ]
+    },
+    {
+      "name": "drop_session_validation",
+      "returncode": 1,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.926s",
+        "",
+        "FAILED (failures=1)"
+      ]
+    },
+    {
+      "name": "drop_continuation_bound",
+      "returncode": 1,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 2.127s",
+        "",
+        "FAILED (failures=1)"
+      ]
+    },
+    {
+      "name": "failed_state_as_success",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.909s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "name": "drop_nonzero_exit_guard",
+      "returncode": 0,
+      "summary": [
+        "----------------------------------------------------------------------",
+        "Ran 6 tests in 1.935s",
+        "",
+        "OK"
+      ]
+    }
+  ],
+  "splices": [
+    {
+      "name": "drop_schema_guard",
+      "old": "record.get(\"schema\") != 1",
+      "new": "False",
+      "equivalent": false
+    },
+    {
+      "name": "drop_reuse_guard",
+      "old": "if handle in jobs and jobs[handle][\"record\"] != record:",
+      "new": "if False:",
+      "equivalent": false
+    },
+    {
+      "name": "drop_tool_name_guard",
+      "old": "if data.get(\"tool_name\") != \"mcp__codescout__run_command\":",
+      "new": "if False:",
+      "equivalent": false
+    },
+    {
+      "name": "drop_record_error_guard",
+      "old": "if value.get(\"record_error\"):",
+      "new": "if False:",
+      "equivalent": false
+    },
+    {
+      "name": "ignore_text_payload",
+      "old": "yield from background_launches(value.get(\"text\", \"\"))",
+      "new": "return",
+      "equivalent": false
+    },
+    {
+      "name": "only_first_pending",
+      "old": "pending = [j for j in jobs.values() if not j[\"delivered\"]]",
+      "new": "pending = [j for j in jobs.values() if not j[\"delivered\"]][:1]",
+      "equivalent": false
+    },
+    {
+      "name": "accept_failed_cli_turn",
+      "old": "if event.get(\"is_error\") is not False or event.get(\"subtype\") != \"success\":",
+      "new": "if False:",
+      "equivalent": false
+    },
+    {
+      "name": "sum_cumulative_cost",
+      "old": "cost = total",
+      "new": "cost += total",
+      "equivalent": false
+    },
+    {
+      "name": "drop_handle_validation",
+      "old": "record.get(\"handle\") != handle",
+      "new": "False",
+      "equivalent": false
+    },
+    {
+      "name": "drop_session_validation",
+      "old": "if event.get(\"session_id\") != session_id:",
+      "new": "if False:",
+      "equivalent": false
+    },
+    {
+      "name": "drop_continuation_bound",
+      "old": "if continuations >= max_continuations:",
+      "new": "if False:",
+      "equivalent": false
+    },
+    {
+      "name": "failed_state_as_success",
+      "old": "j.get(\"outcome\",{}).get(\"state\")==\"exited\"",
+      "new": "j.get(\"outcome\",{}).get(\"state\") in (\"exited\",\"failed\")",
+      "equivalent": true
+    },
+    {
+      "name": "drop_nonzero_exit_guard",
+      "old": "if proc.returncode != 0:",
+      "new": "if False:",
+      "equivalent": false
+    }
+  ]
+}

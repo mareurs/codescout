@@ -1,0 +1,125 @@
+{
+  "status": "independently_checked",
+  "controller_commit": "979fffc586616890f61cf1b6ec498253169f8697",
+  "fingerprint": "0ef13885b2c5021225fd6551df6b7990480c4110808e2f41fd8c96ff0c715355",
+  "driver_sha256": "927c85b0b073bfcee71283ca5d851d66c4c7f14a3b36ad8426f7850ad2690e4a",
+  "root": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104",
+  "cells": [
+    {
+      "cell": 0,
+      "session_id": "46fcf4cb-684d-458a-bc9b-5408499b94a2",
+      "cost_usd": "0",
+      "requests": 15,
+      "forwarded": 0,
+      "hint_visible_on_wire": true,
+      "host_canary_unavailable": true,
+      "private_grader_not_mounted": true,
+      "cleanup": [
+        {
+          "name": "hfa-native-c9469ef997364879882390fd4b22be1f",
+          "absent": true
+        },
+        {
+          "name": "hfa-native-5781da8996e34b20a107f460a7665397",
+          "absent": true
+        }
+      ],
+      "scripted_completion_only": true
+    },
+    {
+      "cell": 1,
+      "session_id": "9f0993b9-50bf-4dd0-9685-925d068d3a22",
+      "cost_usd": "0",
+      "requests": 15,
+      "forwarded": 0,
+      "hint_visible_on_wire": true,
+      "host_canary_unavailable": true,
+      "private_grader_not_mounted": true,
+      "cleanup": [
+        {
+          "name": "hfa-native-253c21e2966e4fd185b77ab6f28e86dd",
+          "absent": true
+        },
+        {
+          "name": "hfa-native-ead68a5e0efa436da3ba3917e603c9f6",
+          "absent": true
+        }
+      ],
+      "scripted_completion_only": true
+    },
+    {
+      "cell": 2,
+      "session_id": "830ff189-8a83-49bc-8acb-5829d03e6b2c",
+      "cost_usd": "0",
+      "requests": 15,
+      "forwarded": 0,
+      "hint_visible_on_wire": true,
+      "host_canary_unavailable": true,
+      "private_grader_not_mounted": true,
+      "cleanup": [
+        {
+          "name": "hfa-native-ffb2e277910f467eac38b84ef9ab483b",
+          "absent": true
+        },
+        {
+          "name": "hfa-native-196ad627a53a4b9c9d4485d35e0eb136",
+          "absent": true
+        }
+      ],
+      "scripted_completion_only": true
+    },
+    {
+      "cell": 3,
+      "session_id": "21756b95-d8af-4391-a3c1-559a1bf32af1",
+      "cost_usd": "0",
+      "requests": 15,
+      "forwarded": 0,
+      "hint_visible_on_wire": true,
+      "host_canary_unavailable": true,
+      "private_grader_not_mounted": true,
+      "cleanup": [
+        {
+          "name": "hfa-native-1fac4af3205b4cb19d72063880b61e5e",
+          "absent": true
+        },
+        {
+          "name": "hfa-native-21ad45a181c74a48bf6b3fa695a9d321",
+          "absent": true
+        }
+      ],
+      "scripted_completion_only": true
+    }
+  ],
+  "host_canary_presence_at_audit": {
+    "path": "/home/marius/.cache/codescout-resident/codescout/worker-context-verification-20261104/outside-host-canary.txt",
+    "bytes": 58,
+    "sha256": "629d00dfc9dc550621a98aaae00ac5df1af50d91daf5fabab6cf1aa22fac6363",
+    "ctime_ns": 1793800877728168299
+  },
+  "baseline": {
+    "passed": 0,
+    "failed": 2,
+    "failure_kind": "observed assertion failures"
+  },
+  "positive": [
+    {
+      "filter": "hfa_acceptance",
+      "passed": 2,
+      "failed": 0
+    },
+    {
+      "filter": "librarian::catalog::chunk::",
+      "passed": 9,
+      "failed": 0
+    },
+    {
+      "filter": "librarian::indexer::tests::",
+      "passed": 39,
+      "failed": 0
+    }
+  ],
+  "provider_forwarded_requests": 0,
+  "qualification_model_cost_usd": "0",
+  "real_model_completion_measured": false,
+  "canary_instrument_bug": "36f004f53aae1e7c; manual host-presence witness mitigates this qualification only"
+}

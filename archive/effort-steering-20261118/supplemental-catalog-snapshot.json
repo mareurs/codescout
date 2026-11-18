@@ -1,0 +1,420 @@
+{
+  "artifact": [
+    {
+      "id": "6b6f3546c3761800",
+      "abs_path": "/home/marius/work/claude/codescout/docs/superpowers/plans/2026-11-05-agent-background-continuation.md",
+      "kind": "plan",
+      "status": "done",
+      "title": "Agent background continuation implementation plan",
+      "owners": "[]",
+      "tags": "[]",
+      "topic": null,
+      "time_scope": null,
+      "source": "generated",
+      "created_at": 1793830477602,
+      "updated_at": 1793832084994,
+      "file_mtime": 1793832084993,
+      "file_sha256": "74ed36f56b8ecfc717a0420167cfbe0fa1380085472ab203ba32e737e84a13f0",
+      "confidence": 1.0,
+      "slug": "agent-background-continuation-implementation-plan",
+      "missing_since": null,
+      "embedded_sha256": "74ed36f56b8ecfc717a0420167cfbe0fa1380085472ab203ba32e737e84a13f0"
+    },
+    {
+      "id": "22ed6d6c4e0c2288",
+      "abs_path": "/home/marius/work/claude/codescout/docs/superpowers/plans/2026-11-05-verified-worker-composition.md",
+      "kind": "plan",
+      "status": "done",
+      "title": "Compose live worker with bounded public verification",
+      "owners": "[]",
+      "tags": "[]",
+      "topic": null,
+      "time_scope": null,
+      "source": "generated",
+      "created_at": 1793860598129,
+      "updated_at": 1793862534130,
+      "file_mtime": 1793862534129,
+      "file_sha256": "7b548d0a3fb5416eb93d7bb119743896ed58f4c5c8f320f387eb6ff97dac9a4c",
+      "confidence": 1.0,
+      "slug": "compose-live-worker-with-bounded-public",
+      "missing_since": null,
+      "embedded_sha256": "7b548d0a3fb5416eb93d7bb119743896ed58f4c5c8f320f387eb6ff97dac9a4c"
+    },
+    {
+      "id": "4dcc14505cbc396a",
+      "abs_path": "/home/marius/work/claude/codescout/docs/research/2026-11-06-own-cache-cleanup-followup.md",
+      "kind": "report",
+      "status": "done",
+      "title": "Own closed experiment cache cleanup follow-up",
+      "owners": "[]",
+      "tags": "[]",
+      "topic": null,
+      "time_scope": "dated_snapshot",
+      "source": "repo",
+      "created_at": 1793952948570,
+      "updated_at": 1794043349073,
+      "file_mtime": 1793953288335,
+      "file_sha256": "802f08a3649b228e701aa5036028b5fd2206fb55d571eb46ca8031f6fa0d39e8",
+      "confidence": 1.0,
+      "slug": "own-closed-experiment-cache-cleanup-follow-up",
+      "missing_since": null,
+      "embedded_sha256": "802f08a3649b228e701aa5036028b5fd2206fb55d571eb46ca8031f6fa0d39e8"
+    },
+    {
+      "id": "28aab59cb5842630",
+      "abs_path": "/home/marius/work/claude/codescout/docs/superpowers/specs/2026-11-06-semantic-contract-pilot-design.md",
+      "kind": "spec",
+      "status": "done",
+      "title": "Semantic contract protocol: bounded development pilot with reused onboarding",
+      "owners": "[]",
+      "tags": "[\"effort-steering\",\"generic-mechanism\",\"development-pilot\"]",
+      "topic": null,
+      "time_scope": null,
+      "source": "generated",
+      "created_at": 1793968195121,
+      "updated_at": 1794059802714,
+      "file_mtime": 1794059802713,
+      "file_sha256": "395606bc8077887260f3986d798ff060f43c78f9db1532cb551f79a1dd926fcf",
+      "confidence": 1.0,
+      "slug": "semantic-contract-protocol-bounded-development",
+      "missing_since": null,
+      "embedded_sha256": "395606bc8077887260f3986d798ff060f43c78f9db1532cb551f79a1dd926fcf"
+    },
+    {
+      "id": "fb7d21b6e59730b3",
+      "abs_path": "/home/marius/work/claude/codescout/docs/superpowers/specs/2026-11-06-semantic-contract-adapter-design.md",
+      "kind": "spec",
+      "status": "active",
+      "title": "Paid workflow adapter with public classification and owned runtime supervision",
+      "owners": "[]",
+      "tags": "[\"effort-steering\",\"controller\",\"runtime\"]",
+      "topic": null,
+      "time_scope": null,
+      "source": "generated",
+      "created_at": 1793992882021,
+      "updated_at": 1793992882021,
+      "file_mtime": 1793992882021,
+      "file_sha256": "64f6eb168be47bb3d8f7c2675dde8fc5b0bf0e037748605e73557ca410abc4fb",
+      "confidence": 1.0,
+      "slug": "paid-workflow-adapter-with-public-classification",
+      "missing_since": null,
+      "embedded_sha256": "64f6eb168be47bb3d8f7c2675dde8fc5b0bf0e037748605e73557ca410abc4fb"
+    },
+    {
+      "id": "8fef748e3506be56",
+      "abs_path": "/home/marius/work/claude/codescout/docs/research/data/2026-11-07-semantic-contract-source-diagnosis.md",
+      "kind": "memory",
+      "status": "draft",
+      "title": "Nushell semantic contract: offline diagnosis",
+      "owners": "[]",
+      "tags": "[]",
+      "topic": null,
+      "time_scope": "dated_snapshot",
+      "source": "repo",
+      "created_at": 1794062118876,
+      "updated_at": 1794062118876,
+      "file_mtime": 1794059606999,
+      "file_sha256": "f75527dc6afedcdae595382583322b6bb2f831fba07cdaa0abe68aa9fdee7dbf",
+      "confidence": 0.5,
+      "slug": "nushell-semantic-contract-offline-diagnosis",
+      "missing_since": null,
+      "embedded_sha256": "f75527dc6afedcdae595382583322b6bb2f831fba07cdaa0abe68aa9fdee7dbf"
+    },
+    {
+      "id": "564b4d7c13b53b69",
+      "abs_path": "/home/marius/work/claude/codescout/docs/research/data/2026-11-07-semantic-contract-actor-diagnosis.md",
+      "kind": "memory",
+      "status": "draft",
+      "title": "Six completed actor attempts: intervention and execution audit",
+      "owners": "[]",
+      "tags": "[]",
+      "topic": null,
+      "time_scope": "dated_snapshot",
+      "source": "repo",
+      "created_at": 1794062118903,
+      "updated_at": 1794062118903,
+      "file_mtime": 1794059622326,
+      "file_sha256": "970a09150cffe207163fb97bd437e373322e074c6b00789043cb2560f9e68242",
+      "confidence": 0.5,
+      "slug": "six-completed-actor-attempts-intervention-and",
+      "missing_since": null,
+      "embedded_sha256": "970a09150cffe207163fb97bd437e373322e074c6b00789043cb2560f9e68242"
+    },
+    {
+      "id": "c40495db60f87d27",
+      "abs_path": "/home/marius/work/claude/codescout/docs/superpowers/specs/2026-11-07-baseline-first-oracle-design.md",
+      "kind": "spec",
+      "status": "active",
+      "title": "Freeze repair contracts before exposing a candidate: low and xhigh development pair",
+      "owners": "[]",
+      "tags": "[\"effort-steering\",\"generic-mechanism\",\"evaluation-integrity\"]",
+      "topic": null,
+      "time_scope": null,
+      "source": "generated",
+      "created_at": 1794075245768,
+      "updated_at": 1794075245768,
+      "file_mtime": 1794075245768,
+      "file_sha256": "3a1bef55c72e9b002c59e6bcfa91537bf761672d3288276420edc28ac9e0eb1f",
+      "confidence": 1.0,
+      "slug": "freeze-repair-contracts-before-exposing-a",
+      "missing_since": null,
+      "embedded_sha256": "3a1bef55c72e9b002c59e6bcfa91537bf761672d3288276420edc28ac9e0eb1f"
+    },
+    {
+      "id": "d8be1a58471ad76d",
+      "abs_path": "/home/marius/work/claude/codescout/docs/superpowers/specs/2026-11-08-oracle-uncertainty-resolution-design.md",
+      "kind": "spec",
+      "status": "done",
+      "title": "Public-only uncertainty resolution after baseline oracle authoring",
+      "owners": "[]",
+      "tags": "[\"effort-steering\",\"evaluation-integrity\"]",
+      "topic": null,
+      "time_scope": null,
+      "source": "generated",
+      "created_at": 1794117420321,
+      "updated_at": 1794151619290,
+      "file_mtime": 1794151619289,
+      "file_sha256": "39ea056d6e9ab0bd797034bbb61118709d0b54094087b48676977ec0024e1a61",
+      "confidence": 1.0,
+      "slug": "public-only-uncertainty-resolution-after-baseline",
+      "missing_since": null,
+      "embedded_sha256": "39ea056d6e9ab0bd797034bbb61118709d0b54094087b48676977ec0024e1a61"
+    }
+  ],
+  "events": [
+    {
+      "id": "01M6MBAW953AGV74ESJ50VPSPK",
+      "artifact_id": "6b6f3546c3761800",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":4047,\"new_bytes\":4667,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793831825690
+    },
+    {
+      "id": "01M6MBJSGDEVTRAN3MMMEYMP4Y",
+      "artifact_id": "6b6f3546c3761800",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":4667,\"new_bytes\":5105,\"edits_count\":0,\"mode\":\"overwrite\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793832084994
+    },
+    {
+      "id": "01M6N83T9GBK1TEKP2ZKXAVT2B",
+      "artifact_id": "22ed6d6c4e0c2288",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":3552,\"new_bytes\":4134,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793862002581
+    },
+    {
+      "id": "01M6N8M0ZWDZ083F38NZVC7TVV",
+      "artifact_id": "22ed6d6c4e0c2288",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":4134,\"new_bytes\":4573,\"edits_count\":0,\"mode\":\"overwrite\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793862534130
+    },
+    {
+      "id": "01M6QZ5M4W36GM52ZX03DM0C0D",
+      "artifact_id": "4dcc14505cbc396a",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":2678,\"new_bytes\":4168,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793953288336
+    },
+    {
+      "id": "01M6RDNRXFTRC7MEW3DF48DR6W",
+      "artifact_id": "28aab59cb5842630",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":13536,\"new_bytes\":14175,\"edits_count\":2,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793968497576
+    },
+    {
+      "id": "01M6RPM81TP0Y3A34T8ETZP9Z1",
+      "artifact_id": "28aab59cb5842630",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":14175,\"new_bytes\":14309,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793977884711
+    },
+    {
+      "id": "01M6RZPFHGAM5RAYWT1NDTMKRT",
+      "artifact_id": "28aab59cb5842630",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":14309,\"new_bytes\":16691,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793987395114
+    },
+    {
+      "id": "01M6S81N0F79WAY3ZKMGGPNMDK",
+      "artifact_id": "28aab59cb5842630",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":16691,\"new_bytes\":17151,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1793996149769
+    },
+    {
+      "id": "01M6TGN5Z0B9YD6SX2RFM915WQ",
+      "artifact_id": "28aab59cb5842630",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":17151,\"new_bytes\":17993,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1794038732762
+    },
+    {
+      "id": "01M6TMKZ7B7NWYDAZQNKQ6M4H3",
+      "artifact_id": "28aab59cb5842630",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":17993,\"new_bytes\":19057,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1794042887393
+    },
+    {
+      "id": "01M6V4R633ECQAHGCNDPTXH1ZK",
+      "artifact_id": "28aab59cb5842630",
+      "kind": "field_patch",
+      "payload": "{\"field\":\"body\",\"prev_bytes\":19057,\"new_bytes\":19975,\"edits_count\":1,\"mode\":\"edits\",\"forced\":false,\"replaced_subsections\":[]}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1794059802714
+    },
+    {
+      "id": "01M6W562TFF35CW8BBXQJ95Y4V",
+      "artifact_id": "c40495db60f87d27",
+      "kind": "verdict",
+      "payload": "{\"outcome\":\"refuted\",\"text\":\"2026-11-08: useful-detector hypothesis refuted for the unchanged baseline-first mechanism on this development task. Both low and xhigh retain qualified reference but accept saved wrong repair. All three final cells per author valid, with raw-status/resource/hash audits complete. Report bf3e845faf0b862a; no general effort-equivalence or population claim.\"}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1794093812559
+    },
+    {
+      "id": "01M6XW8BCNGEEJC7E6C3M93J39",
+      "artifact_id": "d8be1a58471ad76d",
+      "kind": "verdict",
+      "payload": "{\"outcome\":\"refuted\",\"text\":\"Closed development diagnostic NO-GO. Valid one low follow-up USD0.2943323 retained unresolved clause; all3valid frozen comparisons accept wrong repair and reference, baseline2fail2pass. Six actual emitted baseline observations omit partly-successful case. Generic uncertainty instruction did not provide required regression coverage in this case. No general efficacy claim; stop same-case tuning. Report6fb64036149fee6b, audit2026-11-08-oracle-uncertainty-audit.json.\"}",
+      "anchor_commit": null,
+      "head_commit": null,
+      "author": null,
+      "created_at": 1794151558549
+    }
+  ],
+  "artifact_augmentation": [],
+  "artifact_observation": [],
+  "artifact_link": [
+    {
+      "src_id": "0493d56c581fee30",
+      "dst_id": "28aab59cb5842630",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "0b471a97357e4b0f",
+      "dst_id": "22ed6d6c4e0c2288",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "1134bec5140494f3",
+      "dst_id": "28aab59cb5842630",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "22ed6d6c4e0c2288",
+      "dst_id": "bf167b83c0166a24",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "2a758a6f17667628",
+      "dst_id": "6b6f3546c3761800",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "30fca68660938262",
+      "dst_id": "22ed6d6c4e0c2288",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "6b6f3546c3761800",
+      "dst_id": "bf167b83c0166a24",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "6b6f3546c3761800",
+      "dst_id": "6f6c445bbf50937e",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "c0e1069c9ef03f0b",
+      "dst_id": "28aab59cb5842630",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "7e757ef79f426f29",
+      "dst_id": "6b6f3546c3761800",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "98c33698d67d6a0b",
+      "dst_id": "28aab59cb5842630",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "a926056cc47be553",
+      "dst_id": "6b6f3546c3761800",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "20da31b72242257c",
+      "dst_id": "28aab59cb5842630",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "12d287737be5e06f",
+      "dst_id": "28aab59cb5842630",
+      "rel": "cites",
+      "created_at": 1794049977922
+    },
+    {
+      "src_id": "f0e56c3c59f66b42",
+      "dst_id": "22ed6d6c4e0c2288",
+      "rel": "cites",
+      "created_at": 1794049977922
+    }
+  ]
+}

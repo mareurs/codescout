@@ -1,0 +1,10 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-semantic-contract-preparation-evidence.tar.gz",
+  "sha256": "f796140a42a00f2d83e91fe55c1d2be373f4fe7ec652616acbda99649966e089",
+  "bytes": 245506,
+  "payload_files": 174,
+  "manifest_files": 1,
+  "all_payloads_reopened_and_hash_verified": true,
+  "protected_originals_match_previous_archive": 24,
+  "both_containers_independently_absent_now": true
+}

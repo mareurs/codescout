@@ -7,7 +7,9 @@ Research is **paused**. This is a preservation branch, not a product integration
 - [Experiment index](../../docs/trackers/effort-steering/README.md): historical synthesis, caveats and roadmap. Dates inside it remain historical.
 - [Custody manifest](custody-manifest.json): original source, SHA-256, byte count, mode, storage destination and tar member for each preserved input.
 - [Verification](verification.json): custody comparison and recursive credential-pattern scan. This scan is limited to its named patterns; it is not proof that every possible secret is absent.
-- [Compatibility context](compatibility-context.tar.gz): original issue records and the previous memory pointer before their links are repointed. Product bug records stay in main.
+- [Supplemental custody](supplemental-custody-manifest.json): historical data and full plans/specifications found outside the consolidated tracker in the final sweep; their original paths are retained on this branch.
+- [Post-retirement verification](post-retirement-primary-verification.json): retained primary payloads checked after main cleanup, without requiring their retired original paths.
+- [Compatibility context](compatibility-context.tar.gz): original issue records and the previous memory pointer. Product bug records stay in main.
 - [Catalog snapshot](catalog-snapshot.json): scoped artifacts, augmentations, events, observations, reservations and incoming/outgoing links exported in a read-only SQLite transaction before cleanup.
 - [Main recipes](main-sdd-recipes.tar.gz), [research recipes](research-sdd-recipes.tar.gz), [experimental code](research-tools.tar.gz), and [uncommitted tracked patch](research-uncommitted.patch). These are inert snapshots, not installed modules on this branch.
 
@@ -23,7 +25,7 @@ Historic test/gate reports retain their original dates and exclusions. Archival 
 
 ## External custody
 
-Seven large evidence capsules are stored locally at `/home/marius/archives/codescout/effort-steering-20261118/capsules/`, under their original relative paths. Each omitted capsule has a sibling `*.external.json` in the preserved evidence folder. The old in-tree blind-challenger directory is additionally preserved as the external `legacy-resident.tar.gz` capsule (over 32 MiB compressed), with a complete member manifest and [pointer](legacy-resident.external.json). Exact sizes and hashes are in the custody manifest.
+Eight large evidence capsules are stored locally at `/home/marius/archives/codescout/effort-steering-20261118/capsules/`, under their original relative paths: seven from the consolidated tracker and one from historical research data. Each omitted capsule has a sibling `*.external.json` at its original archive location. The old in-tree blind-challenger directory is additionally preserved as the external `legacy-resident.tar.gz` capsule (over 32 MiB compressed), with a complete member manifest and [pointer](legacy-resident.external.json). Exact sizes and hashes are in the primary and supplemental custody manifests.
 
 This location is on the same machine. Publishing this branch does **not** upload or provide an independent backup of those capsule bytes. Do not prune this directory as a disposable cache. Other external experiment scratch roots, Docker images, and old worktrees were not deleted by this operation; the manifest states what this archive actually covers.
 

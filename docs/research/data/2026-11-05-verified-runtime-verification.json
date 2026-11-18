@@ -1,0 +1,231 @@
+{
+  "verified": true,
+  "qualification_root": "/home/marius/.cache/codescout-resident/codescout/verified-worker-runtime-20261105-final",
+  "runtime_source_hashes": {
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/observer.py": "8b46ef41f3122cd180d3ae42443dbd7197d715607c30ded62ca8c1112f4a0b37",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/qualify.py": "77cee388c56f049641559181d014d571bd04c105290c941a3f7c357a213efb16",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/qualify_workflow.py": "68e6fd9618b8a2dfd28f132b37c9d0aa045137c60792faa403de98df65d05b00",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/session.py": "3c1905da29bd1de39ac47f8905bea6869df4e5a66a9c30c41263ea0b1d9af44f",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/verification.py": "f66b367e018a7380a3ac6129029671337a8c9f8113e7cc1897d953ee822bc277",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/workflow.py": "8ed3e89ca1f14ccda8294e509b2c9bd51ac4dfed188f395f1573391e807be48a",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_completion/driver.py": "36519026b390aba010244a79a95407d6a4cbe6b038add2aceb07ca19c01a5cd6",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/audit.py": "d1736dc2aee84d52276d4c6ff071ec11c8896ae9c1ad77be4eb771faf0851713",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/controls.py": "d6827060e5d65ac9d3cb3fd56ed1a130fb413e9f39842ba449141bc27f5834f7",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/core.py": "5b35b4e249d7a4530d458d182e625689feb92d68ab3179173ec855dd6064107f",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/pilot_hook.py": "1cefc0c36f595a7bd18e798f8e18b40c6686000a90acc8e2f90dd2e926ce0309",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/prepare.py": "1dc2dae6af1a379855811c349e5599a0859db011be0719ccc3425e21c3de9a28",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/run.py": "fd56330f1ba071237196843b35b64c2968b10ba0f14586041c8a39e6335aeada",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/stdio.py": "a001e12a02df29126f6315999ec0e27edfcf6f9ca449d69e6fdc9484a2959e38",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_pilot/transport.py": "3d09bdcb68c02bf761b15546a035b0a8fb4215f4ba3bd00036078f77894737d8",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_resume/driver.py": "5ec9878962b259e43375c2a4830a0f1e5dc170049aec46745bffe25adc0a14f8"
+  },
+  "cells": [
+    {
+      "arm": "low",
+      "mode": "success",
+      "requests": 19,
+      "terminal_events": 2,
+      "public_exit_codes": [
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "runtime_witnesses": 4,
+      "cleanup_names": 2,
+      "workflow_completed": true,
+      "provider_cost_usd": "0",
+      "receipt_sha256": "8eaaa753bf06425f609a6b06b402dd54f88781c6704e8ba44c13390ec6d60582",
+      "filesystem": "btrfs",
+      "free_bytes_at_preflight": 94946619392
+    },
+    {
+      "arm": "low",
+      "mode": "repair",
+      "requests": 21,
+      "terminal_events": 3,
+      "public_exit_codes": [
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "runtime_witnesses": 8,
+      "cleanup_names": 2,
+      "workflow_completed": true,
+      "provider_cost_usd": "0",
+      "receipt_sha256": "347a11cdf950854367293cdd062001bb958cff052ec7f0cc39739c7a543866f6",
+      "filesystem": "btrfs",
+      "free_bytes_at_preflight": 94739800064
+    },
+    {
+      "arm": "low",
+      "mode": "unknown",
+      "requests": 19,
+      "terminal_events": 2,
+      "public_exit_codes": [
+        [
+          0
+        ]
+      ],
+      "runtime_witnesses": 1,
+      "cleanup_names": 2,
+      "workflow_completed": false,
+      "provider_cost_usd": "0",
+      "receipt_sha256": "ddb00ad0cdf1873c2d23b3cedb940283bd145ab52f941c739a71530e98c79c07",
+      "filesystem": "btrfs",
+      "free_bytes_at_preflight": 94718783488
+    },
+    {
+      "arm": "xhigh",
+      "mode": "success",
+      "requests": 19,
+      "terminal_events": 2,
+      "public_exit_codes": [
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "runtime_witnesses": 4,
+      "cleanup_names": 2,
+      "workflow_completed": true,
+      "provider_cost_usd": "0",
+      "receipt_sha256": "188bde87b7618d83b8ffe369cc435f806978c51351a5b2f912ac9027a85efb20",
+      "filesystem": "btrfs",
+      "free_bytes_at_preflight": 94419075072
+    }
+  ],
+  "cleanup_inspections": [
+    {
+      "arm": "low",
+      "mode": "success",
+      "identity": "506ebfd7b323bddefd5ecf0188e045c6fba18586da7472d64707406034b2ca02",
+      "exit_code": 1,
+      "stderr": "error: no such object: 506ebfd7b323bddefd5ecf0188e045c6fba18586da7472d64707406034b2ca02\n"
+    },
+    {
+      "arm": "low",
+      "mode": "success",
+      "identity": "hfa-native-4826f265902347ddbcbeefa2d22b96de",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-4826f265902347ddbcbeefa2d22b96de\n"
+    },
+    {
+      "arm": "low",
+      "mode": "success",
+      "identity": "hfa-native-d8892c083b8c46bcb002c1c859941e39",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-d8892c083b8c46bcb002c1c859941e39\n"
+    },
+    {
+      "arm": "low",
+      "mode": "repair",
+      "identity": "52f3b97d2c3feffe9843341b7ef88c06bdd5bbbf94218381488ad384e3727886",
+      "exit_code": 1,
+      "stderr": "error: no such object: 52f3b97d2c3feffe9843341b7ef88c06bdd5bbbf94218381488ad384e3727886\n"
+    },
+    {
+      "arm": "low",
+      "mode": "repair",
+      "identity": "hfa-native-60f25803973d4fb1a413d205555efd22",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-60f25803973d4fb1a413d205555efd22\n"
+    },
+    {
+      "arm": "low",
+      "mode": "repair",
+      "identity": "hfa-native-9dc6212e729c4dfaa8c292a28c3f4ef2",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-9dc6212e729c4dfaa8c292a28c3f4ef2\n"
+    },
+    {
+      "arm": "low",
+      "mode": "unknown",
+      "identity": "6b3d5dcc0e1c9c089c1f0be18b9484acf1c8aca88801edd5115d28ceb4d3b1a0",
+      "exit_code": 1,
+      "stderr": "error: no such object: 6b3d5dcc0e1c9c089c1f0be18b9484acf1c8aca88801edd5115d28ceb4d3b1a0\n"
+    },
+    {
+      "arm": "low",
+      "mode": "unknown",
+      "identity": "hfa-native-3a65cd9dda7448a0a6ed4531eb43e886",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-3a65cd9dda7448a0a6ed4531eb43e886\n"
+    },
+    {
+      "arm": "low",
+      "mode": "unknown",
+      "identity": "hfa-native-edd88a9564454c1fb7d90ee44cae4aeb",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-edd88a9564454c1fb7d90ee44cae4aeb\n"
+    },
+    {
+      "arm": "xhigh",
+      "mode": "success",
+      "identity": "6c4908c4d95e4878fe5773cde41455c91ab770eefddcc3bae5e4d492c74a8c1d",
+      "exit_code": 1,
+      "stderr": "error: no such object: 6c4908c4d95e4878fe5773cde41455c91ab770eefddcc3bae5e4d492c74a8c1d\n"
+    },
+    {
+      "arm": "xhigh",
+      "mode": "success",
+      "identity": "hfa-native-7721ff4f22eb4d2b9f10048a67e3a642",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-7721ff4f22eb4d2b9f10048a67e3a642\n"
+    },
+    {
+      "arm": "xhigh",
+      "mode": "success",
+      "identity": "hfa-native-9f2b080f59bb4342a7fb5dab1fb0402c",
+      "exit_code": 1,
+      "stderr": "error: no such object: hfa-native-9f2b080f59bb4342a7fb5dab1fb0402c\n"
+    }
+  ],
+  "provider_cost_usd": "0",
+  "limits": "Scripted transport/public probes only; no model quality or full Rust repair conclusion.",
+  "archive": {
+    "path": "docs/research/data/2026-11-05-verified-runtime-evidence.tar.gz",
+    "sha256": "9d76aba72de8a72c1928ba88665754a1c9f3145005fb459882440bca5292b2ef",
+    "payload_files": 349,
+    "all_payload_hashes_verified": true
+  },
+  "gate": {
+    "record": {
+      "schema": 1,
+      "handle": "@bg_00000055",
+      "command": "./scripts/gate.sh --check",
+      "server_pid": 455879,
+      "job_pid": 351989,
+      "state": "exited",
+      "exit_code": 0,
+      "error": null,
+      "started_at": "2026-11-05T11:30:32.180158322+00:00",
+      "finished_at": "2026-11-05T11:46:29.634072005+00:00",
+      "log_path": "/tmp/codescout-bg-Le1LpN.log"
+    },
+    "raw_log_sha256": "95ff16e6c1b93f627df6a81e16f6de672a59bee0b1d7c2400cebbadf655c6590",
+    "coverage": "V gate's configured five lanes; normal documented exclusions; tools lifecycle suite run separately."
+  },
+  "review": {
+    "initial_applied": 12,
+    "initial_killed": 11,
+    "initial_survived": 1,
+    "followup_applied": 8,
+    "followup_killed": 5,
+    "followup_survived": 3,
+    "followup_survivors": "Redundant guards; 3 additional paired green controls establish actual conflicting-option admission is caught."
+  }
+}

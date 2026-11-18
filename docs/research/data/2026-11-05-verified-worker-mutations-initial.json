@@ -1,0 +1,177 @@
+{
+  "baseline": {
+    "returncode": 0,
+    "tests_run": 26,
+    "log": "/tmp/workflow-review-20261105/baseline.log"
+  },
+  "mutations": [
+    {
+      "returncode": 1,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M01_skip_public_checks.log",
+      "id": "M01_skip_public_checks",
+      "path": "tools/agent_lifecycle/session.py",
+      "find": "feedback = completion_check(remaining()) if completion_check is not None else None",
+      "replace": "feedback = None",
+      "source_sha256": "30830a908adc90732f6beec301e3be822480fa5fe6ffe79cbe5f53521d0a6cd4",
+      "mutated_sha256": "1147e207c84612226b42963528444e944f064087671e6c2c36728dd8a402f112",
+      "verdict": "KILLED"
+    },
+    {
+      "returncode": 1,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M02_last_check_only.log",
+      "id": "M02_last_check_only",
+      "path": "tools/agent_lifecycle/verification.py",
+      "find": "all(c[\"exit_code\"]==0 for c in receipt[\"checks\"])",
+      "replace": "receipt[\"checks\"][-1][\"exit_code\"]==0",
+      "source_sha256": "f66b367e018a7380a3ac6129029671337a8c9f8113e7cc1897d953ee822bc277",
+      "mutated_sha256": "4e3c32b7a6bebd0846a9d1d9ea6777fd35d65d838501443fbccf6c3441e51ae1",
+      "verdict": "KILLED"
+    },
+    {
+      "returncode": 1,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M03_unknown_exit_passes.log",
+      "id": "M03_unknown_exit_passes",
+      "path": "tools/agent_lifecycle/verification.py",
+      "find": "if type(code) is not int:\n                    raise ValueError(\"public command has no known terminal exit code\")",
+      "replace": "if type(code) is not int:\n                    code=0",
+      "source_sha256": "f66b367e018a7380a3ac6129029671337a8c9f8113e7cc1897d953ee822bc277",
+      "mutated_sha256": "97a2cfec6e47f773636b21a9986e8406e403c6456721381015ff9b2356a79a50",
+      "verdict": "KILLED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M04_ignore_cleanup_failure.log",
+      "id": "M04_ignore_cleanup_failure",
+      "path": "tools/agent_lifecycle/workflow.py",
+      "find": "and cleanup_error is None",
+      "replace": "",
+      "source_sha256": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+      "mutated_sha256": "b8567ab373af97911470bcfc7f2ec78ff25e2c15f614cc59dc8fd37bc89cf98a",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M05_unknown_cost_false.log",
+      "id": "M05_unknown_cost_false",
+      "path": "tools/agent_lifecycle/workflow.py",
+      "find": "unknown=server.budget.pending is not None or terminal is None",
+      "replace": "unknown=False",
+      "source_sha256": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+      "mutated_sha256": "ceb29cbe9d66e4aeb6bd3a7b9f31cfd3c1fc1509cf132832c50ed6fe32bd265c",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M06_discard_cleanup_cost.log",
+      "id": "M06_discard_cleanup_cost",
+      "path": "tools/agent_lifecycle/workflow.py",
+      "find": "\"cost_usd\":str(terminal[\"cost\"]) if terminal else None",
+      "replace": "\"cost_usd\":str(terminal[\"cost\"]) if terminal and cleanup_error is None else None",
+      "source_sha256": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+      "mutated_sha256": "a0fa6907a91f19abe7a21e3d79fe024d15daa8597dad05ba950e7ad064b70921",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M07_accept_worker_mismatch.log",
+      "id": "M07_accept_worker_mismatch",
+      "path": "tools/agent_lifecycle/workflow.py",
+      "find": "if row[\"Image\"]!=image or row[\"Config\"][\"Labels\"].get(\"codescout.hfa\")!=name:",
+      "replace": "if False:",
+      "source_sha256": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+      "mutated_sha256": "f65664457c4efa37eb563e55b5fa301f63895a2c9ff15787c21e1d7743edb64c",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M08_accept_ambiguous_worker.log",
+      "id": "M08_accept_ambiguous_worker",
+      "path": "tools/agent_lifecycle/workflow.py",
+      "find": "if len(live)!=1:",
+      "replace": "if not live:",
+      "source_sha256": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+      "mutated_sha256": "220bb4820254dcdcb38e76d3d0051af3d0e5aad4f0ee2858c98b1011c9e9f7e8",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M09_drop_campaign_limit.log",
+      "id": "M09_drop_campaign_limit",
+      "path": "tools/agent_lifecycle/workflow.py",
+      "find": "within=terminal is not None and terminal[\"cost\"]<=available",
+      "replace": "within=terminal is not None",
+      "source_sha256": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+      "mutated_sha256": "1f96fb2f67aa3cd7996e00e9f8346a1e552ff0b5ab8aceb981a46fdca611dcd1",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M10_verify_despite_provider_unknown.log",
+      "id": "M10_verify_despite_provider_unknown",
+      "path": "tools/agent_lifecycle/workflow.py",
+      "find": "if server.budget.pending is not None or server.errors or server.budget_stop:",
+      "replace": "if False:",
+      "source_sha256": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+      "mutated_sha256": "d10802e26e9e17f0bb10ac56aa5d3934623062f21e96cb0f4f248c9b7df81121",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 1,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M11_skip_manifest_before_credentials.log",
+      "id": "M11_skip_manifest_before_credentials",
+      "path": "tools/hint_authority_pilot/run.py",
+      "find": "workflow_adapter.validate_config(workflow)",
+      "replace": "pass",
+      "source_sha256": "b9e5d3e15b654a229de6ee8f38619d45c18bbe1bbeeb3c7f2196ee158fcc8a08",
+      "mutated_sha256": "dcf5363cdea576515ba046cd5bb3d8fba7f7f13f679b7321083b9f3c7cc64058",
+      "verdict": "KILLED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M12_remove_check_deadline.log",
+      "id": "M12_remove_check_deadline",
+      "path": "tools/agent_lifecycle/verification.py",
+      "find": "if time.monotonic()>deadline:\n                    raise TimeoutError(\"public verification deadline\")",
+      "replace": "if False:\n                    raise TimeoutError(\"public verification deadline\")",
+      "source_sha256": "f66b367e018a7380a3ac6129029671337a8c9f8113e7cc1897d953ee822bc277",
+      "mutated_sha256": "f589a6588c128a5d1d7f25eea03f74c1124b179e8088b725dcb40e982ecc3147",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 0,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M13_accept_incomplete_verification.log",
+      "id": "M13_accept_incomplete_verification",
+      "path": "tools/agent_lifecycle/workflow.py",
+      "find": "and public[\"status\"]==\"completed\" and public[\"passed\"]",
+      "replace": "",
+      "source_sha256": "81b19feeeae333462655bbf1f982064e74d4be86c3934e33d9c8aa2b0b3b19c7",
+      "mutated_sha256": "15ce08286f6ea75f6886f94bec3de88faecf82d40eb877edaaebb9fcead14db3",
+      "verdict": "SURVIVED"
+    },
+    {
+      "returncode": 1,
+      "tests_run": 26,
+      "log": "/tmp/workflow-review-20261105/M14_sum_cumulative_cost.log",
+      "id": "M14_sum_cumulative_cost",
+      "path": "tools/agent_lifecycle/session.py",
+      "find": "cost = total",
+      "replace": "cost += total",
+      "source_sha256": "30830a908adc90732f6beec301e3be822480fa5fe6ffe79cbe5f53521d0a6cd4",
+      "mutated_sha256": "4849d7fcb0408d155221277969df8829ebb4bb52118971e26ff0bb2c0161280d",
+      "verdict": "KILLED"
+    }
+  ]
+}

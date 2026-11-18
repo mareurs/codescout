@@ -1,0 +1,50 @@
+{
+  "source_commit": "0998c3b64f81c13331db26e0091ff25404272c66",
+  "legacy_frozen_inputs_fingerprint": "043c9225bbf46ec820e97c813e9068dc516258c5b47d82783c8812acc845c233",
+  "additional_files": {
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/observer.py": "8b46ef41f3122cd180d3ae42443dbd7197d715607c30ded62ca8c1112f4a0b37",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/qualify.py": "77cee388c56f049641559181d014d571bd04c105290c941a3f7c357a213efb16",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/qualify_workflow.py": "68e6fd9618b8a2dfd28f132b37c9d0aa045137c60792faa403de98df65d05b00",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/session.py": "3c1905da29bd1de39ac47f8905bea6869df4e5a66a9c30c41263ea0b1d9af44f",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/test_observer.py": "3b16c4f5c00a2ebcd78d18c7e4afa4844f81a261c898dc23c071d4b2aa413713",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/test_qualify.py": "a146d6939dc34d899e7adbcbeda14b7432fc1dcf9213d2f2210623b0439b0239",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/test_session.py": "db0c4d37d9b1fa40035381fe0411d61bd2ec3407154781cf793df1a83d1ee6d1",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/test_verification.py": "9d3ea33c4bd95d55de901666936282a3615f979b1e720164cbe3acf5784f573d",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/test_workflow.py": "f37534ed21c0af98ec818b4db4b426080d101bd060e1bf845b93883bf7e77643",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/verification.py": "f66b367e018a7380a3ac6129029671337a8c9f8113e7cc1897d953ee822bc277",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/agent_lifecycle/workflow.py": "966dd0438aa8c991de32d2d3c58eb10ca0ffcf8176d60edb659bf6ffbfc6162e",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_completion/driver.py": "36519026b390aba010244a79a95407d6a4cbe6b038add2aceb07ca19c01a5cd6",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_completion/test_driver.py": "931a044f818d30d89ecc0b3b8b4000300c2e08fefcda7c6c46ea365ce007dffb",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_resume/driver.py": "5ec9878962b259e43375c2a4830a0f1e5dc170049aec46745bffe25adc0a14f8",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_resume/test_resume.py": "b8365189be020cc20ea81f4ff8594298d0e661f918f7257078ffe54880c40103",
+    "/home/marius/.codex/worktrees/615e/codescout/tools/hint_authority_workflow/public-checks.json": "a32284afd3f77d83e41c1050d0509621d2a5898cfe2ab55c38c8cd0ca7248537",
+    "/tmp/verified-public-profile-01a15ca9-20261105.py": "3369ee8d629ff14155deccc96a5021d2b3a1d3a641bc483c8cf29f830d65b7f4"
+  },
+  "reference_patch_sha256": "c7b43de4cbd8dfd3b201676d65864a7140f10a7b163e4cbf6f5cf896a71c488e",
+  "profile": {
+    "checks": [
+      {
+        "id": "format",
+        "command": "cargo fmt"
+      },
+      {
+        "id": "clippy",
+        "command": "cargo clippy --workspace --all-targets --features local-embed -- -D warnings"
+      },
+      {
+        "id": "lean",
+        "command": "cargo test --workspace --no-default-features"
+      },
+      {
+        "id": "default",
+        "command": "cargo test --workspace"
+      }
+    ],
+    "timeout_s": 1800,
+    "check_timeout_s": 900,
+    "max_continuations": 4
+  },
+  "paid_admitted": false,
+  "scope": "Known reference patch; full public Rust checks; no model quality measurement",
+  "composition_inventory_sha256": "b541c9985e029599ff1ce988eede755f5615d1612566a6d067c5dee8cdb9ef9d"
+}

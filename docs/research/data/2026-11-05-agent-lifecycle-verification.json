@@ -1,0 +1,83 @@
+{
+  "verified": true,
+  "root": "/home/marius/.cache/codescout-resident/codescout/agent-lifecycle-20261105-v5",
+  "source_hashes": {
+    "session.py": "c4b8994f51d27c6e2a8123e0155bc0f403460a325383b5edc5c4c411e189cbeb",
+    "observer.py": "8b46ef41f3122cd180d3ae42443dbd7197d715607c30ded62ca8c1112f4a0b37",
+    "qualify.py": "77cee388c56f049641559181d014d571bd04c105290c941a3f7c357a213efb16"
+  },
+  "cells": [
+    {
+      "mode": "negative",
+      "session_id": "17dc7792-9078-4fee-b5f9-6d396c14d20e",
+      "terminal_count": 1,
+      "status": "incomplete",
+      "job_states_observed": [],
+      "continuations": 0,
+      "all_jobs_succeeded": false,
+      "original_task_history_retained": false,
+      "cost_usd": "0"
+    },
+    {
+      "mode": "success",
+      "session_id": "38208687-ba90-482e-ac37-3ef4926a5a4d",
+      "terminal_count": 2,
+      "status": "settled",
+      "job_states_observed": [
+        "exited",
+        "running"
+      ],
+      "continuations": 1,
+      "all_jobs_succeeded": true,
+      "original_task_history_retained": true,
+      "cost_usd": "0"
+    },
+    {
+      "mode": "failed",
+      "session_id": "27ebbf7d-25be-4849-929d-f1aa23d71405",
+      "terminal_count": 2,
+      "status": "settled",
+      "job_states_observed": [
+        "exited",
+        "running"
+      ],
+      "continuations": 1,
+      "all_jobs_succeeded": false,
+      "original_task_history_retained": true,
+      "cost_usd": "0"
+    }
+  ],
+  "owned_containers": [
+    {
+      "name": "hfa-native-2a91ccd21bfd4cc58fe88d2e741e3551",
+      "independently_absent": true
+    },
+    {
+      "name": "hfa-native-4f6a2427a2df459ba8f7f9d34f057474",
+      "independently_absent": true
+    },
+    {
+      "name": "hfa-native-7c8b423131ba47a59a22a913241035d4",
+      "independently_absent": true
+    },
+    {
+      "name": "hfa-native-fcd7c69ed6d24d8bafe6183db105d6b8",
+      "independently_absent": true
+    },
+    {
+      "name": "hfa-native-a3290c2f4cae4bfea0f1e217ad53d888",
+      "independently_absent": true
+    },
+    {
+      "name": "hfa-native-a63996a5ec634bf2b1682b5d6cefdfb4",
+      "independently_absent": true
+    }
+  ],
+  "provider_forwarded": 0,
+  "new_cost_usd": "0",
+  "limits": [
+    "scripted transport control, not model quality or recall",
+    "not evidence all task public checks ran",
+    "legacy paid launcher remains unchanged; lifecycle integration needs its own qualification"
+  ]
+}

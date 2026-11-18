@@ -1,0 +1,112 @@
+{
+  "budget_limits": "Not total research/setup/review/CPU/provider invoice spend; new launch must bind all existing known costs and allocate adequate author plus both-arm reserves.",
+  "finite_thread_ceiling_usd": "60",
+  "global_instruction_comparison": "identical to previous E global snapshot; cs-hint authority factorial remains separately unmeasured",
+  "global_instructions_sha256": "74a3eb181f6ec2ba5c3275dda9da35102144fe8cc665abaf67a778a29771d8c6",
+  "known_prior_cli_repair_continuation_usd": "35.255714099999999604",
+  "paid_runs_admitted": false,
+  "pending": [
+    "generic evaluated-client task adapter and source/patch preservation",
+    "actual provider-disabled CLI full instruction/skills/native/wire/oracle-boundary qualification",
+    "source-only author once per project then immutable identical per-arm knowledge",
+    "semantic/named-reference readiness on selected runtime",
+    "independent finite mutation review and full gate for adapter",
+    "fresh matched four-attempt order/full cost registration"
+  ],
+  "provider_calls_this_phase": 0,
+  "purpose": "external source/task admission, not a paid-launch authorization receipt",
+  "remaining_against_known_cli_costs_usd": "24.744285900000000396",
+  "schema": 1,
+  "setting_sources_required": "user,project,local",
+  "setup_author_calls_this_phase": 0,
+  "tasks": [
+    {
+      "control_resources": {
+        "cpus": 4,
+        "memory_gib": 24,
+        "network": "none",
+        "pids_limit": 4096,
+        "user": "1000:1000"
+      },
+      "instance_id": "nushell__nushell-18863",
+      "knowledge": {
+        "author_calls_this_phase": 0,
+        "bootstrap_evidence": "/home/marius/.cache/codescout-resident/codescout/external-transfer-admission-20261105/native-probes/nushell__nushell-18863",
+        "complete_source_only_snapshot": null,
+        "embedding_config_required": "local:JinaEmbeddingsV2BaseCode",
+        "known_cache_inventory": "No complete suitable KB found in inspected known caches; RA22849 had only onboarding/language-pattern boilerplate. Search bounded to six levels with build/target/runs/pruned directories excluded; not exhaustive machine absence."
+      },
+      "private_control": {
+        "base_rejected": true,
+        "expected": 8622,
+        "f2p": 2,
+        "gold_accepted": true,
+        "p2p": 8620,
+        "parser_sha256": "6348ec74a6b0ff87d7690580c8e69af9a69732734c3aa3ee5b5b6573e52c9e2f",
+        "repeat_accepted": true
+      },
+      "problem_statement_sha256": "1f48fd88a6643bb5a741fc763c34dbdfa3859ea74f3606c7076236f1b3d8d14e",
+      "project_instructions_sha256": "f220ecee66c680cdef9e380140b8d58ab93fe354f6abf3e77aaf6ef30b44c772",
+      "public_checks": [
+        {
+          "command": "cargo build --offline",
+          "id": "build",
+          "timeout_s": 1800
+        },
+        {
+          "command": "cargo test --offline --workspace --no-fail-fast -- --skip plugin_persistence::plugin_process_exits_when_nushell_exits",
+          "id": "tests",
+          "timeout_s": 1800
+        }
+      ],
+      "source_image_id": "sha256:3767f31b9b1a3288ad7132740dcff712737d5e855029079a4171a8065a2040ef",
+      "status": "public-and-historical-private-controls-verified; evaluated-client-admission-pending",
+      "task_record_sha256": "8bb14b9ac8bd98d78f3ae2e3776a523b64d826269a79277058ea2677f5344114",
+      "upstream_base_commit": "b1341d87305292decafa604a4eee8a153d013f8f"
+    },
+    {
+      "control_resources": {
+        "cpus": 4,
+        "memory_gib": 24,
+        "network": "none",
+        "pids_limit": 4096,
+        "user": "1000:1000"
+      },
+      "instance_id": "rust-lang__rust-analyzer-22992",
+      "knowledge": {
+        "author_calls_this_phase": 0,
+        "bootstrap_evidence": "/home/marius/.cache/codescout-resident/codescout/external-transfer-admission-20261105/native-probes/rust-lang__rust-analyzer-22992",
+        "complete_source_only_snapshot": null,
+        "embedding_config_required": "local:JinaEmbeddingsV2BaseCode",
+        "known_cache_inventory": "No complete suitable KB found in inspected known caches; RA22849 had only onboarding/language-pattern boilerplate. Search bounded to six levels with build/target/runs/pruned directories excluded; not exhaustive machine absence."
+      },
+      "private_control": {
+        "base_rejected": true,
+        "expected": 8182,
+        "f2p": 1,
+        "gold_accepted": true,
+        "p2p": 8181,
+        "parser_sha256": "6348ec74a6b0ff87d7690580c8e69af9a69732734c3aa3ee5b5b6573e52c9e2f",
+        "repeat_accepted": true
+      },
+      "problem_statement_sha256": "288500fa5c6e5e1229fce9a68da37878399d1f499dafca98f2d9879e83f3bd5e",
+      "project_instructions_sha256": "b4ee9a7c36bf387ed9295627d6c5bb38efbac6015dd058599cbbc5f6843cb8e9",
+      "public_checks": [
+        {
+          "command": "cargo build --offline",
+          "id": "build",
+          "timeout_s": 1800
+        },
+        {
+          "command": "RUN_SLOW_TESTS=1 cargo +stable test --offline --no-fail-fast -- --nocapture",
+          "id": "tests",
+          "timeout_s": 1800
+        }
+      ],
+      "source_image_id": "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+      "status": "public-and-historical-private-controls-verified; evaluated-client-admission-pending",
+      "task_record_sha256": "25d70755edd1d3073af9ea2520d08331089ef36aa157ff6ce488323aa7e2ba68",
+      "upstream_base_commit": "983e906e23cf0cfd645910025bd9436818688d78"
+    }
+  ]
+}

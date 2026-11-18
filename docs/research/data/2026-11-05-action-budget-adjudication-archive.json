@@ -1,0 +1,7 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-05-action-budget-adjudication-evidence.tar.gz",
+  "sha256": "5bb489a63843be810bb5ded207258fe4ab6ff8c279706cbd2494548244927497",
+  "payload_files": 40,
+  "every_payload_hash_verified": true,
+  "fix_commit": "774d81703ec14efc9fa50c72d4a3eb6380258c13"
+}

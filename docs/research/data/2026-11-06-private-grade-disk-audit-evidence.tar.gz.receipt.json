@@ -1,0 +1,8 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-private-grade-disk-audit-evidence.tar.gz",
+  "sha256": "89dfc97b0d7a901d4da3f37a9beb5576e7fe7d36f319cfdce8ddbf986367f518",
+  "bytes": 33232147,
+  "payload_files": 1600,
+  "all_reopened_and_hash_verified": true,
+  "original_results_sha256": "e28e9eac4c326d6bebe4109336cd1594a712cd3374b041d41ad299ff602059da"
+}

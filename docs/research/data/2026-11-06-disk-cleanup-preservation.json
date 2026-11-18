@@ -1,0 +1,46 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/research/data/2026-11-06-disk-cleanup-evidence.tar.gz",
+  "sha256": "f52c8d98bba780e1a6885049004f24a25ed94c5f443b2acc4fbb1eaf968ba131",
+  "archive_bytes": 8974214,
+  "actual_regular_payload_files_verified": 39,
+  "all_payloads_reopened_and_sha256_verified": true,
+  "summary": {
+    "scope": "Safe closed-build-cache and actually-empty-anonymous-volume cleanup; protected backups, data and active campaign retained.",
+    "gate_cache_allocation_removed_bytes": 26512560128,
+    "closed_cache_allocation_removed_bytes": 37439565824,
+    "cache_allocation_total_removed_bytes": 63952125952,
+    "cache_allocation_note": "Sum of du allocation over removed paths, not exclusive physical bytes freed. Btrfs compression/sharing, retained snapshots and concurrent writes prevent equating this sum with df delta.",
+    "closed_project_copies": 6,
+    "cache_directories_removed": 24,
+    "preserved_nontarget_file_link_records": 141162,
+    "historical_archives_unchanged": {
+      "2026-11-05-complete-workflow-evidence.tar.gz": "35e6b5523aaf29f3ef896c3bcc31d9e3623bb1b581782c4b272f6301cee835c8",
+      "2026-11-05-cold-recovery-final-evidence.tar.gz": "7ee89423633505746820ea6e5e9fe35efd13a02a8e78fac20560823831cd05d7",
+      "2026-11-05-action-budget-final-evidence.tar.gz": "5a9c571c6d1d926a645d0409a3910f7766fa246debb59d49198eafa7176d14b8",
+      "2026-11-05-xhigh-expost-public-evidence.tar.gz": "f7c7ba9d4f207d203b9806b2f31ef3cd41bf3d4b4ddfd1809bcdc81179eb74eb"
+    },
+    "retained_top_level_binaries_metadata": true,
+    "empty_anonymous_volumes_removed": 75,
+    "nonempty_anonymous_postgres_volumes_preserved": 10,
+    "all_named_volumes_preserved": true,
+    "all_image_and_existing_container_delete_apis_avoided": true,
+    "admission_proof_files_sha256_matched": 79,
+    "protected_actor_grader_images_present": [
+      "sha256:3767f31b9b1a3288ad7132740dcff712737d5e855029079a4171a8065a2040ef",
+      "sha256:0d74e4f14c68a438dce6cf9e4a02c626432ce12b866f55ac69c6cc687f7fff7a",
+      "sha256:e317a8e791bfa1f546ab9b58af244ba0844311fef0019306042522d5f68d81b2",
+      "sha256:b3df4c943af162ec27e038ed6b80557ae8764e869e43402ea96c477d876066c9"
+    ],
+    "snapshots_preserved": [
+      2794,
+      2795,
+      3085,
+      3086
+    ],
+    "positive_snapshot_cache_witness": "Both inspected home snapshots still contain old action-budget target/debug/deps. Btrfs fi du over each old action-budget root reports Total16.31GiB/Exclusive0.00B/Set shared12.60GiB; not a unique physical reclaim estimate.",
+    "peer_dependency_request": "One measured2.1.312 Claude peer queried about SAB reservations; no image/template release inferred from silence.",
+    "df_final": "Filesystem         1B-blocks          Used   Available Use% Mounted on\n/dev/nvme0n1p2 1999323004928 1916747784192 66350931968  97% /\ntmpfs            34359738368    9341964288 25017774080  28% /tmp\n",
+    "script_provider_calls": 0,
+    "completed_epoch": 1793946467.663358
+  }
+}

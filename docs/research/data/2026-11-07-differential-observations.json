@@ -1,0 +1,74 @@
+{
+  "observations": {
+    "baseline": {
+      "p2": {
+        "before": "List([Int(1), Int(2), Int(3)])",
+        "operation_exit": "1",
+        "after": "List([Int(1), Error(EvalBlockWithInput { span: Span[67..68], sources: [LabeledError(LabeledError { msg: \"boom\", labels: [ErrorLabel { text: \"\", span: Span[108..121] }], code: None, url: None, help: None, inner: [] })] }), Int(3)])",
+        "fetch_begin": "",
+        "fetch_exit": "0"
+      },
+      "p3": {
+        "before": "List([Record({\"name\": String(\"first.txt\")}), Record({\"name\": String(\"second.txt\")})])",
+        "operation_exit": "1",
+        "after": "List([Error(OnlySupportsThisInputType { exp_input_type: \"string\", wrong_type: \"record<name: string>\", dst_span: Span[111..121], src_span: Span[1..20] }), Error(OnlySupportsThisInputType { exp_input_type: \"string\", wrong_type: \"record<name: string>\", dst_span: Span[111..121], src_span: Span[21..41] })])",
+        "fetch_begin": "",
+        "fetch_exit": "0"
+      },
+      "p1": {
+        "before": "List([Int(1), Int(2), Int(3)])",
+        "operation_exit": "1",
+        "after": "List([Int(1), Int(2), Int(3)])",
+        "fetch_begin": "",
+        "fetch_exit": "0"
+      }
+    },
+    "low-control": {
+      "p2": {
+        "before": "List([Int(1), Int(2), Int(3)])",
+        "operation_exit": "1",
+        "after": "List([Int(1), Int(2), Int(3)])",
+        "fetch_begin": "",
+        "fetch_exit": "0"
+      },
+      "p1": {
+        "before": "List([Int(1), Int(2), Int(3)])",
+        "operation_exit": "1",
+        "after": "List([Int(1), Int(2), Int(3)])",
+        "fetch_begin": "",
+        "fetch_exit": "0"
+      },
+      "p3": {
+        "before": "List([Record({\"name\": String(\"first.txt\")}), Record({\"name\": String(\"second.txt\")})])",
+        "operation_exit": "1",
+        "after": "List([Record({\"name\": String(\"first.txt\")}), Record({\"name\": String(\"second.txt\")})])",
+        "fetch_begin": "",
+        "fetch_exit": "0"
+      }
+    }
+  },
+  "both_cells_valid": true,
+  "probe_programs": 3,
+  "expected_value_assertions": 0,
+  "semantic_verdict": "not_assigned",
+  "floors": {
+    "root_gib": 80,
+    "tmp_gib": 4,
+    "mem_gib": 24
+  },
+  "native_memory_gib": 8,
+  "native_cpus": 4,
+  "output_limitations": "Raw unmarked stdout/stderr can interleave between concurrent tests. Only OBS markers have per-probe attribution. Fetch exit0 is not a complete semantic oracle.",
+  "probe_patch_sha256": "bc7fe427d8f5c962b93c5050a093ba45a2d3106b59a13204884aaeb3b19d4020",
+  "model_calls_for_observation": 0,
+  "audit_native_reruns": 0,
+  "all_owned_observation_containers_absent": true,
+  "evidence": {
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/observation-v2/evaluation-v3-baseline/0.log": "b07cd02b8538ca42e1c66d14ebc527cb93d673a6250e4bf42e952c2b1f805891",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/observation-v2/evaluation-v3-baseline/1.log": "1d67bb1f396adf2f56ada1680e814c8e0100f0a76bcef56915ddee43f4701dd9",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/observation-v2/evaluation-v3-baseline/resource-samples.jsonl": "4da5cba49938cebf7a8049898e7871a25b1e5ce72477d618b9cd03ce14e4bd4d",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/observation-v2/evaluation-v3-low-control/0.log": "e9222af7a1378160f982a891f98bc6968ed8439ea4322c650226f84c5f98ca0a",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/observation-v2/evaluation-v3-low-control/1.log": "e3879c432fc0ba97569dcd379d292c4511e94cecb200b4d22ba4a1607ba6401b",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/observation-v2/evaluation-v3-low-control/resource-samples.jsonl": "cec6a77295f3a7deb28a5687a9ea1fa3d56df15f5612e6613ff0806fc51d6daf"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "verified": true,
+  "scope": "Scripted actual CLI/native xhigh compatibility; not model quality",
+  "actual_request_efforts": {
+    "xhigh": 19
+  },
+  "session_id": "dd267c18-4616-4602-979d-418607c8edf8",
+  "raw_terminal_count": 2,
+  "public_probe_exits": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "same_container_id": "bc425db5aba70840e8aec87a60c5e91ad71ffef6b116b918e1fe93b282feef1a",
+  "owned_containers_independently_absent": [
+    "hfa-native-a0452d8f58894401a9b3518f4ff52f06",
+    "hfa-native-a9128a2b28164359a668f534e9c09b83"
+  ],
+  "model_cost_usd": "0",
+  "raw_receipt_sha256": "4123397ad2da8ac7a5efd21745c82d72f79cccb2808e3589911f75098965cd20"
+}
