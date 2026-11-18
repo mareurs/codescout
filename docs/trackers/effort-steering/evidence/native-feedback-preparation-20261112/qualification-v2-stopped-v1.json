@@ -1,0 +1,120 @@
+{
+  "schema": "native-feedback-qualification-failure-v1",
+  "status": "stopped",
+  "rows": [
+    {
+      "index": 0,
+      "task_id": "apache__arrow-rs-7783",
+      "arm": "P",
+      "workflow_state": "closed",
+      "measurement_invalid": false,
+      "actor_started": true,
+      "cost": {
+        "known_usd": "0",
+        "unknown": false
+      },
+      "private_grade": null,
+      "turns": 5,
+      "continuations": 4,
+      "provider_forwarded": 0,
+      "credentials_read": false
+    },
+    {
+      "index": 1,
+      "task_id": "apache__arrow-rs-7783",
+      "arm": "X",
+      "workflow_state": "closed",
+      "measurement_invalid": false,
+      "actor_started": true,
+      "cost": {
+        "known_usd": "0",
+        "unknown": false
+      },
+      "private_grade": null,
+      "turns": 5,
+      "continuations": 4,
+      "provider_forwarded": 0,
+      "credentials_read": false
+    },
+    {
+      "index": 2,
+      "task_id": "apache__arrow-rs-7783",
+      "arm": "R",
+      "workflow_state": "closed",
+      "measurement_invalid": false,
+      "actor_started": true,
+      "cost": {
+        "known_usd": "0",
+        "unknown": false
+      },
+      "private_grade": null,
+      "turns": 5,
+      "continuations": 4,
+      "provider_forwarded": 0,
+      "credentials_read": false
+    },
+    {
+      "index": 3,
+      "task_id": "apache__arrow-rs-7783",
+      "arm": "L",
+      "workflow_state": "closed",
+      "measurement_invalid": false,
+      "actor_started": true,
+      "cost": {
+        "known_usd": "0",
+        "unknown": false
+      },
+      "private_grade": null,
+      "turns": 5,
+      "continuations": 4,
+      "provider_forwarded": 0,
+      "credentials_read": false
+    },
+    {
+      "index": 4,
+      "task_id": "DioxusLabs__dioxus-5384",
+      "arm": "X",
+      "workflow_state": "measurement_invalid",
+      "measurement_invalid": true,
+      "actor_started": false,
+      "cost": {
+        "known_usd": "0",
+        "unknown": false
+      },
+      "private_grade": null,
+      "reason": "ReadinessViolation: one structured project status required",
+      "status_envelope": {
+        "output_id": "@tool_d0fbd253",
+        "summary": "status \u00b7 testbed \u00b7 index:1053f/19131c (up_to_date)",
+        "hint": "read_file(\"@tool_d0fbd253\", json_path=\"$.workspace.projects[*]\") to extract a specific field, or read_file(\"@tool_d0fbd253\", start_line=N, end_line=M) to browse sections",
+        "buffered_bytes": 14177,
+        "_guide_hint": "First call this session for topic 'project-activation-bootstrap'. Full guide auto-injected as a separate content block below; do not re-call get_guide(\"project-activation-bootstrap\")."
+      }
+    }
+  ],
+  "closed_arrow_receipts": 4,
+  "attempt_receipts": 5,
+  "unexecuted": 11,
+  "private_grades": 0,
+  "known_client_usd": "0",
+  "paid_ready": false,
+  "compute_cost": "unknown",
+  "efficacy_claim": null,
+  "bindings": {
+    "/var/tmp/native-feedback-qualified-v2-01a15/result.json": "617c5f52f2e46fa6f49b80a52367a3f44d1fafe431fb9757dcb6c342dd4be180",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/00-P/attempt.json": "b0a9a4eea4437c6867d3f3ff0518494570aacc103c1f0f11e52f3507d496aee7",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/00-P/repair/native/receipt.json": "56ecf5878c672ef59bbb0246e1c9bd78f5e2d35f40cced0bbc0e0a02385e3a3e",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/00-P/repair/native/launch.json": "b6369f76d9428e4886d782b2fa9f61c511734dc25443e62f74fa20bd8ed641d7",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/01-X/attempt.json": "8f48c84eeb50ab560748fd2de876ec672bbe72daa94f725fe31ff0725df3ecce",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/01-X/repair/native/receipt.json": "0b366f22fc179f3c99e48c739ce96b60ff0c7535c452bcbb8debaeb827f721c5",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/01-X/repair/native/launch.json": "2e8a36e6a07b5f20e30a9539ac264c1e669e9f65775aaad32a0eb21541bd0488",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/02-R/attempt.json": "61bf09f867e0605cc9e7bb138930fe468c55565fa33c060eb9f43a3c77ab1065",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/02-R/repair/native/receipt.json": "11d13aabe454d1b1791bc6aa0ffcd33eec83240e2a9a164b510f5416c11c3922",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/02-R/repair/native/launch.json": "c3c72da8af02f6db4a802fef51ddf98c13a0f09a154fc5981fbb90acc9185e0a",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/03-L/attempt.json": "f6ba35a070d51d13a11241053a4d11b677126eb25e54dfd2924b00aa2fe4f9e9",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/03-L/repair/native/receipt.json": "8c3894e379473915d0115b309d4822427c2c6f487ad666abe1098bcb54a041aa",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/03-L/repair/native/launch.json": "943ce26e6647cce634e6b609c37de461cc419f559f82ff33a391d4a8da963bf3",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/04-X/attempt.json": "0594f75e0cb94323b05340eaa88ff48142981fcfb672264b1fcc95db134b2216",
+    "/var/tmp/native-feedback-qualified-v2-01a15/attempts/04-X/repair/native/readiness/readiness-calls.json": "fb27b04b207de5b09babcdd61c95cc3277f522fe35d689997fdefee8dd212f8f"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/prospective-linker-20261110/final-evidence.tar.gz",
+  "sha256": "06c45de573b8b249b23c3d3585eb8fdf9ccaf281e161c1e4d8bb90eaabe62f3d",
+  "archive_bytes": 11022876,
+  "regular_payloads": 1949,
+  "all_members_reopened": true,
+  "all_current_payloads_byte_equal": true,
+  "source_files": 99,
+  "changed_paths": [
+    "tools/setup-ab-eval/grade_policy.py",
+    "tools/setup-ab-eval/test_stream_policy.py"
+  ],
+  "legacy_functions_source_byte_equal": {
+    "compiler_diagnostic": true,
+    "adjudicate_private": true,
+    "scoped_lines": true
+  },
+  "paid_ready": false
+}

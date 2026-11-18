@@ -1,0 +1,27 @@
+{
+  "scope": "current protocol source matches frozen public-handoff archive; excludes __pycache__",
+  "verified_source_files": 19,
+  "source_files": [
+    "source/README.md",
+    "source/adapter.py",
+    "source/executor.py",
+    "source/native_executor.py",
+    "source/policy.py",
+    "source/prompts.json",
+    "source/public_artifacts.py",
+    "source/qualify_native.py",
+    "source/readiness.py",
+    "source/receipts.py",
+    "source/test_adapter.py",
+    "source/test_executor.py",
+    "source/test_native.py",
+    "source/test_native_executor.py",
+    "source/test_policy.py",
+    "source/test_public_artifacts.py",
+    "source/test_qualification_cleanup.py",
+    "source/test_readiness.py",
+    "source/test_receipts.py"
+  ],
+  "code_committed": false,
+  "paid_ready": false
+}

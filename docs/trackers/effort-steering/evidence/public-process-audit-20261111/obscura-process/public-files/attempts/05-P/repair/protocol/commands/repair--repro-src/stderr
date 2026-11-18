@@ -1,0 +1,6 @@
+public-fixture-ready f00b0b48d33f8aa0d387ec5185f4d10e04c50b36bfab7007f774baefaf60bd61
+Traceback (most recent call last):
+  File "/testbed/probes/check_clone_source.py", line 10, in <module>
+    g = body[body.index("Object.create(Object.getPrototypeOf(value))") - 80:][:600]
+             ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: substring not found

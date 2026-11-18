@@ -1,0 +1,66 @@
+{
+  "actual_mounts_reopened": true,
+  "additional_onboarding_calls": 0,
+  "cgroup_probes": 2,
+  "client_model_calls": 0,
+  "closed_generated_evidence_reopened": true,
+  "definition_and_lsp_call_edge_verified": true,
+  "embedding_compute_cost_usd": null,
+  "fresh_absence": [
+    {
+      "id": "4e97be5e460499c4f837a8e9a014a28bb54c67aaf23ea75d9fb2a60bc1cd0842",
+      "kind": "container",
+      "returncode": 1,
+      "stderr_sha256": "90bb76abf5d3bfc3376bf6b4c6725ab3386aa84bfe6238242e2ce6f7ad3a86b4"
+    },
+    {
+      "id": "a1381734ef835a49df6eafb2f6e913358ac974774da7e61ad55fadc57a89626e",
+      "kind": "container",
+      "returncode": 1,
+      "stderr_sha256": "fe9d02d8facdad51c984fea7c9aab3403fec9d936c7021407aca94affcbdf974"
+    },
+    {
+      "id": "bd0be9fb78069a579bd1a1ef04b56a3920be63a1e36dae7bf48bc9ccb636cf49",
+      "kind": "network",
+      "returncode": 1,
+      "stderr_sha256": "830bc8947d9e55890326c1462fedf08f1011bbbeca71191f069975105fd0a1dd"
+    }
+  ],
+  "helper_sha256": "6c885275cd975935c1e5b280a179d70da732b7c3358be17e4e216e7ac4f3c88d",
+  "image": "sha256:338d956b2271853f58da5b29ed6be9acebd1d2a1fdb4f020135446e890185876",
+  "index_expected_files": 130,
+  "index_stored_files": 130,
+  "memory_document_bytes": 5999,
+  "memory_files_covered": 5,
+  "native_and_embedding_cleanup": true,
+  "native_tools_exposed": 21,
+  "observed_native_memory_limit_bytes": 34359738368,
+  "original_template_unchanged": true,
+  "paid_ready": false,
+  "prior_public_checks": [
+    {
+      "exact_public_checks": 2,
+      "scope": "final-baseline-public-v1",
+      "source_unchanged": true
+    },
+    {
+      "exact_public_checks": 2,
+      "scope": "final-reference-public-v1",
+      "source_unchanged": true
+    }
+  ],
+  "producer_sha256": "aba7dc8d0b7cefca0a7b3e1616b11510861a2f6e323e9c4f4686898b0bcb9dfb",
+  "public_build_descriptor_sha256": "6a5c814f3d073b8731bf96923acfa43639a3c2992afd557713bbb983d00223a6",
+  "public_source_sha256": "87d685fd6a90a6c24ae0f6bcd13154599b1336b5830667cb3155d72103c36ef2",
+  "returned_reference_rows_source_checked": 10,
+  "returned_semantic_hit_rows_source_checked": 3,
+  "schema": "native-build-input-component-audit-v1",
+  "scope": "Real MCP preparation/build-input/navigation components only; no author CLI first request or all16 qualification.",
+  "semantic_broad_query_hits_only_test_attributes": true,
+  "semantic_quality_issue": "d25024261adb4d7c",
+  "semantic_relevance_or_repair_quality_claim": false,
+  "static_knowledge_sha256": "7e22793933a441b04957a0fa00b80eeae0af4ae1f7149a9727eba633dc71c990",
+  "stored_chunks_exactly_test_attribute": 208,
+  "stored_code_chunks": 3738,
+  "task": "skim-rs__skim-1044"
+}

@@ -1,0 +1,11 @@
+{
+  "all_payloads_reopened": true,
+  "archive": "source-and-controls.tar.gz",
+  "bytes": 276998,
+  "paid_ready": false,
+  "provider_calls": 0,
+  "regular_file_payloads": 150,
+  "scope": "Population, public-command and historical-accounting admission checks plus current source. Full runtime/review/verification admission and paid backend wiring remain incomplete.",
+  "sha256": "4609e0220e40b5b4814ef6f76e8d1771c5c5212fd6b4a5c0964514a799de814e",
+  "source_originals_rechecked": true
+}

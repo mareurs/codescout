@@ -1,0 +1,303 @@
+diff --git a/rust/src/core/ocla/response_cache.rs b/rust/src/core/ocla/response_cache.rs
+index ea002ca..2eacb85 100644
+--- a/rust/src/core/ocla/response_cache.rs
++++ b/rust/src/core/ocla/response_cache.rs
+@@ -64,6 +64,8 @@ impl ResponseCacheKey {
+ /// A response stored in the cache.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct CachedResponse {
++    /// HTTP status the upstream answered with, replayed verbatim on a hit.
++    pub status: u16,
+     pub body: Vec<u8>,
+     pub tokens: u64,
+     pub created_at: Instant,
+@@ -264,6 +266,7 @@ mod tests {
+ 
+     fn response(body: &[u8], created_at: Instant, ttl: Duration) -> CachedResponse {
+         CachedResponse {
++            status: 200,
+             body: body.to_vec(),
+             tokens: body.len() as u64,
+             created_at,
+diff --git a/rust/src/proxy/forward/mod.rs b/rust/src/proxy/forward/mod.rs
+index 51327d3..6eb4690 100644
+--- a/rust/src/proxy/forward/mod.rs
++++ b/rust/src/proxy/forward/mod.rs
+@@ -211,9 +211,9 @@ pub async fn forward_request(
+         .and_then(|m| m.as_str());
+     let cache_prompt_hash = super::ocla_cache_bridge::prompt_hash(&body_bytes);
+     if let (Some(cache), Some(model)) = (&state.ocla_cache, model)
+-        && let Some(body) = cache.try_cache_hit(model, &cache_prompt_hash, 0.0, 0)
++        && let Some(cached) = cache.try_cache_hit(model, &cache_prompt_hash, 0.0, 0)
+     {
+-        let mut response = Response::new(Body::from(body));
++        let mut response = Response::new(Body::from(cached.body));
+         trace_id::inject_trace_id(&mut response, &trace_id);
+         return Ok(response);
+     }
+diff --git a/rust/src/proxy/forward/tests.rs b/rust/src/proxy/forward/tests.rs
+index 65ec962..c0003fe 100644
+--- a/rust/src/proxy/forward/tests.rs
++++ b/rust/src/proxy/forward/tests.rs
+@@ -613,6 +613,86 @@ fn cache_prompt_hash_is_content_sensitive() {
+     let hash = super::super::ocla_cache_bridge::prompt_hash;
+     assert_ne!(hash(b"one"), hash(b"two"));
+ }
++/// A cached upstream error must replay with its original status. The cache-hit
++/// path used to rebuild a bare `Response`, so a cached 429 came back as 200 OK.
++/// No upstream is reachable here: only the cache can answer.
++#[tokio::test]
++#[allow(clippy::await_holding_lock)]
++async fn cached_upstream_error_replays_with_original_status() {
++    use crate::core::ocla::response_cache::ResponseCache;
++    use crate::proxy::ocla_cache_bridge::{OclaCacheBridge, prompt_hash};
++
++    let _lock = crate::core::data_dir::test_env_lock();
++    let tmp = tempfile::tempdir().unwrap();
++    crate::test_env::set_var("LEAN_CTX_DATA_DIR", tmp.path());
++    crate::proxy::policy_gate::test_set_rules(None);
++
++    let request_body = serde_json::to_vec(&serde_json::json!({
++        "model": "gpt-5",
++        "messages": [{"role": "user", "content": "explain caching"}]
++    }))
++    .unwrap();
++    let error_body = br#"{"error":{"message":"rate limited"}}"#;
++
++    let bridge = Arc::new(OclaCacheBridge::new(Arc::new(ResponseCache::new(
++        4,
++        std::time::Duration::from_mins(1),
++    ))));
++    bridge.record_response(
++        "gpt-5",
++        &prompt_hash(&request_body),
++        0.0,
++        0,
++        StatusCode::TOO_MANY_REQUESTS,
++        error_body,
++        3,
++    );
++
++    let (_tx, rx) = tokio::sync::watch::channel(Arc::new(crate::proxy::Upstreams {
++        anthropic: "https://api.anthropic.com".into(),
++        openai: "https://api.openai.com".into(),
++        chatgpt: "https://chatgpt.com".into(),
++        gemini: "https://generativelanguage.googleapis.com".into(),
++        providers: Vec::new(),
++    }));
++    let state = ProxyState {
++        client: reqwest::Client::new(),
++        port: 0,
++        stats: Arc::new(crate::proxy::ProxyStats::default()),
++        introspect: Arc::new(crate::proxy::introspect::IntrospectState::default()),
++        ocla_cache: Some(bridge),
++        upstreams: rx,
++        chatgpt_cookies: crate::proxy::chatgpt_cookies::shared_chatgpt_cloudflare_cookie_store(),
++        mcp_servers: Arc::new(Vec::new()),
++    };
++    let request = Request::builder()
++        .method("POST")
++        .uri("/v1/chat/completions")
++        .header("content-type", "application/json")
++        .body(Body::from(request_body))
++        .unwrap();
++
++    let response = forward_request(
++        State(state),
++        request,
++        "https://api.openai.com",
++        "/v1/chat/completions",
++        add_test_marker,
++        "OpenAI",
++        &[],
++    )
++    .await
++    .expect("a cache hit answers without contacting the upstream");
++
++    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
++    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
++        .await
++        .unwrap();
++    assert_eq!(&body[..], error_body);
++
++    crate::proxy::policy_gate::test_clear_rules();
++    crate::test_env::remove_var("LEAN_CTX_DATA_DIR");
++}
+ 
+ #[test]
+ fn forwards_commandcode_cli_headers() {
+diff --git a/rust/src/proxy/forward/transport.rs b/rust/src/proxy/forward/transport.rs
+index 4f7301f..da6d985 100644
+--- a/rust/src/proxy/forward/transport.rs
++++ b/rust/src/proxy/forward/transport.rs
+@@ -172,6 +172,7 @@ pub(crate) async fn build_response(
+             cache_prompt_hash,
+             0.0,
+             0,
++            status,
+             &resp_bytes,
+             measured_output_tokens,
+         );
+diff --git a/rust/src/proxy/ocla_cache_bridge.rs b/rust/src/proxy/ocla_cache_bridge.rs
+index 7da5505..e527f47 100644
+--- a/rust/src/proxy/ocla_cache_bridge.rs
++++ b/rust/src/proxy/ocla_cache_bridge.rs
+@@ -3,6 +3,8 @@
+ use std::sync::Arc;
+ use std::time::{Duration, Instant};
+ 
++use axum::{body::Body, http::StatusCode, response::Response};
++
+ use crate::core::ocla::response_cache::{CachedResponse, ResponseCache, ResponseCacheKey};
+ 
+ /// Shared proxy adapter for the OCLA response cache.
+@@ -17,32 +19,34 @@ impl OclaCacheBridge {
+         Self { cache }
+     }
+ 
+-    /// Returns a cached response body for matching request fields.
++    /// Returns the cached response, status included, for matching request fields.
+     pub fn try_cache_hit(
+         &self,
+         model: &str,
+         prompt_hash: &str,
+         temp: f32,
+         max_tokens: u32,
+-    ) -> Option<Vec<u8>> {
++    ) -> Option<CachedResponse> {
+         self.cache
+             .get(&cache_key(model, prompt_hash, temp, max_tokens))
+-            .map(|response| response.body)
+     }
+ 
+-    /// Records a response for matching request fields.
++    /// Records the upstream status and body for matching request fields.
++    #[allow(clippy::too_many_arguments)]
+     pub fn record_response(
+         &self,
+         model: &str,
+         prompt_hash: &str,
+         temp: f32,
+         max_tokens: u32,
++        status: StatusCode,
+         body: &[u8],
+         tokens: u64,
+     ) {
+         self.cache.put(
+             cache_key(model, prompt_hash, temp, max_tokens),
+             CachedResponse {
++                status: status.as_u16(),
+                 body: body.to_vec(),
+                 tokens,
+                 created_at: Instant::now(),
+@@ -52,6 +56,14 @@ impl OclaCacheBridge {
+     }
+ }
+ 
++/// Rebuilds the HTTP response for a cache hit, keeping the upstream status.
++pub fn replay_response(cached: CachedResponse) -> Response {
++    let mut response = Response::new(Body::from(cached.body));
++    // Only a corrupted entry can hold an invalid status; fail loudly, not as 200.
++    *response.status_mut() = StatusCode::from_u16(cached.status).unwrap_or(StatusCode::BAD_GATEWAY);
++    response
++}
++
+ /// Computes the stable blake3 hash used by the bridge for a request body.
+ pub fn prompt_hash(request_body: &[u8]) -> String {
+     blake3::hash(request_body).to_hex().to_string()
+@@ -85,12 +97,13 @@ mod tests {
+         let hash = prompt_hash(br#"{"prompt":"hello"}"#);
+ 
+         assert!(bridge.try_cache_hit("model", &hash, 0.2, 128).is_none());
+-        bridge.record_response("model", &hash, 0.2, 128, b"answer", 7);
++        bridge.record_response("model", &hash, 0.2, 128, StatusCode::OK, b"answer", 7);
+ 
+-        assert_eq!(
+-            bridge.try_cache_hit("model", &hash, 0.2, 128),
+-            Some(b"answer".to_vec())
+-        );
++        let hit = bridge
++            .try_cache_hit("model", &hash, 0.2, 128)
++            .expect("recorded response is served");
++        assert_eq!(hit.status, 200);
++        assert_eq!(hit.body, b"answer");
+         assert!(bridge.try_cache_hit("model", &hash, 0.3, 128).is_none());
+         assert!(
+             bridge
+@@ -98,4 +111,64 @@ mod tests {
+                 .is_none()
+         );
+     }
++
++    #[test]
++    fn bridge_preserves_upstream_error_status() {
++        let bridge = OclaCacheBridge::new(Arc::new(ResponseCache::new(4, Duration::from_mins(1))));
++        let hash = prompt_hash(br#"{"prompt":"hello"}"#);
++        let error = br#"{"error":{"type":"rate_limit_error"}}"#;
++
++        bridge.record_response(
++            "model",
++            &hash,
++            0.0,
++            0,
++            StatusCode::TOO_MANY_REQUESTS,
++            error,
++            3,
++        );
++
++        let hit = bridge
++            .try_cache_hit("model", &hash, 0.0, 0)
++            .expect("recorded error is served");
++        assert_eq!(hit.status, 429);
++        assert_eq!(hit.body, error);
++    }
++
++    #[tokio::test]
++    async fn replay_response_keeps_cached_status_and_body() {
++        let bridge = OclaCacheBridge::new(Arc::new(ResponseCache::new(4, Duration::from_mins(1))));
++        let hash = prompt_hash(br#"{"prompt":"hello"}"#);
++
++        for status in [
++            StatusCode::OK,
++            StatusCode::BAD_REQUEST,
++            StatusCode::SERVICE_UNAVAILABLE,
++        ] {
++            bridge.record_response("model", &hash, 0.0, 0, status, b"payload", 1);
++            let cached = bridge
++                .try_cache_hit("model", &hash, 0.0, 0)
++                .expect("recorded response is served");
++
++            let response = replay_response(cached);
++            assert_eq!(response.status(), status);
++            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
++                .await
++                .expect("replayed body is readable");
++            assert_eq!(&body[..], b"payload");
++        }
++    }
++
++    #[test]
++    fn replay_response_never_turns_an_invalid_status_into_success() {
++        let cached = CachedResponse {
++            status: 0,
++            body: b"corrupt".to_vec(),
++            tokens: 0,
++            created_at: Instant::now(),
++            ttl: Duration::ZERO,
++        };
++
++        assert_eq!(replay_response(cached).status(), StatusCode::BAD_GATEWAY);
++    }
+ }
+diff --git a/rust/tests/ocla_integration_suite.rs b/rust/tests/ocla_integration_suite.rs
+index 088cd92..4d57231 100644
+--- a/rust/tests/ocla_integration_suite.rs
++++ b/rust/tests/ocla_integration_suite.rs
+@@ -181,6 +181,7 @@ fn test_full_pipeline() {
+     cache.put(
+         key.clone(),
+         CachedResponse {
++            status: 200,
+             body: b"cached response".to_vec(),
+             tokens: 40,
+             created_at: Instant::now(),

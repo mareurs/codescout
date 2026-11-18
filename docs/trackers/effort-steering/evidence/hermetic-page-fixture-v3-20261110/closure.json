@@ -1,0 +1,105 @@
+{
+  "archive": {
+    "all_members_reopened_byte_equal": true,
+    "all_origin_bytes_unchanged_during_seal": true,
+    "bytes": 1128565,
+    "regular_members": 160,
+    "sha256": "91b2a7f3ae3ae72d837829fe0cd43f170ffdf6c1bd2f7047daefcb5748af6d61"
+  },
+  "common_actor_public_baseline_bound": false,
+  "experimental_model_repair_calls": 0,
+  "full_original_population_qualified": false,
+  "open": [
+    "full331Obscura base/reference/repeat",
+    "public image delta+page fixture common actor/index/runtime binding",
+    "Lean gitlink-aware source inventory",
+    "host resource floor,F6,whole-controller/accounting/review"
+  ],
+  "paid_ready": false,
+  "preserved_failures": [
+    "registration typo before native run",
+    "v2serviceoff final source-binding false",
+    "source probe initial wrong absent-container error-label check",
+    "Lean all-indexed-path audits refuse gitlink before producing population count"
+  ],
+  "proof": {
+    "assertions_unchanged": true,
+    "common_actor_source_context_runtime_bound": false,
+    "controls": {
+      "reference-page-on": {
+        "actual_host_mapping_loopback_only": true,
+        "complete_streams_requalified": true,
+        "expected": 16,
+        "failed_names": [],
+        "fixture_requests_recorded": 8,
+        "fresh_container_absence": true,
+        "global_private_env_absent": true,
+        "log_sha256": "5d825aeae2f5984daec1372dcf19589d237d41b05e6c537012f6a2e7821960c3",
+        "missing": 0,
+        "network_none_limits_and_oom_zero": true,
+        "not_passing": 0,
+        "source_and_service_bytes": true,
+        "wall_seconds": 20.0
+      },
+      "reference-service-off": {
+        "actual_host_mapping_loopback_only": true,
+        "complete_streams_requalified": true,
+        "expected": 16,
+        "failed_names": [
+          "obscura-cli::mcp_client$test_evaluate",
+          "obscura-cli::mcp_client$test_navigate_and_snapshot",
+          "obscura-cli::mcp_client$test_wait_for_selector"
+        ],
+        "fixture_requests_recorded": 0,
+        "fresh_container_absence": true,
+        "global_private_env_absent": true,
+        "log_sha256": "ca8da2d5dc7fdd4815cea4d567a3d70b6ed9ca8c31ea7bd4f637f20e0d850e85",
+        "missing": 0,
+        "network_none_limits_and_oom_zero": true,
+        "not_passing": 3,
+        "source_and_service_bytes": true,
+        "wall_seconds": 25.2
+      },
+      "reference-wrong-page": {
+        "actual_host_mapping_loopback_only": true,
+        "complete_streams_requalified": true,
+        "expected": 16,
+        "failed_names": [
+          "obscura-cli::mcp_client$test_wait_for_selector"
+        ],
+        "fixture_requests_recorded": 8,
+        "fresh_container_absence": true,
+        "global_private_env_absent": true,
+        "log_sha256": "206cc7e4c014577ae6abe17101148ce3694e4453f9db92e5c647ca6a205ca63a",
+        "missing": 0,
+        "network_none_limits_and_oom_zero": true,
+        "not_passing": 1,
+        "source_and_service_bytes": true,
+        "wall_seconds": 22.3
+      }
+    },
+    "full_original_population_executed": false,
+    "known_limits": [
+      "HTTP fixture does not qualify TLS",
+      "Obscura old canonical public prep lacks2image source edits",
+      "Lean broader indexed-path audit refused unsupported gitlink160000 aur/lean-ctx-bin; no whole-source parity claim",
+      "full331base/reference/repeat pending",
+      "whole-admission independent review pending"
+    ],
+    "paid_ready": false,
+    "public_baseline_delta_explicit": true,
+    "task1_verified": true
+  },
+  "schema": 1,
+  "scope": "fixture discrimination and source-parity diagnostic only",
+  "source_parity_observation": {
+    "differences": [
+      ".gitignore",
+      "crates/obscura-js/js/bootstrap.js",
+      "crates/obscura-js/src/runtime.rs"
+    ],
+    "lean_broad_source_parity": "unqualified; unsupported gitlink aur/lean-ctx-bin",
+    "match": 130,
+    "obscura_indexed_paths_measured": 133
+  }
+}

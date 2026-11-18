@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000025",
+  "command": "TMPDIR=/var/tmp/ep9-01a15 ./scripts/with-slot.sh cargo test --workspace every_bug_filed_since_the_class_fit_rule_carries_one -- --nocapture > /home/marius/.cache/codescout-resident/codescout/effort-protocol-verification-20261109-01a15ca9/logs/gate-class-fit-contained.log 2>&1",
+  "server_pid": 337215,
+  "job_pid": 710244,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T13:04:48.950214335+00:00",
+  "finished_at": "2026-11-09T13:05:27.331648635+00:00",
+  "log_path": "/tmp/codescout-bg-Zw5DsS.log"
+}

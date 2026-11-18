@@ -1,0 +1,1028 @@
+[
+  {
+    "id": "apache__arrow-rs-7783",
+    "repo": "apache/arrow-rs",
+    "rank_sha256": "015addd22b2165245c3fc7e2c0c48bed06f8cbcf53c5d07917e1f599feb9b691",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "skim-rs__skim-1044",
+    "repo": "skim-rs/skim",
+    "rank_sha256": "01a9a999967123cdcc88e72b4fef80617798baf7612359c0c558f92d83b24fc3",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "DioxusLabs__dioxus-5384",
+    "repo": "DioxusLabs/dioxus",
+    "rank_sha256": "0225dbfe5005057166a758cc3c17d0ef7181755a4701e36e35cd687d8ffbbc31",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "yvgude__lean-ctx-1168",
+    "repo": "yvgude/lean-ctx",
+    "rank_sha256": "02ff6104ccaeea8eb799379f6cbadb8ef29d0da248a30c3c24e09d8c33596294",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "nearai__ironclaw-6724",
+    "repo": "nearai/ironclaw",
+    "rank_sha256": "03ffc93941a1250ce8ce20bccbfd0f4ba8c3feeb73ffd149d97e4a9e3193a59e",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22046",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "06c7d0852a3d23f765a06ce63c2dabb65da0f7b668e39aae177dea37ae6da3b1",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "linebender__vello-1100",
+    "repo": "linebender/vello",
+    "rank_sha256": "07c3c9658f720d56a06e06019c8b4c75c284bc8a94cb53c2c17407cec7c935eb",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22822",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "07fe6581ac44c1e455b3967a7ccc204aade166ad8596590a25e7d1d60a331e15",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "wasm-bindgen__wasm-bindgen-5051",
+    "repo": "wasm-bindgen/wasm-bindgen",
+    "rank_sha256": "08b07a559f06920f7cbf694aa2097e774b4c66102d44fd533674be5be890d308",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "matrix-org__matrix-rust-sdk-5395",
+    "repo": "matrix-org/matrix-rust-sdk",
+    "rank_sha256": "08bad381b01a5ad3b0cd7bf25f14780b1859a4392d0907af31d098b1d6a6e7e9",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "napi-rs__napi-rs-2784",
+    "repo": "napi-rs/napi-rs",
+    "rank_sha256": "08d9ae5545f31081be8655d691573548383bd9ab2040bf93e9b7ebb72154f293",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "J-F-Liu__lopdf-481",
+    "repo": "J-F-Liu/lopdf",
+    "rank_sha256": "0ad61802715c527e869f9e45baf3bb314e5ec3f80ae1cf27f05c66872c25eee9",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__mdBook-2806",
+    "repo": "rust-lang/mdBook",
+    "rank_sha256": "0b37515259fd0057158f2271c37081563bd7b068d8274246acc9e69ef8dd5fbe",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "jj-vcs__jj-7269",
+    "repo": "jj-vcs/jj",
+    "rank_sha256": "0bf8eef8cd8b01fa0acf43a98aeba885e2befee6324dcbb454881ff3f3fa6334",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "oxc-project__oxc-20810",
+    "repo": "oxc-project/oxc",
+    "rank_sha256": "0cd974cd7f094bc1d24aa206a3422ea67e7227975f365ebacb46836052fd6322",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "biomejs__biome-10886",
+    "repo": "biomejs/biome",
+    "rank_sha256": "0eee26f5d895c6cffda2cafd3bd58fc855b0228475c9b30a81875aaebfe0dc9b",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "biomejs__biome-9995",
+    "repo": "biomejs/biome",
+    "rank_sha256": "0ef574efb1bf6e7ac96b4c405158cb37ff3cdd27c98a9d430f9197b9e34b32a6",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "agentgateway__agentgateway-2313",
+    "repo": "agentgateway/agentgateway",
+    "rank_sha256": "0fa00034b882945c5068751a3fc8e5aab7186ed9bcefd2b3682c87ad7ae64e29",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__datafusion-17233",
+    "repo": "apache/datafusion",
+    "rank_sha256": "130dc80b0d93f06d28eba567b71c10f3cbfa319e45ee541e222162787897a404",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gfx-rs__wgpu-9367",
+    "repo": "gfx-rs/wgpu",
+    "rank_sha256": "14e38c6007c714e865ed590c50ce490dff53d9c0e143c19f42f3185a911574e5",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-447",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "154798d0c83e673fdce4432e3e143b6f1b0fdd44f8d25243c989ce8a4504b812",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "lakehq__sail-2292",
+    "repo": "lakehq/sail",
+    "rank_sha256": "1643b356fb07c0cdb65f0c6c1e440ca1e258e3069bd7442e503d550f53ac032f",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "notify-rs__notify-701",
+    "repo": "notify-rs/notify",
+    "rank_sha256": "19c1f88124c0fb3c7b84791fab57771a926b9b63a39075e55213a97545b788e4",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "web-infra-dev__rspack-14794",
+    "repo": "web-infra-dev/rspack",
+    "rank_sha256": "1d2c35a7746db450899259285d848ea3f25db618ff87a11d31d4d96918b3e2a1",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "prefix-dev__pixi-6335",
+    "repo": "prefix-dev/pixi",
+    "rank_sha256": "1f997c3a195fc2ca9f792eee93356f0e7c12ff7eaa7af1677bdaf099e192c218",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__datafusion-17139",
+    "repo": "apache/datafusion",
+    "rank_sha256": "1f9b67bda4ff22165037198fea8308657db061525bd42cc3b4251dbb245304d5",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__datafusion-17130",
+    "repo": "apache/datafusion",
+    "rank_sha256": "1fe525c62db29e26c00c7d157b13a1140e14dd7095623849d3ce47b8267cf1d7",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "oxc-project__oxc-21546",
+    "repo": "oxc-project/oxc",
+    "rank_sha256": "22392361a5497310abffc971ed21e6b17190f1a89d796f0a8ecc2f9cd1dff5a8",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "lakehq__sail-2284",
+    "repo": "lakehq/sail",
+    "rank_sha256": "23333099b5d7165913f44eb9cd9ebb1c274d73985fda8c5fecb475ce62b4d432",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "delta-io__delta-rs-4333",
+    "repo": "delta-io/delta-rs",
+    "rank_sha256": "255c59d6559a1a49241b67ad7d596b95e6cdb0f5e21e5faa26c76c52148e328a",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "uutils__coreutils-8528",
+    "repo": "uutils/coreutils",
+    "rank_sha256": "2b002f866a1ffe4e397ab60a889a4d2c3e7d1722078035324b93f96e608eb986",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__arrow-rs-8214",
+    "repo": "apache/arrow-rs",
+    "rank_sha256": "2c2c58c0bb1fca80d802b2160362fc52f32e99dbd753be3d3c251c7e38c61303",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "delta-io__delta-rs-4358",
+    "repo": "delta-io/delta-rs",
+    "rank_sha256": "2c492959764c0feef7b3f24e65c6ab96827584540168c4cb22fc1705692fb3d6",
+    "reason": "retained earlier preparation exclusion: cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public metadata adapter incompatibility"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-421",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "2e723d6be131aac460fbeb776cdd9c8eed7ef3fcf3e32cf0f4267b0b6fc793d1",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "linebender__vello-1132",
+    "repo": "linebender/vello",
+    "rank_sha256": "302b9031a50c279ba2f1860614fb29a82cb216b4090e2d8847e8318c3c3ba14d",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "ruffle-rs__ruffle-23197",
+    "repo": "ruffle-rs/ruffle",
+    "rank_sha256": "30ee1739da669115babee81712169c8331ce26ac919bdf54ae014f2d898716f1",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "pnpm__pnpm-12879",
+    "repo": "pnpm/pnpm",
+    "rank_sha256": "327ea4edfe85712bf13372e8bacfd5ceda5c3c6c44716bde48fd269801939c60",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22751",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "34581fd30353e9d5b22af10929966029d9ca6f79210a6f4e621de7b157409d35",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "jtroo__kanata-1681",
+    "repo": "jtroo/kanata",
+    "rank_sha256": "3555e7f525a83722f4e99df190c6a9a268032baef29999402aaa598b5f611507",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "noir-lang__noir-9250",
+    "repo": "noir-lang/noir",
+    "rank_sha256": "36788be84da696b34e7d6e20566de00cde2efe1d012d544a65d52f5e8b8a9ec0",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "tursodatabase__turso-8102",
+    "repo": "tursodatabase/turso",
+    "rank_sha256": "36be846b5891846f95055afe3a79c250ec6e643eee343b5394e48bfcdd1d49ed",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22827",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "3762e840f80161a90dc0669462601b7ea5fd060a5d7e3c133db1f3f7d561cba4",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "SeaQL__sea-query-920",
+    "repo": "SeaQL/sea-query",
+    "rank_sha256": "37da7077d494b93d8965b1e3865725304520ba41db615926fde2c7471f568a7c",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "prefix-dev__pixi-6529",
+    "repo": "prefix-dev/pixi",
+    "rank_sha256": "395de23f1240087aef5fcd59b031c632fdd0084a28fd8fe7b258262ef2db0aee",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "GitoxideLabs__gitoxide-2476",
+    "repo": "GitoxideLabs/gitoxide",
+    "rank_sha256": "3a1d93c2d438170477764742805d4422d0107e5ef538ada004428f7678518bd4",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "modelcontextprotocol__rust-sdk-996",
+    "repo": "modelcontextprotocol/rust-sdk",
+    "rank_sha256": "3f7d7314919bf2bd18d82f5f6b9e9db1f0969e78c613b85653dbd855a43ade5f",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "prefix-dev__pixi-6500",
+    "repo": "prefix-dev/pixi",
+    "rank_sha256": "40e1e9eff4dc7e1fa8856d6d444082e0bcce1298d01f68a7b8aa58830f9327ac",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "Automattic__harper-2973",
+    "repo": "Automattic/harper",
+    "rank_sha256": "4127c681323269b1ee87d5ca30943011de84aed93abdc3105c372d621f636e1f",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-479",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "43e5ae28b0dcdf343d2ec98cf4200868e1cbba07f0472aa7b51ca71626f21f0a",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22804",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "45a96eaea90011c9e86995ec1c2b84ed4eb3148351d3ed2346e87a8200b8e710",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-bindgen-3382",
+    "repo": "rust-lang/rust-bindgen",
+    "rank_sha256": "489aa4fcbb94332f2ced26505a5d649f9d2b9128199f20523fa022c06cc770ae",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "sinelaw__fresh-1642",
+    "repo": "sinelaw/fresh",
+    "rank_sha256": "496f29c55b14a64f12fac52bb1cb23e1d593983d391e6b0cf380e75bb1f526fc",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "biomejs__biome-10867",
+    "repo": "biomejs/biome",
+    "rank_sha256": "49b2e4a1835e821ac718e33ea5a4467d0e6a5a165a7965c2940dca79d2acea01",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "slatedb__slatedb-1461",
+    "repo": "slatedb/slatedb",
+    "rank_sha256": "4c6882eab3540445429e8a96c10d7d4e7d9c47eb13c45e6f94572dc080c60790",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "casey__just-3200",
+    "repo": "casey/just",
+    "rank_sha256": "4d473bd5c8a1257ca694dc550390b0f5b54c386fa5bec7acc9001afa2358b19a",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-426",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "4e59834afb7db5b120cfbe003fc978bcaf91ab34c095cda54d04b99a75341bab",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__mdBook-2796",
+    "repo": "rust-lang/mdBook",
+    "rank_sha256": "4e74e5f7da4426dafacc3f0a54775a6bf8dfa27606f6dd68f8f1066bf7094994",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "Automattic__harper-2976",
+    "repo": "Automattic/harper",
+    "rank_sha256": "4ee54085abe785a8d6b69e8414135047b70eb2b7e2744697fb462817823b15f4",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "yvgude__lean-ctx-632",
+    "repo": "yvgude/lean-ctx",
+    "rank_sha256": "4f2f35a4839736e9156cb2dae252048dbce8a918ca8ffd352b5bb365766dfed0",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "uutils__coreutils-8336",
+    "repo": "uutils/coreutils",
+    "rank_sha256": "4f51c024876bfdde79ac22cfa86a93510723d0be74ca2ce58969b340d3269f28",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "biomejs__biome-10875",
+    "repo": "biomejs/biome",
+    "rank_sha256": "4ffe9830ae52be9ed9c3ca8849dfd13132a747e3cb09260d7c85c55d72ad4749",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "pola-rs__polars-28484",
+    "repo": "pola-rs/polars",
+    "rank_sha256": "52f21f22bc065611134fe12e9f3ed92b0ab02894daae1891d8c7df91bd64531d",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "apache__datafusion-23201",
+    "repo": "apache/datafusion",
+    "rank_sha256": "536473e2579a485573c594ad37dae1ca7f02a20a5a1a8146a932b245384ac920",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "yvgude__lean-ctx-927",
+    "repo": "yvgude/lean-ctx",
+    "rank_sha256": "55d3091bbe8c4c5ccffaf121384e223df8a952541aa276d0a01e1f6b2951d658",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "casey__just-2785",
+    "repo": "casey/just",
+    "rank_sha256": "567bcbf19e1528df067973cc901c02ab557ab8d675eb0cc4690f1fecf6a062a7",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "uutils__coreutils-8447",
+    "repo": "uutils/coreutils",
+    "rank_sha256": "574feae16e57a6ec5b088be16cb4379302950d939ad6d0a4388c0288408cea15",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__datafusion-17081",
+    "repo": "apache/datafusion",
+    "rank_sha256": "5c34b8e7afb77e00fe472239a4d1e654a26b2297f15dfb2417ba0ff409442327",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "DioxusLabs__dioxus-5464",
+    "repo": "DioxusLabs/dioxus",
+    "rank_sha256": "5c47a813934199ffd2224553f353e913c5d33f70acf8536a312c0a04515a9f6c",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-6030",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "5c822521f28ca9c16bfa30269989ed62dbb899f40548c6eaf8ba73598f9348e8",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "matrix-org__matrix-rust-sdk-5522",
+    "repo": "matrix-org/matrix-rust-sdk",
+    "rank_sha256": "5e1c1d3510817ad1aba95a4bfbf6d925ae67d2c99ee09db35f94b4dbea604a0e",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "yvgude__lean-ctx-816",
+    "repo": "yvgude/lean-ctx",
+    "rank_sha256": "5f1504770714cfaa981a9b1fd4344a9b7225d95f9113147e380b137fe1480906",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "yvgude__lean-ctx-1164",
+    "repo": "yvgude/lean-ctx",
+    "rank_sha256": "5f84695c0e08373298c4d2423634f8544209b96342ceadfb20251c0ea90ec07a",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-5510",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "61680ac197afc0c262ce4bb1fab5ab93a5ed501efb004f1b590c87714b63e1c9",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "ProvableHQ__leo-28814",
+    "repo": "ProvableHQ/leo",
+    "rank_sha256": "61dbadf36208710e7243ee1d4c0a878c0b4c76a7e1822a740bb2c80424b58680",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "zeroclaw-labs__zeroclaw-5165",
+    "repo": "zeroclaw-labs/zeroclaw",
+    "rank_sha256": "64fd86548681124102b3f701fb75f6b3d0ad25e6cbe1382737bbff2c8e626b18",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "Automattic__harper-3150",
+    "repo": "Automattic/harper",
+    "rank_sha256": "65331b38df22a9bb1d17e28bbf2702e3b24d8e37e95adefc1404369188e63533",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "uutils__coreutils-8310",
+    "repo": "uutils/coreutils",
+    "rank_sha256": "656c3967594dda084d332c974cf46d46adbfb9eeb4c6074144fcb922b2e42eeb",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "yvgude__lean-ctx-1179",
+    "repo": "yvgude/lean-ctx",
+    "rank_sha256": "65908453707c07b5af155a1417ea9e161056ce6b1661f50c41433b85b0c3e920",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-6049",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "65d428b7661f3be35b5e598ba005ef44d9329bc299ad959330f6b5a780946ae1",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "ProvableHQ__leo-29334",
+    "repo": "ProvableHQ/leo",
+    "rank_sha256": "6656ccd29b40f13b0043f3451a2480916aad61df25e13a618d1819650bb395f0",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "clap-rs__clap-6068",
+    "repo": "clap-rs/clap",
+    "rank_sha256": "67840065f0e07253ce1079afb0cdf23a726c24865b12f8680c1b98316bb5f3a9",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-6021",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "683440fda8bd667ebcc90401e55968ed19fa2280440955b80605ae4473215808",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "oxc-project__oxc-21330",
+    "repo": "oxc-project/oxc",
+    "rank_sha256": "6dcceca294ccc72084092a242d6f76402fd4076b3f6e59ed863ed41b3714304f",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "eza-community__eza-1664",
+    "repo": "eza-community/eza",
+    "rank_sha256": "6e05b3b829c25933f487d8ec8f6fa02462b24783e2f0e1dadfe31a03b32bbc02",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "lance-format__lance-7545",
+    "repo": "lance-format/lance",
+    "rank_sha256": "75272b302360ecabd0f65fc32101d042c2d0de1197c8a05ee41946ffdb9457a2",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "NVlabs__cuda-oxide-381",
+    "repo": "NVlabs/cuda-oxide",
+    "rank_sha256": "77a6af7272d0937c1ac52d59ca53bf0f7d3bca5e2c6d2c171e330da90c98c6f1",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-5532",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "77dcf51d748de0f6f96e30e5a2ce551f7dda18c154a44daa96169de8d97ac0fb",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-5982",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "77f0b340485dcf6d7d6f319715b5ab1eb8008c4b270b1927e2715e74086879f2",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-20381",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "7ac33ba950375f69c0d1968a27e6b10cc6bc458616a3dc96cb93f2da5422abb9",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "pnpm__pnpm-12935",
+    "repo": "pnpm/pnpm",
+    "rank_sha256": "7da0fb6c6c4cc1753fa963c3d94203a4abf4e9b81745efdcda48b366e46aa4f4",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-bindgen-3390",
+    "repo": "rust-lang/rust-bindgen",
+    "rank_sha256": "7f2814965770c82296bbc4e75d53604789707f5eb3056d4251186162559f571b",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "gleam-lang__gleam-5493",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "7f595b937878ffb4eb915d562cd53255e3639cb04e9a21dcdb02ee6a5aedd6d0",
+    "reason": "retained earlier preparation exclusion: cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public command did not start"
+  },
+  {
+    "id": "casey__just-2835",
+    "repo": "casey/just",
+    "rank_sha256": "7f8b82b2a94918118a232c8c8a3e7651778d1742a525530400132146a14258a8",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "web-infra-dev__rspack-14882",
+    "repo": "web-infra-dev/rspack",
+    "rank_sha256": "80d4bca1753fb141bf0f639a782b5ae7403929d47ec82102679765cb0f93d3d2",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "Automattic__harper-3112",
+    "repo": "Automattic/harper",
+    "rank_sha256": "814b7947fb8c2c66cfb3d2e81d2722dcc79b8062e3876eeb89b90edb9f3b0916",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-4708",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "83d6c8391a86fd3a216194d3f9bf5a107de5ba9c15cfe2f1de77ff98c0ad40d4",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "ruffle-rs__ruffle-23330",
+    "repo": "ruffle-rs/ruffle",
+    "rank_sha256": "858c8be40142e34cf52311af890f8dab940ab2e802f6563560de85fc0c06b8aa",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "biomejs__biome-10773",
+    "repo": "biomejs/biome",
+    "rank_sha256": "860f66b32259fffd69163ff3278101bab7ff42cd6956f457728fbfd2fa2c53ed",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "prefix-dev__pixi-5850",
+    "repo": "prefix-dev/pixi",
+    "rank_sha256": "8758b7872032982b37485295c8985eb37e4986a5c5a956c698a5bffc2ca34b9c",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gfx-rs__wgpu-9298",
+    "repo": "gfx-rs/wgpu",
+    "rank_sha256": "88df60273bd2810b2755ae1a4f5dfd28d89bf0a020de2f66437bc404be0d20ef",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22849",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "8e034827dd0f95385505bbf857d5a8f3385baf8850c5ea59b5689bceaa7d4301",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-390",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "90949562c0878a57d9593df50696bc45c82c4915772eb83e9f4581a153581f9d",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "rust-lang__rustfmt-6840",
+    "repo": "rust-lang/rustfmt",
+    "rank_sha256": "9379538bf91de02c806a067514316ce7bbc73dceb749d5bfe92d63f8bf5a75aa",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "modelcontextprotocol__rust-sdk-1044",
+    "repo": "modelcontextprotocol/rust-sdk",
+    "rank_sha256": "9689b44a70d65ee1ffc5000e27285c689b0aeb1911f0e5be8fd976bacd2751c6",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "modelcontextprotocol__rust-sdk-1005",
+    "repo": "modelcontextprotocol/rust-sdk",
+    "rank_sha256": "96c2ad18df846e840791415242327b956ff1fdf4c95992954391c537b40bcfde",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22855",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "9af6fc95a19317d17801c289cd4001343de6249c1b84cd556d3db91bc32462ef",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "uutils__coreutils-8149",
+    "repo": "uutils/coreutils",
+    "rank_sha256": "9c2a4e5e37fdd94f6d2ce40fe3f275d8bd14b740df77a679304a7b40ecf1242c",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__datafusion-16610",
+    "repo": "apache/datafusion",
+    "rank_sha256": "9c5a51f63c97df7d4f08dc10ac8cfa6ca571732e8cea55f701bf1dc076a9c21b",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__arrow-rs-7841",
+    "repo": "apache/arrow-rs",
+    "rank_sha256": "9d981433a98136fe314a370907054d62e5768b2f21d52faa1154cbc6b0cd6ad2",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "ProvableHQ__leo-29291",
+    "repo": "ProvableHQ/leo",
+    "rank_sha256": "9dfcd773d57b7dd1dffe453220f251936dfb7f95044f70bf597e34e6f72e84b9",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "lance-format__lance-7835",
+    "repo": "lance-format/lance",
+    "rank_sha256": "9e2df4bbe6ff99e73ae1aee4ea77a0dbe63aed1f6b9813fb005d680c6a317ab8",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__datafusion-21121",
+    "repo": "apache/datafusion",
+    "rank_sha256": "a02ded7331c210f21e084d6d3c72e71f7b93024ddeee8f16a18b6fd54a1e740a",
+    "reason": "retained earlier preparation exclusion: cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public metadata adapter incompatibility"
+  },
+  {
+    "id": "yvgude__lean-ctx-1180",
+    "repo": "yvgude/lean-ctx",
+    "rank_sha256": "a160a721f4ffce753ac619901fe5eaf3cb66ac76b72a7e17d4a3c7d427316d98",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "servo__servo-46309",
+    "repo": "servo/servo",
+    "rank_sha256": "a3e760447d2e39f71581be3c81c0f6552b23c834d20ce1143c155a525c603dec",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22789",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "a5affd5c7c787ba3745f65b15037976dc199a436114dd8be8731ab8a8e378d39",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-20185",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "a61b9683cbdc0eeed14f57666e55e94ea035b5e0c21bf2b7ad081683f003ea9f",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "lalrpop__lalrpop-1076",
+    "repo": "lalrpop/lalrpop",
+    "rank_sha256": "a819f0f9181d2d4e6418aa2982182517a131af06e11bb8442da7bfb76196e0be",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "biomejs__biome-10827",
+    "repo": "biomejs/biome",
+    "rank_sha256": "a9b6f6833897d32ab43c9a9a78f2c53cc05c73936dcc3d927478ccc246b3405f",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "biomejs__biome-10853",
+    "repo": "biomejs/biome",
+    "rank_sha256": "aa885f02567fa5654af35e7a151b88cdb890b048720b943c2fac69840c388fc4",
+    "reason": "retained earlier preparation exclusion: 33141223122 compressed layer bytes exceeds frozen12000000000 acquisition limit; no image pulled"
+  },
+  {
+    "id": "NVIDIA__OpenShell-695",
+    "repo": "NVIDIA/OpenShell",
+    "rank_sha256": "ab47743dd2e98ec664cc58871cfa8daa490c3ecfaf2a5ba653767ddf28f000cd",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-392",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "af2fcf207be345bb49641617500199671f29ec691162f7dcab79f8e4cfe7be6d",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "agentgateway__agentgateway-2452",
+    "repo": "agentgateway/agentgateway",
+    "rank_sha256": "b3032b469e6711c440a5af4023e5af403e32341f6b64295305c8753c05a8639a",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-5938",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "b4322fd6ace6eac7fed569826bea4e87a487b8da023b4085fe598680d0b31c8c",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__datafusion-17201",
+    "repo": "apache/datafusion",
+    "rank_sha256": "b43b071390cb6a527e5bc22647075c2f18f01d16ef6d959be70ce3a7619898db",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-477",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "b4a514a6f00e7773aa4edf7f67e83162c1469426835c8fde2ae9cd9bf2fa342e",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "lance-format__lance-7565",
+    "repo": "lance-format/lance",
+    "rank_sha256": "b5f332129a5d45355e04cdc3e97acdc84294fe1ba6d16ef032beb6e27b9de2d5",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "ProvableHQ__leo-29265",
+    "repo": "ProvableHQ/leo",
+    "rank_sha256": "b79a559932ffdf30e68ce2b02ed27fe47fcdfefd521248664df1ed169fc36b02",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "web-infra-dev__rspack-14806",
+    "repo": "web-infra-dev/rspack",
+    "rank_sha256": "be3e71d0b9ffb04fd440c44ddf0ddc29cb7f6def32ce284df9ff5a9508df2072",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "yvgude__lean-ctx-969",
+    "repo": "yvgude/lean-ctx",
+    "rank_sha256": "c047030a1ac4c35c0598ce2a3ba68ba2c7df9b36f592bb0ff3bf2ae3d9293e28",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "vercel__turborepo-12516",
+    "repo": "vercel/turborepo",
+    "rank_sha256": "c1f174fa1f3c4d3302a097496eda9b2e1ac9d6a3a835379d70c7936b15189767",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "Automattic__harper-1737",
+    "repo": "Automattic/harper",
+    "rank_sha256": "c2aa0f563f3cf24508cb61c3d57bfa3f1bd6517a9b1e25f394d1260a3140b0f7",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "nearai__ironclaw-6706",
+    "repo": "nearai/ironclaw",
+    "rank_sha256": "c4b575f8bdb5a9919159bb404329cc7098b5920a62bf9820bec8866ec6b5c6cb",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-412",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "c5167aba6960dbb325f154faab5f272cc09016d64ce46236bbbb1fcc138914cb",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "lance-format__lance-7618",
+    "repo": "lance-format/lance",
+    "rank_sha256": "c7eb9b053a9458a22a22f9e277467469fa94f7a5f188d91700a0f3811da70af3",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "Automattic__harper-2962",
+    "repo": "Automattic/harper",
+    "rank_sha256": "c7eca777d972dc70132a61ceb1d1e022e517383edb46433b1301e90778cb746a",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "noir-lang__noir-9323",
+    "repo": "noir-lang/noir",
+    "rank_sha256": "c8e67e135c242c085ac4aca7ce32e140bf3f392d06493756e9fa4d3ddacd34bf",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "pnpm__pnpm-12888",
+    "repo": "pnpm/pnpm",
+    "rank_sha256": "c9ca08a6d8b6fc7c6d63e4b8e7f8ba1e669c77c0f74b1036b6e231fa52f53f8a",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "oxc-project__oxc-21092",
+    "repo": "oxc-project/oxc",
+    "rank_sha256": "cb00df6908e3fadf096a4c258ed606a900f6d9f00dfdd9db70d38933c40f07cd",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-4854",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "cb6987cc57817238120daaaaae5e099c1b93206e0afda137282d5a24cf65fbeb",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "prefix-dev__pixi-6457",
+    "repo": "prefix-dev/pixi",
+    "rank_sha256": "ccc93498e269840bba8e96ef6c58840dc608a8cafd3d0aa74fe5935ea2fff2f1",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-5971",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "ce6eee097ffe44f77f91cce87b3f737c2553c01d350b2b3ef42369d579e8427b",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "nearai__ironclaw-6712",
+    "repo": "nearai/ironclaw",
+    "rank_sha256": "d277d7869041ccd9fcde72bae680b36357bd69a85bcc41416102551fd2569c20",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "lance-format__lance-8049",
+    "repo": "lance-format/lance",
+    "rank_sha256": "d293666d768d1686ff005a19fe331cfdcf894bd86371272e2a8941444688ec7b",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-22061",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "d33e4e6fd81a22e345b445e8fce2219c9252c0d75248178d9e6d4a2a6f814d8b",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-414",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "d5af4c86f5885db847a8b3304bd031919ce8e2a10b5f81cc75f8de986c688640",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "astral-sh__uv-18976",
+    "repo": "astral-sh/uv",
+    "rank_sha256": "d61403a08240aca858013425f0915e3cf79f838108027b4d1897ca3ccefee046",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-413",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "d7c9d586c56539b3263bae16c9c67ab4cdb12ccd515c8f850304864fc000cfc9",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "delta-io__delta-rs-4357",
+    "repo": "delta-io/delta-rs",
+    "rank_sha256": "db2e3178d1cdc531c1e9d90100743450658ee76d5b4caf0865d8b5ac0710560c",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-analyzer-20180",
+    "repo": "rust-lang/rust-analyzer",
+    "rank_sha256": "dd8964ef60b801f626966aef7b075f0ed4eddf12456af4f541c04ba8cd10ccb9",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "notify-rs__notify-700",
+    "repo": "notify-rs/notify",
+    "rank_sha256": "e1c2567d3abfa9e8d3a52bd68e1fd7a78738aab5790b0891d3dbec5757925262",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "NVIDIA__OpenShell-810",
+    "repo": "NVIDIA/OpenShell",
+    "rank_sha256": "e492aff80d852eb4f84f77cc692c614143df3bfbbc1fd5cdf7648b0e2560dd04",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "oxc-project__oxc-21163",
+    "repo": "oxc-project/oxc",
+    "rank_sha256": "e50c092ee226c4fd15081884080809b645f5c21faec7d1d415a7cb3ec575bce5",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-5482",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "e7c1c00b148ebc3fcd8f6cf92b46716805a14fca810b68860048750554c410fd",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "oxc-project__oxc-20976",
+    "repo": "oxc-project/oxc",
+    "rank_sha256": "e87460b3d98b911e8e378214207e27a4c8d9309009bb8ff83c0c3fe3931948c5",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "web-infra-dev__rspack-14803",
+    "repo": "web-infra-dev/rspack",
+    "rank_sha256": "e982f275212348fff972df88778fde75e84b929f03cbca2025bcd4e85740c987",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "vercel__turborepo-12599",
+    "repo": "vercel/turborepo",
+    "rank_sha256": "ecb18bfec194f09c2d7dbf0d11d22c9809b3adc5fbbbe4dd7fb407297c1f7f67",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "oxc-project__oxc-20857",
+    "repo": "oxc-project/oxc",
+    "rank_sha256": "edb50e9dbe1307d7084727f453830863d468c232eee021068d44ffefefc21ebc",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gleam-lang__gleam-5958",
+    "repo": "gleam-lang/gleam",
+    "rank_sha256": "ee2244f178d75b13b853b2f09e91e0e95576d166c1a439d03e69d9aaf8574b90",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "apache__datafusion-16726",
+    "repo": "apache/datafusion",
+    "rank_sha256": "ee855f3ae357895edba96ad1f7ec71662f7cbc02556f9325cf3406355bd1810d",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "biomejs__biome-10767",
+    "repo": "biomejs/biome",
+    "rank_sha256": "ef0e661113fd6a0ca66f5cd49b19d515cdffd090ad98868bd746bc153f50b707",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "modelcontextprotocol__rust-sdk-1021",
+    "repo": "modelcontextprotocol/rust-sdk",
+    "rank_sha256": "f183b9c8c732003882222654f1022409f91c6a1e82f41e339b2ba21ebf955212",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "jj-vcs__jj-6728",
+    "repo": "jj-vcs/jj",
+    "rank_sha256": "f50e46f89c1b9e167eb685b7590f0e1023e3ff96e38242103bacf705aec7dccf",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "immunant__c2rust-1322",
+    "repo": "immunant/c2rust",
+    "rank_sha256": "f52c501bfd736fda149b7a0c5dd03240b9eae8372fbb4700fe442ebfdf17258d",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "uutils__coreutils-8197",
+    "repo": "uutils/coreutils",
+    "rank_sha256": "f6d8f7ed3710cd7a3aad365e9daf8ea17d971ea2be523c643cb3f8e6112c3e08",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "redis-rs__redis-rs-1721",
+    "repo": "redis-rs/redis-rs",
+    "rank_sha256": "fa47704792d9d0e075b02ca38def9a90a5b0c5a517b0abb5b4aee6e19ebaaa44",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "uutils__coreutils-8433",
+    "repo": "uutils/coreutils",
+    "rank_sha256": "fa47a63dcb50bd2758887def3f066ca1e0eaf67dbc1b99f3dbdbd3b119bb98f8",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "rust-lang__rust-bindgen-3391",
+    "repo": "rust-lang/rust-bindgen",
+    "rank_sha256": "fa4e59af160636812cffe3e0975f5e84682524ff69a84330254c045b5a17bd11",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "gitbutlerapp__gitbutler-14920",
+    "repo": "gitbutlerapp/gitbutler",
+    "rank_sha256": "fb1dce798f53ebf3b2b293fdccd04be9c960211e74c900283de83320ed979c56",
+    "reason": "research_exposure"
+  },
+  {
+    "id": "h4ckf0r0day__obscura-440",
+    "repo": "h4ckf0r0day/obscura",
+    "rank_sha256": "fb65555e03b6c2cf6104a75513c95748f4e47605e4ad34af1e3c43c1fc664fa8",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "modelcontextprotocol__rust-sdk-760",
+    "repo": "modelcontextprotocol/rust-sdk",
+    "rank_sha256": "fb71a581163ca7102a83fa3e948ac47a1c4300be322a942a6f3a6c2e1e8cb77b",
+    "reason": "qualification_pending"
+  },
+  {
+    "id": "prefix-dev__pixi-6518",
+    "repo": "prefix-dev/pixi",
+    "rank_sha256": "fd100bc5cb464e775f657271c17183e574eadcdaaa1bdee92fc4a165c8d0db51",
+    "reason": "qualification_pending"
+  }
+]

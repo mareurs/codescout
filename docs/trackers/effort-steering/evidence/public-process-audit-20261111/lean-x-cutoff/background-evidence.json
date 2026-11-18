@@ -1,0 +1,33 @@
+{
+  "complete": true,
+  "logs": [
+    {
+      "native_path": "/tmp/codescout-bg-3dd5a2.log",
+      "saved_path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/0.log",
+      "container_id": "3ea261e8ea38f0f2a19f8819998c95d97c780003c93b6cf8a2f1f46cf8e472ae",
+      "bytes_saved": 877,
+      "sha256": "b85e30f82abeb2306c2e37e30f2290f359c00ab6a12dfbd5c5003b4c6b0542d6",
+      "truncated": false,
+      "observed_job_state": "exited"
+    },
+    {
+      "native_path": "/tmp/codescout-bg-SdZaAc.log",
+      "saved_path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/1.log",
+      "container_id": "3ea261e8ea38f0f2a19f8819998c95d97c780003c93b6cf8a2f1f46cf8e472ae",
+      "bytes_saved": 16487,
+      "sha256": "5a6d1edcd58d764b581c7ef2bc04847ae4cf6f0357d63bf4b9a374d84930e68c",
+      "truncated": false,
+      "observed_job_state": "exited"
+    },
+    {
+      "native_path": "/tmp/codescout-bg-rCp9c1.log",
+      "saved_path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/2.log",
+      "container_id": "3ea261e8ea38f0f2a19f8819998c95d97c780003c93b6cf8a2f1f46cf8e472ae",
+      "bytes_saved": 709,
+      "sha256": "984947a04ab6f516fe83ab043ec9a1fbb03fb3366327800c73832c3a94f72402",
+      "truncated": false,
+      "observed_job_state": "exited"
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,63 @@
+{
+  "decision_counts": {
+    "qualification_pending": 155,
+    "research_exposure": 12,
+    "retained earlier preparation exclusion: 33141223122 compressed layer bytes exceeds frozen12000000000 acquisition limit; no image pulled": 1,
+    "retained earlier preparation exclusion: cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public command did not start": 1,
+    "retained earlier preparation exclusion: cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public metadata adapter incompatibility": 2
+  },
+  "experimental_model_calls": 0,
+  "exposure_ids": 40,
+  "initial_status_counts": {
+    "False": 4,
+    "None": 167
+  },
+  "mechanism_design_sha256": "c83d181d7c93e8e5ff3b708488b7e8f28b797a3deb8a53e5d0037a6792e7aace",
+  "metadata_rows": 171,
+  "new_private_repair_outcomes_read": false,
+  "paid_admitted": false,
+  "payload_sha256": {
+    "explicit-aliases.json": "80cc84c4687a3db3b395ca01ad6cce17890855c8bd5bcc6cc1abdd5d0ddd9852",
+    "exposure.json": "ebbf60cd4a7234690393c4a508e38979d4bb5f05e10b2d7b52aa49f10b6dc00c",
+    "original-exposure.json": "039c88a35a2929f4bd2d662992e3f455f81a30a9e7e3636391e1adc6a9c26537",
+    "original-metadata.json": "4a0a6865c186f62a7adf840797493e2651be3f5ef7f01acbbd7b36ea81f9adc0",
+    "original-status.json": "2128f6bd2851f15272c9cda56723cc10e3fce695e9e5999c78b1dd614c10f897",
+    "ranked-decisions.json": "d648bd742bea50c06f04115b26c440449c0f5c9837aa9e812dae46edd987802e",
+    "registry-exposure-snapshots.json": "f7fe985fcbb8c025269089b154dff85a2b0f30e453d4e0d0f6606861db98548d",
+    "selection-rule.json": "3361929384f94815be519a30ee21a02b97de2209dae8430639fb2ed579ae27f6",
+    "status-initial.json": "4c60c93ac8e85fd60fb927cb57026b3c35b7be178dbfb83e5eae3af6a609568e"
+  },
+  "procedure_source_sha256": "6380c1a0aafa6f3ecf3d8e5406841bc83f0e7cb9e4c3a899763bb56f4c1fe27b",
+  "repositories": 55,
+  "schema": "native-feedback-population-policy-freeze-v1",
+  "sources": [
+    {
+      "path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/registration.json",
+      "role": "closed pilot selected IDs and original exposure",
+      "sha256": "8752ec55e0426a5e1cc27701366fa4e1b90da0bd475d8e6ac7ba83b9d0fab60f"
+    },
+    {
+      "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/public-cohort-20261110/verification.tar.gz",
+      "role": "original public metadata/status/exposure",
+      "sha256": "98500549aabe4b1101229f489595d562c2a77519b372f723835943c87bd16145"
+    },
+    {
+      "path": "/home/marius/work/claude/setup-ab-data/fresh-build/records.jsonl",
+      "sha256": "1495980cbd12b72972c8b96ec49023790f2e4a954800414f0f177e20cc699f75"
+    },
+    {
+      "path": "/home/marius/work/claude/setup-ab-data/fresh-build-v2/pool/records.jsonl",
+      "sha256": "1061fad3808e28505026fa692fc4e9fd498b40edfb00c2e5d0862cbcb3b0e347"
+    },
+    {
+      "path": "/home/marius/work/claude/setup-ab-data/fresh-screen-v2/live-screen/screen-plan.json",
+      "sha256": "fc6fa116249888d21a2823f11b2320b5a2f7e5e245d6242d51677d34b275e699"
+    },
+    {
+      "path": "/home/marius/work/claude/setup-ab-data/fresh-screen-v2-cs/live-screen-cs/screen-plan.json",
+      "sha256": "778826a401844126b33190051f0945c85d73fa36806070f3e0482c23e37de092"
+    }
+  ],
+  "state": "qualification_pending",
+  "universe_exposure_exclusions": 12
+}

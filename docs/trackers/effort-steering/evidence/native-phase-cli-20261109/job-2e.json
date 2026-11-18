@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_0000002e",
+  "command": "TMPDIR=/var/tmp/ep9-01a15 EFFORT_PROTOCOL_TEST_IMAGE=sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d python3 -m unittest discover -s tools/effort_protocol -p 'test_*.py' -v > /home/marius/.cache/codescout-resident/codescout/effort-protocol-verification-20261109-01a15ca9/logs/public-handoff-final-suite.log 2>&1",
+  "server_pid": 337215,
+  "job_pid": 1475073,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T13:28:17.340343026+00:00",
+  "finished_at": "2026-11-09T13:30:04.161770734+00:00",
+  "log_path": "/tmp/codescout-bg-Xn8tOc.log"
+}

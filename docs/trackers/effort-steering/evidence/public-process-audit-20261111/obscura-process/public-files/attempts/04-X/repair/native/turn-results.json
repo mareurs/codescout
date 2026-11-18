@@ -1,0 +1,208 @@
+[
+  {
+    "duration_api_ms": 368629,
+    "stop_reason": "end_turn",
+    "session_id": "67e6d6f6-c13d-4f53-96aa-fb89ffc8f361",
+    "total_cost_usd": 0.517766,
+    "usage": {
+      "input_tokens": 48,
+      "cache_creation_input_tokens": 63973,
+      "cache_read_input_tokens": 1084380,
+      "output_tokens": 15334,
+      "output_tokens_details": {
+        "thinking_tokens": 5984
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 63973,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "modelUsage": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 48,
+        "outputTokens": 15334,
+        "cacheReadInputTokens": 1084380,
+        "cacheCreationInputTokens": 63973,
+        "webSearchRequests": 0,
+        "costUSD": 0.517766,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 5984,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+        "background": 0,
+        "foreground": 0,
+        "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+        "parent": 0,
+        "user": 0,
+        "system": 0
+      },
+      "refused": {
+        "depth_limit": 0,
+        "concurrency_limit": 0,
+        "budget": 0
+      },
+      "by_type": {}
+    },
+    "safety_stops": 0,
+    "is_error": false,
+    "num_turns": 34,
+    "subtype": "success",
+    "api_error_status": null,
+    "result": "Both `structuredClone` bugs are fixed in `crates/obscura-js/js/bootstrap.js`, and the new regression tests pass with the fix and fail without it.\n\n**Circular `Error.cause`:** the Error branch now does `seen.set(value, e)` right after constructing the clone and before recursing into `cause`.\n- `e.cause = e` and `e.cause = { back: e }` now clone with the cycle intact.\n- An Error referenced from two places clones once.\n\n**Own `__proto__` property:** the generic branch now builds plain objects on `{}`, so they get `Object.prototype` instead of the source's prototype. Arrays still use `[]`. Properties are copied with `Object.defineProperty` (writable, enumerable, configurable) instead of assignment, so an own `__proto__` key stays a data property and the clone is not reparented. I did the same for the symbol-keyed loop. The same fix also covers an Error with an own-`__proto__` object in its graph.\n\n**Tests:** I added two to `crates/obscura-cdp/tests/structured_clone_crypto_parity.rs`, reusing its CDP helpers: `structured_clone_handles_circular_error_cause` and `structured_clone_defines_own_proto_property`.\n- With `bootstrap.js` reverted, they fail with exactly the issue's symptoms: `RangeError: Maximum call stack size exceeded`, and no own `__proto__` on the clone.\n- With the fix, `cargo nextest run -p obscura-js -p obscura-cdp` passes all 169 tests.\n\n- **Obstacle course not run:** the 33/33 obstacle course lives in the separate `obscura-benchmark` repo, which isn't in this checkout. That AGENTS.md check is still outstanding.\n- **`edit_code` unavailable:** the JS language server wouldn't start, so I inlined `Object.defineProperty` at the two call sites rather than adding a helper function.\n- **Behaviour change:** class instances now clone to plain objects, as in Chrome. Nothing in the repo or its tests relied on prototype preservation.\n\nI didn't touch the Date and RegExp branches, which also skip `seen`. They can't form cycles, so they're outside both issues.\n\nThe Date/RegExp point and the obstacle-course gap are the only things I'd flag before merging.",
+    "ttft_ms": 10986,
+    "type": "result",
+    "duration_ms": 402850,
+    "uuid": "c659d9d1-eea4-4f22-baf2-b9d7340f4e5e",
+    "ttft_stream_ms": 10402,
+    "time_to_request_ms": 53,
+    "first_content_frame_ms": 10402,
+    "queued_turn_count": 0,
+    "result_index": 0,
+    "model_usage_since_last_result": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 48,
+        "outputTokens": 15334,
+        "cacheReadInputTokens": 1084380,
+        "cacheCreationInputTokens": 63973,
+        "webSearchRequests": 0,
+        "costUSD": 0.517766,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 5984,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    }
+  },
+  {
+    "duration_api_ms": 395430,
+    "stop_reason": "end_turn",
+    "session_id": "67e6d6f6-c13d-4f53-96aa-fb89ffc8f361",
+    "total_cost_usd": 0.5467500999999999,
+    "usage": {
+      "input_tokens": 4,
+      "cache_creation_input_tokens": 2606,
+      "cache_read_input_tokens": 131921,
+      "output_tokens": 536,
+      "output_tokens_details": {
+        "thinking_tokens": 130
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 2606,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "modelUsage": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 52,
+        "outputTokens": 15870,
+        "cacheReadInputTokens": 1216301,
+        "cacheCreationInputTokens": 66579,
+        "webSearchRequests": 0,
+        "costUSD": 0.5467500999999999,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 6114,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+        "background": 0,
+        "foreground": 0,
+        "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+        "parent": 0,
+        "user": 0,
+        "system": 0
+      },
+      "refused": {
+        "depth_limit": 0,
+        "concurrency_limit": 0,
+        "budget": 0
+      },
+      "by_type": {}
+    },
+    "safety_stops": 0,
+    "is_error": false,
+    "num_turns": 2,
+    "subtype": "success",
+    "api_error_status": null,
+    "result": "That background job finished with all 6 tests passing, which matches what I reported. It built a cold tree in 42s, and V8 came from a prebuilt artifact rather than the ~5 minute compile the docs warn about.\n\nIt was the first run, made before I improved the failure messages in the two new tests. Later runs superseded it:\n- **With the fix:** the structured-clone test file passes 6/6 and `cargo nextest run -p obscura-js -p obscura-cdp` passes 169/169, both on the final test code.\n- **Without the fix:** the two new tests fail with the `RangeError: Maximum call stack size exceeded` and own-`__proto__`-missing messages.\n\nNothing is left running. The only remaining check from AGENTS.md is the 33/33 obstacle course, which needs the separate `obscura-benchmark` repo and wasn't run.",
+    "ttft_ms": 12638,
+    "type": "result",
+    "duration_ms": 26910,
+    "uuid": "37896905-f6b8-4dd0-94f6-8d0fcbb2a4d4",
+    "ttft_stream_ms": 11376,
+    "time_to_request_ms": 29,
+    "first_content_frame_ms": 11376,
+    "queued_turn_count": 0,
+    "result_index": 1,
+    "model_usage_since_last_result": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 4,
+        "outputTokens": 536,
+        "cacheReadInputTokens": 131921,
+        "cacheCreationInputTokens": 2606,
+        "webSearchRequests": 0,
+        "costUSD": 0.0289841,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 130,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    }
+  }
+]

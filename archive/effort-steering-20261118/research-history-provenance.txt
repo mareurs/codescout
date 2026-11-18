@@ -1,0 +1,1278 @@
+commit d7236b843a231b63f39e191ee6d85b27619d75a3
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 10 08:27:12 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 10 08:27:12 2026 +0200
+
+    research: preserve native profile controls and unresolved gate
+    
+    Preserve the exact uncommitted source snapshot, complete native index/tool
+    controls, initial independent review and bounded correction replay. The
+    834-member archive is read back byte/mode/hash for every regular member and
+    calibrated against sha256sum. No runtime source is activated by this commit.
+    
+    Keep the failed DEFAULT=101 mux watchdog gate and its isolated passing replay;
+    this is not an all-green gate or paid admission. Record the legacy charge
+    lookup separately: registered transport bypasses Langfuse and sends directly
+    to Anthropic; no trace is not a zero-charge proof. The $4 hold stays open.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit b2c13b462363a03cee3afacd728b6ae05d4b0544
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 10 04:46:39 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 10 04:46:39 2026 +0200
+
+    research: preserve outcome-blind admission controls and prepared corpus evidence
+    
+    Preserve the source at 623811bb03d7d7edf4e8a0e34494fc5b2be41708,
+    metadata/selection/accounting controls, actual applied mutations, failed
+    integrations and gates, public exports and dependency preparation, native
+    onboarding, raw source-document corpora, Git byte checks and public seeds.
+    
+    Archive: 25,015,928 bytes, 572 members, every size/mode/SHA read back.
+    SHA256 eed441554066fd367975928c72aa9c4ca6a1614ee47e38b83c7311fb8f87abb2
+    The manifest agrees with GNU sha256sum. The 35,287,040-byte Lean raw export
+    stays external with its exact hash reverified. Heavy build outputs and full
+    model/LSP/embedding/image runtimes are not inside this compact capsule.
+    The self-captured preservation log is empty at capture time, so closure.json
+    separately retains the completed job/log; do not read it as a run receipt.
+    
+    Both dependency derivatives compile public source. Behavioral admission
+    remains open: Obscura library tests report 183 passed/68 failed; Lean's run
+    times out. Exactly one programmatic onboarding per project, seven raw public
+    document copies verified, no indexing yet. Local Git conversion was fixed
+    without new onboarding. Raw tracked blobs match, but the direct Lean Git
+    bundle clone omits one empty directory; physical snapshot transfer remains
+    required. Preserve every failed control and the prospective guarded helper.
+    
+    No experimental actor generation, private grade, final cohort, paid-ready,
+    whole-campaign approval, efficacy or savings claim. No merge or push.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 623811bb03d7d7edf4e8a0e34494fc5b2be41708
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 10 03:50:22 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 10 03:50:22 2026 +0200
+
+    research: preserve generic evidence protocol development checkpoint
+    
+    Add source-bound evidence execution, phase policy, public handoffs, native
+    readiness/context checks, reusable source-only preparation, and pure
+    outcome-blind selection/schedule/charge accounting. Native paid execution
+    is blocked by default. A paid campaign launcher is not implemented.
+    
+    The protocol fixture suite discovered 230 tests, executed 227 successfully
+    and skipped 3 native-input cases. Product gate --check separately passed
+    Python light, rustfmt, Clippy, lean and default; it does not collect this
+    package. Campaign guard review applied 12 mutations: 9 killed/3 survived
+    initially, then all 12 killed after observed-edge regressions. These are
+    author checks; whole-campaign independent review remains pending.
+    
+    Reject empty cwd before Docker/evidence effects (73a2e863f3df2df2), with
+    observed RED then GREEN. Keep root cwd represented by a single dot.
+    
+    This tree retains required lifecycle libraries. A main-based copy lacking
+    those dependencies failed imports despite its green product gate; retain
+    that failed attempt as effort-steering session-log F-6. Do not cherry-pick
+    this package alone onto a base without its transitive native runtime.
+    
+    Final cohort, all-arm real context, private evaluator controls and paid
+    admission remain incomplete. No efficacy, parity or savings claim.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 312f407d540b36ef58faab5701abececc38cc670
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 10 03:46:23 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 10 03:46:23 2026 +0200
+
+    test: port upstream attribution-history isolation to native experiment base
+    
+    Apply b33315316110f787b58cb88997ed3e3bf13939a5 to the base retaining
+    qualified lifecycle dependencies. Shipping from_env/default settings remain
+    unchanged. This avoids the known old-base gate timeout without dropping
+    security or engine assertions.
+    
+    Validation: 33 attribution tests passed. Full product gate --check passed:
+    Python light, rustfmt, Clippy, lean and default all exited zero. Protocol
+    suite is separate and is not collected by that gate. No paid actor call.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Co-Authored-Session-Id: 48d211eb-3bd8-4247-975b-631a73b1a87a
+
+commit fe8bb4b34f5e7912f9b16c4c0bf1ff73a3a10a23
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Nov 7 09:37:57 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Nov 7 09:37:57 2026 +0200
+
+    feat(eval): add owned workflow supervision hooks
+    
+    Let prepared workflows classify public output before feedback and stop
+    session/provider activity after a runtime fault. Preserve final supervision
+    errors before client/native teardown and keep the existing default callers.
+    
+    Validation: lifecycle and transport suites, plus the whole-adapter review
+    and one offline fix pass with 20 exact mutations killed. Final gate evidence
+    is bound to source/test hashes in semantic-contract-adapter-20261106.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 36fec1201b0f809d6f21cc31082def4d651b6cf8
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Fri Nov 6 13:25:30 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Fri Nov 6 13:30:27 2026 +0200
+
+    research: give external native actors an executable private /tmp and admit only 32 GiB hosts
+    
+    Normalizes the actor /tmp to a private tmpfs (rw,exec,size=4g,uid=1000,gid=1000), rejects duplicate /tmp definitions, keeps unrelated tmpfs mounts, and makes the external entry require --memory 32g plus the exact temporary policy. The internal verified default stays at 12 GiB. Fixes the noexec /tmp mechanism recorded in docs/issues/2026-11-06-external-public-verification-temporary-execution-failures.md.
+    
+    Authored by Codex thread 01a15ca9-f939-7603-acb5-01c6b02f68e2 (confirmed by that thread through the operator). Committed by Claude Code session codescout-1d on the operator's instruction. Gate, review and public qualification were reported passed by the authoring thread; this committing session did not re-run them. Amended once to use the Codex-namespaced trailer (docs/issues/2026-11-06-codex-coauthor-trailer-missing-namespace.md).
+    
+    Co-Authored-Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: b3485581-2540-4da8-a440-3bed2e9c517f
+
+commit c1d51c446c5712b6a09c82e358f5ffbda834923c
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 20:10:46 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 20:10:46 2026 +0200
+
+    research: preserve external repair patches before teardown
+    
+    Add a prepared external entry that validates frozen inputs and the complete
+    native Docker option profile before credentials or launch. Capture new,
+    deleted and binary source changes against the controller baseline even
+    when the actor moves HEAD; failed capture prevents workflow completion
+    while retaining reported cost.
+    
+    Verified 71 lifecycle, 30 pilot and 24 campaign methods; full gate exits 0.
+    Final scoped review applied eleven mutations: ten assertion kills and one
+    independent production-error rejection, with zero survivors. Actual pinned
+    CLI synthetic checks passed on Nushell and rust-analyzer, including fresh
+    patch application and exact owned cleanup. Fix draft issue d06194e58297a768.
+    This is harness evidence; external repair efficacy remains unmeasured.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 9751891074a2bc9ce6da17b9f88e685af5d058d8
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 19:02:31 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 19:02:31 2026 +0200
+
+    research: carry external worker image through lifecycle
+    
+    Use the configured runtime image for native background records, log capture
+    and exact owned cleanup. Preserve the pilot default and allow an explicitly
+    bounded memory profile for external task admission.
+    
+    Validate the lifecycle, pilot and campaign suites separately. Eight distinct
+    applied mutations have meaningful assertion kills; retain the historical
+    invalid fixture observation and its corrected exact reapplication (bug
+    26021c97d11af0a0). Native synthetic CLI checks exercise both selected images
+    without provider access. External repair efficacy is still unmeasured.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit d3c1d104708df2d21a6cf6920d72e3af8ff9ddc6
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 18:13:41 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 18:13:41 2026 +0200
+
+    research: record complete native workflow feasibility and limits
+    
+    Preserve the original grading result alongside the corrected sealed-log adjudication. Record the lower low-effort cost, lack of component attribution and next external admission cases as LMC-4.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 774d81703ec14efc9fa50c72d4a3eb6380258c13
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 18:08:18 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 18:08:18 2026 +0200
+
+    research: parse regression execution counts without suffix matches
+    
+    Corroborate a positive anchored test summary against unique named passing tests, so 40 passing tests do not match the zero-test guard. Pin the actual grading call site and malformed evidence with regression tests.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 2fbbce1cbabff4ba743ab1d41512a284fe8b550d
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 17:03:00 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 17:03:00 2026 +0200
+
+    research: bound verified workflows by cost and time
+    
+    Remove the inherited pilot action ceiling only for verified workflows and reconstruct the closed recovery pair before new admission. Preserve the legacy limit and all monetary, time and continuation controls.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 0f7fb1dd69f6807e4a5564c25ce379bf267c7fc5
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 15:51:00 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 15:51:00 2026 +0200
+
+    research: qualify cold workflows and preserve native evidence
+    
+    Use the cold-verified resource/deadline bundle and retain background logs before the client tears down its container. Pin native reads and cleanup to the observed immutable ID. Bind cold command/log proofs and charge the aborted cohort before admitting a fresh pair.
+    
+    Validation: full development gate; 56 lifecycle, 21 driver, 28 pilot, 9 completion and 3 resume tests; four real zero-provider CLI/native controls. Independent applied-mutation review closed all observed survivors.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit c278effb9b36259480e079051d16238d66314e8e
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 14:26:08 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 14:26:08 2026 +0200
+
+    research: admit a fresh matched complete-workflow calibration
+    
+    Add an exclusive low/xhigh pair with an eight-dollar allocation, four-dollar arm envelopes and full-composition admission. Persist reconciled costs before private grading and mark in-flight totals nonfinal; require complete public checks, valid context, settled lifecycle and private acceptance.
+    
+    Preserve legacy CLI defaults while allowing a validated explicit workflow budget. Qualify the actual CLI/native budget configuration, reuse byte-matched private controls, and close regression gaps with applied mutations. No model-quality claim follows from the scripted controls.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 7e57bf8f91a2fd369411a2d89db51cf97c070d9f
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 13:47:22 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 13:47:22 2026 +0200
+
+    research: qualify verified worker storage and native resources
+    
+    Put opt-in workflow actors and build targets under their disk-backed launch root, reject unsupported storage or less than 30 GiB free before credentials, and apply CPU2/init while preserving legacy launches. Validate supported native argv before credentials.
+    
+    Through-worker boundary regressions, actual CLI/native scripted controls, applied mutation review and the worktree gate validate the runtime. These controls do not establish low/xhigh model-quality parity.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 0998c3b64f81c13331db26e0091ff25404272c66
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 09:04:28 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 09:04:28 2026 +0200
+
+    research: compose live worker with public verification
+    
+    Add opt-in same-session repair and verification with a single provider
+    budget across turns. Observe every configured public command, retain
+    failed rounds and return public feedback before a fresh complete round.
+    Distinguish terminal, lifecycle, public-check, cleanup and cost coverage.
+    
+    Qualify actual CLI/native success, repair and unknown-timeout controls
+    without provider forwarding. Pin native container IDs, reject stale cost
+    coverage and close all substantive survivors from 14 applied mutations.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit f89af31e371268944b4e5e920f27a591bfe7bf75
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Nov 5 00:39:17 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Nov 5 00:39:17 2026 +0200
+
+    research: preserve background jobs across agent turns
+    
+    Keep one stream-json CLI/MCP session alive until native job records settle,
+    deliver bounded continuations, and distinguish job outcomes from turn exit.
+    Qualify native success/failure and first-turn shutdown offline without
+    provider access. Add deadline and structured-receipt regressions and close
+    all substantive survivors from 13 applied mutation probes.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 083d95a8b28e55fc3ad5a11caf7cc9b40969bd60
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 23:34:22 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 23:34:22 2026 +0200
+
+    research: bound matched low-xhigh completion calibration
+    
+    Carry all prior terminal-verified pilot costs into a fixed low/xhigh pair,
+    with unchanged qualified worker/context, explicit decreasing envelopes,
+    review/plan/canary bindings, exact terminal identity, known-cost persistence
+    before grading, and exclusive attempt markers.
+    
+    Nine wrapper tests pass; independent review killed all six previously
+    observed survivors after direct guard coverage. Pilot28 and resume3 tests
+    and full scripts/gate.sh --check passed.
+    
+    The paid pair cost0.96970900000000016USD and both patches passed private
+    acceptance and regressions. Both successful CLI turns yielded awaiting
+    background verification; full required verification is not established.
+    Lifecycle/measurement issue bf167b83c0166a24 remains open in MAIN.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 979fffc586616890f61cf1b6ec498253169f8697
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 22:26:33 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 22:26:33 2026 +0200
+
+    research: preserve budget-aware hint pilot controller
+    
+    Reserve requests against the verified remaining campaign balance instead of
+    an unrelated one-dollar run envelope. Keep the CLI target and conservative
+    usage/unknown-cost guards, record campaign exhaustion separately, and pass
+    the decreasing balance through both ordinary and resumed launch paths.
+    
+    Preserve the pilot, private-grader qualification and context-audit helpers
+    with 28 pilot tests and three resume tests. Replay all four recorded cutoff
+    reservations offline; actual launcher tests kill the three review survivors.
+    Full scripts/gate.sh --check passed. No new provider calls in this correction.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 89c0ae1c5c6a8880aa60b0a339e8251b8cc0b001
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 16:12:44 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 16:12:44 2026 +0200
+
+    research: advance context checkpoint and link main issue evidence
+    
+    Separate real client transport from scripted model responses, retain readiness counterexamples and keep quality admission false. New issues and complete evidence are in the main checkout per operator instruction.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 2a83170f381dc192b1f8deadbba51d816a94169b
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 14:29:46 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 14:29:46 2026 +0200
+
+    research: preserve reusable native semantic preparation
+    
+    Record tiny opposite controls, incremental bindgen indexing, canonical recall and a no-op cache reuse measurement. Preserve complete evidence and keep raw coverage/context contradictions open (F-19); no paid-worker or quality admission.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit f5bc952ecc35c0c7e532e9eb9f3cb73bccc3ce52
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 13:22:13 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 13:22:13 2026 +0200
+
+    research: qualify isolated native runtime packaging
+    
+    Preserve source-only onboarding with a targeted corpus correction. Verify actual mux references and offline library tests, retaining failed semantic-index diagnostics and all open admission gates.
+    
+    F-18 records loader self-spawn and compiler library isolation.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit b496644e200759b9e96e38229edd3f6b5569eb32
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 12:19:53 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 12:19:53 2026 +0200
+
+    research: close onboarding reuse review findings
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 5d658ce80f32dfaf2905f2600134ddaef7dc301f
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 12:17:10 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 12:17:10 2026 +0200
+
+    research: validate isolated onboarding snapshot reuse
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit a394d7aaba7f185e1d601fe390de9a76718f44ef
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 11:18:03 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 11:18:03 2026 +0200
+
+    research: reuse project onboarding across experiment arms
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 8918c627120b6b8935c58fe6fc56708391e61f1d
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 10:53:19 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 10:53:19 2026 +0200
+
+    research: correct native environment prerequisites and qualify MCP startup
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 0279d8782a003c8416fb3c69599073397fea769b
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 09:54:22 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 09:54:22 2026 +0200
+
+    research: preserve closed Recon factorial evidence
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 156bd510ec7f9f8e685a721938f2840867f81853
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 09:52:49 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 09:52:49 2026 +0200
+
+    research: record completed low Recon factorial
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 87417905d11d9c3ad3134865a13fc308e52e0ab8
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Nov 4 09:25:24 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Nov 4 09:25:24 2026 +0200
+
+    research: freeze low Recon factorial diagnostic
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 53c29d9a15f80146d56d5f5c88400e5cd1fb118f
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 19:33:45 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 19:33:45 2026 +0200
+
+    research: close and preserve causal diagnosis pilot evidence
+    
+    Record GNU-calibrated closure of 26034 regular paths and 16 literal links; preserve HOLD and unchanged raw outcomes. Keep branch and worktree locally.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 40f50f3dd4980b7b96d091b4aaeb84d720d98fda
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 19:31:14 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 19:31:14 2026 +0200
+
+    research: record causal prompt pilot and independent gate misses
+    
+    Six valid calls: low plain 0/2, low causal 1/2, xhigh 2/2. Preserve HOLD, full client costs and LMC-2 trajectory/adherence limits; no retrospective repairs.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 96098cc6d3ff844c547d3c113bcc973480b9f196
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 19:11:24 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 19:11:24 2026 +0200
+
+    research: preregister causal diagnosis pilot after applied review
+    
+    Pin six workflows, independent source-bound acceptance and full client costs. Close F-16/F-17 with observed mutation replay and poisoned-helper control.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit cdaa1c4da115b5a3e7c8ad8fb7fe991913b7040c
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 16:07:17 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 16:07:17 2026 +0200
+
+    research: record calibrated matched pilot closure
+    
+    Preserve F-15 regular-only rejection, literal source link targets and the verified evidence seal. Bind the historical result without changing its outcome, denominator or client charges.
+    
+    Validation: full GNU-calibrated nofollow inventory, actual link-target mutation/restoration and fresh canonical close.py verify. No push.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 2947aab55de050aff7d7f790e8c2d1a3ab023465
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 16:00:30 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 16:00:30 2026 +0200
+
+    research: record stopped matched pilot and patch diagnostic
+    
+    Preserve F-13 protocol stop, low correction failure and the separate model-free diagnostic of the invalid high repair. Reconcile all four raw charges and full source-bound evaluations; keep bindgen unstarted and general promotion on hold. F-14 and the private auditor serialization correction retain actual negative controls.
+    
+    Validation: full paid_audit.py verify, raw named populations, exact source/parent/protocol evidence and 40 scoped container absence checks. Required five-lane repository gate passed earlier; repository runtime unchanged.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit b2516d9384a3af5685cd7f797e490c66496fb53d
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 15:29:39 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 15:29:39 2026 +0200
+
+    research: admit fresh matched completion pilot
+    
+    Exclude the five outcome-exposed cached candidates (F-10), calibrate two new task/oracle pairs and freeze an equal low/xhigh completion-feedback workflow before payment. Preserve parser correction F-11, review fixes F-12 and the rejected order-only admission revision.
+    
+    Validation: 38 focused methods, exact 15 assertion-only mutation kills, real source-bound base/gold controls and fresh preflight. Full five-lane project gate passed with recorded exclusions. No paid call at this checkpoint.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 19b37ab9909daf31ab22165af54ab9ad4618f36e
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 13:47:38 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 13:47:38 2026 +0200
+
+    docs: record Cargo admission evidence closure
+    
+    Bind the calibrated seal and mark the runtime plan complete; preserve matched pilot admission gaps and historical resource limits.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit bd8f83b524e8b111f0ab1c4d6aebc4dc71c1b2d5
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 13:43:40 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 13:43:40 2026 +0200
+
+    research: bound Cargo admission and draft matched pilot
+    
+    Close tested operation deadlines, owned cleanup and public compile diagnostic gaps.
+    Record one strong applied-mutation review and one fix pass; preserve F-8/F-9 measurement and late-create evidence.
+    Keep candidate tasks unadmitted and client budget unchanged.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit ca680e460404046f76b13ea8d1352311895e35b4
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 12:07:15 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 12:07:15 2026 +0200
+
+    docs(eval): close Cargo capability proof and preserve admission limits
+    
+    Record calibrated evidence seal and complete the runtime plan; prospective campaign integration remains a separate gate.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 4f5ae5b0f7fb41ef3343e13bd771aed1a176d81f
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 12:05:13 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 12:05:13 2026 +0200
+
+    research(eval): validate bounded Cargo MCP and completed feedback
+    
+    Record F-7, actual CLI source/container/long-output controls, one strong review and observed mutation fixes. Preserve invalid attempts and private-only mitigation limits; no new paid comparison.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 3b3156b8a936d5a4955d36eba704084addd147d7
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 11:01:51 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 11:01:51 2026 +0200
+
+    docs(eval): record runtime inventory closure and remaining gates
+    
+    Bind the historical publication and calibrated seal; complete the narrow plan while retaining Cargo and long-call limits.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit d6ab694a25f203b97e0ae84917f0ed09f6f7810d
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 10:59:49 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 10:59:49 2026 +0200
+
+    research(eval): prove actual CLI inventory and dispatch
+    
+    Record F-6 and close the observed private-proof identity and completion gaps. Preserve actual loopback controls, mutation results and scope limits; Cargo transport and long-call delivery remain open.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 62f62ad9f466d287cb5eb80b7d3cf7391cd4aebe
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 10:32:03 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 10:32:03 2026 +0200
+
+    research: record verified stopped-phase closure
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 6a6c129a047fe08da15c232e53f9adee0049c37f
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 10:24:37 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 10:24:37 2026 +0200
+
+    research: stop invalid-authority pilot and preserve diagnostic costs (F-5)
+    
+    Bill the single low initial artifact while keeping the matched comparison stopped. Preserve calibrated controls, actual Cargo evidence, broader Bash execution, denied async feedback and next model-free capability proof.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 109bbc1ae5de45444f3a3e0a32822c59ead46ade
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 09:56:00 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 09:56:00 2026 +0200
+
+    research: verify calibrated Nushell admission before matched runs
+    
+    Keep unsupported Ruff in the fixed denominator, close stale-binary calibration (F-4), and distinguish public agreement from independent correction. Task 1 inputs are frozen; first admission spends nothing.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 5a49d2a4e60db3fef683371ade57addc8157fbf8
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 09:42:21 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 09:42:21 2026 +0200
+
+    research: fix public-oracle preparation and pin campaign guards (F-4)
+    
+    Freeze the two-task matched design and preserve unsupported Ruff calibration. Restore source-built Nu checks and record the prepayment review and observed consumer mutation regressions.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit edc111a675a10c04317f021ed015ef3b93dea447
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 08:31:06 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 08:31:06 2026 +0200
+
+    research(eval): mark sealed byte repair complete
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 899109bd65ad950f8e3a5b727fdde02d5d3148e9
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 08:27:58 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 08:27:58 2026 +0200
+
+    research(eval): record successful exposed byte reference repair
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 230779529f94c2453d733079f4be0bc48ec1b2b7
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 08:12:49 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 08:12:49 2026 +0200
+
+    research(eval): register exposed byte reference repair
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 1f6425efe6b1c0e5040ea3433c645f5a62d0ec35
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 06:40:52 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 06:40:52 2026 +0200
+
+    research(eval): mark verified finite cohort complete
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit b4956d5f9bb8c3d9eeb5ab58dc176f4786fc637f
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Nov 3 06:36:55 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Nov 3 06:36:55 2026 +0200
+
+    research(eval): close finite cohort with oracle failure hold
+    
+    Six valid sessions; all arms pass Tokio and miss raw filename output. Retain exact costs, review fixes and calibrated source archives.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 85ce65670fdd671827077d43670bcf6fbb9c1bf3
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Mon Nov 2 21:09:13 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Mon Nov 2 21:09:13 2026 +0200
+
+    research(eval): register reviewed finite workflow pilot
+    
+    Retain setup friction F-2, fixed runnable populations and independent review fixes before payment.
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit b7c10d270bc1a80805c3c28c9d219482a9d3db14
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Mon Nov 2 20:46:03 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Mon Nov 2 20:46:03 2026 +0200
+
+    research(eval): freeze finite cohort and fail-closed admission
+    
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 58ae4c05b31f710472a769004dafc722d392f5f9
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Mon Nov 2 17:18:49 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Mon Nov 2 17:18:49 2026 +0200
+
+    docs(eval): record contract-first ripgrep transfer ceiling
+    
+    Freeze public-contract cases before solution and score inspection. Nine cases calibrate on base and gold; both preselected Sonnet artifacts pass. Retain 72 CLI receipts, source identities and four invalid initial source setups separately. No new model calls or low/xhigh claim.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 85cf94584fbca9f002b537438f34e1083255a68c
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Mon Nov 2 16:54:41 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Mon Nov 2 16:54:41 2026 +0200
+
+    docs(eval): record a detecting topology variant of a low test
+    
+    Freeze one wrapper-removal variant for each recorded seed. Six valid grades show the structured body assertion detects the candidate defect with unchanged requests and assertions, while the generic status-only fallback case still misses it. Preserve exposed-case limits, exact source comparisons and zero new model-client spend.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 99beae062a63a15d702f26426aed00dd74301e9c
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Mon Nov 2 16:01:51 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Mon Nov 2 16:01:51 2026 +0200
+
+    docs(eval): diagnose behavioral case selection with paired traces
+    
+    Record 18 offline replays and nine outcome-preserving pairs. Generated probes execute the faulty update but clear its state before observation; the direct fallback control detects it despite visiting fewer selected event sites. Retain raw failures, known timeout-gate limitation and the offline selector gate. Resolves effort-steering-session-log:F-1.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 5d6fa2af47cd48dec5690c02ffd89bafe1ab6a39
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Mon Nov 2 15:05:43 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Mon Nov 2 15:05:43 2026 +0200
+
+    docs(eval): record contract assertion diagnostic miss
+    
+    Record one valid low call whose final public API test passes candidate, reference and gold. Source-bound traces verify C2 assertion sensitivity and restoration, while C1 control adherence is incomplete. Retain the negative outcome, reconciled whole-call client cost, instrument limits and offline case-selection gate; preserve historical experiment bytes.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 5b2418a45497d3d6b56440207549e0650f709d57
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Mon Nov 2 14:48:16 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Mon Nov 2 14:48:16 2026 +0200
+
+    docs(eval): freeze contract-to-assertion diagnostic
+    
+    Specify one exposed Axum low reviewer with a 0.60 allowance and 0.20 reserve. Preserve the primary behavioral discovery endpoint, secondary procedure audit, corrected actor/evidence-root bindings and the deferred charge-test scope finding. Instrument controls, applied mutations and the project gate passed; no model call has started.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit d50ba381d20045a18869a592e0db1d52080477f1
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sun Nov 1 17:16:29 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sun Nov 1 17:16:29 2026 +0200
+
+    docs(eval): consolidate current findings and research roadmap
+    
+    Add a mutable entry point over the preserved mechanism trackers. Separate observed correction components, acceptance ceilings and the blind discovery miss; record the remaining campaign budget, gated next steps, recovery and storage cleanup. Historical experiment documents and seals remain unchanged.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 441dc53ae545f936e5bba0ca7e3d8f17a639e000
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sun Nov 1 16:53:12 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sun Nov 1 16:54:10 2026 +0200
+
+    docs(eval): record blind low challenger diagnostic miss
+    
+    Record the single valid low discovery miss, exact three-role adjudication, conditional stop and reconciled client cost. Retain controls, mutation review and fresh project gate evidence; disclose post-capture observer restoration. No repair or quality parity claim.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 871c52c3ef04af4dfc79cc134d032828f92cca31
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sun Nov 1 14:12:20 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sun Nov 1 14:12:20 2026 +0200
+
+    docs: record population transfer results and quality gaps
+    
+    Record all six source-reviewed workflows and complete model-client costs.
+    Keep the registered acceptance ceiling separate from common diagnostics
+    that expose Tokio lock inversion and an uncorrected Axum fallback contract.
+    Preserve prepayment review, mutation replay, instrument corrections and
+    exposure limits without promoting cheap acceptance to equal quality.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+    Session-Id: codex:01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 7cb2254acc228f2b47d227216b5339833170aa62
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sun Nov 1 12:35:06 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sun Nov 1 12:35:06 2026 +0200
+
+    feat(eval): bind fixed acceptance to enumerated candidate tests
+    
+    Require every fixed case while validating the entire source-bound libtest population, including legitimate additional tests. Keep required and additional counts separate and reject added failures. Preserve legacy parsers and registered cohort verdicts.
+    
+    Validate with real retained-source controls, the full configured project gate, 54 passing tests and two explicit skips, plus six observed mutation kills after closing two review coverage gaps.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit e3daa380d87dcf663cc0f32e099afe199eba2bee
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 31 22:04:54 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 31 22:04:54 2026 +0200
+
+    docs(research): record fixed checker loop diagnostic
+    
+    Compare four prospectively registered low repairs from the same failing Ruff
+    seed. The fixed callable checker plus authority/command scaffold reaches two
+    accepted endpoints; generic exact-diagnostic controls reach zero. Record all
+    raw charges, source-bound grades and actual mechanism use without claiming
+    heldout validity, component necessity or low/xhigh parity.
+    
+    Preserve LMC-2, the review regressions and implementation/process limits.
+    Validation: 15 focused tests pass in the isolated copy; six selected mutants
+    are caught after one review/fix pass; required project gate passes all lanes.
+    Phase client estimate $0.787337; no paid retry or production source change.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit c707df401d19df3bf0ca3c5117653ea054ff333b
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 31 13:23:38 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 31 13:23:38 2026 +0200
+
+    docs(research): record matched workflow replication failure
+    
+    Record the prospectively registered snapshot-visible workflow comparison. Low
+    reached one of two accepted endpoints at $0.3487474; xhigh reached both at
+    $1.7908823. Reconcile all six client-estimate charges and distinguish actual
+    artifact consumption from correction and causal claims.
+    
+    Preserve protocol, source-bound evidence, review regressions and tracker
+    continuation. Record exact Docker cleanup scope and storage reports.
+    
+    Validation: 23 focused cases passed including real Docker; eight selected
+    mutations killed after one review/test pass; required project gate passed.
+    No production source change, merge or push.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit f938c32a0c12ad1e0a31712f89e21b5a23dc5ec5
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 31 11:22:02 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 31 11:22:02 2026 +0200
+
+    fix(reliable-agent-eval): return generated author snapshots
+    
+    Return bounded, source-bound snapshots from author Cargo checks while preserving failure status and oracle isolation. Keep destination descriptors open through publication and verify freshness, independent limits and content hashes.
+    
+    Validation: real Docker regression RED to GREEN; 40 focused tests passed and 1 older opt-in test skipped; all 12 selected mutations killed after one review/fix pass; required gate lanes passed.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 23f2347004657db31da1b22804d97883de2bd464
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 31 10:00:34 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 31 10:00:34 2026 +0200
+
+    docs: record capped workflow pilot and snapshot artifact gap
+    
+    Tokio passes the declared target at both efforts. Preserve the invalid capped
+    Ruff xhigh repair and its charge; keep its passing saved-source diagnosis
+    separate from eligible completion and leave Ruff low unmeasured.
+    
+    Record the generated-snapshot visibility reproduction and LEM-19 without
+    revising earlier results. Phase client estimate: $1.5159117.
+    
+    Validation: six applied mutations killed after one fix pass; closing private
+    suite32 passed. Full project gate passed earlier this phase; production
+    repository source unchanged.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 074c1e3ed3a1cb2f5314c0466485b5ad5ea65814
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 31 07:33:09 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 31 07:33:09 2026 +0200
+
+    docs: checkpoint matched low and xhigh workflow protocol
+    
+    Freeze the prospective two-task comparison with equal checker and same-effort
+    repair opportunities. Record the observed missing-cache preparation blocker
+    without changing sealed prior results or starting new model runs.
+    
+    Validation: full project gate passed; exact staged content and local document
+    references checked.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 3cc1ed50c90fc98b96b3dbc6223bf4d920a754df
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Fri Oct 30 21:54:17 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Fri Oct 30 21:54:17 2026 +0200
+
+    docs: record two-task checked low repair transfer pilot
+    
+    Record both diagnostic low repairs, complete workflow costs, failed single-xhigh
+    references and unchanged negative GO result. Retain the prospective completion
+    probe, applied-review regressions and qualified LEM-18 evidence.
+    
+    Validation: full project gate passed; 24 local tests; six selected mutations
+    killed after regression additions; prior 17 tracker entries preserved.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit f489cd3daad81538596954f766df1053b374744c
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Fri Oct 30 08:48:09 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Fri Oct 30 08:48:09 2026 +0200
+
+    research: measure prechecked diagnostic repairs against generic review
+    
+    Low with an actual failure diagnostic repairs both fixed attempts; generic low repairs one of two and generic xhigh repairs its reference. Retain all five calls and the unchanged failing draft, exact source-bound acceptance and case-specific limits.
+    
+    Append LEM-17 while preserving all prior entries. Record and verify the private runner launch-lock fix, raw cost reconciliation and the frozen-input/commit-bound evidence chain.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 60f912622083859217e5313797480fcdb32f1ac2
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Fri Oct 30 07:53:46 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Fri Oct 30 07:53:46 2026 +0200
+
+    research: record low review repairs and broader coverage gap
+    
+    All four fresh review trajectories pass the registered CLI and upstream targets without delivered feedback. Preserve the independent overlap probe: two low reviews miss the behavior that another low review, xhigh and upstream gold handle correctly.
+    
+    Retain exact receipts, source reviews, invalid preparation controls and budget reconciliation. Append LEM-16 while preserving all prior entries. Record the increased global cap separately from the frozen phase admission.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit d291f9ed41bea1b8f7023dbb2bb8459ca6f1a667
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Oct 29 23:25:55 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Oct 29 23:25:55 2026 +0200
+
+    test: record external low-effort calibration and oracle gap
+    
+    Record two valid low calls that passed their upstream targets without feedback, leaving the disjoint holdout unstarted. Retain a concrete empty-suffix crash shared by the bat candidate and upstream gold.
+    
+    Add exact source binding and bounded behavioral feedback, close the observed admission and mutation-test gaps, and append LEM-15 while preserving earlier evidence. Repair eight missing opened fields in the preceding issue reports; their bodies and recorded Git objects remain unchanged.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 36f3c3e32f54b767bd68292e6ebea77c19bc8bd0
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Oct 29 19:14:09 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Oct 29 19:14:09 2026 +0200
+
+    research: record inactive behavioral feedback pilot
+    
+    Register and retain the matched low, gated-low and xhigh diagnostic. All three
+    pass the finite 31-function parent contract; no Stop feedback was delivered,
+    so the correction effect remains unproven. Preserve the broader historical
+    baseline failure and preparation failures, and add LEM-14 without rewriting
+    prior evidence. Full gate and independent applied-mutation review completed.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 6b70fbb1bd3676d7708253b672622d2857fdeda4
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Oct 29 15:29:17 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Oct 29 15:29:17 2026 +0200
+
+    test(research): compare precise checks and low compiler feedback
+    
+    Run the registered four-arm compiler diagnostic in an isolated worktree. Parent acceptance: L1/2, I2/2, G2/2, X2/2; retain one observed low gate repair, all charges, the invalid first protocol and the calibrated post-hoc command readout.
+    
+    Record evidence in LEM-13 and the result report. Preserve prior tracker entries and negatives; no production source change.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 1e3ead8d988781112391fa9b5af9be5fbfb9c945
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Thu Oct 29 09:06:46 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Thu Oct 29 09:06:46 2026 +0200
+
+    research: catalogue low-effort quality mechanisms and counterexamples
+    
+    Aggregate twelve evidence entries with prevention/detection/correction/
+    selection roles, causal limits, negative results and a filterable schema.
+    Recount retained compiler-gate, paragraph, conclude-last and critic rows;
+    preserve the distinction between a feedback intervention and acceptance
+    selection. Export the augmentation recovery shape with the tracker.
+    
+    Codex-Session-Id: 01a18667-f0b8-7f30-87cb-623463a0924d
+
+commit 747ee5a456583ed30f306d51e318d64642a37341
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Oct 28 18:52:46 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Oct 28 18:52:46 2026 +0200
+
+    research: record paired low/xhigh transfer on two frozen tasks
+    
+    Both low authors and independent xhigh baselines pass their sixteen-case
+    external contracts and all-target compilation. Low model estimates are
+    66.9% and 72.7% lower; no repair was eligible. Preserve the two failed
+    repository gate tests, isolated probes, finite mutation evidence and
+    unknown native overhead. New CLI estimates total $0.9854012; cumulative
+    campaign estimates are $10.4988400 of the $20 cap.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit f41b306b4c17bdb9bddc5cecf3e1baead8640ee8
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Oct 28 15:53:52 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Oct 28 15:53:52 2026 +0200
+
+    research: complete authorized producer-status xhigh baseline
+    
+    Raise the cumulative client-estimate cap to $20 and retain the original
+    capped result while recording a fresh, valid xhigh completion. Both arms
+    pass the protected matrix and all-target compile; low costs 78.2% less
+    on this one task. Preserve full-gate failures and log its timeout fixture.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 1023edc172b17d389f70a5923bae223a732632b9
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Oct 28 15:13:41 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Oct 28 15:13:41 2026 +0200
+
+    research: record frozen producer-status pilot and budget-stop diagnostic
+    
+    Low effort completed and passed all 38 frozen public-surface scenarios plus all-target compilation. The fixed-xhigh run exhausted its cap; retain its cost and successful post-hoc patch check while leaving the registered comparison inconclusive. Preserve reusable validator assets and document the three temporary-directory fixture assumptions observed during repository verification.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 0cb5ca9f48791ff81f769de48b4679d2f78a7bfa
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Oct 28 10:23:05 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Oct 28 10:23:05 2026 +0200
+
+    research: validate operation effects across saved repairs
+    
+    Add a frozen 120-scenario worktree-write contract matrix, strict output
+    verification and integrity controls. Record reference calibration, saved
+    repair replay and three applied mutation kills. No new paid model runs.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit d08ece298d594807dbcf6dfe88feeb064c3df87e
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Oct 28 08:57:47 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Oct 28 08:57:47 2026 +0200
+
+    docs(research): record full-validator feedback repair result
+    
+    Preserve known-test improvement, the withheld directory-approval failure,
+    executable reversal/ancestry controls and the complete repair cost sequence.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 0f5063491c937328603d1d7137f88d0ef103cb6b
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Oct 28 07:56:50 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Oct 28 07:56:50 2026 +0200
+
+    docs(research): record bounded repair and compatibility failures
+    
+    Preserve the failed first repair, independent compatibility controls,
+    observed reversal mutation, protected inputs and reconciled costs.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 2cae27b67e68b85a7f12cfb87a09f4f953ac99b0
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Wed Oct 28 06:52:50 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Wed Oct 28 06:52:50 2026 +0200
+
+    docs(research): compare blinded review costs on an existing pair
+    
+    Record executable four-way adjudication, review-context correction,
+    component costs, mutation observations and completed repository gate.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 9e4b8c31931ce1ff6ab5f9031ec82022d104b942
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Oct 27 10:51:54 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Oct 27 10:51:54 2026 +0200
+
+    docs(research): record real-task review failure and supervised fix
+    
+    Preserve the frozen one-attempt operating plan and distinguish the green
+    low-effort completion checks from the independent semantic failures. Record
+    the supervisor repair, observed mutation results, full gate, source commit,
+    client estimates and native accounting limits without claiming workflow savings.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit bc32dc291ebee89bc630181fac72f82290f6f6af
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Oct 27 10:46:59 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Oct 27 10:46:59 2026 +0200
+
+    fix(tools): scope worktree selection checks to write targets
+    
+    Let create_file, edit_file and approve_write reach normal authorization for
+    outside-project targets while preserving ambiguity protection for active,
+    linked and discovered project roots. Classify atomic file replacement by
+    its parent and leaf entry; resolve directory approvals through the leaf.
+    
+    Add baseline controls and independent production-entry regressions for
+    aliases, missing descendants, relocated members and both symlink directions.
+    The initial low-effort candidate needed a supervisor repair after review.
+    
+    Validation: scripts/gate.sh --check passed all five lanes; 17 targeted tests
+    passed; applied mutation review killed all eight final mutations.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 91d2a6e30a40102ab37608a15102f91bf0761864
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Tue Oct 27 09:12:50 2026 +0200
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Tue Oct 27 09:12:50 2026 +0200
+
+    feat(research): validate low effort behind executable completion checks
+    
+    Preserve the aborted six-case study and record a separate prospectively
+    frozen five-pair diagnostic. Both arms pass all five acceptance contracts;
+    low uses 61.5% less client-estimated model cost. Keep whole-workflow costs
+    unknown and the demonstrated operating scope explicit.
+    
+    Add the reviewed completion hook with a canonical descendant cwd guard,
+    16 regression tests, usage instructions and the observed integration bug.
+    Keep earlier harness registrations immutable and all paid charges counted.
+    
+    Codex-Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 22bbf1fc636451fbe81a26a0ea0b2e6511a3dafb
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 24 15:55:10 2026 +0300
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 24 15:55:10 2026 +0300
+
+    docs(research): record upstream-gated repair comparison
+    
+    Preserve four independently passing Ruff attempts, the voluntary compiler repair, zero Stop repairs, broader upstream validation and all client costs. Record observed harness defects and phase-local offline corrections without paid retries or changes to frozen inputs. Keep whole-workflow costs and causal limits explicit.
+    
+    Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 267f693453bef2778d5de10ec181cc989020a491
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 24 12:22:04 2026 +0300
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 24 12:22:04 2026 +0300
+
+    docs(research): record matched low-effort comparison and review limits
+    
+    Preserve all four original17 passes, later stronger24 failures, selected
+    candidate corrections, actual mutation survivors/replays and full gate evidence.
+    Reconcile 36 experimental calls at $3.1279880 reported client cost; record
+    orchestration usage separately with unavailable prices explicit.
+    
+    Close the local source-metadata issue records with source SHA and stable
+    patch-id. Keep the main issue investigating with an unmerged local-fix pointer.
+    Preserve branch/worktree; do not merge, push, install or enable global hooks.
+    
+    Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit b1a030f8a1a43bf481362b589e50bfe363fadd48
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 24 12:16:34 2026 +0300
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 24 12:16:34 2026 +0300
+
+    fix(build): scope dirty metadata and refresh it on incremental builds
+    
+    Use manifest-root Git metadata, preserve raw status bytes and ignore inherited
+    repository/index overrides. Watch source inputs and resolved administrative
+    paths in ordinary and linked worktrees without refreshing the watched index.
+    
+    Add actual build-script and warm offline Cargo regression tests. Independent
+    review applies 38 final mutations: 37 assertion-detected, one runtime missing-
+    prompt detection, no survivors or compiler failures. Addresses the scheduling
+    gap recorded in main bug-fix-session-log:F-199.
+    
+    Validation: full repository gate passed; post-review light Python lane passed
+    1311 tests and 442 subtests; focused 24 methods and standalone Clippy passed.
+    
+    Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit f61b9dac7227e8d4d0e82bdece386259df8fcc12
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 24 09:41:21 2026 +0300
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 24 09:41:21 2026 +0300
+
+    docs(eval): attach verified real-task delivery provenance
+    
+    Record the local fix commit and stable patch identity, retain the isolated
+    worktree, and release the main issue claim with its unmerged-fix pointer.
+    
+    Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2
+
+commit 6acfec2f4ace503cd9c3d89a48cd14973935a378
+Author:     Marius Ailinca <ailinca.marius@gmail.com>
+AuthorDate: Sat Oct 24 09:39:46 2026 +0300
+Commit:     Marius Ailinca <ailinca.marius@gmail.com>
+CommitDate: Sat Oct 24 09:39:46 2026 +0300
+
+    fix(probes): include recoverable errors throughout friction reports
+    
+    Use the complete error population in Python and SQL while retaining all
+    calls for denominators and recovery sequences. Correct the help text.
+    
+    Freeze 13 behavioral checks before one checked-low attempt; add a review
+    regression for a matching-signature unknown next call. Preserve the
+    original survivor and observed 16-mutation replay. Record actual corpus
+    calibration, experiment spend and unpriced orchestration/review overhead.
+    
+    Session-Id: 01a15ca9-f939-7603-acb5-01c6b02f68e2

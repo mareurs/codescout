@@ -1,0 +1,19 @@
+{
+  "state": "passed",
+  "documents_moved": 51,
+  "historical_notes_byte_identical": 107,
+  "raw_evidence_files_byte_identical": 56,
+  "retained_worktree_archive": {
+    "logical_documents": 33,
+    "unique_body_snapshots": 33,
+    "original_source_files_and_archive_members_checked": 66,
+    "new_wrapper_and_index_links_checked": 103,
+    "historical_body_links_reinterpreted_or_checked": false
+  },
+  "commonmark_local_file_links_checked": 455,
+  "link_instrument_calibration": "nested labels, inline/fenced code and reference-style links",
+  "anchors_or_external_urls_checked": false,
+  "selected_git_index_entries_unchanged": true,
+  "unrelated_shared_index_changed": true,
+  "errors": []
+}

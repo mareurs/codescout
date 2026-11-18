@@ -1,0 +1,6 @@
+{
+  "archive_sha256": "21eb2a0a69fd1b199f994425c7140201c8bc9cee6905b3f2574a9a8c4150e5f6",
+  "archive_bytes": 29137865,
+  "matches_producer": true,
+  "scope": "Independent GNU digest; payload checks are separately in closure.json."
+}

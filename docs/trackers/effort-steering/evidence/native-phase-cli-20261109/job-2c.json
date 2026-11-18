@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_0000002c",
+  "command": "TMPDIR=/var/tmp/ep9-01a15 PYTHONPATH=tools/effort_protocol python3 - <<'PY' > /home/marius/.cache/codescout-resident/codescout/effort-protocol-verification-20261109-01a15ca9/logs/public-handoff-native-green.log 2>&1\nimport json,os,unittest,sys\ncfg=json.load(open('/tmp/effort-native-cli-config-20261109-01a15ca9.json'))\nfor k,v in cfg.items():\n key='EFFORT_PROTOCOL_TEST_IMAGE' if k=='evidence_image' else 'EFFORT_PROTOCOL_'+k.upper()\n os.environ[key]=v\nsuite=unittest.defaultTestLoader.loadTestsFromName('test_native.NativeQualificationTests.test_three_native_phases_zero_provider_and_context_bound')\nsys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())\nPY",
+  "server_pid": 337215,
+  "job_pid": 1075351,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T13:19:42.641134336+00:00",
+  "finished_at": "2026-11-09T13:22:11.455026494+00:00",
+  "log_path": "/tmp/codescout-bg-d6Yjas.log"
+}

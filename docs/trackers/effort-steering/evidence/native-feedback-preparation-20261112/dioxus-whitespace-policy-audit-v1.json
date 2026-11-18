@@ -1,0 +1,59 @@
+{
+  "additional_index_calls": 0,
+  "additional_onboarding_calls": 0,
+  "client_model_calls": 0,
+  "coverage": {
+    "coverage": "all_non_ascii_whitespace_eligible_files",
+    "empty_missing_files": [
+      {
+        "path": "packages/fullstack/src/payloads/redirect.rs",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "packages/manganis/manganis-core/assets/script.js",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "packages/manganis/manganis-macro/assets/script.js",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "packages/manganis/manganis/assets/script.js",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "expected_eligible_files": 1060,
+    "native_verdict": "incomplete",
+    "stored_files": 1053,
+    "whitespace_missing_files": [
+      {
+        "bytes": 1,
+        "path": "packages/core-types/src/attributes.rs",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+        "bytes": 1,
+        "path": "packages/ssr/src/config.rs",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+        "bytes": 1,
+        "path": "packages/ssr/src/template.rs",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      }
+    ]
+  },
+  "default_policy_refusal": "missing file is not empty regular source",
+  "explicit_policy": "ascii-whitespace-source-v1",
+  "paid_ready": false,
+  "public_source_sha256": "52d34ed35793e99bab0826373b617d471168f77d20174e2f36bbc98d11055836",
+  "reader_sha256": "6c551b8206fd515dfa91d5291f37723b25d7cd7d8ca7e5b6495884f74fdff506",
+  "saved_actual_native_verification": {
+    "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/common-preparation-v1/index-coderank-v1/index-verification.json",
+    "sha256": "37b4818b07f46cea0afde23accbb3520b6074d6dc6339debc400cce5961205a4"
+  },
+  "schema": "native-index-whitespace-policy-audit-v1",
+  "scope": "Readback of saved real native verifier with physical omitted source files; no new MCP/actor/CLI qualification.",
+  "source_unchanged": true,
+  "task": "DioxusLabs__dioxus-5384"
+}

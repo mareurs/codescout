@@ -1,0 +1,2715 @@
+diff --git a/tools/agent_lifecycle/external.py b/tools/agent_lifecycle/external.py
+index bed258a51..d6a52b31c 100644
+--- a/tools/agent_lifecycle/external.py
++++ b/tools/agent_lifecycle/external.py
+@@ -1,9 +1,12 @@
+ """Prepared external task entry; admission and shared-knowledge assembly stay controller-owned."""
+ import hashlib
++import importlib.util
+ import json
+ import pathlib
+ import re
+ import stat
++import os
++import tempfile
+ import uuid
+ from decimal import Decimal
+ from types import SimpleNamespace
+@@ -13,12 +16,113 @@ import transport
+ import workflow
+ from artifacts import capture_patch
+ from core import amount
++from embedding_profile import validate_embedding_profile
++
++# Load the standalone shared contract without changing global module search order.
++_fixture_spec = importlib.util.spec_from_file_location(
++    "lifecycle_public_fixture", pathlib.Path(__file__).resolve().parents[1] / "effort_protocol/public_fixture.py")
++public_fixture = importlib.util.module_from_spec(_fixture_spec)
++_fixture_spec.loader.exec_module(public_fixture)
+ 
+ 
+ def save(path, value):
+     path.write_text(json.dumps(value, indent=2) + "\n")
+ 
+ 
++def validate_context_path(path):
++    """Admit only physical scratch paths without inherited project or user context."""
++    raw = pathlib.Path(path).absolute()
++    resolved = raw.resolve(strict=True)
++    bases = (pathlib.Path("/tmp"), pathlib.Path("/var/tmp"))
++    base = next((value for value in bases if resolved != value and value in resolved.parents), None)
++    if base is None or resolved != raw:
++        raise ValueError("external CLI context must have isolated physical scratch ancestry")
++    for parent in resolved.parents:
++        if any((parent / name).exists() or (parent / name).is_symlink()
++               for name in ("CLAUDE.md", "AGENTS.md", ".git", ".claude", "Cargo.toml")):
++            raise ValueError("external CLI context has inherited rules or workspace ancestry")
++        if parent == base:
++            break
++    if resolved.stat().st_uid != os.getuid():
++        raise ValueError("external CLI context is not owned scratch")
++    return resolved
++
++def context_preload(cfg, actor):
++    """Reconstruct the bound append-only system input before any credential read."""
++    if "context_preload" not in cfg:
++        return None
++    descriptor=cfg["context_preload"]
++    if not isinstance(descriptor,dict) or set(descriptor)!={"path","system_path","skill_path","files"}:
++        raise ValueError("invalid prepared context descriptor")
++    body_path=pathlib.Path(descriptor["path"])
++    system=pathlib.Path(descriptor["system_path"])
++    skill=pathlib.Path(descriptor["skill_path"])
++    target=actor/".codescout/prepared-context/reconnaissance"
++    if system!=actor/".codescout/system-prompt.md" or skill!=target/"SKILL.md":
++        raise ValueError("prepared context must name the actor's frozen onboarding and skill")
++    paths=[body_path,system,*target.rglob("*")]
++    if any(p.is_symlink() or not(p.is_file() or p.is_dir()) for p in paths):
++        raise ValueError("physical prepared context required")
++    files={str(p) for p in paths if p.is_file()}
++    if files!=set(descriptor["files"]):
++        raise ValueError("prepared context file coverage differs")
++    for name,digest in descriptor["files"].items():
++        p=pathlib.Path(name)
++        if (any(parent.is_symlink() for parent in p.parents) or cfg["files"].get(name)!=digest
++                or hashlib.sha256(p.read_bytes()).hexdigest()!=digest):
++            raise ValueError("prepared context hash coverage differs")
++    if not system.read_text().strip() or not skill.read_text().strip():
++        raise ValueError("nonempty prepared context required")
++    expected=("<prepared-context>\n<codescout-onboarding>\n"+system.read_text()+
++              "\n</codescout-onboarding>\n<reconnaissance-instructions>\n"
++              "Supporting files: .codescout/prepared-context/reconnaissance\n"+
++              skill.read_text()+"\n</reconnaissance-instructions>\n</prepared-context>\n")
++    body=body_path.read_text()
++    if body!=expected:
++        raise ValueError("prepared context body differs from frozen inputs")
++    return body
++
++def _public_build_helper(cfg):
++    """Load the hash-bound standalone helper only for the registered new profile."""
++    fields = {"public_build_inputs", "public_build_stage", "public_build_inputs_helper"}
++    selected = fields.intersection(cfg)
++    if not selected and cfg.get("execution_profile") != "cargo-v3":
++        return None
++    if selected != fields or cfg.get("execution_profile") != "cargo-v3":
++        raise ValueError("external public build contract incomplete or profile differs")
++    name = cfg["public_build_inputs_helper"]
++    if not isinstance(name, str):
++        raise ValueError("external public build helper path missing")
++    path = pathlib.Path(name)
++    if (not path.is_absolute() or path.resolve(strict=True) != path
++            or path.is_symlink() or not path.is_file()):
++        raise ValueError("external public build helper must be a physical frozen file")
++    data = path.read_bytes()
++    digest = hashlib.sha256(data).hexdigest()
++    if cfg.get("files", {}).get(str(path)) != digest:
++        raise ValueError("external public build helper hash missing or changed")
++    spec = importlib.util.spec_from_file_location("lifecycle_public_build_inputs_" + digest, path)
++    helper = importlib.util.module_from_spec(spec)
++    # Execute the exact bytes just checked, without adding their directory to sys.path.
++    exec(compile(data, str(path), "exec"), helper.__dict__)
++    return helper
++
++def public_build_contract(cfg, options, actor):
++    helper = _public_build_helper(cfg)
++    if helper is None:
++        return None
++    return helper.validate_native_options(options, cfg["public_build_inputs"], cfg["public_build_stage"],
++                                          actor, cfg["image"])
++
++
++def public_build_runtime(cfg, row, actor):
++    helper = _public_build_helper(cfg)
++    if helper is None:
++        return None
++    return helper.validate_native_runtime(row, cfg["public_build_inputs"], cfg["public_build_stage"],
++                                          actor, cfg["image"])
++
++
+ def validate_prepared(out, effort, allowance, cli_cap):
+     out = pathlib.Path(out)
+     cfg = json.loads((out / "prepared.json").read_text())
+@@ -29,11 +133,13 @@ def validate_prepared(out, effort, allowance, cli_cap):
+         raise ValueError("external image must be immutable")
+     if not re.fullmatch(r"[0-9a-f]{40}", cfg["baseline_commit"]):
+         raise ValueError("external source baseline must be immutable")
+-    actor = pathlib.Path(cfg["actor"]).resolve()
+-    if pathlib.Path("/tmp") not in actor.parents:
+-        raise ValueError("external CLI context must avoid host-home ancestry")
++    actor = validate_context_path(cfg["actor"])
++    context_preload(cfg, actor)
+     required = {str(out / "mcp-native-argv.json"), cfg["global_rules"], cfg["cli"],
+                 str(actor / "CLAUDE.md")}
++    if "public_fixture" in cfg:
++        public_fixture.read_fixture_bundle(cfg["public_fixture"])
++        required |= {str(path) for path in pathlib.Path(cfg["public_fixture"]["root"]).iterdir()}
+     if not required <= cfg["files"].keys():
+         raise ValueError("external required input hashes missing")
+     for name, expected in cfg["files"].items():
+@@ -47,8 +153,13 @@ def validate_prepared(out, effort, allowance, cli_cap):
+     valued = {"--pull", "--network", "--user", "--cpus", "--memory", "--memory-swap",
+               "--pids-limit", "--name", "--label", "--tmpfs", "--mount", "--workdir",
+               "--entrypoint", "-e", "--env"}
++    if "public_fixture" in cfg:
++        valued.add("--add-host")
+     repeated = {"--mount", "-e", "--env"}
+     flags = {"--init", "-i"}
++    if "embedding_profile" in cfg:
++        valued |= {"--cap-drop", "--security-opt"}
++        flags.add("--read-only")
+     args = native[2:-4]
+     index = 0
+     while index < len(args):
+@@ -70,12 +181,20 @@ def validate_prepared(out, effort, allowance, cli_cap):
+             raise ValueError("duplicate external native option " + option)
+         options.setdefault(option, []).append(value)
+         index += 1
+-    for option, expected in [("--network", "none"), ("--user", "1000:1000"),
++    public_build_contract(cfg, options, actor)
++    if "public_fixture" in cfg:
++        public_fixture.validate_fixture_options(options, cfg["public_fixture"], "native", actor=actor)
++    if "embedding_profile" in cfg:
++        validate_embedding_profile(cfg["embedding_profile"], options, cfg["image"])
++    else:
++        if options.get("--network") != ["none"]:
++            raise ValueError("unexpected external native option --network")
++        if options.get("--tmpfs") != ["/tmp:rw,exec,size=4g,uid=1000,gid=1000"]:
++            raise ValueError("unexpected external native temporary storage")
++    for option, expected in [("--user", "1000:1000"),
+                              ("--cpus", "4"), ("--memory", "32g"), ("--pids-limit", "4096")]:
+         if options.get(option) != [expected]:
+             raise ValueError("unexpected external native option " + option)
+-    if options.get("--tmpfs") != ["/tmp:rw,exec,size=4g,uid=1000,gid=1000"]:
+-        raise ValueError("unexpected external native temporary storage")
+     if options.get("--memory-swap", ["32g"]) != ["32g"]:
+         raise ValueError("unexpected external native swap limit")
+     if options.get("--pull", ["never"]) != ["never"]:
+@@ -93,6 +212,8 @@ def launch(out, *, effort, allowance, cli_cap=None, scripted_plan=None,
+            token_path=pathlib.Path("/home/marius/.config/s5/token-claude-stef"), supervisor=None):
+     out = pathlib.Path(out).resolve()
+     cfg, config, actor, balance, cap = validate_prepared(out, effort, allowance, cli_cap)
++    temporary_base = "/var/tmp" if actor.is_relative_to("/var/tmp") else "/tmp"
++    client_temporary = pathlib.Path(tempfile.mkdtemp(prefix="ep-cli-", dir=temporary_base))
+     scripted = scripted_plan is not None
+     with (out / "started.json").open("x") as marker:
+         json.dump({"prepared_sha256": hashlib.sha256((out / "prepared.json").read_bytes()).hexdigest(),
+@@ -104,9 +225,13 @@ def launch(out, *, effort, allowance, cli_cap=None, scripted_plan=None,
+     expected = {"effort": effort, "clause": worker.CLAUSE,
+         "declaration": worker.CLAUSE in global_md + "\n" + project_md,
+         "global_visible": worker.visible(global_md), "project_visible": worker.visible(project_md)}
++    preload = context_preload(cfg, actor)
++    if preload is not None:
++        expected["preload_visible"] = worker.visible(preload)
+     save(out / "expected.json", expected)
++    stdio = pathlib.Path(__file__).with_name("native_stdio.py")
+     save(out / "mcp.json", {"mcpServers": {"codescout": {"command": "/usr/bin/python3",
+-        "args": ["-B", str(worker.HERE / "stdio.py"), str(out)]}}})
++        "args": ["-B", str(stdio), str(out)]}}})
+     allowed = ["Skill", "ToolSearch", "mcp__codescout__*"]
+     save(out / "settings.json", {"permissions": {"allow": allowed}})
+     hook = out / "hook"; hook.mkdir()
+@@ -116,10 +241,13 @@ def launch(out, *, effort, allowance, cli_cap=None, scripted_plan=None,
+         "--strict-mcp-config", "--mcp-config", str(out / "mcp.json"), "--permission-mode", "acceptEdits",
+         "--tools", "Skill,ToolSearch", "--allowedTools", ",".join(allowed), "--output-format", "json",
+         "--max-budget-usd", str(cap), "--plugin-dir", cfg["plugin"], "--", cfg["prompt"]]
++    if preload is not None:
++        argv[-2:-2] = ["--append-system-prompt", preload]
+     env = {"HOME": str(home), "USER": "marius", "LANG": "C.UTF-8", "PATH": "/usr/local/bin:/usr/bin:/bin",
+         "CLAUDE_CONFIG_DIR": str(client_config), "DISABLE_AUTOUPDATER": "1",
+         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8192",
+-        "PYTHONDONTWRITEBYTECODE": "1"}
++        "PYTHONDONTWRITEBYTECODE": "1", "MCP_PROTOCOL_NEGOTIATION": "legacy",
++        "TMPDIR": str(client_temporary)}
+     if scripted:
+         env["ANTHROPIC_API_KEY"] = "scripted-no-real-credential"
+     else:
+@@ -131,6 +259,10 @@ def launch(out, *, effort, allowance, cli_cap=None, scripted_plan=None,
+     env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:" + str(server.server_port)
+     save(out / "launch.json", {"argv": argv, "session_id": sid, "scripted": scripted,
+         "real_credentials_read": not scripted, "source_image": cfg["image"],
++        "mcp_protocol_negotiation": env["MCP_PROTOCOL_NEGOTIATION"],
++        "client_temporary": str(client_temporary),
++        **({"context_preload_sha256": hashlib.sha256(preload.encode()).hexdigest()} if preload is not None else {}),
++        "native_stdio_sha256": hashlib.sha256(stdio.read_bytes()).hexdigest(),
+         "hook_set": "Pinned companion skills plus lifecycle observer; no task-specific hint hook"})
+     runtime = SimpleNamespace(IMAGE=cfg["image"], save=save,
+         extract_result=worker.extract_result, audit_hooks=worker.audit_hooks)
+diff --git a/tools/agent_lifecycle/test_external_entry.py b/tools/agent_lifecycle/test_external_entry.py
+index 0142cc6bb..d2d52c3d2 100644
+--- a/tools/agent_lifecycle/test_external_entry.py
++++ b/tools/agent_lifecycle/test_external_entry.py
+@@ -32,6 +32,77 @@ class ExternalEntryTests(unittest.TestCase):
+                       for p in (native, glob, cli, actor / "CLAUDE.md")}}
+         (root / "prepared.json").write_text(json.dumps(cfg))
+         return cfg
++    def test_context_preload_is_hash_bound_and_appended_to_system(self):
++        with tempfile.TemporaryDirectory() as temp:
++            root=pathlib.Path(temp)
++            cfg=self.fixture(root)
++            context=root/'context.txt'; context.write_text('<prepared-context>\n<codescout-onboarding>\nONBOARDING\n</codescout-onboarding>\n<reconnaissance-instructions>\nSupporting files: .codescout/prepared-context/reconnaissance\nRECON\n</reconnaissance-instructions>\n</prepared-context>\n')
++            system=root/'actor/.codescout/system-prompt.md'
++            system.parent.mkdir(); system.write_text('ONBOARDING')
++            skill=root/'actor/.codescout/prepared-context/reconnaissance/SKILL.md'
++            skill.parent.mkdir(parents=True); skill.write_text('RECON')
++            files={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (context,system,skill)}
++            cfg['context_preload']={'path':str(context),'system_path':str(system),'skill_path':str(skill),'files':files}
++            cfg['files'].update(files)
++            (root/'prepared.json').write_text(json.dumps(cfg))
++            seen={}
++            def execute(runtime,config,out,actor,argv,env,server,sid,hook,available,**kwargs):
++                seen['argv']=argv
++                return {'workflow_completed':True}
++            with patch.object(external.workflow,'execute',side_effect=execute):
++                external.launch(root,effort='low',allowance='1',scripted_plan=[])
++            self.assertEqual(seen['argv'][seen['argv'].index('--append-system-prompt')+1],context.read_text())
++            expected=json.loads((root/'expected.json').read_text())
++            self.assertEqual(expected['preload_visible'],external.worker.visible(context.read_text()))
++            self.assertEqual(json.loads((root/'launch.json').read_text())['context_preload_sha256'],files[str(context)])
++            cfg['files'].pop(str(skill))
++            (root/'prepared.json').write_text(json.dumps(cfg))
++            with self.assertRaises(ValueError):
++                external.validate_prepared(root,'low','1','1')
++            cfg['files'].update(files)
++            context.write_text('ONBOARDING ONLY')
++            cfg['files'][str(context)]=hashlib.sha256(context.read_bytes()).hexdigest()
++            cfg['context_preload']['files'][str(context)]=cfg['files'][str(context)]
++            (root/'prepared.json').write_text(json.dumps(cfg))
++            with self.assertRaises(ValueError):
++                external.validate_prepared(root,'low','1','1')
++
++    def test_public_fixture_native_options_and_hashes_are_admitted_exactly(self):
++        with tempfile.TemporaryDirectory(prefix="external-public-fixture-") as directory:
++            root = pathlib.Path(directory)
++            cfg = self.fixture(root)
++            descriptor = external.public_fixture.create_fixture_bundle(
++                root / "fixture",
++                {"version": "public-http-fixture-v1", "hostname": "fixture.sample.test",
++                 "port": 18081, "routes": {"/": {
++                     "status": 200, "content_type": "text/plain", "body": "public"}}})
++            cfg["public_fixture"] = descriptor
++            argv_path = root / "mcp-native-argv.json"
++            argv = json.loads(argv_path.read_text())
++            argv[-4:-4] = external.public_fixture.fixture_docker_options(descriptor, "native")
++            argv_path.write_text(json.dumps(argv))
++            for path in (argv_path, *pathlib.Path(descriptor["root"]).iterdir()):
++                cfg["files"][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            external.validate_prepared(root, "low", "1.00", None)
++            original = argv_path.read_text()
++            for before, after in (
++                    ("fixture.sample.test:127.0.0.1", "example.com:127.0.0.1"),
++                    ("/bench/public-fixture/launch-native", "/bench/bin/codescout"),
++                    (f"type=bind,src={descriptor['root']},dst=/bench/public-fixture,readonly",
++                     f"type=bind,src={descriptor['root']},dst=/bench/public-fixture")):
++                bad = [after if x == before else x for x in json.loads(original)]
++                argv_path.write_text(json.dumps(bad))
++                cfg["files"][str(argv_path)] = hashlib.sha256(argv_path.read_bytes()).hexdigest()
++                (root / "prepared.json").write_text(json.dumps(cfg))
++                with self.subTest(before=before), self.assertRaises(ValueError):
++                    external.validate_prepared(root, "low", "1.00", None)
++            argv_path.write_text(original)
++            cfg["files"][str(argv_path)] = hashlib.sha256(argv_path.read_bytes()).hexdigest()
++            del cfg["files"][str(pathlib.Path(descriptor["root"]) / "spec.json")]
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            with self.assertRaises(ValueError):
++                external.validate_prepared(root, "low", "1.00", None)
+ 
+     def test_drift_and_empty_checks_block_before_credentials_or_start_marker(self):
+         self.assertIsNotNone(external, "external entry is not implemented")
+@@ -131,6 +202,49 @@ class ExternalEntryTests(unittest.TestCase):
+                     with self.assertRaisesRegex(ValueError, "swap"):
+                         external.validate_prepared(root, "low", "8", None)
+ 
++    def test_disk_actor_is_admitted_and_launch_uses_private_short_temporary(self):
++        with tempfile.TemporaryDirectory(prefix="ep-disk-", dir="/var/tmp") as temp:
++            root = pathlib.Path(temp)
++            self.fixture(root)
++            seen = {}
++            def execute(runtime, config, out, actor, argv, env, server, sid, hook, available, **kwargs):
++                seen.update(env=env)
++                return {"workflow_completed": False}
++            with patch.object(external.workflow, "execute", side_effect=execute):
++                external.launch(root, effort="low", allowance="1", scripted_plan=[])
++            scratch = pathlib.Path(seen["env"]["TMPDIR"])
++            self.addCleanup(lambda: __import__("shutil").rmtree(scratch))
++            self.assertEqual(scratch.parent, pathlib.Path("/var/tmp"))
++            self.assertLess(len(str(scratch)), 40)
++            self.assertEqual(scratch.stat().st_mode & 0o777, 0o700)
++            launch = json.loads((root / "launch.json").read_bytes())
++            self.assertEqual(launch["client_temporary"], str(scratch))
++
++    def test_actor_ancestry_cannot_inherit_rules_workspace_or_symlink(self):
++        with tempfile.TemporaryDirectory(prefix="ep-context-", dir="/var/tmp") as temp:
++            root = pathlib.Path(temp)
++            nested = root / "nested"
++            nested.mkdir()
++            self.fixture(nested)
++            external.validate_prepared(nested, "low", "1", None)
++            for name in ("CLAUDE.md", "AGENTS.md", ".git", ".claude", "Cargo.toml"):
++                with self.subTest(name=name):
++                    marker = root / name
++                    marker.write_text("parent context")
++                    try:
++                        with self.assertRaisesRegex(ValueError, "ancestry"):
++                            external.validate_prepared(nested, "low", "1", None)
++                        self.assertFalse((nested / "started.json").exists())
++                    finally:
++                        marker.unlink()
++            link = root / "linked"
++            link.symlink_to(nested / "actor", target_is_directory=True)
++            cfg = json.loads((nested / "prepared.json").read_bytes())
++            cfg["actor"] = str(link)
++            (nested / "prepared.json").write_text(json.dumps(cfg))
++            with self.assertRaisesRegex(ValueError, "ancestry"):
++                external.validate_prepared(nested, "low", "1", None)
++
+     def test_scripted_launch_wires_full_context_budget_and_required_capture(self):
+         self.assertIsNotNone(external, "external entry is not implemented")
+         with tempfile.TemporaryDirectory() as temp:
+@@ -160,6 +274,26 @@ class ExternalEntryTests(unittest.TestCase):
+             self.assertTrue((root / "started.json").exists())
+             with self.assertRaises((ValueError, FileExistsError)):
+                 external.launch(root, effort="low", allowance="8", scripted_plan=[])
++    def test_cli_legacy_protocol_and_per_connection_stdio_are_explicit(self):
++        with tempfile.TemporaryDirectory() as temp:
++            root = pathlib.Path(temp)
++            self.fixture(root)
++            seen = {}
++            def execute(runtime, config, out, actor, argv, env, server, sid, hook, available, **kwargs):
++                seen.update(env=dict(env))
++                server.shutdown()
++                server.server_close()
++                return {"workflow_completed": True}
++            with patch.object(external.workflow, "execute", side_effect=execute):
++                external.launch(root, effort="low", allowance="8", cli_cap="7", scripted_plan=[])
++            self.assertEqual(seen["env"].get("MCP_PROTOCOL_NEGOTIATION"), "legacy")
++            config = json.loads((root / "mcp.json").read_bytes())
++            wrapper = pathlib.Path(external.__file__).with_name("native_stdio.py")
++            self.assertEqual(config["mcpServers"]["codescout"]["args"][1], str(wrapper))
++            launch = json.loads((root / "launch.json").read_bytes())
++            self.assertEqual(launch["mcp_protocol_negotiation"], "legacy")
++            self.assertEqual(launch["native_stdio_sha256"], hashlib.sha256(wrapper.read_bytes()).hexdigest())
++
+     def test_launch_forwards_runtime_supervisor_to_workflow(self):
+         from types import SimpleNamespace
+         with tempfile.TemporaryDirectory() as temp:
+@@ -175,3 +309,148 @@ class ExternalEntryTests(unittest.TestCase):
+                 external.launch(root, effort="low", allowance="8",
+                                 scripted_plan=[], supervisor=supervisor)
+             self.assertEqual(observed, ["checked"])
++
++    def test_registered_embedding_profile_preserves_fail_before_launch_boundary(self):
++        import embedding_profile
++        from test_embedding_profile import EmbeddingProfileTests
++        fixture = EmbeddingProfileTests("test_only_registered_owned_internal_relay_graph_is_admitted")
++        fixture.setUp()
++        self.addCleanup(fixture.temp.cleanup)
++        with tempfile.TemporaryDirectory(prefix="external-relay-profile-") as td:
++            root = pathlib.Path(td)
++            cfg = self.fixture(root)
++            native_path = root / "mcp-native-argv.json"
++            native = json.loads(native_path.read_text())
++            native[native.index("--network") + 1] = fixture.net
++            native[native.index("--tmpfs") + 1] = "/tmp:rw,exec,size=16g,uid=1000,gid=1000"
++            native[2:2] = ["--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
++            native_path.write_text(json.dumps(native))
++            cfg["files"][str(native_path)] = hashlib.sha256(native_path.read_bytes()).hexdigest()
++            cfg["embedding_profile"] = fixture.profile
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            with patch.object(embedding_profile, "_inspect", side_effect=lambda kind, identity: fixture.rows[identity]):
++                try:
++                    actual = external.validate_prepared(root, "low", "0.50", None)
++                except ValueError as exc:
++                    self.fail("registered live relay should validate: " + str(exc))
++                self.assertEqual(actual[0]["embedding_profile"]["network_id"], fixture.net)
++                fixture.rows[fixture.net]["Internal"] = False
++                with self.assertRaises(ValueError):
++                    external.launch(root, effort="low", allowance="0.50", token_path="/must-not-read-token")
++            self.assertFalse((root / "started.json").exists())
++
++    def test_unregistered_embedding_declaration_cannot_hide_behind_default_network_none(self):
++        with tempfile.TemporaryDirectory(prefix="external-bad-relay-profile-") as td:
++            root = pathlib.Path(td)
++            cfg = self.fixture(root)
++            cfg["embedding_profile"] = {"version": "arbitrary-network"}
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            with self.assertRaises(ValueError):
++                external.validate_prepared(root, "low", "0.50", None)
++
++    def test_profile_only_flags_cannot_be_admitted_on_default_network_none(self):
++        for extra in [
++            ["--read-only"], ["--cap-drop", "ALL"], ["--security-opt", "no-new-privileges"],
++        ]:
++            with self.subTest(extra=extra), tempfile.TemporaryDirectory(prefix="external-default-option-") as td:
++                root = pathlib.Path(td)
++                cfg = self.fixture(root)
++                path = root / "mcp-native-argv.json"
++                argv = json.loads(path.read_text())
++                argv[2:2] = extra
++                path.write_text(json.dumps(argv))
++                cfg["files"][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
++                (root / "prepared.json").write_text(json.dumps(cfg))
++                with self.assertRaises(ValueError):
++                    external.validate_prepared(root, "low", "0.50", None)
++                self.assertFalse((root / "started.json").exists())
++
++
++    def test_public_dependency_contract_is_validated_before_credentials(self):
++        import importlib.util
++        from pathlib import Path
++        helper_source = Path(__file__).resolve().parents[1] / "effort_protocol/public_build_inputs.py"
++        spec = importlib.util.spec_from_file_location("entry_build_input_fixture", helper_source)
++        helper = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(helper)
++        with tempfile.TemporaryDirectory(dir="/var/tmp") as temporary:
++            root = Path(temporary)
++            cfg = self.fixture(root)
++            actor = Path(cfg["actor"])
++            (actor / "node_modules").mkdir()
++            raw = {"schema":"public-build-inputs-v1", "image":cfg["image"], "seed":None,
++                   "dependency_dirs":["node_modules"], "cache_mounts":[]}
++            stage = helper.stage_inputs(raw, actor, cfg["image"], root / "build-state")
++            frozen = root / "public-build-inputs-helper.py"
++            frozen.write_bytes(helper_source.read_bytes())
++            cfg.update(execution_profile="cargo-v3", public_build_inputs=raw,
++                       public_build_stage=stage, public_build_inputs_helper=str(frozen))
++            cfg["files"][str(frozen)] = hashlib.sha256(frozen.read_bytes()).hexdigest()
++            native = root / "mcp-native-argv.json"
++            argv = json.loads(native.read_bytes())
++            options = ["--mount", "type=bind,src=" + str(actor) + ",dst=/testbed"]
++            for row in stage["mounts"]:
++                options += ["--mount", "type=bind,src=" + row["source"] + ",dst=" + row["destination"]]
++            argv[-4:-4] = options
++            native.write_text(json.dumps(argv))
++            cfg["files"][str(native)] = hashlib.sha256(native.read_bytes()).hexdigest()
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            self.assertEqual(external.validate_prepared(root, "low", "1", "1")[0]["public_build_inputs"], raw)
++            original = json.loads(json.dumps(cfg))
++            for variant in ("missing-stage", "missing-helper-hash", "other-descriptor", "legacy-profile"):
++                changed = json.loads(json.dumps(original))
++                if variant == "missing-stage": changed.pop("public_build_stage")
++                elif variant == "missing-helper-hash": changed["files"].pop(str(frozen))
++                elif variant == "other-descriptor": changed["public_build_inputs"]["dependency_dirs"] = []
++                else: changed["execution_profile"] = "cargo-v2"
++                (root / "prepared.json").write_text(json.dumps(changed))
++                with self.subTest(variant=variant), self.assertRaises(ValueError):
++                    external.validate_prepared(root, "low", "1", "1")
++            (root / "prepared.json").write_text(json.dumps(original))
++            argv[-4-len(options):-4] = []
++            native.write_text(json.dumps(argv))
++            original["files"][str(native)] = hashlib.sha256(native.read_bytes()).hexdigest()
++            (root / "prepared.json").write_text(json.dumps(original))
++            with self.assertRaises(ValueError):
++                external.validate_prepared(root, "low", "1", "1")
++            self.assertFalse((root / "started.json").exists())
++
++
++    def test_isolated_process_loads_only_the_copied_bound_build_helper(self):
++        import importlib.util
++        import subprocess
++        import sys
++        from pathlib import Path
++        helper_source = Path(__file__).resolve().parents[1] / "effort_protocol/public_build_inputs.py"
++        spec = importlib.util.spec_from_file_location("isolated_build_fixture", helper_source)
++        helper = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(helper)
++        with tempfile.TemporaryDirectory(dir="/var/tmp") as temporary:
++            root = Path(temporary)
++            cfg = self.fixture(root)
++            actor = Path(cfg["actor"])
++            raw = {"schema":"public-build-inputs-v1", "image":cfg["image"], "seed":None,
++                   "dependency_dirs":[], "cache_mounts":[]}
++            stage = helper.stage_inputs(raw, actor, cfg["image"], root / "build-state")
++            copied = root / "bound-helper.py"
++            copied.write_bytes(helper_source.read_bytes())
++            cfg.update(execution_profile="cargo-v3", public_build_inputs=raw,
++                       public_build_stage=stage, public_build_inputs_helper=str(copied))
++            cfg["files"][str(copied)] = hashlib.sha256(copied.read_bytes()).hexdigest()
++            native = root / "mcp-native-argv.json"
++            argv = json.loads(native.read_bytes())
++            argv[-4:-4] = ["--mount", "type=bind,src=" + str(actor) + ",dst=/testbed"]
++            native.write_text(json.dumps(argv))
++            cfg["files"][str(native)] = hashlib.sha256(native.read_bytes()).hexdigest()
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            program = (
++                "import sys; sys.path.insert(0,sys.argv[2]); import external; "
++                "assert 'public_build_inputs' not in sys.modules; "
++                "external.validate_prepared(sys.argv[1],'low','1','1'); "
++                "assert 'public_build_inputs' not in sys.modules; print('ready')"
++            )
++            process = subprocess.run([sys.executable, "-I", "-B", "-c", program, str(root),
++                                      str(Path(external.__file__).parent)],
++                                     capture_output=True, text=True, timeout=30)
++            self.assertEqual(process.returncode, 0, process.stderr)
++            self.assertEqual(process.stdout.strip(), "ready")
+diff --git a/tools/effort_protocol/adapter.py b/tools/effort_protocol/adapter.py
+index f30e611d6..dacb3abbb 100644
+--- a/tools/effort_protocol/adapter.py
++++ b/tools/effort_protocol/adapter.py
+@@ -17,7 +17,8 @@ from policy import ProtocolViolation, validate_transition
+ from receipts import ReceiptViolation, input_digest, publish_exclusive
+ from readiness import ReadinessViolation, validate_readiness
+ from public_artifacts import build_public_artifact
+-from execution_profiles import ProfileViolation, get_profile, profile_digest
++from execution_profiles import (ProfileViolation, get_profile, profile_digest,
++                                validate_command_budget, validate_profile_fixture, validate_profile_build_inputs)
+ 
+ _ACTIVE = {"investigate": "repair", "repair": "challenge", "challenge": "closed"}
+ _PUBLIC_KEYS = {"issue", "project_rules", "global_rules", "onboarding", "prior_public_artifacts"}
+@@ -83,7 +84,20 @@ def _admit_backend(request, executor):
+     if not isinstance(proof, dict) or set(proof) != {"expected", "wire"}:
+         raise PhaseInvalid("native preparation evidence missing")
+     try:
+-        ready = validate_readiness(proof["expected"], proof["wire"])
++        source_reader = getattr(executor, "readiness_source", None)
++        source = source_reader() if callable(source_reader) else None
++        ready = validate_readiness(proof["expected"], proof["wire"], source=source)
++        fixture = validate_profile_fixture(request.get("execution_profile", "fixture-v1"),
++                                           request.get("public_fixture"))
++        native_fixture = ready["binding"].get("public_fixture_sha256")
++        command_fixture = fixture["fingerprint"] if fixture is not None else None
++        if native_fixture != command_fixture:
++            raise ValueError("native and command public fixture bindings differ")
++        inputs = validate_profile_build_inputs(request.get("execution_profile", "fixture-v1"),
++                                               request.get("public_build_inputs"), source, ready["binding"]["image"])
++        command_inputs = inputs["fingerprint"] if inputs is not None else None
++        if ready["binding"].get("public_build_inputs_sha256") != command_inputs:
++            raise ValueError("native and command public build inputs differ")
+         binder = getattr(executor, "bind_readiness", None)
+         if not callable(binder):
+             raise ValueError("native backend cannot bind concrete preparation")
+@@ -93,6 +107,70 @@ def _admit_backend(request, executor):
+         raise PhaseInvalid("native preparation not ready: " + str(exc)) from exc
+ 
+ 
++def _submission_contract(phase, execution_profile, prefixes, timeout_s, max_log_bytes):
++    """Deliver the generic public producer/consumer contract before actor work."""
++    if not isinstance(prefixes, list) or not all(
++            isinstance(p, str) and p.endswith("/") and
++            all(part not in ("", ".", "..") for part in p[:-1].split("/")) and
++            not any(ord(ch) < 32 or ch == "\\" for ch in p)
++            for p in prefixes) or len(set(prefixes)) != len(prefixes):
++        raise PhaseInvalid("invalid public probe locations")
++    profile = get_profile(execution_profile)
++    string = {"type": "string", "minLength": 1}
++    contract = {
++        "version": "public-submission-contract-v1",
++        "output_path": "submission.json",
++        "phase": phase,
++        "submission_schema": {
++            "type": "object", "required": ["status", "clauses", "commands"],
++            "properties": {
++                "status": {"enum": ["submitted", "incomplete", "budget_exhausted"]},
++                "clauses": {"type": "array", "items": {
++                    "type": "object", "required": ["id", "kind", "role", "receipts"],
++                    "properties": {
++                        "id": {**string, "description": "Unique clause ID."},
++                        "kind": {"enum": ["requirement", "preservation", "uncertainty"]},
++                        "role": {**string, "description":
++                            "Use reproduction and legitimate for the two investigation roles."},
++                        "receipts": {"type": "array", "minItems": 1, "items": string,
++                            "description": "Local command IDs from this submission; the host supplies receipts."},
++                        "unresolved": {"type": "boolean", "default": False},
++                        "statement": {**string, "description":
++                            "Public-source justification and intended behavior, distinguished from observations."}}}},
++                "commands": {"type": "array", "maxItems": 8, "items": {
++                    "type": "object", "required": ["id", "argv", "cwd", "test_files"],
++                    "properties": {
++                        "id": {"type": "string", "pattern": "^(?!public-)[A-Za-z0-9_-]{1,80}$",
++                            "description": "Unique local command ID; public- is reserved."},
++                        "argv": {"type": "array", "minItems": 1, "items": {"type": "string"},
++                            "description": "Executable and arguments; argv[0] must be nonempty. No implicit shell."},
++                        "cwd": {**string, "description":
++                            "Existing source-relative directory, such as ., without absolute paths or .. components."},
++                        "test_files": {"type": "array", "minItems": 1, "items": string,
++                            "description": "Existing regular source-relative files read by this command."}}}}},
++            "allOf": [{"if": {"properties": {"status": {"const": "submitted"}}},
++                       "then": {"properties": {
++                           "clauses": {"minItems": 1}, "commands": {"minItems": 1}}}}]},
++        "execution": {
++            "source_mount": profile["source_mount"], "source_read_only": True,
++            "allowed_probe_prefixes": list(prefixes), "build_directory": "/build",
++            "environment": copy.deepcopy(profile["env"]),
++            "timeout_s": timeout_s, "max_log_bytes": max_log_bytes,
++            "description": "The host replays commands in a separate container with frozen source. "
++                "Use the source mount for absolute paths and the writable build or temporary directories for outputs. "
++                "Submit observed failures truthfully; a reproduction command may fail."},
++        "phase_rules": {
++            "investigate": {"required_roles": ["reproduction", "legitimate"],
++                "description": "Keep every existing file unchanged, including tests. New standalone probe files "
++                    "and their directories must be under allowed_probe_prefixes. Empty prefixes allow no new files."},
++            "repair": {"description": "Submit commands for the captured current source and declare uncertainty."},
++            "challenge": {"no_unresolved_uncertainty": True,
++                "description": "The host independently runs registered public checks on final source. "
++                    "Do not invent final_receipts; the host creates them."}},
++        "incomplete_example": {"status": "incomplete", "clauses": [], "commands": []},
++    }
++    return "\n<submission-contract>\n" + json.dumps(contract, sort_keys=True, separators=(",", ":")) + "\n</submission-contract>"
++
+ def run_phase(request: dict, executor) -> dict:
+     """Invoke an actor once, preserve charges, then gate on host-executed evidence."""
+     readiness = _admit_backend(request, executor)
+@@ -104,29 +182,46 @@ def run_phase(request: dict, executor) -> dict:
+     execution_profile = request.get("execution_profile", "fixture-v1")
+     try:
+         get_profile(execution_profile)
++        validate_profile_fixture(execution_profile, request.get("public_fixture"))
+     except ProfileViolation as exc:
+         raise PhaseInvalid("unregistered execution profile") from exc
+     if arm not in ("P", "R"):
+         raise PhaseInvalid("phase adapter supports protocol and continuation-control arms only")
++    if arm == "P" or "command_timeout_s" in request or "max_log_bytes" in request:
++        try:
++            validate_command_budget(execution_profile, request.get("command_timeout_s"),
++                                    request.get("max_log_bytes"))
++        except ProfileViolation as exc:
++            raise PhaseInvalid(str(exc)) from exc
+     budget = _amount(request.get("phase_budget_usd"))
+     if budget is None or budget <= 0:
+         raise PhaseInvalid("invalid phase budget")
++    if "cli_cap_usd" in request:
++        cap = _amount(request["cli_cap_usd"])
++        if cap is None or cap <= 0 or cap >= budget:
++            raise PhaseInvalid("invalid CLI cap")
+     packet = request.get("public_packet")
+     if not isinstance(packet, dict) or not set(packet) <= _PUBLIC_KEYS:
+         raise PhaseInvalid("unregistered public packet fields")
+     prompts = json.loads(Path(__file__).with_name("prompts.json").read_text())
+     prompt = prompts[phase] if arm == "P" else prompts["continuation"]
++    prefixes = request.get("allowed_probe_prefixes", [])
++    if arm == "P":
++        prompt += _submission_contract(phase, execution_profile, prefixes,
++                                       request["command_timeout_s"], request["max_log_bytes"])
+     out = Path(request["out"]).resolve()
+     out.mkdir(parents=True, exist_ok=False)
+     publish_exclusive(out / "started.json", {"run_id": state.get("run_id"),
+         "phase": phase, "arm": arm, "phase_budget_usd": str(budget),
++        **({"cli_cap_usd": request["cli_cap_usd"]} if "cli_cap_usd" in request else {}),
+         "prompt_sha256": packet_digest(prompt), "public_packet_sha256": packet_digest(packet),
+         "native_readiness_sha256": packet_digest(readiness) if readiness else None,
+         "execution_profile": execution_profile,
+         "execution_profile_sha256": profile_digest(execution_profile)})
+     actor_packet = {"run_id": state.get("run_id"), "phase": phase, "arm": arm,
+                     "prompt": prompt, "public_packet": copy.deepcopy(packet),
+-                    "allowance_usd": str(budget), "max_continuations": 2}
++                    "allowance_usd": str(budget), "max_continuations": 2,
++                    **({"cli_cap_usd": request["cli_cap_usd"]} if "cli_cap_usd" in request else {})}
+     # Bind command execution separately from actor-controlled submission fields.
+     publish_exclusive(out / "execution-profile.json",
+                       {"execution_profile": execution_profile,
+@@ -165,20 +260,17 @@ def run_phase(request: dict, executor) -> dict:
+         facts = {}
+         final_ids = []
+         submission = returned.get("submission")
++        counted_turns = None
+         try:
+             turns = returned.get("turns")
+             _require(type(turns) is int and 1 <= turns <= 3, "invalid phase turn count")
+             previous = state.get("turns_used", 0)
+             _require(type(previous) is int and 0 <= previous and previous + turns <= 9,
+                      "workflow turn limit")
++            counted_turns = previous + turns
+             if arm == "P":
+                 _require(isinstance(submission, dict), "malformed phase submission")
+                 if phase == "investigate":
+-                    prefixes = request.get("allowed_probe_prefixes", [])
+-                    _require(isinstance(prefixes, list) and
+-                             all(isinstance(p, str) and p.endswith("/") and not Path(p).is_absolute()
+-                                 and ".." not in Path(p).parts for p in prefixes),
+-                             "invalid public probe locations")
+                     _require(_phase_zero(state, candidate, prefixes),
+                              "investigation modified production or added unadmitted inputs")
+                 status = submission.get("status")
+@@ -194,7 +286,9 @@ def run_phase(request: dict, executor) -> dict:
+                     "test_files": command.get("test_files"), "production_files": production,
+                     "image": request["image"], "kind": kind,
+                     "timeout_s": request["command_timeout_s"],
+-                    "max_log_bytes": request["max_log_bytes"], "execution_profile": execution_profile}
++                    "max_log_bytes": request["max_log_bytes"], "execution_profile": execution_profile,
++                    **({"public_fixture": request["public_fixture"]} if "public_fixture" in request else {}),
++                    **({"public_build_inputs": request["public_build_inputs"]} if request.get("public_build_inputs") is not None else {})}
+                 try:
+                     return execute_observation(execution_request, candidate, out / "commands")
+                 except ExecutionInvalid as exc:
+@@ -232,12 +326,16 @@ def run_phase(request: dict, executor) -> dict:
+             public_artifact = build_public_artifact(
+                 run_id=state["run_id"], phase=phase, arm=arm, source=candidate,
+                 commands=out / "commands", receipt_ids=list(facts),
+-                submission=submission if arm == "P" else None)
++                submission=submission if arm == "P" else None,
++                expected_profile=execution_profile, expected_fixture=request.get("public_fixture"),
++                expected_build_inputs=request.get("public_build_inputs"))
+             publish_exclusive(out / "public-artifact.json", public_artifact)
+             outcome["public_artifact"] = public_artifact
+         except ProtocolViolation as exc:
+             next_state = copy.deepcopy(state)
+             next_state["phase"] = "incomplete"
++            if counted_turns is not None:
++                next_state["turns_used"] = counted_turns
+             outcome = {"state": next_state, "receipts": facts, "final_receipts": final_ids,
+                        "cost": cost, "measurement_invalid": False, "reason": str(exc)}
+         publish_exclusive(out / "outcome.json", outcome)
+diff --git a/tools/effort_protocol/campaign.py b/tools/effort_protocol/campaign.py
+index f439c0a6c..501516e11 100644
+--- a/tools/effort_protocol/campaign.py
++++ b/tools/effort_protocol/campaign.py
+@@ -4,6 +4,7 @@ import hashlib
+ import json
+ import re
+ from decimal import Decimal, localcontext
++from pathlib import Path
+ 
+ 
+ class CampaignViolation(ValueError):
+@@ -46,8 +47,9 @@ def _metadata(rows):
+         seen.add(row["id"])
+ 
+ 
+-def selection_report(metadata, exposure, seed):
++def selection_report(metadata, exposure, seed, *, task_count=2):
+     """Retain every ranked decision; pending earlier qualification blocks later picks."""
++    _require(type(task_count) is int and task_count in (2, 4), "unsupported explicit population quota")
+     _metadata(metadata)
+     _require(isinstance(exposure, set) and all(isinstance(x, str) for x in exposure),
+              "exposure must be an explicit ID set")
+@@ -62,7 +64,7 @@ def selection_report(metadata, exposure, seed):
+             reason = "research_exposure"
+         elif row["eligible"] is False:
+             reason = row["reason"]
+-        elif len(selected) == 2:
++        elif len(selected) == task_count:
+             reason = "selection_quota_reached"
+         elif row["eligible"] is None:
+             pending = True
+@@ -79,7 +81,7 @@ def selection_report(metadata, exposure, seed):
+                           "reason": reason})
+     return {"seed": seed, "metadata_sha256": _hash(sorted(metadata, key=lambda r: r["id"])),
+             "exposure_sha256": _hash(sorted(exposure)), "selected": selected,
+-            "decisions": decisions, "complete": len(selected) == 2 and not pending}
++            "decisions": decisions, "complete": len(selected) == task_count and not pending}
+ 
+ 
+ def select_tasks(metadata, exposure, seed):
+@@ -89,7 +91,7 @@ def select_tasks(metadata, exposure, seed):
+ 
+ 
+ def attempt_schedule(selected):
+-    """Mirror arm positions across the two tasks; no outcome-dependent replacement."""
++    """Mirror arm positions; stage1-headroom-v2 changes transport reserves only."""
+     _metadata(selected)
+     _require(len(selected) == 2 and selected[0]["id"] != selected[1]["id"]
+              and selected[0]["repo"].casefold() != selected[1]["repo"].casefold()
+@@ -98,10 +100,10 @@ def attempt_schedule(selected):
+     for row, arms in zip(selected, (("L", "R", "P", "X"), ("X", "P", "R", "L"))):
+         for arm in arms:
+             entry = {"id": row["id"] + "::" + arm, "task_id": row["id"], "arm": arm,
+-                     "reserved_usd": "6" if arm == "X" else "3",
++                     "reserved_usd": "9" if arm == "X" else "10" if arm in ("P", "R") else "6",
+                      "cli_cap_usd": "5.50" if arm == "X" else "2.75"}
+             if arm in ("P", "R"):
+-                entry["phase_reservations_usd"] = ["0.60", "1.80", "0.60"]
++                entry["phase_reservations_usd"] = ["3", "4", "3"]
+                 entry["phase_cli_caps_usd"] = ["0.55", "1.65", "0.55"]
+             result.append(entry)
+     return result
+@@ -165,11 +167,61 @@ def accounting_totals(ledger):
+                 "ceiling_usd": str(ceiling)}
+ 
+ 
+-def reserve_attempt(ledger, attempt):
+-    """Return a new ledger; refuse drift/unknown cost before any actor can be called."""
++def admit_history(ledger, *, carried_holds=None, bindings=None):
++    """Carry only explicitly frozen pre-provider unknown holds, at their full reservation."""
+     totals = accounting_totals(ledger)
+-    _require(not totals["unknown_charge_ids"] and not totals["unsettled_hold_ids"],
+-             "unknown prior charge or hold blocks admission")
++    _require(not totals["unknown_charge_ids"], "unknown prior charge blocks admission")
++    proofs = [] if carried_holds is None else carried_holds
++    _require(isinstance(proofs, list), "historical hold proofs must be a list")
++    bindings = {} if bindings is None else bindings
++    _require(isinstance(bindings, dict), "historical receipt bindings missing")
++    by_id = {}
++    for proof in proofs:
++        _require(isinstance(proof, dict) and
++                 set(proof) == {"id", "source", "receipt_sha256", "reserved_usd"},
++                 "historical hold proof schema invalid")
++        identity = _identity(proof)
++        _require(identity not in by_id, "duplicate historical hold proof")
++        by_id[identity] = proof
++    _require(set(by_id) == set(totals["unsettled_hold_ids"]),
++             "unknown prior hold is not exactly covered by frozen carry proofs")
++    for hold in ledger["holds"]:
++        if hold["settled"]:
++            continue
++        proof = by_id[hold["id"]]
++        _require(all(hold.get(key) == proof[key] for key in proof) and
++                 hold.get("cost_usd") is None and
++                 _money(proof["reserved_usd"]) > 0 and
++                 _digest(proof["receipt_sha256"]),
++                 "historical hold amount, source or receipt drift")
++        _require(isinstance(proof["source"], str) and
++                 bindings.get(proof["source"]) == proof["receipt_sha256"],
++                 "historical receipt is not bound by campaign registration")
++        path = Path(proof["source"])
++        try:
++            _require(path.is_absolute() and path.resolve(strict=True) == path and path.is_file(),
++                     "historical receipt must be a physical regular file")
++            raw = path.read_bytes()
++            _require(hashlib.sha256(raw).hexdigest() == proof["receipt_sha256"],
++                     "historical receipt bytes changed")
++            receipt = json.loads(raw)
++            _require(isinstance(receipt, dict) and
++                     isinstance(receipt.get("session_id"), str) and
++                     hold["id"] == "native-client:" + receipt["session_id"] and
++                     receipt.get("scripted") is False and
++                     receipt.get("cost_usd") is None and
++                     receipt.get("unknown_provider_cost") is True and
++                     type(receipt.get("requests")) is int and receipt["requests"] == 0 and
++                     type(receipt.get("forwarded")) is int and receipt["forwarded"] == 0 and
++                     _money(receipt.get("campaign_available_usd")) == _money(proof["reserved_usd"]),
++                     "historical receipt does not prove the registered startup hold")
++        except (OSError, ValueError, TypeError, KeyError) as exc:
++            raise CampaignViolation("invalid historical hold evidence: " + str(exc)) from exc
++    return frozenset(by_id)
++
++def reserve_attempt(ledger, attempt, *, carried_holds=None, bindings=None):
++    """Return a new ledger; no hold is forgiven or unknown charge zero-filled."""
++    admit_history(ledger, carried_holds=carried_holds, bindings=bindings)
+     identity = _identity(attempt)
+     _require(attempt.get("arm") in ("L", "R", "P", "X")
+              and isinstance(attempt.get("task_id"), str) and bool(attempt["task_id"]),
+diff --git a/tools/effort_protocol/execution_profiles.py b/tools/effort_protocol/execution_profiles.py
+index 7a7db62ea..e2e2fb598 100644
+--- a/tools/effort_protocol/execution_profiles.py
++++ b/tools/effort_protocol/execution_profiles.py
+@@ -4,6 +4,9 @@ import hashlib
+ import json
+ from pathlib import Path
+ 
++from public_fixture import VERSION, DESTINATION, read_fixture_bundle, validate_fixture_runtime
++from public_build_inputs import validate_descriptor, verify_staged
++
+ _PROFILES = {
+     "fixture-v1": {
+         "memory_bytes": 256 * 1024 * 1024, "nano_cpus": 1_000_000_000, "pids": 128,
+@@ -17,6 +20,15 @@ _PROFILES = {
+                 "CARGO_TARGET_DIR": "/build/target", "CARGO_NET_OFFLINE": "true"}}}
+ 
+ 
++# A new identity binds the cold-command budget; old dictionaries stay frozen.
++_PROFILES["cargo-v2"] = {**copy.deepcopy(_PROFILES["cargo-v1"]), "max_command_timeout_s": 900}
++_PROFILES["cargo-v3"] = {**copy.deepcopy(_PROFILES["cargo-v2"]), "public_build_inputs": "public-build-inputs-v1"}
++_PROFILES["fixture-public-v1"] = {**copy.deepcopy(_PROFILES["fixture-v1"]),
++                                  "public_fixture": "public-fixture-bundle-v1"}
++_PROFILES["cargo-public-v1"] = {**copy.deepcopy(_PROFILES["cargo-v2"]),
++                                "public_fixture": "public-fixture-bundle-v1"}
++
++
+ class ProfileViolation(ValueError):
+     """Registered execution contract is absent or not observed at runtime."""
+ 
+@@ -31,6 +43,39 @@ def get_profile(name):
+     return copy.deepcopy(_PROFILES[name])
+ 
+ 
++def validate_profile_build_inputs(name, descriptor, source, image):
++    settings = get_profile(name)
++    if settings.get("public_build_inputs"):
++        _require(descriptor is not None, "public build inputs required")
++        try:
++            return validate_descriptor(descriptor, source, image)
++        except (ValueError, OSError, TypeError, KeyError, AttributeError) as exc:
++            raise ProfileViolation("invalid public build inputs: " + str(exc)) from exc
++    _require(descriptor is None, "legacy profile forbids public build inputs")
++    return None
++
++def validate_profile_fixture(name, descriptor):
++    profile = get_profile(name)
++    if profile.get("public_fixture") is None:
++        _require(descriptor is None, "old execution profile cannot accept a public fixture")
++        return None
++    _require(profile["public_fixture"] == VERSION and descriptor is not None,
++             "public execution profile requires an expected fixture")
++    try:
++        read_fixture_bundle(descriptor)
++    except (ValueError, OSError, TypeError) as exc:
++        raise ProfileViolation("invalid expected public fixture: " + str(exc)) from exc
++    return descriptor
++
++def validate_command_budget(name, timeout_s, max_log_bytes):
++    """Validate host command bounds before any actor or container effect."""
++    maximum = get_profile(name).get("max_command_timeout_s", 300)
++    _require(type(max_log_bytes) is int and 0 < max_log_bytes <= 64 * 1024 * 1024,
++             "unsupported_log_limit")
++    _require(type(timeout_s) in (int, float) and 0 < timeout_s <= maximum,
++             "unsupported_timeout")
++
++
+ def profile_digest(name):
+     return hashlib.sha256(json.dumps(get_profile(name), sort_keys=True,
+                                      separators=(",", ":")).encode()).hexdigest()
+@@ -47,7 +92,8 @@ def runtime_contract(name):
+             "Environment": profile["env"], **({"BuildMounts": extra} if extra else {})}
+ 
+ 
+-def validate_runtime_profile(row, source, build, name):
++def validate_runtime_profile(row, source, build, name, *, public_fixture=None, public_build_inputs=None):
++    validate_profile_fixture(name, public_fixture)
+     contract = runtime_contract(name)
+     host = row.get("HostConfig", {})
+     config = row.get("Config", {})
+@@ -57,11 +103,27 @@ def validate_runtime_profile(row, source, build, name):
+              "container profile mismatch")
+     _require(config.get("User") == "1000:1000", "container profile user mismatch")
+     _require(host.get("Tmpfs") == contract["Tmpfs"], "container profile temporary storage mismatch")
++    declared = {}
++    if get_profile(name).get("public_build_inputs"):
++        try:
++            _require(public_build_inputs is not None, "public build stage required")
++            checked = verify_staged(public_build_inputs, source, row.get("Image"))
++            declared = {m["destination"]:m for m in checked["mounts"]}
++            contract["PublicBuildInputs"] = checked["fingerprint"]
++        except (ValueError, OSError, TypeError, KeyError, AttributeError) as exc:
++            raise ProfileViolation("invalid public build stage: " + str(exc)) from exc
++    else:
++        _require(public_build_inputs is None, "legacy profile forbids public build stage")
+     mounts = row.get("Mounts", [])
+     binds = {m["Destination"]: m for m in mounts if m.get("Type") == "bind"}
++    if declared:
++        _require(len(binds) == sum(m.get("Type") == "bind" for m in mounts),
++                 "container profile duplicate host mount")
+     source_mount = contract["SourceMount"]
+     extra = contract.get("BuildMounts", {})
+-    _require(set(binds) == {source_mount, "/build", *extra}, "container profile unexpected host mount")
++    _require(set(binds) == {source_mount, "/build", *extra, *declared,
++                           *({DESTINATION} if public_fixture else set())},
++             "container profile unexpected host mount")
+     _require(binds[source_mount].get("Source") == str(Path(source))
+              and binds[source_mount].get("RW") is False
+              and binds["/build"].get("Source") == str(Path(build))
+@@ -69,10 +131,18 @@ def validate_runtime_profile(row, source, build, name):
+     _require(all(binds[destination].get("Source") == str(Path(build) / relative)
+                  and binds[destination].get("RW") is True
+                  for destination, relative in extra.items()), "container profile scratch mount mismatch")
++    _require(all(binds[destination].get("Source") == mount["source"]
++                 and binds[destination].get("RW") is True
++                 for destination, mount in declared.items()), "container profile dependency mount mismatch")
+     _require(all(m.get("Type") == "bind" or
+                  (m.get("Type") == "tmpfs" and m.get("Destination") == "/tmp")
+                  for m in mounts), "container profile unexpected runtime mount")
+     environment = dict(item.split("=", 1) for item in config.get("Env", []))
+     _require(all(environment.get(key) == value for key, value in contract["Environment"].items()),
+              "container profile environment mismatch")
++    if public_fixture is not None:
++        try:
++            contract["PublicFixture"] = validate_fixture_runtime(row, public_fixture, "command")
++        except (ValueError, OSError, TypeError) as exc:
++            raise ProfileViolation("public fixture runtime mismatch: " + str(exc)) from exc
+     return contract
+diff --git a/tools/effort_protocol/executor.py b/tools/effort_protocol/executor.py
+index ea8814656..8815155eb 100644
+--- a/tools/effort_protocol/executor.py
++++ b/tools/effort_protocol/executor.py
+@@ -15,7 +15,11 @@ import uuid
+ from pathlib import Path
+ 
+ from receipts import ReceiptViolation, input_digest, test_input_digest, publish_exclusive, verify_receipt
+-from execution_profiles import ProfileViolation, get_profile, profile_digest, validate_runtime_profile
++from execution_profiles import (ProfileViolation, get_profile, profile_digest,
++                                validate_runtime_profile, validate_command_budget, validate_profile_fixture,
++                                validate_profile_build_inputs)
++from public_fixture import fixture_docker_options, verify_fixture_startup
++from public_build_inputs import stage_inputs, generated_digest, verify_staged
+ 
+ LABEL = "codescout.effort-protocol"
+ MEMORY = 256 * 1024 * 1024
+@@ -48,9 +52,10 @@ def _owned(row, cid, name, image):
+              and row.get("Config", {}).get("Labels", {}).get(LABEL) == name,
+              "container_ownership_mismatch")
+ 
+-def _profile(row, source, build, name="fixture-v1"):
++def _profile(row, source, build, name="fixture-v1", public_fixture=None, public_build_inputs=None):
+     try:
+-        return validate_runtime_profile(row, source, build, name)
++        return validate_runtime_profile(row, source, build, name, public_fixture=public_fixture,
++                                        public_build_inputs=public_build_inputs)
+     except ProfileViolation as exc:
+         raise ExecutionInvalid("container_profile_mismatch: " + str(exc)) from exc
+ 
+@@ -90,6 +95,7 @@ def _request(request, source, out):
+     profile_name = request.get("execution_profile", "fixture-v1")
+     try:
+         get_profile(profile_name)
++        validate_profile_fixture(profile_name, request.get("public_fixture"))
+     except ProfileViolation as exc:
+         raise ExecutionInvalid("unsupported_execution_profile") from exc
+     image = request.get("image")
+@@ -103,8 +109,10 @@ def _request(request, source, out):
+              and ".." not in Path(cwd).parts, "unsupported_working_directory")
+     _require(request.get("kind") in ("observation", "verification"), "unsupported_evidence_kind")
+     limit, timeout = request.get("max_log_bytes"), request.get("timeout_s")
+-    _require(type(limit) is int and 0 < limit <= 64 * 1024 * 1024, "unsupported_log_limit")
+-    _require(type(timeout) in (int, float) and 0 < timeout <= 300, "unsupported_timeout")
++    try:
++        validate_command_budget(profile_name, timeout, limit)
++    except ProfileViolation as exc:
++        raise ExecutionInvalid(str(exc)) from exc
+     _require(source.is_dir() and not source.is_symlink(), "unsupported_source_root")
+     _require(not out.is_relative_to(source) and not source.is_relative_to(out),
+              "host_output_overlaps_source")
+@@ -118,6 +126,10 @@ def _request(request, source, out):
+             (test_input_digest if key == "test_files" else input_digest)(source, request[key])
+         except (ReceiptViolation, OSError, TypeError) as exc:
+             raise ExecutionInvalid("unsupported_" + key) from exc
++    try:
++        validate_profile_build_inputs(profile_name, request.get("public_build_inputs"), source, image)
++    except ProfileViolation as exc:
++        raise ExecutionInvalid("unsupported_public_build_inputs: " + str(exc)) from exc
+     return image, argv, limit, float(timeout), profile_name
+ 
+ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+@@ -125,6 +137,10 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+     source, out = Path(source).absolute(), Path(out).absolute()
+     image, argv, limit, timeout, profile_name = _request(request, source, out)
+     settings = get_profile(profile_name)
++    fixture = request.get("public_fixture")
++    build_descriptor = request.get("public_build_inputs")
++    build_stage = None
++    build_hash = generated_digest if profile_name == "cargo-v3" else input_digest
+     original_digest = input_digest(source)
+     directory = out / request["id"]
+     directory.mkdir(parents=True, exist_ok=False)
+@@ -148,7 +164,9 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+         _require(frozen == original_digest == input_digest(source), "source_changed_during_capture")
+         test_digest = test_input_digest(snapshot, request["test_files"])
+         production_digest = input_digest(snapshot, request["production_files"])
+-        build_before = input_digest(build)
++        if build_descriptor is not None:
++            build_stage = stage_inputs(build_descriptor, snapshot, image, directory / "public-build-state")
++        build_before = build_hash(build)
+         result = _docker(["image", "inspect", image])
+         _require(result.returncode == 0 and json.loads(result.stdout)[0]["Id"] == image,
+                  "registered_image_unavailable")
+@@ -166,7 +184,13 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+                   "--workdir", settings["source_mount"] + "/" + request["cwd"],
+                   *[part for key, value in sorted(settings["env"].items())
+                     for part in ("--env", key + "=" + value)],
+-                  "--entrypoint", argv[0], image, *argv[1:]]
++                  *(fixture_docker_options(fixture, "command") if fixture else ["--entrypoint", argv[0]]),
++                image, *(argv if fixture else argv[1:])]
++        if build_stage is not None:
++            image_index = create.index(image)
++            options = [part for mount in build_stage["mounts"]
++                       for part in ("--mount", "type=bind,src=" + mount["source"] + ",dst=" + mount["destination"])]
++            create[image_index:image_index] = options
+         created = _docker(create)
+         _require(created.returncode == 0 and re.fullmatch(r"[0-9a-f]{64}", created.stdout.strip()),
+                  "container_creation_failed")
+@@ -174,7 +198,8 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+         before = _inspect(cid)
+         _owned(before, cid, name, image)
+         publish_exclusive(directory / "container-before.json", before)
+-        profile = _profile(before, snapshot, build, profile_name)
++        profile = _profile(before, snapshot, build, profile_name, fixture,
++                           public_build_inputs=build_stage)
+         samples.append({"at": "before_start", "state": before["State"]})
+         deadline = time.monotonic() + timeout
+         with (directory / "stdout").open("xb") as stdout, (directory / "stderr").open("xb") as stderr:
+@@ -193,7 +218,8 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+         final = _inspect(cid)
+         _owned(final, cid, name, image)
+         publish_exclusive(directory / "container-after.json", final)
+-        _profile(final, snapshot, build, profile_name)
++        _profile(final, snapshot, build, profile_name, fixture,
++                 public_build_inputs=build_stage)
+         _require(not final["State"]["Running"] and final["State"]["Status"] == "exited",
+                  "command_not_closed")
+         _require(not final["State"]["OOMKilled"], "oom")
+@@ -202,6 +228,11 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+                  "log_limit")
+         code = final["State"]["ExitCode"]
+         _require(type(code) is int and attach.returncode in (0, code), "attach_transport_failure")
++        if fixture is not None:
++            try:
++                verify_fixture_startup((directory / "stderr").read_bytes(), fixture)
++            except (ValueError, OSError, TypeError) as exc:
++                raise ExecutionInvalid("public_fixture_startup_failed") from exc
+         after = input_digest(snapshot)
+         _require(after == frozen, "frozen_source_changed")
+         publish_exclusive(directory / "samples.json", samples)
+@@ -211,13 +242,18 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+                   "production_digest": production_digest, "test_files": request["test_files"],
+                   "test_digest": test_digest, "image": image, "toolchain_digest": image[7:],
+                   "dependency_digest": image[7:], "build_before": build_before,
+-                  "build_after": input_digest(build), "capture_complete": True,
++                  "build_after": build_hash(build), "capture_complete": True,
+                   "resource_valid": True, "exit_code": code, "container_id": cid,
+                   "container_name": name, "container_profile": profile,
+                   "execution_profile": profile_name, "execution_profile_sha256": profile_digest(profile_name),
+                   "runtime_before_sha256": hashlib.sha256((directory / "container-before.json").read_bytes()).hexdigest(),
+                   "runtime_after_sha256": hashlib.sha256((directory / "container-after.json").read_bytes()).hexdigest(),
+                   "final_container_state": final["State"], "docker_attach_exit": attach.returncode}
++        if build_stage is not None:
++            reopened = verify_staged(build_stage, snapshot, image)
++            record.update({"generated_inventory_schema": "generated-artifact-inventory-v1",
++                           "public_build_stage": build_stage,
++                           "public_build_generated_after": reopened["generated_sha256"]})
+         for stream in ("stdout", "stderr"):
+             record[stream + "_sha256"] = hashlib.sha256((directory / stream).read_bytes()).hexdigest()
+     except Exception as exc:
+@@ -245,4 +281,5 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+         raise ExecutionInvalid(reason)
+     record["cleanup_complete"] = clean
+     publish_exclusive(directory / "receipt.json", record)
+-    return verify_receipt({"id": request["id"]}, out, snapshot, expected_profile=profile_name)
++    return verify_receipt({"id": request["id"]}, out, snapshot, expected_profile=profile_name,
++                          expected_fixture=fixture, expected_build_inputs=build_descriptor)
+diff --git a/tools/effort_protocol/native_executor.py b/tools/effort_protocol/native_executor.py
+index 0a339992b..d4bbd4a8b 100644
+--- a/tools/effort_protocol/native_executor.py
++++ b/tools/effort_protocol/native_executor.py
+@@ -8,10 +8,14 @@ import json
+ import shutil
+ import sys
+ from pathlib import Path
++from decimal import Decimal, InvalidOperation
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agent_lifecycle"))
+ import external
+ from receipts import input_digest, publish_exclusive
++import public_fixture
++import feedback_policy
++import public_build_inputs
+ 
+ # Explicit runner roles, identical to lifecycle artifact exclusions plus Git and
+ # the phase submission. These are not inferred from extensions or file contents.
+@@ -32,6 +36,21 @@ def _text(value):
+ 
+ def _context(out, system_lines, recon_marker):
+     """Require successful native calls and the client's actual delivered body."""
++    expected_path = out / "expected.json"
++    if expected_path.is_file():
++        expected = json.loads(expected_path.read_bytes())
++        if "preload_visible" in expected:
++            valid = False
++            first = out / "request-0.json"
++            if first.is_file():
++                body = json.loads(first.read_bytes())
++                try:
++                    external.transport.audit_request(body, expected)
++                    system = _text(body.get("system", []))
++                    valid = bool(system_lines) and all(line in system for line in system_lines)
++                except (ValueError, TypeError, KeyError):
++                    pass
++            return {"system_delivered": valid, "recon_delivered": valid}
+     system_ok = recon_ok = False
+     for path in sorted(out.glob("request-*.json")):
+         body = json.loads(path.read_text())
+@@ -62,15 +81,21 @@ def _context(out, system_lines, recon_marker):
+     return {"system_delivered": system_ok, "recon_delivered": recon_ok}
+ 
+ 
+-def _public_digest(actor):
++def _public_digest(actor, *, dependency_dirs=(), preserve_project_context=False):
++    if type(preserve_project_context) is not bool:
++        raise ValueError("project context policy must be boolean")
++    declared = public_build_inputs.dependency_directories(actor, dependency_dirs)
+     names = []
+     for child in actor.iterdir():
+-        if child.name in TOOL_ROLES or child.name == "submission.json":
++        if (child.name in TOOL_ROLES and not (preserve_project_context and child.name == ".claude")) or child.name == "submission.json":
+             continue
+         names.append(child.name)
+         if child.is_dir() and not child.is_symlink():
+-            names.extend(path.relative_to(actor).as_posix() for path in child.rglob("*"))
+-    return input_digest(actor, sorted(names))
++            names.extend(path.relative_to(actor).as_posix() for path in child.rglob("*")
++                         if ".codescout" not in path.relative_to(actor).parts)
++    for relative in declared:
++        names.extend("/".join(relative.parts[:count]) for count in range(1, len(relative.parts)+1))
++    return input_digest(actor, sorted(set(names)))
+ 
+ 
+ def _options(argv, key):
+@@ -81,7 +106,17 @@ def _options(argv, key):
+ def _runtime_binding(prepared):
+     cfg = json.loads((prepared / "prepared.json").read_text())
+     argv = json.loads((prepared / "mcp-native-argv.json").read_text())
+-    if _options(argv, "--entrypoint") != ["/bench/bin/codescout"]:
++    build_contract = external.public_build_contract(cfg, {"--mount": _options(argv, "--mount")}, Path(cfg["actor"]))
++    dependency_dirs = cfg["public_build_inputs"]["dependency_dirs"] if build_contract is not None else []
++    descriptor = cfg.get("public_fixture")
++    fixture_binding = ({"public_build_inputs_sha256": build_contract["fingerprint"]}
++                       if build_contract is not None else {})
++    if "public_fixture" in cfg:
++        public_fixture.validate_fixture_options(
++            {key: _options(argv, key) for key in ("--mount", "--entrypoint", "--add-host")},
++            descriptor, "native", actor=Path(cfg["actor"]))
++        fixture_binding["public_fixture_sha256"] = descriptor["fingerprint"]
++    elif _options(argv, "--entrypoint") != ["/bench/bin/codescout"]:
+         raise ValueError("native executable binding requires the registered entrypoint")
+     mounts = [dict(part.split("=", 1) if "=" in part else (part, True)
+                    for part in mount.split(",")) for mount in _options(argv, "--mount")]
+@@ -94,33 +129,56 @@ def _runtime_binding(prepared):
+     knowledge = cfg.get("knowledge_paths", ["project.toml", "system-prompt.md"])
+     binding = {"image": cfg["image"],
+         "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+-        "source_snapshot_sha256": _public_digest(Path(cfg["actor"])),
+-        "knowledge_sha256": input_digest(Path(cfg["actor"]) / ".codescout", knowledge)}
++        "source_snapshot_sha256": _public_digest(Path(cfg["actor"]), dependency_dirs=dependency_dirs, preserve_project_context=build_contract is not None),
++        "knowledge_sha256": input_digest(Path(cfg["actor"]) / ".codescout", knowledge),
++        **fixture_binding}
+     return binding, executable
+ 
+-def _capture(actor, destination):
++def _capture(actor, destination, *, dependency_dirs=(), preserve_project_context=False):
++    if type(preserve_project_context) is not bool:
++        raise ValueError("project context policy must be boolean")
++    declared = public_build_inputs.dependency_directories(actor, dependency_dirs)
+     destination.mkdir(exist_ok=False)
+     for source in actor.iterdir():
+-        if source.name in TOOL_ROLES or source.name == "submission.json":
++        if (source.name in TOOL_ROLES and not (preserve_project_context and source.name == ".claude")) or source.name == "submission.json":
+             continue
+         target = destination / source.name
+         if source.is_symlink():
+             target.symlink_to(source.readlink())
+         elif source.is_dir():
+-            shutil.copytree(source, target, symlinks=True)
++            shutil.copytree(source, target, symlinks=True,
++                ignore=lambda parent, names: {".codescout"} & set(names))
+         elif source.is_file():
+             shutil.copy2(source, target)
+         else:
+             raise ValueError("unsupported native source input")
+-    input_digest(destination)  # Refuses escaping symlinks and special files.
++    for relative in declared:
++        for count in range(1, len(relative.parts)+1):
++            part = Path(*relative.parts[:count])
++            target = destination / part
++            target.mkdir(parents=True, exist_ok=True)
++            target.chmod((actor / part).stat().st_mode & 0o777)
++    input_digest(destination)
+     return str(destination)
+ 
+ 
++def _cli_cap(request):
++    value = request.get("cli_cap_usd", request.get("allowance_usd"))
++    try:
++        cap = Decimal(str(value))
++        allowance = Decimal(str(request.get("allowance_usd")))
++    except (InvalidOperation, TypeError, ValueError) as exc:
++        raise ValueError("invalid CLI cap") from exc
++    if (not cap.is_finite() or not allowance.is_finite() or cap <= 0 or allowance <= 0
++            or cap > allowance or ("cli_cap_usd" in request and cap >= allowance)):
++        raise ValueError("invalid CLI cap")
++    return str(value)
++
+ class NativeExecutor:
+     mode = "native"
+ 
+     def __init__(self, prepared, capture, *, system_lines, recon_marker,
+-                 scripted_plan=None, allow_paid=False, token_path=None):
++                 scripted_plan=None, allow_paid=False, token_path=None, supervisor=None):
+         self.prepared = Path(prepared).resolve()
+         self.capture = Path(capture).resolve()
+         self.system_lines = list(system_lines)
+@@ -128,6 +186,13 @@ class NativeExecutor:
+         self.scripted_plan = scripted_plan
+         self.allow_paid = allow_paid
+         self.token_path = token_path
++        self.supervisor = supervisor
++
++    def readiness_source(self):
++        """Return the concrete actor source for source-bound readiness checks."""
++        cfg = json.loads((self.prepared / "prepared.json").read_text())
++        return Path(cfg["actor"])
++
+ 
+     def bind_readiness(self, binding):
+         measured, executable = _runtime_binding(self.prepared)
+@@ -137,54 +202,88 @@ class NativeExecutor:
+         path = self.prepared / "prepared.json"
+         cfg = json.loads(path.read_text())
+         cfg.setdefault("files", {})[str(executable)] = measured["executable_sha256"]
++        if "public_fixture" in cfg:
++            public_fixture.read_fixture_bundle(cfg["public_fixture"])
++            for item in Path(cfg["public_fixture"]["root"]).iterdir():
++                cfg["files"][str(item)] = hashlib.sha256(item.read_bytes()).hexdigest()
+         path.write_text(json.dumps(cfg, indent=2) + "\n")
+         return measured
+ 
+     def execute(self, request):
++        arm = request.get("arm", "P")
++        if arm not in ("L", "R", "P", "X"):
++            raise ValueError("unsupported native arm")
++        selected = feedback_policy.validated_request(request)
++        bound = 4 if selected is not None else 2
+         if self.scripted_plan is None and not self.allow_paid:
+             raise ValueError("paid native execution has not been admitted")
+         if getattr(self, "_bound_readiness", None) != _runtime_binding(self.prepared)[0]:
+             raise ValueError("native preparation binding is missing or changed")
+-        if request.get("max_continuations") != 2:
++        if type(request.get("max_continuations")) is not int or request["max_continuations"] != bound:
+             raise ValueError("native phase requires the registered continuation bound")
++        cli_cap = _cli_cap(request)
+         cfg_path = self.prepared / "prepared.json"
+         cfg = json.loads(cfg_path.read_text())
++        if selected is not None:
++            if (cfg.get("feedback_policy") != selected
++                    or cfg.get("checks") != feedback_policy.completion_checks(selected)
++                    or cfg.get("max_continuations") != bound):
++                raise ValueError("prepared repair-only policy or checks differ")
++        elif "feedback_policy" in cfg:
++            raise ValueError("repair-only preparation requires an explicit policy request")
+         if (self.prepared / "started.json").exists():
+             raise ValueError("native phase cannot restart an existing attempt")
+         cfg["prompt"] = request["prompt"] + "\n\nFrozen public packet:\n" + json.dumps(
+             request["public_packet"], sort_keys=True)
+-        if request.get("arm", "P") == "P":
++        if selected is not None:
++            cfg["prompt"] += "\n\n" + selected["common_instruction"]
++            if selected["plan_instruction"]:
++                cfg["prompt"] += "\n\n" + selected["plan_instruction"]
++        elif arm == "P":
+             cfg["prompt"] += "\n\nWrite submission.json in the project root."
+-        cfg["max_continuations"] = 2
++        cfg["max_continuations"] = bound
+         cfg_path.write_text(json.dumps(cfg, indent=2) + "\n")
+-        kwargs = {"effort": "low", "allowance": request["allowance_usd"],
+-                  "cli_cap": request["allowance_usd"], "scripted_plan": self.scripted_plan}
++        kwargs = {"effort": "xhigh" if arm == "X" else "low", "allowance": request["allowance_usd"],
++                  "cli_cap": cli_cap, "scripted_plan": self.scripted_plan}
+         if self.token_path is not None:
+             kwargs["token_path"] = self.token_path
++        if self.supervisor is not None:
++            kwargs["supervisor"] = self.supervisor
+         receipt = external.launch(self.prepared, **kwargs)
+         context_error = None
+         try:
+             context = _context(self.prepared, self.system_lines, self.recon_marker)
++            if selected is not None:
++                first = json.loads((self.prepared / "request-0.json").read_bytes())
++                context["feedback_prompt_delivered"] = any(
++                    m.get("role") == "user" and cfg["prompt"] in _text(m.get("content"))
++                    for m in first.get("messages", []) if isinstance(m, dict))
+         except (ValueError, OSError, TypeError, AttributeError) as exc:
+             context = {"system_delivered": False, "recon_delivered": False}
+             context_error = type(exc).__name__ + ": " + str(exc)
+         actor = Path(cfg["actor"])
+         submission = None
+         submission_path = actor / "submission.json"
+-        if submission_path.is_file() and not submission_path.is_symlink():
++        if selected is None and submission_path.is_file() and not submission_path.is_symlink():
+             try:
+                 submission = json.loads(submission_path.read_text())
+             except (ValueError, OSError):
+                 pass  # Malformed actor submission is incomplete, not another call.
+         captured = False
+         capture_error = None
++        build_after = None
++        dependency_dirs = cfg["public_build_inputs"]["dependency_dirs"] if "public_build_inputs" in cfg else []
+         try:
+-            _capture(actor, self.capture)
++            _capture(actor, self.capture, dependency_dirs=dependency_dirs,
++                         preserve_project_context="public_build_inputs" in cfg)
++            if "public_build_inputs" in cfg:
++                argv = json.loads((self.prepared / "mcp-native-argv.json").read_bytes())
++                build_after = external.public_build_contract(cfg, {"--mount": _options(argv, "--mount")}, actor)
+             captured = receipt.get("artifact_evidence", {}).get("complete") is True
+         except (ValueError, OSError) as exc:
+             capture_error = type(exc).__name__ + ": " + str(exc)
+         turns = receipt.get("lifecycle", {}).get("continuations")
+-        valid_turns = type(turns) is int and 0 <= turns <= 2
++        valid_turns = type(turns) is int and 0 <= turns <= bound
+         result = {"source": str(self.capture), "submission": submission,
+             "cost_usd": receipt.get("cost_usd"),
+             "cost_is_final": receipt.get("unknown_provider_cost") is False,
+@@ -195,6 +294,12 @@ class NativeExecutor:
+             "capture_complete": captured, "capture_error": capture_error,
+             "turns": turns + 1 if valid_turns else None,
+             "context_evidence": context, "context_error": context_error, "provider_forwarded": receipt.get("forwarded"),
+-            "scripted_provider": self.scripted_plan is not None}
++            "scripted_provider": self.scripted_plan is not None,
++            "workflow_completed": receipt.get("workflow_completed") is True,
++            "public_verification": receipt.get("public_verification")}
++        if "public_build_inputs" in cfg:
++            result.update(public_build_inputs=cfg["public_build_stage"]["fingerprint"],
++                          public_build_stage=cfg["public_build_stage"],
++                          public_build_generated_after=build_after["generated_sha256"] if build_after is not None else None)
+         publish_exclusive(self.prepared / "native-executor.json", result)
+         return result
+diff --git a/tools/effort_protocol/public_artifacts.py b/tools/effort_protocol/public_artifacts.py
+index 4d769a7a8..805e4a443 100644
+--- a/tools/effort_protocol/public_artifacts.py
++++ b/tools/effort_protocol/public_artifacts.py
+@@ -20,7 +20,8 @@ def _stream(raw):
+         return {"encoding": "base64", "content": base64.b64encode(raw).decode("ascii")}
+ 
+ 
+-def build_public_artifact(*, run_id, phase, arm, source, commands, receipt_ids, submission):
++def build_public_artifact(*, run_id, phase, arm, source, commands, receipt_ids, submission,
++                          expected_profile=None, expected_fixture=None, expected_build_inputs=None):
+     """Export actor-authored public claims and independently verified observations.
+ 
+     No lifecycle outcome, controller path, provider charge or private grading field
+@@ -38,7 +39,9 @@ def build_public_artifact(*, run_id, phase, arm, source, commands, receipt_ids,
+     source_digest = input_digest(source)
+     observations = []
+     for rid in receipt_ids:
+-        facts = verify_receipt({"id": rid}, commands, source)
++        facts = verify_receipt({"id": rid}, commands, source, expected_profile=expected_profile,
++                               expected_fixture=expected_fixture,
++                                   **({"expected_build_inputs": expected_build_inputs} if expected_build_inputs is not None else {}))
+         _require(facts["run_id"] == run_id and facts["phase"] == phase,
+                  "handoff execution identity mismatch")
+         directory = commands / rid
+@@ -50,7 +53,9 @@ def build_public_artifact(*, run_id, phase, arm, source, commands, receipt_ids,
+             _require(hashlib.sha256(raw).hexdigest() == record[name + "_sha256"],
+                      "handoff execution log drift")
+             streams[name] = _stream(raw)
+-        _require(verify_receipt({"id": rid}, commands, source) == facts
++        _require(verify_receipt({"id": rid}, commands, source, expected_profile=expected_profile,
++                                expected_fixture=expected_fixture,
++                                   **({"expected_build_inputs": expected_build_inputs} if expected_build_inputs is not None else {})) == facts
+                  and _host_file(directory, "receipt.json", 1024 * 1024) == frozen_record,
+                  "handoff receipt changed during export")
+         observations.append({"id": rid, "source_digest": facts["source_digest"],
+diff --git a/tools/effort_protocol/qualify_native.py b/tools/effort_protocol/qualify_native.py
+index 5355af575..b441fe9be 100644
+--- a/tools/effort_protocol/qualify_native.py
++++ b/tools/effort_protocol/qualify_native.py
+@@ -15,8 +15,8 @@ from pathlib import Path
+ from unittest.mock import patch
+ 
+ from adapter import run_phase
+-from native_executor import NativeExecutor, TOOL_ROLES, external
+-from readiness import validate_readiness
++from native_executor import NativeExecutor, TOOL_ROLES, external, _public_digest
++from readiness import buffered_status_ref, validate_readiness
+ from receipts import input_digest, publish_exclusive
+ 
+ 
+@@ -54,7 +54,8 @@ def _native_argv(actor, home, cfg):
+              "--mount", f"type=bind,src={home},dst=/bench-home"]
+     keys = {"HOME", "USER", "PATH", "CARGO_NET_OFFLINE", "HF_HUB_OFFLINE", "CODESCOUT_DISABLE_SPARSE",
+             "FASTEMBED_CACHE_PATH", "CODESCOUT_VECTOR_BACKEND", "CODESCOUT_ARTIFACT_BACKEND",
+-            "CODESCOUT_SQLITE_DIR", "MCP_PROTOCOL_NEGOTIATION"}
++            "CODESCOUT_SQLITE_DIR", "MCP_PROTOCOL_NEGOTIATION",
++            "CODESCOUT_EMBED_MODEL", "CODESCOUT_EMBED_URL"}
+     for value in manifest["Config"]["Env"]:
+         if value.split("=")[0] in keys:
+             args += ["-e", value]
+@@ -63,6 +64,27 @@ def _native_argv(actor, home, cfg):
+ 
+ def _readiness(out, argv, actor, public_source, cfg):
+     """Measure each prepared clone in the exact image before starting its actor."""
++    build_cfg = {**cfg, "image": cfg["native_image"]}
++    build_options = {"--mount": [argv[i+1] for i, value in enumerate(argv[:-4]) if value == "--mount"]}
++    build_contract = external.public_build_contract(build_cfg, build_options, actor)
++    dependency_dirs = cfg["public_build_inputs"]["dependency_dirs"] if build_contract is not None else []
++    warmup_limit = cfg.get("lsp_warmup_retries", 0)
++    if type(warmup_limit) is not int or warmup_limit not in (0, 1):
++        raise ValueError("native startup retry bound must be integer zero or one")
++    registered_keys = {"registered_readiness", "knowledge_paths", "knowledge_sha256",
++                       "baseline_commit", "index_update_required"}
++    registered = None
++    if registered_keys.intersection(cfg) or "source_baseline_sha256" in cfg:
++        if not registered_keys <= set(cfg) or type(cfg["index_update_required"]) is not bool:
++            raise ValueError("incomplete registered readiness contract")
++        registered = cfg["registered_readiness"]
++        if (not isinstance(registered, dict) or
++                not {"project_root", "languages", "tools", "probes"} <= set(registered) or
++                    not set(registered) <= {"project_root", "languages", "tools", "probes", "index_omission_policy"} or
++                input_digest(actor / ".codescout", cfg["knowledge_paths"]) != cfg["knowledge_sha256"]):
++            raise ValueError("registered public readiness or static knowledge changed")
++        if input_digest(public_source) != _public_digest(actor, dependency_dirs=dependency_dirs, preserve_project_context=build_contract is not None):
++            raise ValueError("prepared public source differs from registered input")
+     name = "ep-ready-" + uuid.uuid4().hex
+     argv = list(argv)
+     argv[argv.index("--name") + 1] = name
+@@ -101,9 +123,28 @@ def _readiness(out, argv, actor, public_source, cfg):
+         cid = row["Id"]
+         if row["Image"] != cfg["native_image"] or row["Config"]["Labels"].get("codescout.hfa") != name:
+             raise ValueError("readiness worker identity mismatch")
+-        indexed = _docker("exec", cid, "/bench/bin/codescout", "index", "-p", "/testbed", timeout=180)
+-        (out / "index.stdout").write_text(indexed.stdout)
+-        (out / "index.stderr").write_text(indexed.stderr)
++        if build_contract is not None:
++            _save(out / "public-build-runtime-raw.json", row)
++            observed_build = external.public_build_runtime(build_cfg, row, actor)
++            _save(out / "public-build-runtime.json", {"binding": observed_build,
++                  "scope": "Live mount/seed contract only; generated outputs inventory requires closed writers."})
++        update = cfg["index_update_required"] if registered is not None else True
++        if update:
++            indexed = _docker("exec", cid, "/bench/bin/codescout", "index", "-p", "/testbed", timeout=1800)
++            (out / "index.stdout").write_text(indexed.stdout)
++            (out / "index.stderr").write_text(indexed.stderr)
++            _save(out / "index-result.json", {"actual_index_calls": 1, "exit_code": indexed.returncode})
++            if indexed.returncode != 0:
++                raise ValueError("native index update failed")
++        else:
++            _save(out / "index-reused.json", {"actual_index_calls": 0})
++        if registered is not None:
++            indexed_state = json.loads((actor / ".codescout/index-state.json").read_bytes())
++            if indexed_state.get("last_indexed_commit") != cfg["baseline_commit"]:
++                raise ValueError("native index does not bind the prepared public Git head")
++            _save(out / "index-commit-binding.json", {
++                "last_indexed_commit": indexed_state["last_indexed_commit"],
++                "source_head": cfg["baseline_commit"]})
+         number = 2
+         pages = []
+         cursor = None
+@@ -121,6 +162,12 @@ def _readiness(out, argv, actor, public_source, cfg):
+             number += 1
+             return result
+         status = tool("workspace", {"action": "status"})
++        status_resolution = []
++        handle = buffered_status_ref(status)
++        if handle is not None:
++            for field in ("project_root", "languages"):
++                arguments = {"path": handle, "json_path": "$." + field}
++                status_resolution.append({"arguments": arguments, "response": tool("read_file", arguments)})
+         specs = [
+             {"tool": "references", "arguments": {"path": "src/lib.rs", "symbol": "double"},
+              "must_contain": ["src/lib.rs", "use_double"]},
+@@ -130,19 +177,56 @@ def _readiness(out, argv, actor, public_source, cfg):
+              "must_contain": ["use_double", "lsp"]},
+             {"tool": "semantic_search", "arguments": {"query": "double the input value", "limit": 3},
+              "must_contain": ["src/lib.rs", "double"]}]
+-        observations = [{"tool": spec["tool"], "arguments": spec["arguments"],
+-                         "response": tool(spec["tool"], spec["arguments"])} for spec in specs]
++        if registered is not None:
++            specs = registered["probes"]
++        observations, warmups = [], []
++        def startup_timeout(spec, response):
++            if spec["tool"] not in ("references", "symbol_at", "call_graph"):
++                return False
++            try:
++                payload = json.loads(response["result"]["content"][0]["text"])
++                return (isinstance(payload, dict) and payload.get("ok") is False and
++                        isinstance(payload.get("error"), str) and
++                        payload["error"].startswith("LSP request timed out after 30s:"))
++            except (KeyError, IndexError, TypeError, ValueError):
++                return False
++        for spec in specs:
++            response = tool(spec["tool"], spec["arguments"])
++            if len(warmups) < warmup_limit and startup_timeout(spec, response):
++                entry = {"tool": spec["tool"], "arguments": spec["arguments"],
++                         "prior_response": response, "retry_response": None,
++                         "reason": "registered max-one model-free LSP startup timeout retry"}
++                warmups.append(entry)
++                _save(out / "readiness-warmup-started.json", warmups)
++                response = tool(spec["tool"], spec["arguments"])
++                entry["retry_response"] = response
++            observations.append({"tool": spec["tool"], "arguments": spec["arguments"], "response": response})
++        _save(out / "readiness-warmup-retries.json", warmups)
+         binding = {"image": cfg["native_image"], "executable_sha256": _docker(
+             "exec", cid, "sha256sum", "/bench/bin/codescout").stdout.split()[0],
+             "source_snapshot_sha256": input_digest(public_source),
+             "knowledge_sha256": input_digest(actor / ".codescout",
+-                ["project.toml", "system-prompt.md"])}
++                cfg["knowledge_paths"] if registered is not None else ["project.toml", "system-prompt.md"])}
++        if build_contract is not None:
++            binding["public_build_inputs_sha256"] = build_contract["fingerprint"]
++        if "public_fixture" in cfg:
++            binding["public_fixture_sha256"] = cfg["public_fixture"]["fingerprint"]
+         expected = {"project_root": "/testbed", "languages": ["rust"],
+             "tools": ["symbols", "references", "symbol_at", "call_graph", "semantic_search"],
+             "binding": binding, "probes": specs}
++        if registered is not None:
++            expected = {**registered, "binding": binding}
++        if build_contract is not None:
++            expected["public_build_inputs"] = cfg["public_build_inputs"]
++        if "source_baseline_sha256" in cfg:
++            expected["source_baseline_sha256"] = cfg["source_baseline_sha256"]
+         wire = {"binding": binding, "status": status, "tool_pages": pages, "probes": observations,
+                 "index_verification": tool("index", {"action": "verify"})}
+-        result = validate_readiness(expected, wire)
++        if status_resolution:
++            wire["status_resolution"] = status_resolution
++        result = validate_readiness(expected, wire, source=actor)
++        if registered is not None and binding["knowledge_sha256"] != cfg["knowledge_sha256"]:
++            raise ValueError("static onboarding changed during native readiness")
+         _save(out / "readiness.json", {"expected": expected, "wire": wire, "result": result})
+         return {"expected": expected, "wire": wire}
+     finally:
+@@ -159,6 +243,10 @@ def _readiness(out, argv, actor, public_source, cfg):
+                 proc.wait(timeout=15)
+         except Exception as exc:
+             errors.append(exc)
++        try:
++            proc.stdout.close()
++        except Exception as exc:
++            errors.append(exc)
+         try:
+             stderr.close()
+         except Exception as exc:
+diff --git a/tools/effort_protocol/readiness.py b/tools/effort_protocol/readiness.py
+index b34bccd8d..a14d741c5 100644
+--- a/tools/effort_protocol/readiness.py
++++ b/tools/effort_protocol/readiness.py
+@@ -11,6 +11,7 @@ import hashlib
+ import stat
+ from pathlib import Path, PurePosixPath
+ from native_executor import _public_digest
++from public_build_inputs import validate_descriptor
+ 
+ LSP_TOOLS = {"references", "symbol_at", "call_graph"}
+ BINDING_FIELDS = {"image", "executable_sha256", "source_snapshot_sha256", "knowledge_sha256"}
+@@ -47,7 +48,70 @@ def _texts(reply):
+                      "MCP content reports failure")
+     return texts
+ 
+-def _verify_index(reply, source=None):
++def buffered_status_ref(reply):
++    """Identify only the MCP buffer envelope; never follow a supplied hint."""
++    first = _texts(reply)[0]
++    try:
++        value = json.loads(first)
++    except ValueError:
++        return None
++    if not isinstance(value, dict) or "output_id" not in value:
++        return None
++    handle = value["output_id"]
++    _require(isinstance(handle, str) and re.fullmatch(r"@tool_[0-9a-f]{8,64}", handle),
++             "invalid buffered project status reference")
++    return handle
++
++
++def _project_status(wire):
++    statuses = []
++    for text in _texts(wire.get("status")):
++        try:
++            value = json.loads(text)
++        except ValueError:
++            continue
++        if isinstance(value, dict) and "project_root" in value and "languages" in value:
++            statuses.append(value)
++    handle = buffered_status_ref(wire.get("status"))
++    if handle is None:
++        _require("status_resolution" not in wire, "unexpected project status resolution")
++    else:
++        _require(not statuses, "ambiguous buffered project status")
++        resolution = wire.get("status_resolution")
++        _require(isinstance(resolution, list) and len(resolution) == 2,
++                 "two buffered project status fields required")
++        status = {}
++        for item, field, kind in zip(resolution, ("project_root", "languages"), ("string", "array")):
++            query = {"path": handle, "json_path": "$." + field}
++            _require(isinstance(item, dict) and set(item) == {"arguments", "response"}
++                     and item["arguments"] == query, "buffered project status query mismatch")
++            # MCP renders read_file's internal JSON as a line-counted text body.
++            # Parse the actual transport, not its pre-render internal Value.
++            text = _texts(item["response"])[0]
++            frame = re.fullmatch(r"([1-9][0-9]*) lines?\n\n([\s\S]*)", text)
++            _require(frame is not None and len(text.encode()) <= 4096,
++                     "incomplete buffered project status field")
++            count, content = int(frame[1]), frame[2]
++            _require(count <= 64 and len(content.splitlines()) == count,
++                     "incomplete buffered project status field")
++            if field == "project_root":
++                _require(count == 1, "incomplete buffered project status field")
++                status[field] = content
++            else:
++                try:
++                    status[field] = json.loads(content)
++                except ValueError as exc:
++                    raise ReadinessViolation("malformed buffered project status languages") from exc
++                _require(isinstance(status[field], list)
++                         and all(isinstance(language, str) for language in status[field]),
++                         "malformed buffered project status languages")
++        statuses.append(status)
++    _require(len(statuses) == 1, "one structured project status required")
++    return statuses[0]
++
++def _verify_index(reply, source=None, *, omission_policy="empty-source-v1"):
++    _require(type(omission_policy) is str and omission_policy in
++             ("empty-source-v1","ascii-whitespace-source-v1"), "unknown index omission policy")
+     values = []
+     for text in _texts(reply):
+         try:
+@@ -64,6 +128,7 @@ def _verify_index(reply, source=None):
+              and type(missing) is int and missing >= 0 and stored + missing == expected,
+              "native index file coverage is unproved")
+     empty = []
++    whitespace = []
+     if value.get("verdict") == "incomplete" and missing > 0 and source is not None:
+         names = value.get("missing_sample")
+         _require(isinstance(names, list) and len(names) == missing
+@@ -83,11 +148,18 @@ def _verify_index(reply, source=None):
+                 _require(not target.is_symlink(), "linked missing path refused")
+             try:
+                 info = target.stat()
+-                _require(stat.S_ISREG(info.st_mode) and info.st_size == 0
+-                         and target.read_bytes() == b"", "missing file is not empty regular source")
++                _require(stat.S_ISREG(info.st_mode), "missing file is not regular source")
++                data = target.read_bytes()
++                _require(len(data)==info.st_size and (data==b"" or
++                         (omission_policy=="ascii-whitespace-source-v1" and not data.strip())),
++                         ("missing file is not empty regular source" if omission_policy=="empty-source-v1" else
++                          "missing source has content outside the declared omission policy"))
+             except OSError as exc:
+                 raise ReadinessViolation("missing source cannot be inspected") from exc
+-            empty.append({"path": name, "sha256": hashlib.sha256(b"").hexdigest()})
++            if data:
++                whitespace.append({"path":name,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
++            else:
++                empty.append({"path": name, "sha256": hashlib.sha256(b"").hexdigest()})
+     else:
+         _require(value.get("verdict") == "complete" and missing == 0,
+                  "native index is incomplete")
+@@ -99,8 +171,10 @@ def _verify_index(reply, source=None):
+     for key in ("missing_count", "orphan_count"):
+         _require(type(memories.get(key)) is int and memories[key] == 0,
+                  "native memory coverage is incomplete")
+-    return {"native_verdict": value["verdict"],
+-            "coverage": "all_nonempty_eligible_files" if empty else "native_complete",
++    return {**({"whitespace_missing_files":whitespace} if omission_policy=="ascii-whitespace-source-v1" else {}),
++            "native_verdict": value["verdict"],
++            "coverage": ("all_non_ascii_whitespace_eligible_files" if omission_policy=="ascii-whitespace-source-v1"
++                         else "all_nonempty_eligible_files") if (empty or whitespace) else "native_complete",
+             "expected_eligible_files": expected, "stored_files": stored,
+             "empty_missing_files": empty}
+ 
+@@ -125,28 +199,39 @@ def validate_readiness(expected, wire, *, source=None):
+     _require(isinstance(expected.get("project_root"), str) and expected["project_root"].startswith("/"),
+              "registered absolute project root required")
+     binding = expected.get("binding")
+-    _require(isinstance(binding, dict) and set(binding) == BINDING_FIELDS, "registered runtime binding incomplete")
++    _require(isinstance(binding, dict) and BINDING_FIELDS <= set(binding)
++             and set(binding) <= BINDING_FIELDS | {"public_fixture_sha256", "public_build_inputs_sha256"},
++             "registered runtime binding incomplete")
++    dependency_dirs = []
++    descriptor = expected.get("public_build_inputs")
++    if descriptor is not None or "public_build_inputs_sha256" in binding:
++        _require(descriptor is not None and source is not None, "physical public build inputs required")
++        try:
++            admitted = validate_descriptor(descriptor, source, binding["image"])
++        except (ValueError, OSError, TypeError, KeyError) as exc:
++            raise ReadinessViolation("invalid public build inputs") from exc
++        _require(binding.get("public_build_inputs_sha256") == admitted["fingerprint"],
++                 "registered public build descriptor binding differs")
++        dependency_dirs = descriptor["dependency_dirs"]
+     for key, value in binding.items():
+         pattern = r"sha256:[0-9a-f]{64}" if key == "image" else r"[0-9a-f]{64}"
+         _require(isinstance(value, str) and re.fullmatch(pattern, value), "invalid runtime binding " + key)
+     _require(wire.get("binding") == binding, "actual runtime/source/knowledge binding mismatch")
+-    statuses = []
+-    for text in _texts(wire.get("status")):
+-        try:
+-            value = json.loads(text)
+-        except ValueError:
+-            continue
+-        if isinstance(value, dict) and "project_root" in value and "languages" in value:
+-            statuses.append(value)
+-    _require(len(statuses) == 1, "one structured project status required")
+-    status = statuses[0]
++    status = _project_status(wire)
+     _require(status["project_root"] == expected["project_root"], "wrong active project root")
+     _require(isinstance(status["languages"], list) and set(languages) <= set(status["languages"]),
+              "expected source languages not active")
+ 
+     if source is not None:
+-        _require(_public_digest(source) == binding["source_snapshot_sha256"], "actual public source mismatch")
+-    coverage = _verify_index(wire.get("index_verification"), source)
++        _require(_public_digest(source, dependency_dirs=dependency_dirs, preserve_project_context=descriptor is not None) == binding["source_snapshot_sha256"], "actual public source mismatch")
++    baseline = expected.get("source_baseline_sha256")
++    changed_source = False
++    if baseline is not None:
++        _require(isinstance(baseline, str) and re.fullmatch(r"[0-9a-f]{64}", baseline)
++                 and source is not None, "physical public source and frozen baseline required")
++        changed_source = binding["source_snapshot_sha256"] != baseline
++    coverage = _verify_index(wire.get("index_verification"), source,
++        omission_policy=expected["index_omission_policy"] if "index_omission_policy" in expected else "empty-source-v1")
+ 
+     pages = wire.get("tool_pages")
+     _require(isinstance(pages, list) and bool(pages), "actual MCP tools/list required")
+@@ -168,6 +253,7 @@ def validate_readiness(expected, wire, *, source=None):
+     actual = wire.get("probes")
+     _require(isinstance(actual, list) and len(actual) == len(probes), "actual public operation canaries missing")
+     covered = set()
++    witnesses = []
+     for spec, observation in zip(probes, actual):
+         _require(isinstance(spec, dict) and isinstance(observation, dict), "malformed operation canary")
+         tool = spec.get("tool")
+@@ -179,10 +265,18 @@ def validate_readiness(expected, wire, *, source=None):
+                  "positive public canary witness required")
+         # Supplemental guides are not witnesses of an operation.
+         text = _texts(observation.get("response"))[0]
+-        _require(all(needle in text for needle in needles), "public operation witness not observed: " + tool)
++        observed = all(needle in text for needle in needles)
++        if not changed_source:
++            _require(observed, "public operation witness not observed: " + tool)
++        witnesses.append({"tool": tool, "observed": observed})
+         covered.add(tool)
+     _require(LSP_TOOLS | {"semantic_search"} <= covered, "LSP and semantic operation probes required")
+     if source is not None:
+-        _require(_public_digest(source) == binding["source_snapshot_sha256"], "source changed during verification")
+-    return {"ready": True, "index_coverage": coverage, "project_root": status["project_root"], "languages": sorted(status["languages"]),
+-            "tools": sorted(advertised), "probes_verified": len(actual), "binding": dict(binding)}
++        _require(_public_digest(source, dependency_dirs=dependency_dirs, preserve_project_context=descriptor is not None) == binding["source_snapshot_sha256"], "source changed during verification")
++    result = {"ready": True, "index_coverage": coverage, "project_root": status["project_root"],
++              "languages": sorted(status["languages"]), "tools": sorted(advertised),
++              "probes_verified": sum(item["observed"] for item in witnesses), "binding": dict(binding)}
++    if baseline is not None:
++        result.update(readiness_scope="changed-source-capabilities" if changed_source else "baseline-positive-witnesses",
++                      probes_observed=len(actual), probe_witnesses=witnesses)
++    return result
+diff --git a/tools/effort_protocol/receipts.py b/tools/effort_protocol/receipts.py
+index 9b8ad1d57..bc75a3fbc 100644
+--- a/tools/effort_protocol/receipts.py
++++ b/tools/effort_protocol/receipts.py
+@@ -9,9 +9,11 @@ import json
+ import os
+ import re
+ import stat
+-from pathlib import Path
++from pathlib import Path, PurePosixPath
+ 
+ from execution_profiles import ProfileViolation, get_profile, profile_digest, validate_runtime_profile
++from public_fixture import verify_fixture_startup
++from public_build_inputs import validate_descriptor, generated_digest, verify_staged
+ 
+ class ReceiptViolation(ValueError):
+     """Evidence is absent, altered, unsupported or from the wrong boundary."""
+@@ -76,19 +78,32 @@ def _host_file(directory, name, limit):
+     _require(path.stat().st_size <= limit, "host evidence exceeds complete-capture limit")
+     return path.read_bytes()
+ 
+-def _verified_profile(record, directory, expected_profile):
++def _verified_profile(record, directory, expected_profile, expected_fixture, expected_build_inputs):
+     # Old frozen fixture receipts predate this contract. New raw runtime records
+     # prevent a fresh receipt from silently falling back after binding deletion.
+     fresh = any(key in record for key in ("execution_profile", "execution_profile_sha256")) or any(
+         (directory / ("container-" + stage + ".json")).exists() for stage in ("before", "after"))
+-    if not fresh and expected_profile is None:
++    if not fresh and expected_profile is None and expected_fixture is None:
+         return {}
+     name = record.get("execution_profile")
+     try:
+-        get_profile(name)
++        settings = get_profile(name)
++        build_stage = record.get("public_build_stage")
++        if name == "cargo-v3":
++            _require(expected_build_inputs is not None and build_stage is not None,
++                     "registered public build descriptor missing")
++            admitted = validate_descriptor(expected_build_inputs, directory / "input", record["image"])
++            current_stage = verify_staged(build_stage, directory / "input", record["image"])
++            _require(current_stage["fingerprint"] == admitted["fingerprint"]
++                     and current_stage["generated_sha256"] == record.get("public_build_generated_after"),
++                     "generated public build evidence differs")
++        else:
++            _require(expected_build_inputs is None and build_stage is None,
++                     "legacy receipt cannot carry public build inputs")
+         _require(expected_profile is None or name == expected_profile, "execution profile mismatch")
+         _require(record.get("execution_profile_sha256") == profile_digest(name),
+                  "execution profile binding mismatch")
++        expected_cwd = str(PurePosixPath(settings["source_mount"]) / record["cwd"])
+         for stage in ("before", "after"):
+             raw = _host_file(directory, "container-" + stage + ".json", 1024 * 1024)
+             _require(record.get("runtime_" + stage + "_sha256") == _hash(raw),
+@@ -98,15 +113,39 @@ def _verified_profile(record, directory, expected_profile):
+                      and row.get("Image") == record.get("image")
+                      and row.get("Config", {}).get("Labels", {}).get("codescout.effort-protocol")
+                          == record.get("container_name"), "execution profile worker identity mismatch")
+-            observed = validate_runtime_profile(row, directory / "input", directory / "build", name)
++            config = row.get("Config", {})
++            expected_entry = "/bench/public-fixture/launch-command" if expected_fixture else record["argv"][0]
++            expected_argv = record["argv"] if expected_fixture else record["argv"][1:]
++            _require(config.get("Entrypoint") == [expected_entry]
++                     and (config.get("Cmd") or []) == expected_argv
++                     and config.get("WorkingDir") == expected_cwd,
++                     "execution command runtime binding mismatch")
++            observed = validate_runtime_profile(row, directory / "input", directory / "build", name,
++                                                public_fixture=expected_fixture,
++                                                public_build_inputs=build_stage)
+             _require(record.get("container_profile") == observed, "execution profile observation mismatch")
+-    except (ProfileViolation, OSError, TypeError, KeyError) as exc:
++            if stage == "after":
++                state = row.get("State")
++                _require(isinstance(state, dict) and state.get("Status") == "exited"
++                         and state.get("Running") is False and state.get("OOMKilled") is False
++                         and not state.get("Error"), "execution final state is not valid and closed")
++                code = state.get("ExitCode")
++                attach = record.get("docker_attach_exit")
++                _require(type(code) is int and type(record.get("exit_code")) is int
++                         and code == record["exit_code"]
++                         and record.get("final_container_state") == state,
++                         "execution final exit binding mismatch")
++                _require(type(attach) is int and attach in (0, code),
++                         "execution attach transport binding mismatch")
++    except (ValueError, OSError, TypeError, KeyError) as exc:
+         raise ReceiptViolation("invalid execution profile: " + str(exc)) from exc
+-    return {"execution_profile": name, "execution_profile_sha256": profile_digest(name)}
++    return {"execution_profile": name, "execution_profile_sha256": profile_digest(name),
++            **({"public_fixture": observed["PublicFixture"]} if expected_fixture else {}),
++            **({"public_build_inputs": observed["PublicBuildInputs"]} if name == "cargo-v3" else {})}
+ 
+ 
+ def verify_receipt(receipt: dict, execution_root: Path, source_snapshot: Path,
+-                   *, expected_profile=None) -> dict:
++                   *, expected_profile=None, expected_fixture=None, expected_build_inputs=None) -> dict:
+     """Resolve an opaque receipt ID in host storage; never trust actor-supplied facts."""
+     _require(isinstance(receipt, dict) and set(receipt) == {"id"},
+              "actor may reference an ID only")
+@@ -143,13 +182,27 @@ def verify_receipt(receipt: dict, execution_root: Path, source_snapshot: Path,
+              "test input snapshot drift")
+     _require(_is_digest(record.get("build_before")) and _is_digest(record.get("build_after")),
+              "missing generated input inventory")
+-    _require(record["build_after"] == input_digest(directory / "build"),
+-             "generated execution input drift")
+-    profile = _verified_profile(record, directory, expected_profile)
++    if record.get("execution_profile") == "cargo-v3":
++        _require(record.get("generated_inventory_schema") == "generated-artifact-inventory-v1",
++                 "generated inventory policy missing")
++        try:
++            current_build = generated_digest(directory / "build")
++        except (ValueError, OSError) as exc:
++            raise ReceiptViolation("generated execution input unavailable") from exc
++    else:
++        _require("generated_inventory_schema" not in record, "legacy generated policy differs")
++        current_build = input_digest(directory / "build")
++    _require(record["build_after"] == current_build, "generated execution input drift")
++    profile = _verified_profile(record, directory, expected_profile, expected_fixture, expected_build_inputs)
+     streams = {}
+     for name in ("stdout", "stderr"):
+         streams[name] = _host_file(directory, name, 64 * 1024 * 1024)
+         _require(record.get(name + "_sha256") == _hash(streams[name]), "execution log drift")
++    if expected_fixture is not None:
++        try:
++            verify_fixture_startup(streams["stderr"], expected_fixture)
++        except (ValueError, OSError, TypeError) as exc:
++            raise ReceiptViolation("public fixture startup invalid") from exc
+     if record["kind"] == "observation":
+         _require(bool(streams["stdout"] or streams["stderr"]), "empty observation")
+     _require(isinstance(record.get("run_id"), str) and bool(record["run_id"])
+diff --git a/tools/effort_protocol/test_adapter.py b/tools/effort_protocol/test_adapter.py
+index 1233c082f..9b0d5dcc4 100644
+--- a/tools/effort_protocol/test_adapter.py
++++ b/tools/effort_protocol/test_adapter.py
+@@ -16,6 +16,7 @@ except ModuleNotFoundError as exc:
+         raise
+     adapter = None
+ import receipts
++import public_fixture
+ 
+ IMAGE = os.environ.get("EFFORT_PROTOCOL_TEST_IMAGE")
+ 
+@@ -72,6 +73,8 @@ class AdapterTests(unittest.TestCase):
+                                            "cwd": ".", "test_files": ["probe.py"]}],
+                         "command_timeout_s": 10, "max_log_bytes": 1048576}
+ 
++
++
+     def run_phase(self):
+         return adapter.run_phase(self.request, self.actor)
+ 
+@@ -137,6 +140,31 @@ class AdapterTests(unittest.TestCase):
+             record = json.loads((self.root / "phase/commands" / rid / "receipt.json").read_text())
+             self.assertEqual(record["execution_profile"], "fixture-v1")
+ 
++    def test_missing_public_fixture_stops_before_actor_spend(self):
++        self.request["execution_profile"] = "fixture-public-v1"
++        with self.assertRaises(adapter.PhaseInvalid):
++            self.run_phase()
++        self.assertEqual(self.actor.calls, [])
++        self.assertFalse((self.root / "phase").exists())
++
++    def test_actor_descriptor_cannot_override_trusted_fixture_or_break_public_export(self):
++        descriptor = public_fixture.create_fixture_bundle(
++            self.root / "public-fixture",
++            {"version": "public-http-fixture-v1", "hostname": "fixture.sample.test",
++             "port": 18081, "routes": {"/": {
++                 "status": 200, "content_type": "text/plain", "body": "public"}}})
++        self.request.update(execution_profile="fixture-public-v1", public_fixture=descriptor)
++        for command in self.submission["commands"]:
++            command["public_fixture"] = {"root": "/actor-controlled"}
++        result = self.run_phase()
++        self.assertEqual(result["state"]["phase"], "repair")
++        self.assertEqual(len(result["public_artifact"]["observations"]), 2)
++        for rid, facts in result["receipts"].items():
++            self.assertEqual(facts["public_fixture"]["fingerprint"], descriptor["fingerprint"])
++            record = json.loads((self.root / "phase/commands" / rid / "receipt.json").read_text())
++            self.assertEqual(record["container_profile"]["PublicFixture"]["fingerprint"],
++                             descriptor["fingerprint"])
++
+     def test_host_cargo_profile_is_forwarded_to_actual_evidence_commands(self):
+         self.request["execution_profile"] = "cargo-v1"
+         for command in self.submission["commands"]:
+@@ -149,6 +177,35 @@ class AdapterTests(unittest.TestCase):
+             actual = json.loads((self.root / "phase/commands" / rid / "container-before.json").read_text())
+             self.assertEqual(actual["HostConfig"]["Memory"], 8 * 1024**3)
+ 
++    def test_host_long_budget_cannot_be_overridden_by_actor_commands(self):
++        from unittest.mock import patch
++        self.request["execution_profile"] = "cargo-v2"
++        self.request["command_timeout_s"] = 900
++        for command in self.submission["commands"]:
++            command["argv"][2] = "/testbed/probe.py"
++            command["timeout_s"] = 999999
++            command["max_log_bytes"] = 0
++            command["execution_profile"] = "fixture-v1"
++        forwarded = []
++        actual = adapter.execute_observation
++        def observe(request, *args, **kwargs):
++            forwarded.append(copy.deepcopy(request))
++            return actual(request, *args, **kwargs)
++        with patch.object(adapter, "execute_observation", side_effect=observe):
++            result = self.run_phase()
++        self.assertEqual(result["state"]["phase"], "repair")
++        self.assertEqual(result["cost"]["known_usd"], "0.12")
++        self.assertEqual(len(forwarded), 2)
++        for request in forwarded:
++            self.assertEqual(request["timeout_s"], 900)
++            self.assertEqual(request["max_log_bytes"], 1048576)
++            self.assertEqual(request["execution_profile"], "cargo-v2")
++        for rid in result["receipts"]:
++            record = json.loads((self.root / "phase/commands" / rid / "receipt.json").read_text())
++            self.assertEqual(record["execution_profile"], "cargo-v2")
++            self.assertEqual(record["execution_profile_sha256"],
++                             adapter.profile_digest("cargo-v2"))
++
+     def test_phase_zero_production_drift_keeps_cost_and_is_incomplete(self):
+         (self.source / "program.txt").write_text("unauthorized phase-zero repair")
+         result = self.run_phase()
+diff --git a/tools/effort_protocol/test_campaign.py b/tools/effort_protocol/test_campaign.py
+index d9ac8d90a..78452c1ad 100644
+--- a/tools/effort_protocol/test_campaign.py
++++ b/tools/effort_protocol/test_campaign.py
+@@ -111,18 +111,47 @@ class CampaignTests(unittest.TestCase):
+         chosen[0]["reason"] = "changed"
+         self.assertEqual(rows, before)
+ 
+-    def test_schedule_balances_positions_and_reserves_thirty_dollars(self):
++    def test_schedule_balances_positions_and_reserves_seventy_dollars(self):
++        from decimal import Decimal
+         chosen = campaign.select_tasks(metadata(), set(), "fixture-seed")
+         schedule = campaign.attempt_schedule(chosen)
+-        self.assertEqual([(r["task_id"], r["arm"]) for r in schedule],
++        self.assertEqual([(row["task_id"], row["arm"]) for row in schedule],
+                          [("three", "L"), ("three", "R"), ("three", "P"), ("three", "X"),
+                           ("four", "X"), ("four", "P"), ("four", "R"), ("four", "L")])
+-        self.assertEqual([r["reserved_usd"] for r in schedule],
+-                         ["3", "3", "3", "6", "6", "3", "3", "3"])
+-        self.assertEqual(len({r["id"] for r in schedule}), 8)
+-        self.assertEqual(schedule[1]["phase_reservations_usd"], ["0.60", "1.80", "0.60"])
+-        self.assertEqual(schedule[2]["phase_cli_caps_usd"], ["0.55", "1.65", "0.55"])
+-        self.assertLess(float(schedule[0]["cli_cap_usd"]), 3)
++        self.assertEqual([row["reserved_usd"] for row in schedule],
++                         ["6", "10", "10", "9", "9", "10", "10", "6"])
++        self.assertEqual(sum(Decimal(row["reserved_usd"]) for row in schedule), Decimal("70"))
++        self.assertEqual(len({row["id"] for row in schedule}), 8)
++        for row in schedule:
++            self.assertEqual(row["cli_cap_usd"], "5.50" if row["arm"] == "X" else "2.75")
++            if row["arm"] in ("P", "R"):
++                self.assertEqual(row["phase_reservations_usd"], ["3", "4", "3"])
++                self.assertEqual(row["phase_cli_caps_usd"], ["0.55", "1.65", "0.55"])
++                self.assertEqual(sum(Decimal(value) for value in row["phase_reservations_usd"]),
++                                 Decimal(row["reserved_usd"]))
++    def test_recorded_investigation_request_fits_transport_without_raising_cli_target(self):
++        from decimal import Decimal
++        from native_executor import external
++        schedule = campaign.attempt_schedule(campaign.select_tasks(metadata(), set(), "fixture-seed"))
++        for arm in ("P", "R"):
++            entry = next(row for row in schedule if row["arm"] == arm)
++            with self.subTest(arm=arm):
++                self.assertEqual(entry["phase_cli_caps_usd"], ["0.55", "1.65", "0.55"])
++                budget = external.transport.Budget(entry["phase_reservations_usd"][0])
++                budget.spent = Decimal("0.18006615")
++                admitted = True
++                try:
++                    bound = budget.reserve(56958, 8192)
++                except external.transport.BudgetExhausted:
++                    admitted = False
++                self.assertTrue(admitted, "registered transport envelope censored the recorded R request")
++                self.assertEqual(bound, Decimal("0.5958480"))
++                with self.assertRaises(ValueError):
++                    budget.reserve(56958, 8192)
++                oversized = external.transport.Budget(entry["phase_reservations_usd"][0])
++                oversized.spent = Decimal("0.18006615")
++                with self.assertRaises(external.transport.BudgetExhausted):
++                    oversized.reserve(400000, 8192)
+ 
+     def test_reservation_preserves_history_and_decimal_precision(self):
+         prior = ledger()
+diff --git a/tools/effort_protocol/test_native_executor.py b/tools/effort_protocol/test_native_executor.py
+index 6015a97fb..863540963 100644
+--- a/tools/effort_protocol/test_native_executor.py
++++ b/tools/effort_protocol/test_native_executor.py
+@@ -1,11 +1,13 @@
+ """Consumer checks for the native CLI phase boundary, with real file capture."""
+ import importlib
+ import json
++import shutil
+ import sys
+ import tempfile
+ import unittest
+ from pathlib import Path
+ from unittest.mock import patch
++import public_fixture
+ 
+ sys.path.insert(0, str(Path(__file__).parent))
+ try:
+@@ -76,6 +78,176 @@ class NativeExecutorTests(unittest.TestCase):
+         (self.actor / ".git").mkdir()
+         (self.actor / ".git/metadata").write_text("tool role, never source")
+         self.executor.bind_readiness(self.binding)
++    def test_preloaded_first_system_request_needs_no_tool_calls(self):
++        expected={'effort':'low','declaration':False,'clause':'AUTHORITY',
++                  'global_visible':['GLOBAL'],'project_visible':['PROJECT'],
++                  'preload_visible':['<prepared-context>','Shared source-only guidance.','RECON_LOADED','</prepared-context>']}
++        (self.prepared/'expected.json').write_text(json.dumps(expected))
++        request={'model':'claude-sonnet-5-5','output_config':{'effort':'low'},
++                 'system':[{'type':'text','text':'GLOBAL\nPROJECT\n'+'\n'.join(expected['preload_visible'])}],
++                 'messages':[{'role':'user','content':'Repair the public task.'}]}
++        path=self.prepared/'request-0.json'; path.write_text(json.dumps(request))
++        self.assertEqual(native._context(self.prepared,['Shared source-only guidance.'],'RECON_LOADED'),
++                         {'system_delivered':True,'recon_delivered':True})
++        for target in ('later','user','tool','onboarding'):
++            bad=json.loads(json.dumps(request))
++            if target=='later':
++                (self.prepared/'request-1.json').write_text(json.dumps(request))
++                bad['system']=[]
++            elif target in ('user','tool'):
++                text=bad['system'][0]['text'];bad['system']=[]
++                bad['messages']=[{'role':'user','content':text if target=='user' else
++                                 [{'type':'tool_result','tool_use_id':'x','content':text}]}]
++            else:
++                bad['system'][0]['text']=bad['system'][0]['text'].replace('Shared source-only guidance.','')
++            path.write_text(json.dumps(bad))
++            with self.subTest(location=target):
++                self.assertEqual(native._context(self.prepared,['Shared source-only guidance.'],'RECON_LOADED'),
++                                 {'system_delivered':False,'recon_delivered':False})
++
++    def add_fixture(self, root=None):
++        descriptor = public_fixture.create_fixture_bundle(
++            root or self.root / "public-fixture",
++            {"version": "public-http-fixture-v1", "hostname": "fixture.sample.test",
++             "port": 18081, "routes": {"/": {
++                 "status": 200, "content_type": "text/plain", "body": "public"}}})
++        path = self.prepared / "prepared.json"
++        cfg = json.loads(path.read_text())
++        cfg["public_fixture"] = descriptor
++        path.write_text(json.dumps(cfg))
++        argv_path = self.prepared / "mcp-native-argv.json"
++        argv = json.loads(argv_path.read_text())
++        entry = argv.index("--entrypoint")
++        del argv[entry:entry + 2]
++        argv[-4:-4] = public_fixture.fixture_docker_options(descriptor, "native")
++        argv_path.write_text(json.dumps(argv))
++        return descriptor
++
++    def test_native_fixture_binding_preserves_binary_and_adds_exact_bundle(self):
++        descriptor = self.add_fixture()
++        expected = dict(self.binding, public_fixture_sha256=descriptor["fingerprint"])
++        self.assertEqual(native._runtime_binding(self.prepared)[0], expected)
++        self.assertEqual(self.executor.bind_readiness(expected), expected)
++        cfg = json.loads((self.prepared / "prepared.json").read_text())
++        for path in Path(descriptor["root"]).iterdir():
++            self.assertIn(str(path), cfg["files"])
++        binary = self.root / "runtime-bin/codescout"
++        binary.write_bytes(b"different native executable")
++        with self.assertRaises(ValueError):
++            self.executor.bind_readiness(expected)
++
++    def test_native_and_command_fixture_must_have_equal_presence_and_identity_before_launch(self):
++        import shutil
++        from adapter import run_phase, PhaseInvalid, _admit_backend
++        from test_readiness import fixture
++        original_cfg = (self.prepared / "prepared.json").read_text()
++        original_argv = (self.prepared / "mcp-native-argv.json").read_text()
++        declared = self.add_fixture()
++        fixture_cfg = (self.prepared / "prepared.json").read_text()
++        fixture_argv = (self.prepared / "mcp-native-argv.json").read_text()
++        alternate = public_fixture.create_fixture_bundle(
++            self.root / "other-fixture",
++            {"version": "public-http-fixture-v1", "hostname": "fixture.sample.test",
++             "port": 18081, "routes": {"/": {
++                 "status": 200, "content_type": "text/plain", "body": "different public body"}}})
++        for index, (native_has_fixture, command_fixture) in enumerate(
++                ((True, alternate), (True, None), (False, alternate))):
++            prepared = self.root / ("prepared-case-" + str(index))
++            shutil.copytree(self.prepared, prepared)
++            (prepared / "prepared.json").write_text(fixture_cfg if native_has_fixture else original_cfg)
++            (prepared / "mcp-native-argv.json").write_text(fixture_argv if native_has_fixture else original_argv)
++            backend = native.NativeExecutor(prepared, self.root / ("capture-" + str(index)),
++                system_lines=["Shared source-only guidance."], recon_marker="RECON_LOADED", scripted_plan=[])
++            expected, wire = fixture()
++            binding = dict(self.binding)
++            if native_has_fixture:
++                binding["public_fixture_sha256"] = declared["fingerprint"]
++            expected["binding"] = binding
++            wire["binding"] = dict(binding)
++            request = {"state": {"run_id": "r", "phase": "investigate",
++                                "baseline_paths": ["program.txt"],
++                                "baseline_digest": self.binding["source_snapshot_sha256"]},
++                "arm": "R", "execution_mode": "native",
++                "native_preflight": {"expected": expected, "wire": wire},
++                "phase_budget_usd": "0.50", "public_packet": {"issue": "Public request"},
++                "out": str(self.root / ("phase-case-" + str(index))),
++                "execution_profile": "fixture-public-v1" if command_fixture else "fixture-v1",
++                **({"public_fixture": command_fixture} if command_fixture else {})}
++            with self.subTest(index=index):
++                with patch.object(native.external, "launch", side_effect=RuntimeError("unexpected launch")) as launch:
++                    with self.assertRaises(PhaseInvalid):
++                        run_phase(request, backend)
++                    launch.assert_not_called()
++                self.assertFalse(Path(request["out"]).exists())
++        # The guard also admits the matched new profile, without launching a client.
++        expected, wire = fixture()
++        binding = dict(self.binding, public_fixture_sha256=declared["fingerprint"])
++        expected["binding"], wire["binding"] = binding, dict(binding)
++        admitted = _admit_backend(
++            {"execution_mode": "native", "native_preflight": {"expected": expected, "wire": wire},
++             "execution_profile": "fixture-public-v1", "public_fixture": declared}, self.executor)
++        self.assertEqual(admitted["binding"], binding)
++
++    def empty_omission_proof(self):
++        from test_readiness import fixture, reply
++        (self.actor / "empty.rs").write_bytes(b"")
++        expected, wire = fixture()
++        binding = native._runtime_binding(self.prepared)[0]
++        expected["binding"], wire["binding"] = binding, dict(binding)
++        value = {"verdict": "incomplete", "expected_files": 2, "stored_files": 1,
++                 "missing_count": 1, "missing_sample": ["empty.rs"], "orphan_count": 0,
++                 "chunks_without_vectors": 0, "memories": {"missing_count": 0, "orphan_count": 0}}
++        wire["index_verification"] = reply(json.dumps(value))
++        return {"execution_mode": "native", "native_preflight": {"expected": expected, "wire": wire}}
++
++    def test_consuming_native_admission_checks_actual_empty_omission_without_rewriting_verdict(self):
++        import copy
++        from adapter import _admit_backend
++        request = self.empty_omission_proof()
++        before = copy.deepcopy(request)
++        result = _admit_backend(request, self.executor)
++        self.assertEqual(result["index_coverage"]["native_verdict"], "incomplete")
++        self.assertEqual(result["index_coverage"]["coverage"], "all_nonempty_eligible_files")
++        self.assertEqual(result["index_coverage"]["empty_missing_files"][0]["path"], "empty.rs")
++        self.assertEqual(request, before)
++
++    def test_consuming_native_admission_refuses_nonempty_missing_file_on_bound_source(self):
++        from adapter import _admit_backend, PhaseInvalid
++        request = self.empty_omission_proof()
++        (self.actor / "empty.rs").write_text("pub fn omitted() {}")
++        binding = native._runtime_binding(self.prepared)[0]
++        request["native_preflight"]["expected"]["binding"] = binding
++        request["native_preflight"]["wire"]["binding"] = dict(binding)
++        with self.assertRaisesRegex(PhaseInvalid, "missing file is not empty regular source"):
++            _admit_backend(request, self.executor)
++
++    def test_consuming_native_admission_refuses_changed_source_before_coverage(self):
++        from adapter import _admit_backend, PhaseInvalid
++        request = self.empty_omission_proof()
++        (self.actor / "program.txt").write_text("changed after preparation")
++        with self.assertRaisesRegex(PhaseInvalid, "actual public source mismatch"):
++            _admit_backend(request, self.executor)
++
++    def test_native_fixture_alias_mount_and_entrypoint_cannot_drift(self):
++        descriptor = self.add_fixture()
++        path = self.prepared / "mcp-native-argv.json"
++        original = path.read_text()
++        argv = json.loads(original)
++        for before, after in (
++                ("fixture.sample.test:127.0.0.1", "example.com:127.0.0.1"),
++                ("/bench/public-fixture/launch-native", "/bench/public-fixture/launch-command"),
++                (f"type=bind,src={descriptor['root']},dst=/bench/public-fixture,readonly",
++                 f"type=bind,src={descriptor['root']},dst=/bench/public-fixture")):
++            bad = [after if value == before else value for value in argv]
++            path.write_text(json.dumps(bad))
++            with self.subTest(before=before), self.assertRaises(ValueError):
++                native._runtime_binding(self.prepared)
++        path.write_text(original)
++
++    def test_native_fixture_under_actor_source_is_rejected(self):
++        self.add_fixture(self.actor / "mutable-fixture")
++        with self.assertRaises(ValueError):
++            native._runtime_binding(self.prepared)
+ 
+     def launch(self, *args, **kwargs):
+         self.launched = kwargs
+@@ -262,12 +434,70 @@ class NativeExecutorTests(unittest.TestCase):
+         call.assert_not_called()
+ 
+     def test_continuation_control_does_not_require_a_protocol_submission(self):
+-        self.packet.update(arm="R", prompt="Continue the public repair.")
+-        with patch.object(native.external, "launch", return_value=self.receipt):
++        self.packet.update(cli_cap_usd="0.45", arm="R", prompt="Continue the public repair.")
++        with patch.object(native.external, "launch", return_value=self.receipt) as launched:
+             result = self.executor.execute(self.packet)
+         cfg = json.loads((self.prepared / "prepared.json").read_text())
+         self.assertNotIn("submission.json", cfg["prompt"])
+         self.assertIsNone(result["submission"])
++        self.assertEqual(launched.call_args.kwargs["cli_cap"], "0.45")
++
++    def test_fixed_xhigh_baseline_reaches_the_native_launch_at_xhigh(self):
++        self.packet.update(cli_cap_usd="0.45", arm="X", phase="ordinary", prompt="Repair the public task.")
++        with patch.object(native.external, "launch", return_value=self.receipt) as launched:
++            result = self.executor.execute(self.packet)
++        self.assertEqual(launched.call_args.kwargs["effort"], "xhigh")
++        self.assertNotIn("submission.json", json.loads(
++            (self.prepared / "prepared.json").read_text())["prompt"])
++        self.assertIsNone(result["submission"])
++        self.assertEqual(launched.call_args.kwargs["cli_cap"], "0.45")
++
++    def test_ordinary_low_baseline_retains_the_same_native_boundary(self):
++        self.packet.update(cli_cap_usd="0.45", arm="L", phase="ordinary", prompt="Repair the public task.")
++        with patch.object(native.external, "launch", return_value=self.receipt) as launched:
++            result = self.executor.execute(self.packet)
++        self.assertEqual(launched.call_args.kwargs["effort"], "low")
++        self.assertEqual(launched.call_args.kwargs["allowance"], "0.50")
++        self.assertEqual(result["cost_usd"], "0.07")
++        self.assertTrue(result["context_valid"])
++        self.assertNotIn("submission.json", json.loads(
++            (self.prepared / "prepared.json").read_text())["prompt"])
++        self.assertEqual(launched.call_args.kwargs["cli_cap"], "0.45")
++    def test_feedback_r_plan_is_present_at_native_prompt_and_first_request_boundary(self):
++        import feedback_policy
++        selected = feedback_policy.condition_spec("R", ".")
++        self.packet.update(arm="R", phase="repair", effort="low", max_continuations=4,
++                           cli_cap_usd="2.75", allowance_usd="6", feedback_policy=selected)
++        cfg = json.loads((self.prepared / "prepared.json").read_text())
++        cfg.update(feedback_policy=selected, max_continuations=4,
++                   checks=feedback_policy.completion_checks(selected))
++        (self.prepared / "prepared.json").write_text(json.dumps(cfg))
++
++        def launched(prepared, **kwargs):
++            cfg = json.loads((prepared / "prepared.json").read_text())
++            request = json.loads((prepared / "request-0.json").read_text())
++            request["messages"].append({"role": "user", "content": cfg["prompt"]})
++            (prepared / "request-0.json").write_text(json.dumps(request))
++            return self.receipt
++
++        with patch.object(native.external, "launch", side_effect=launched):
++            result = self.executor.execute(self.packet)
++        prompt = json.loads((self.prepared / "prepared.json").read_text())["prompt"]
++        self.assertIn("Before completing, run cargo check --offline --workspace --all-targets in "
++                      "the source-qualified primary Rust workspace '.'. Correct any "
++                      "diagnostics relevant to the repair and rerun this check. Do not enable "
++                      "all features automatically.", prompt)
++        self.assertTrue(result["context_evidence"]["feedback_prompt_delivered"])
++
++    def test_unknown_arm_is_rejected_before_launch_or_prepared_prompt_change(self):
++        self.packet["arm"] = "unregistered"
++        original = (self.prepared / "prepared.json").read_bytes()
++        with patch.object(native.external, "launch", return_value=self.receipt) as launched:
++            with self.assertRaisesRegex(ValueError, "unsupported native arm"):
++                self.executor.execute(self.packet)
++        launched.assert_not_called()
++        self.assertEqual((self.prepared / "prepared.json").read_bytes(), original)
++        self.assertFalse(self.executor.capture.exists())
+ 
+     def test_phase_adapter_forwards_control_identity_to_the_actor_boundary(self):
+         from adapter import run_phase
+@@ -281,8 +511,122 @@ class NativeExecutorTests(unittest.TestCase):
+         request = {"state": {"run_id": "r", "phase": "investigate",
+                             "baseline_digest": self.binding["source_snapshot_sha256"],
+                             "baseline_paths": ["program.txt"]},
+-                   "arm": "R", "execution_mode": "scripted", "phase_budget_usd": "0.50",
++                   "arm": "R", "execution_mode": "scripted", "phase_budget_usd": "0.50", "cli_cap_usd": "0.45",
+                    "public_packet": {"issue": "Public request"}, "out": str(self.root / "control-phase")}
+         result = run_phase(request, SimpleNamespace(mode="scripted", execute=execute))
+         self.assertEqual(result["state"]["phase"], "repair")
+         self.assertEqual(packets[0].get("arm"), "R")
++        self.assertEqual(packets[0].get("cli_cap_usd"), "0.45")
++
++    def test_explicit_cli_cap_and_trusted_supervisor_reach_the_launch(self):
++        marker = object()
++        self.executor = native.NativeExecutor(self.prepared, self.root / "capped-capture",
++            system_lines=["Shared source-only guidance."], recon_marker="RECON_LOADED",
++            scripted_plan=[], supervisor=marker)
++        self.executor.bind_readiness(self.binding)
++        self.packet.update(cli_cap_usd="0.45", supervisor="actor cannot supply this")
++        with patch.object(native.external, "launch", side_effect=self.launch):
++            self.executor.execute(self.packet)
++        self.assertEqual(self.launched["cli_cap"], "0.45")
++        self.assertEqual(self.launched["allowance"], "0.50")
++        self.assertIs(self.launched["supervisor"], marker)
++
++    def test_invalid_cli_caps_cannot_launch_or_mutate_prepared_prompt(self):
++        for index, cap in enumerate((None, "0", "-1", "0.50", "0.51", "NaN", "Infinity", True)):
++            with self.subTest(cap=cap):
++                prepared = self.root / ("cap-case-" + str(index))
++                shutil.copytree(self.prepared, prepared)
++                engine = native.NativeExecutor(prepared, self.root / ("cap-capture-" + str(index)),
++                    system_lines=["Shared source-only guidance."], recon_marker="RECON_LOADED",
++                    scripted_plan=[])
++                engine.bind_readiness(self.binding)
++                before = (prepared / "prepared.json").read_bytes()
++                packet = dict(self.packet, cli_cap_usd=cap)
++                with patch.object(native.external, "launch", return_value=self.receipt) as launched:
++                    with self.assertRaisesRegex(ValueError, "CLI cap"):
++                        engine.execute(packet)
++                launched.assert_not_called()
++                self.assertEqual((prepared / "prepared.json").read_bytes(), before)
++
++    def test_phase_adapter_refuses_invalid_caps_before_actor_or_output(self):
++        from adapter import PhaseInvalid, run_phase
++        from types import SimpleNamespace
++        calls = []
++        def execute(packet):
++            calls.append(packet)
++            raise AssertionError("invalid CLI cap reached actor")
++        for index, cap in enumerate((None, "0", "-1", "0.50", "0.51", "NaN", True)):
++            with self.subTest(cap=cap):
++                out = self.root / ("invalid-adapter-cap-" + str(index))
++                request = {"state":{"run_id":"r","phase":"investigate"},
++                    "arm":"R","execution_mode":"scripted","phase_budget_usd":"0.50","cli_cap_usd":cap,
++                    "public_packet":{"issue":"Public request"},"out":str(out)}
++                with self.assertRaisesRegex(PhaseInvalid,"CLI cap"):
++                    run_phase(request,SimpleNamespace(mode="scripted",execute=execute))
++                self.assertFalse(out.exists())
++        self.assertEqual(calls, [])
++
++
++    def add_build_inputs(self):
++        import hashlib
++        (self.actor / "node_modules").mkdir()
++        raw = {"schema":"public-build-inputs-v1", "image":self.image, "seed":None,
++               "dependency_dirs":["node_modules"], "cache_mounts":[]}
++        stage = native.public_build_inputs.stage_inputs(raw, self.actor, self.image, self.prepared / "build-state")
++        helper = self.prepared / "public-build-inputs-helper.py"
++        helper.write_bytes(Path(native.public_build_inputs.__file__).read_bytes())
++        cfg_path = self.prepared / "prepared.json"
++        cfg = json.loads(cfg_path.read_bytes())
++        cfg.update(public_build_inputs=raw, public_build_stage=stage,
++                   public_build_inputs_helper=str(helper), execution_profile="cargo-v3")
++        cfg.setdefault("files", {})[str(helper)] = hashlib.sha256(helper.read_bytes()).hexdigest()
++        cfg_path.write_text(json.dumps(cfg))
++        argv_path = self.prepared / "mcp-native-argv.json"
++        argv = json.loads(argv_path.read_bytes())
++        mounts = ["--mount", "type=bind,src=" + str(self.actor) + ",dst=/testbed"]
++        for row in stage["mounts"]:
++            mounts += ["--mount", "type=bind,src=" + row["source"] + ",dst=" + row["destination"]]
++        argv[-4:-4] = mounts
++        argv_path.write_text(json.dumps(argv))
++        self.binding.update(source_snapshot_sha256=native._public_digest(self.actor, dependency_dirs=["node_modules"]),
++                            public_build_inputs_sha256=stage["fingerprint"])
++        return raw, stage
++
++    def test_declared_native_dependencies_bind_capture_and_readback(self):
++        raw, stage = self.add_build_inputs()
++        self.executor.bind_readiness(self.binding)
++        with patch.object(native.external, "launch", side_effect=self.launch):
++            result = self.executor.execute(self.packet)
++        self.assertTrue(result["capture_complete"])
++        self.assertEqual(result["public_build_inputs"], stage["fingerprint"])
++        self.assertTrue((self.root / "captured/node_modules").is_dir())
++        self.assertEqual((self.root / "captured/program.txt").read_text(), "repaired\n")
++        self.assertEqual(result["public_build_generated_after"],
++                         native.public_build_inputs.generated_digest(Path(stage["output"]) / "generated"))
++    def test_build_contract_binds_and_captures_original_project_claude_context(self):
++        (self.actor/".claude/rules").mkdir(parents=True)
++        (self.actor/".claude/rules/testing.md").write_text("original public test discipline")
++        self.add_build_inputs()
++        self.binding["source_snapshot_sha256"]=native._public_digest(self.actor,
++            dependency_dirs=["node_modules"],preserve_project_context=True)
++        self.executor.bind_readiness(self.binding)
++        with patch.object(native.external,"launch",side_effect=self.launch):
++            result=self.executor.execute(self.packet)
++        self.assertTrue(result["capture_complete"])
++        self.assertEqual((self.root/"captured/.claude/rules/testing.md").read_text(),
++                         "original public test discipline")
++
++    def test_valid_but_different_command_descriptor_is_refused_before_binding(self):
++        from adapter import _admit_backend, PhaseInvalid
++        from test_readiness import fixture
++        raw, stage = self.add_build_inputs()
++        expected, wire = fixture()
++        expected["binding"] = dict(self.binding)
++        wire["binding"] = dict(self.binding)
++        expected["public_build_inputs"] = raw
++        common = {"execution_mode":"native", "native_preflight":{"expected":expected,"wire":wire},
++                  "execution_profile":"cargo-v3", "public_build_inputs":raw}
++        self.assertEqual(_admit_backend(common, self.executor)["binding"], self.binding)
++        different = {**raw, "dependency_dirs":[]}
++        with self.assertRaises(PhaseInvalid):
++            _admit_backend({**common, "public_build_inputs":different}, self.executor)
+diff --git a/tools/effort_protocol/test_readiness.py b/tools/effort_protocol/test_readiness.py
+index f4b4766c3..07d677ea8 100644
+--- a/tools/effort_protocol/test_readiness.py
++++ b/tools/effort_protocol/test_readiness.py
+@@ -60,6 +60,14 @@ class ReadinessTests(unittest.TestCase):
+         self.assertTrue(result["ready"])
+         self.assertEqual(self.wire, before)
+ 
++    def test_explicit_public_fixture_binding_must_match_actual_wire(self):
++        self.expected["binding"]["public_fixture_sha256"] = "e" * 64
++        self.wire["binding"] = dict(self.expected["binding"])
++        result = readiness.validate_readiness(self.expected, self.wire)
++        self.assertEqual(result["binding"]["public_fixture_sha256"], "e" * 64)
++        self.wire["binding"]["public_fixture_sha256"] = "f" * 64
++        self.reject()
++
+     def test_empty_languages_are_rejected_even_with_all_tool_names(self):
+         self.wire["status"] = reply(json.dumps({"project_root": "/testbed", "languages": []}))
+         self.reject()
+@@ -152,6 +160,53 @@ class ReadinessTests(unittest.TestCase):
+                     {"type": "text", "text": "<!-- auto-injected guide --> " + positive}]
+                 self.reject()
+ 
++    def changed_candidate(self):
++        source,expected,wire,value=self.empty_case()
++        baseline=_public_digest(source)
++        (source/"src/lib.rs").write_text("pub fn renamed(x: i32) -> i32 { x * 2 }")
++        expected["source_baseline_sha256"]=baseline
++        expected["binding"]["source_snapshot_sha256"]=_public_digest(source)
++        wire["binding"]=copy.deepcopy(expected["binding"])
++        wire["probes"][0]["response"]=reply("0 references")
++        return source,expected,wire
++
++    def test_changed_candidate_keeps_tool_context_without_claiming_stale_semantic_witness(self):
++        source,expected,wire=self.changed_candidate()
++        result=readiness.validate_readiness(expected,wire,source=source)
++        self.assertTrue(result["ready"])
++        self.assertEqual(result["readiness_scope"],"changed-source-capabilities")
++        self.assertEqual(result["probes_verified"],3)
++        self.assertEqual(result["probes_observed"],4)
++        self.assertFalse(result["probe_witnesses"][0]["observed"])
++        self.assertTrue(all(item["observed"] for item in result["probe_witnesses"][1:]))
++
++    def test_baseline_source_still_requires_all_positive_semantic_witnesses(self):
++        source,expected,wire,value=self.empty_case()
++        expected["source_baseline_sha256"]=_public_digest(source)
++        wire["probes"][0]["response"]=reply("0 references")
++        with self.assertRaises(readiness.ReadinessViolation):
++            readiness.validate_readiness(expected,wire,source=source)
++
++    def test_changed_candidate_never_bypasses_failed_rpc_tools_index_or_physical_source(self):
++        source,expected,wire=self.changed_candidate()
++        with self.assertRaises(readiness.ReadinessViolation):
++            readiness.validate_readiness(expected,wire)
++        for case in ("rpc","tools","index","root","binding","missing-response"):
++            with self.subTest(case=case):
++                altered=copy.deepcopy(wire)
++                if case=="rpc": altered["probes"][0]["response"]=reply("failed",isError=True)
++                elif case=="tools": altered["tool_pages"][0]["result"]["tools"].pop()
++                elif case=="index": altered["index_verification"]=reply(json.dumps(
++                    {"verdict":"complete","expected_files":3,"stored_files":3,"missing_count":0,
++                     "orphan_count":1,"chunks_without_vectors":0,
++                     "memories":{"missing_count":0,"orphan_count":0}}))
++                elif case=="root": altered["status"]=reply(json.dumps(
++                    {"project_root":"/other","languages":["rust"]}))
++                elif case=="binding": altered["binding"]["image"]="sha256:"+"e"*64
++                else: altered["probes"][0].pop("response")
++                with self.assertRaises(readiness.ReadinessViolation):
++                    readiness.validate_readiness(expected,altered,source=source)
++
+     def empty_case(self):
+         temp = tempfile.TemporaryDirectory()
+         self.addCleanup(temp.cleanup)
+@@ -181,6 +236,52 @@ class ReadinessTests(unittest.TestCase):
+         self.assertEqual([x["path"] for x in coverage["empty_missing_files"]], ["one.rs", "two.rs"])
+         self.assertEqual(coverage["stored_files"], 1)
+         self.assertEqual(wire, before)
++    def test_explicit_ascii_whitespace_coverage_keeps_literal_native_incomplete(self):
++        import hashlib
++        source,expected,wire,_=self.empty_case()
++        (source/"two.rs").write_bytes(b" \t\r\n")
++        expected["binding"]["source_snapshot_sha256"]=_public_digest(source)
++        wire["binding"]=copy.deepcopy(expected["binding"])
++        before=copy.deepcopy(wire)
++        with self.assertRaises(readiness.ReadinessViolation):
++            readiness.validate_readiness(expected,wire,source=source)
++        expected["index_omission_policy"]="ascii-whitespace-source-v1"
++        coverage=readiness.validate_readiness(expected,wire,source=source)["index_coverage"]
++        self.assertEqual(coverage["native_verdict"],"incomplete")
++        self.assertEqual(coverage["coverage"],"all_non_ascii_whitespace_eligible_files")
++        self.assertEqual(coverage["empty_missing_files"],[{"path":"one.rs","sha256":hashlib.sha256(b"").hexdigest()}])
++        self.assertEqual(coverage["whitespace_missing_files"],[
++            {"path":"two.rs","bytes":4,"sha256":hashlib.sha256(b" \t\r\n").hexdigest()}])
++        self.assertEqual(wire,before)
++        for data in (b"\n// meaningful\n",b"\xc2\xa0",b"\x00"):
++            (source/"two.rs").write_bytes(data)
++            expected["binding"]["source_snapshot_sha256"]=_public_digest(source)
++            wire["binding"]=copy.deepcopy(expected["binding"])
++            with self.subTest(data=data),self.assertRaises(readiness.ReadinessViolation):
++                readiness.validate_readiness(expected,wire,source=source)
++        (source/"two.rs").write_bytes(b"\n")
++        expected["binding"]["source_snapshot_sha256"]=_public_digest(source)
++        wire["binding"]=copy.deepcopy(expected["binding"])
++        for policy in (True,"unknown",None):
++            expected["index_omission_policy"]=policy
++            with self.subTest(policy=policy),self.assertRaises(readiness.ReadinessViolation):
++                readiness.validate_readiness(expected,wire,source=source)
++    def test_build_contract_checks_original_project_claude_source_bytes(self):
++        from public_build_inputs import validate_descriptor
++        source,expected,wire,_=self.empty_case()
++        (source/".claude/rules").mkdir(parents=True)
++        (source/".claude/rules/testing.md").write_text("public original rules")
++        raw={"schema":"public-build-inputs-v1","image":expected["binding"]["image"],
++             "seed":None,"dependency_dirs":[],"cache_mounts":[]}
++        expected["public_build_inputs"]=raw
++        expected["binding"].update(
++            source_snapshot_sha256=_public_digest(source,preserve_project_context=True),
++            public_build_inputs_sha256=validate_descriptor(raw,source,raw["image"])["fingerprint"])
++        wire["binding"]=copy.deepcopy(expected["binding"])
++        self.assertTrue(readiness.validate_readiness(expected,wire,source=source)["ready"])
++        (source/".claude/rules/testing.md").write_text("different rules")
++        with self.assertRaises(readiness.ReadinessViolation):
++            readiness.validate_readiness(expected,wire,source=source)
+ 
+     def test_empty_omissions_still_require_opt_in_actual_source(self):
+         _, expected, wire, _ = self.empty_case()
+diff --git a/tools/hint_authority_pilot/core.py b/tools/hint_authority_pilot/core.py
+index 4d98732ec..a6de05b43 100644
+--- a/tools/hint_authority_pilot/core.py
++++ b/tools/hint_authority_pilot/core.py
+@@ -23,16 +23,20 @@ def _ordered(text, lines):
+ def audit_request(request, expected):
+     if request.get('model')!='claude-sonnet-5-5': raise ValueError('Unexpected model')
+     if request.get('output_config',{}).get('effort')!=expected['effort']: raise ValueError('Effort mismatch')
+-    text=json.dumps(request.get('messages',[]),ensure_ascii=False)+json.dumps(request.get('system',[]),ensure_ascii=False)
+-    # Decode escaped newlines/quotes without changing literal prose.
+     def flatten(x):
+         if isinstance(x,str): return x
+         if isinstance(x,list): return '\n'.join(flatten(v) for v in x)
+         if isinstance(x,dict): return '\n'.join(flatten(v) for v in x.values())
+         return ''
+-    text=flatten(request.get('system',[]))+'\n'+flatten(request.get('messages',[]))
++    system=flatten(request.get('system',[]))
++    text=system+'\n'+flatten(request.get('messages',[]))
+     if (expected['clause'] in text)!=expected['declaration']: raise ValueError('Authority clause mismatch')
+     _ordered(text,expected['global_visible']); _ordered(text,expected['project_visible'])
++    if 'preload_visible' in expected:
++        lines=expected['preload_visible']
++        if not isinstance(lines,list) or not lines or any(not isinstance(v,str) or not v.strip() for v in lines):
++            raise ValueError('Nonempty prepared context expectation required')
++        _ordered(system,lines)
+     return True
+ 
+ def audit_hooks(events):
+diff --git a/tools/hint_authority_pilot/test_core.py b/tools/hint_authority_pilot/test_core.py
+index 61e0a8bc0..2421093c0 100644
+--- a/tools/hint_authority_pilot/test_core.py
++++ b/tools/hint_authority_pilot/test_core.py
+@@ -26,6 +26,29 @@ class CoreTests(unittest.TestCase):
+             with self.assertRaises(ValueError,msg=mutate):audit_request(bad,expected)
+         wrong=dict(expected,declaration=False)
+         with self.assertRaises(ValueError):audit_request(request,wrong)
++    def test_preloaded_context_is_required_in_system_before_forwarding(self):
++        request={'model':'claude-sonnet-5-5','output_config':{'effort':'low'},
++                 'system':[{'type':'text','text':'<prepared-context>\nONBOARDING\nRECON\n</prepared-context>'}],
++                 'messages':[{'role':'user','content':'GLOBAL\nPROJECT'}]}
++        expected={'effort':'low','declaration':False,'global_visible':['GLOBAL'],
++                  'project_visible':['PROJECT'],'clause':CLAUSE,
++                  'preload_visible':['<prepared-context>','ONBOARDING','RECON','</prepared-context>']}
++        self.assertTrue(audit_request(request,expected))
++        import copy
++        for line in expected['preload_visible']:
++            bad=copy.deepcopy(request)
++            bad['system'][0]['text']=bad['system'][0]['text'].replace(line,'')
++            with self.subTest(missing=line), self.assertRaises(ValueError):
++                audit_request(bad,expected)
++        bad=copy.deepcopy(request)
++        bad['messages'][0]['content']+='\n'+bad['system'][0]['text']
++        bad['system']=[]
++        with self.assertRaises(ValueError):
++            audit_request(bad,expected)
++        for value in ([],[''],None,'RECON'):
++            with self.subTest(expectation=value), self.assertRaises(ValueError):
++                audit_request(request,dict(expected,preload_visible=value))
++
+     def test_hook_qualifier_needs_delivered_hint_and_subsequent_action(self):
+         events=[{'event':'trigger','carrier':'context'},{'event':'edit','tool_name':'mcp__codescout__edit_code'}]
+         self.assertTrue(audit_hooks(events))

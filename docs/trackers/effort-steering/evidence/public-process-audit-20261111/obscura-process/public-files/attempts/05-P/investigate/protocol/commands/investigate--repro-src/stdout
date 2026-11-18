@@ -1,0 +1,29 @@
+error-branch:
+value instanceof Error) {
+    const Ctor = value.constructor || Error;
+    const e = new Ctor(value.message);
+    if (value.name) e.name = value.name;
+    if (value.stack) e.stack = value.stack;
+    if (value.cause !== undefined) e.cause = _structuredClone(value.cause, seen);
+    
+error branch records seen before cause recursion: False
+generic branch:
+ction") return hook(value, seen);
+  }
+  const out = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
+  seen.set(value, out);
+  for (const k in value) {
+    if (Object.prototype.hasOwnProperty.call(value, k)) {
+      out[k] = _structuredClone(value[k], seen);
+    }
+  }
+  // Symbols are not enumerable via for-in; copy own symbol-keyed properties.
+  const syms = Object.getOwnPropertySymbols(value);
+  for (const s of syms) {
+    const d = Object.getOwnPropertyDescriptor(value, s);
+    if (d && "value" in d) out[s] = _structuredClone(d.value, seen);
+  }
+  return out;
+}
+globa
+generic branch uses assignment: True

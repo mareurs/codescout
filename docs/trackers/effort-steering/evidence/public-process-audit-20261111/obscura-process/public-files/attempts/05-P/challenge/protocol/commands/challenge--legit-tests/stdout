@@ -1,0 +1,9 @@
+
+running 4 tests
+test cryptokey_survives_structured_clone_and_still_signs ... ok
+test structured_clone_preserves_arraybuffer_bytes ... ok
+test structured_clone_preserves_dataview ... ok
+test structured_clone_rejects_functions_and_symbols ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+

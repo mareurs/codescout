@@ -1,0 +1,143 @@
+diff --git a/crates/obscura-cdp/tests/structured_clone_crypto_parity.rs b/crates/obscura-cdp/tests/structured_clone_crypto_parity.rs
+index e234b10..12996f2 100644
+--- a/crates/obscura-cdp/tests/structured_clone_crypto_parity.rs
++++ b/crates/obscura-cdp/tests/structured_clone_crypto_parity.rs
+@@ -207,3 +207,94 @@ async fn structured_clone_rejects_functions_and_symbols() {
+     assert_eq!(val["fn"], "DataCloneError", "functions must not clone");
+     assert_eq!(val["sym"], "DataCloneError", "symbols must not clone");
+ }
++// An Error that reaches itself through `cause` used to recurse before being
++// recorded in `seen`, overflowing the stack. Chrome clones such graphs, keeps
++// the cycle, and keeps one clone for an Error referenced from two places.
++#[tokio::test(flavor = "current_thread")]
++async fn structured_clone_handles_circular_error_cause() {
++    let (mut ctx, sid) = setup().await;
++    let v = eval(
++        &mut ctx,
++        2,
++        r#"(async () => {
++            try {
++                const self = new Error("x");
++                self.cause = self;
++                const selfClone = structuredClone(self);
++                const viaObj = new Error("y");
++                viaObj.cause = { back: viaObj };
++                const viaObjClone = structuredClone(viaObj);
++                const shared = new Error("s");
++                const pair = structuredClone({ a: shared, b: shared });
++                return JSON.stringify({
++                    selfCycle: selfClone.cause === selfClone,
++                    selfIndependent: selfClone !== self,
++                    selfMessage: selfClone.message,
++                    viaObjCycle: viaObjClone.cause.back === viaObjClone,
++                    sharedSame: pair.a === pair.b,
++                    sharedIndependent: pair.a !== shared,
++                });
++            } catch (e) {
++                return JSON.stringify({ threw: e.name + ": " + e.message });
++            }
++        })()"#,
++        &sid,
++    )
++    .await;
++    let val = serde_json::from_str::<Value>(v["result"]["value"].as_str().unwrap()).unwrap();
++    assert!(val["threw"].is_null(), "structuredClone threw: {}", val["threw"]);
++    assert_eq!(val["selfCycle"], true, "clone.cause must point back at the clone");
++    assert_eq!(val["selfIndependent"], true, "clone must not be the source");
++    assert_eq!(val["selfMessage"], "x");
++    assert_eq!(val["viaObjCycle"], true, "cycle through a plain object must resolve to the clone");
++    assert_eq!(val["sharedSame"], true, "a doubly-referenced Error must clone once");
++    assert_eq!(val["sharedIndependent"], true, "shared clone must not alias the source");
++}
++
++// JSON.parse produces an own enumerable "__proto__" data property. Cloning it
++// by assignment ran the Object.prototype setter and reparented the clone, and
++// plain objects also inherited the source's prototype instead of
++// Object.prototype.
++#[tokio::test(flavor = "current_thread")]
++async fn structured_clone_defines_own_proto_property() {
++    let (mut ctx, sid) = setup().await;
++    let v = eval(
++        &mut ctx,
++        2,
++        r#"(async () => {
++            const src = JSON.parse('{"__proto__":{"polluted":true},"a":1}');
++            const clone = structuredClone(src);
++            class P { constructor() { this.x = 1; } }
++            const inst = structuredClone(new P());
++            const arr = structuredClone([1, 2, 3]);
++            const d = Object.getOwnPropertyDescriptor(clone, "__proto__");
++            return JSON.stringify({
++                ownProto: Object.prototype.hasOwnProperty.call(clone, "__proto__"),
++                protoIsObject: Object.getPrototypeOf(clone) === Object.prototype,
++                inherited: typeof clone.polluted,
++                protoValue: d && d.value.polluted,
++                protoEnumerable: d && d.enumerable,
++                a: clone.a,
++                globalClean: typeof ({}).polluted,
++                instProtoIsObject: Object.getPrototypeOf(inst) === Object.prototype,
++                instX: inst.x,
++                arrIsArray: Array.isArray(arr),
++                arr: arr,
++            });
++        })()"#,
++        &sid,
++    )
++    .await;
++    let val = serde_json::from_str::<Value>(v["result"]["value"].as_str().unwrap()).unwrap();
++    assert_eq!(val["ownProto"], true, "own __proto__ must be a data property on the clone");
++    assert_eq!(val["protoIsObject"], true, "clone prototype must stay Object.prototype");
++    assert_eq!(val["inherited"], "undefined", "clone must not inherit from the smuggled __proto__");
++    assert_eq!(val["protoValue"], true);
++    assert_eq!(val["protoEnumerable"], true);
++    assert_eq!(val["a"], 1);
++    assert_eq!(val["globalClean"], "undefined", "Object.prototype must not be polluted");
++    assert_eq!(val["instProtoIsObject"], true, "class instances clone onto Object.prototype");
++    assert_eq!(val["instX"], 1);
++    assert_eq!(val["arrIsArray"], true);
++    assert_eq!(val["arr"], json!([1, 2, 3]));
++}
+diff --git a/crates/obscura-js/js/bootstrap.js b/crates/obscura-js/js/bootstrap.js
+index 6fdd488..a508bdb 100644
+--- a/crates/obscura-js/js/bootstrap.js
++++ b/crates/obscura-js/js/bootstrap.js
+@@ -5269,6 +5269,8 @@ function _structuredClone(value, seen) {
+   if (value instanceof Error) {
+     const Ctor = value.constructor || Error;
+     const e = new Ctor(value.message);
++    // Record before recursing into cause so a cycle through it resolves to e.
++    seen.set(value, e);
+     if (value.name) e.name = value.name;
+     if (value.stack) e.stack = value.stack;
+     if (value.cause !== undefined) e.cause = _structuredClone(value.cause, seen);
+@@ -5281,18 +5283,27 @@ function _structuredClone(value, seen) {
+     const hook = globalThis.__obscura_clone_hooks[value[Symbol.toStringTag]];
+     if (typeof hook === "function") return hook(value, seen);
+   }
+-  const out = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
++  // Ordinary objects clone onto Object.prototype, not the source's prototype.
++  const out = Array.isArray(value) ? [] : {};
+   seen.set(value, out);
+   for (const k in value) {
+     if (Object.prototype.hasOwnProperty.call(value, k)) {
+-      out[k] = _structuredClone(value[k], seen);
++      // Define, not assign: out["__proto__"] = v would run the Object.prototype
++      // setter and reparent the clone instead of adding an own data property.
++      Object.defineProperty(out, k, {
++        value: _structuredClone(value[k], seen), writable: true, enumerable: true, configurable: true,
++      });
+     }
+   }
+   // Symbols are not enumerable via for-in; copy own symbol-keyed properties.
+   const syms = Object.getOwnPropertySymbols(value);
+   for (const s of syms) {
+     const d = Object.getOwnPropertyDescriptor(value, s);
+-    if (d && "value" in d) out[s] = _structuredClone(d.value, seen);
++    if (d && "value" in d) {
++      Object.defineProperty(out, s, {
++        value: _structuredClone(d.value, seen), writable: true, enumerable: true, configurable: true,
++      });
++    }
+   }
+   return out;
+ }

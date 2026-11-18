@@ -1,0 +1,38 @@
+{
+  "scope": "Product sources at published base; inert experimental snapshots and custody docs only. Historical experimental suites are not rerun.",
+  "attempts": [
+    {
+      "name": "system-openssl41",
+      "log": "system-openssl41-gate.log.gz",
+      "log_sha256": "775e397e5e378977e805fed5b52dbe18588e57503cbaeffe4c1fc0681ee29c06",
+      "terminal_summary": [
+        "test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "PYTHON LIGHT EXIT -> PYTHON_LIGHT=0",
+        "GATE EXITS -> FMT=0 CLIPPY=101 LEAN=0 DEFAULT=0 FMT_STATE=passed"
+      ]
+    },
+    {
+      "name": "qualified-openssl35",
+      "log": "qualified-openssl35-gate.log.gz",
+      "log_sha256": "7a1e3d41d046126b094167850425b5e63171f82efe66e5878e3bd90ae3095c64",
+      "terminal_summary": [
+        "test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "PYTHON LIGHT EXIT -> PYTHON_LIGHT=0",
+        "GATE EXITS -> FMT=0 CLIPPY=0 LEAN=0 DEFAULT=0 FMT_STATE=passed"
+      ]
+    }
+  ],
+  "qualified_environment": {
+    "TMPDIR": "/tmp/effort-archive-gate-01a15ca9",
+    "OPENSSL_DIR": "/var/tmp/ep11-01a15/gate-openssl35-v1/prefix",
+    "OPENSSL_STATIC": "0",
+    "LD_LIBRARY_PATH": "/var/tmp/ep11-01a15/gate-openssl35-v1/prefix/lib",
+    "runtime_verified": "OpenSSL 3.5.1 1 Jul 2025"
+  }
+}

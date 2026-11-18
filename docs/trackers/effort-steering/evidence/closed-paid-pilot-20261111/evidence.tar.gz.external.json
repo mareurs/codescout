@@ -1,0 +1,11 @@
+{
+  "scope": "main-tracker",
+  "source_root": "/home/marius/work/claude/codescout",
+  "path": "docs/trackers/effort-steering/evidence/closed-paid-pilot-20261111/evidence.tar.gz",
+  "type": "file",
+  "bytes": 2584835393,
+  "mode": 420,
+  "sha256": "42d8f9a0ca4d95eccd177761d9aeb7a3db1d289644e06787b471aa9f977b4fb8",
+  "storage": "external",
+  "destination": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/closed-paid-pilot-20261111/evidence.tar.gz"
+}

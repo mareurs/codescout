@@ -1,0 +1,150 @@
+{
+  "known_qualification": {
+    "schema": "effort-campaign-observation-v1",
+    "root": "/var/tmp/ep11-01a15/headroom-native-qualification-v1",
+    "producer_sha256": "0d0c34adbebeba8af7d8fbbcb0c12a7791702e3e35f6d9013e15953b0170ce2d",
+    "closed_attempt_receipts": 8,
+    "attempts": [
+      {
+        "attempt_index": 0,
+        "arm": "L",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0",
+          "unknown": false
+        }
+      },
+      {
+        "attempt_index": 1,
+        "arm": "R",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0",
+          "unknown": false
+        }
+      },
+      {
+        "attempt_index": 2,
+        "arm": "P",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0",
+          "unknown": false
+        }
+      },
+      {
+        "attempt_index": 3,
+        "arm": "X",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0",
+          "unknown": false
+        }
+      },
+      {
+        "attempt_index": 4,
+        "arm": "X",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0",
+          "unknown": false
+        }
+      },
+      {
+        "attempt_index": 5,
+        "arm": "P",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0",
+          "unknown": false
+        }
+      },
+      {
+        "attempt_index": 6,
+        "arm": "R",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0",
+          "unknown": false
+        }
+      },
+      {
+        "attempt_index": 7,
+        "arm": "L",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0",
+          "unknown": false
+        }
+      }
+    ],
+    "phase_intents": [
+      "attempts/00-L/repair/intent.json",
+      "attempts/01-R/challenge/intent.json",
+      "attempts/01-R/investigate/intent.json",
+      "attempts/01-R/repair/intent.json",
+      "attempts/02-P/challenge/intent.json",
+      "attempts/02-P/investigate/intent.json",
+      "attempts/02-P/repair/intent.json",
+      "attempts/03-X/repair/intent.json",
+      "attempts/04-X/repair/intent.json",
+      "attempts/05-P/challenge/intent.json",
+      "attempts/05-P/investigate/intent.json",
+      "attempts/05-P/repair/intent.json",
+      "attempts/06-R/challenge/intent.json",
+      "attempts/06-R/investigate/intent.json",
+      "attempts/06-R/repair/intent.json",
+      "attempts/07-L/repair/intent.json"
+    ],
+    "private_entry_markers": 8,
+    "private_verdict_files": 8,
+    "actor_batch_closed": true,
+    "result_written": true,
+    "scope": "Exact on-disk receipt/intent/entry-marker/verdict-file counts; private verdict contents unopened."
+  },
+  "current_paid_observation": {
+    "schema": "effort-campaign-observation-v1",
+    "root": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3",
+    "producer_sha256": "0d0c34adbebeba8af7d8fbbcb0c12a7791702e3e35f6d9013e15953b0170ce2d",
+    "closed_attempt_receipts": 1,
+    "attempts": [
+      {
+        "attempt_index": 0,
+        "arm": "L",
+        "workflow_state": "closed",
+        "measurement_invalid": false,
+        "cost": {
+          "known_usd": "0.23778169999999998",
+          "unknown": false
+        }
+      }
+    ],
+    "phase_intents": [
+      "attempts/00-L/repair/intent.json",
+      "attempts/01-R/challenge/intent.json",
+      "attempts/01-R/investigate/intent.json",
+      "attempts/01-R/repair/intent.json"
+    ],
+    "private_entry_markers": 0,
+    "private_verdict_files": 0,
+    "actor_batch_closed": false,
+    "result_written": false,
+    "scope": "Exact on-disk receipt/intent/entry-marker/verdict-file counts; private verdict contents unopened.",
+    "process": {
+      "pid": 633049,
+      "probe_exit": 0,
+      "observed": "    PID    PPID     ELAPSED %CPU STAT COMMAND\n 633049  212011       27:45  4.8 Sl   python3\n"
+    }
+  },
+  "observer_copy_sha256": "0d0c34adbebeba8af7d8fbbcb0c12a7791702e3e35f6d9013e15953b0170ce2d",
+  "provider_calls": 0,
+  "actor_or_evaluator_changed": false
+}

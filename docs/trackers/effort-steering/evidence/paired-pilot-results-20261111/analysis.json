@@ -1,0 +1,340 @@
+{
+  "advance": false,
+  "batch_client_cost_usd": "4.60646289999999987",
+  "bindings": {
+    "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/closed-campaign-audit-20261111/audit.json": "838b384d8b0c871f32d98324da4686063cdedc3cab5509f5a3a6e620492309af",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/actor-batch-closed.json": "0d00cb12e0efe849e604924b04e20297a8868ef30a516fcd299e395c09eb2842",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/attempt.json": "b778b89b370fb01e77ded2729aa824de506df7bf32b5b3399a6b7e877c013b60",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/attempt.json": "99aa7ac545bfdec4b27321fa8f9ae34716681fbfa76fe9d0bb2249c80ad74577",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/attempt.json": "2c95a75a1f6ecf89a35a1274a0811b5cd101f403b311ef7f709fc089e072f69b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/attempt.json": "1d9e6b4e27d8eb551aacfb29977deeb815031a04722ced851ac71b0a242c2c92",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/attempt.json": "a4f17622b73e8c1e5e0e313885d63c4b8a5842053b4a2f265466e2da66058628",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/attempt.json": "860a6ce296a08e9dfeee2c138330a27e3ba90c0602b7f18a07ada74b0e374e36",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/06-R/attempt.json": "6b499ad4f4cd9ba87d97772fbc7b13f3d8bc0be0063a424a1485747ab046c5a1",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/07-L/attempt.json": "13029563d8ce9c1d8d9d60fa19ccd9d48b1e216231c497c567f6a2078327a3e7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/grades/00/verdict.json": "2837456d5b0f5681d5ec9eb9f49676edb4579620df833e0edea334a25a909c69",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/grades/01/verdict.json": "2837456d5b0f5681d5ec9eb9f49676edb4579620df833e0edea334a25a909c69",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/grades/02/verdict.json": "943ac02ad713b03756b4b0361e21471978a7f90c4bd6dc0fbb32eddd90759666",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/grades/03/verdict.json": "bb3897c928fb3f9eac6f9fa145a3a63d8e4464c169d9cf6fdda6857b1e07e9b1",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/grades/04/verdict.json": "9cabc161e57c61785f681f7718a1ef9dba71fdf7691ab42c775d17bef8a2ea2c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/grades/05/verdict.json": "9cabc161e57c61785f681f7718a1ef9dba71fdf7691ab42c775d17bef8a2ea2c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/grades/06/verdict.json": "9cabc161e57c61785f681f7718a1ef9dba71fdf7691ab42c775d17bef8a2ea2c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/grades/07/verdict.json": "9cabc161e57c61785f681f7718a1ef9dba71fdf7691ab42c775d17bef8a2ea2c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/registration.json": "8752ec55e0426a5e1cc27701366fa4e1b90da0bd475d8e6ac7ba83b9d0fab60f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/result.json": "a11288557cd0681a40209c69b0eb57469934ec38e1367fc4dc289e9a979c1149"
+  },
+  "captured_at": "2026-11-11T18:21:28.120013+00:00",
+  "client_usd_per_hidden_pass_candidate": {
+    "L": "0.17879114999999999",
+    "P": "0.82529029999999999",
+    "R": "0.501953350000000005",
+    "X": "1.5943932999999999"
+  },
+  "closed_and_hidden_pass_workflow_counts": {
+    "L": 2,
+    "P": 0,
+    "R": 2,
+    "X": 1
+  },
+  "controller_reason": null,
+  "controller_status": "completed",
+  "decision": "NO-GO",
+  "hidden_pass_candidate_counts": {
+    "L": 2,
+    "P": 2,
+    "R": 2,
+    "X": 1
+  },
+  "limits": [
+    "Two tasks are a diagnostic development screen, not generic validation or equivalence.",
+    "Incomplete attempts and all their charges remain in primary results.",
+    "Hidden patch acceptance and protocol closure are separately reported.",
+    "Lean X captured an active whole-change mutant at its continuation limit; no corrected candidate is substituted.",
+    "Client proxy charges exclude unmeasured root/review/embedding/compute and are not invoices.",
+    "Historical unresolved 4 USD hold remains outside this batch in the standing series ledger."
+  ],
+  "model_usd": {
+    "L": "0.35758229999999998",
+    "P": "1.65058059999999998",
+    "R": "1.00390670000000001",
+    "X": "1.5943932999999999"
+  },
+  "necessary_screen_conditions": {
+    "P_gains_over_L_and_R_without_losses": false,
+    "P_hidden_pass_count_at_least_X": true,
+    "P_total_cost_below_X": false,
+    "all_eight_interpretable": true,
+    "both_P_protocols_closed": false
+  },
+  "original_runner_analysis": {
+    "advance": false,
+    "decision": "NO-GO",
+    "paired": {},
+    "reason": "protocol incomplete"
+  },
+  "paired_private_patch_outcomes": {
+    "P-L": {
+      "losses": 0,
+      "task_outcomes": [
+        {
+          "P_pass": true,
+          "other_pass": true,
+          "outcome": "tie",
+          "task_id": "yvgude__lean-ctx-1168"
+        },
+        {
+          "P_pass": true,
+          "other_pass": true,
+          "outcome": "tie",
+          "task_id": "h4ckf0r0day__obscura-421"
+        }
+      ],
+      "ties": 2,
+      "wins": 0
+    },
+    "P-R": {
+      "losses": 0,
+      "task_outcomes": [
+        {
+          "P_pass": true,
+          "other_pass": true,
+          "outcome": "tie",
+          "task_id": "yvgude__lean-ctx-1168"
+        },
+        {
+          "P_pass": true,
+          "other_pass": true,
+          "outcome": "tie",
+          "task_id": "h4ckf0r0day__obscura-421"
+        }
+      ],
+      "ties": 2,
+      "wins": 0
+    },
+    "P-X": {
+      "losses": 0,
+      "task_outcomes": [
+        {
+          "P_pass": true,
+          "other_pass": false,
+          "outcome": "win",
+          "task_id": "yvgude__lean-ctx-1168"
+        },
+        {
+          "P_pass": true,
+          "other_pass": true,
+          "outcome": "tie",
+          "task_id": "h4ckf0r0day__obscura-421"
+        }
+      ],
+      "ties": 1,
+      "wins": 1
+    }
+  },
+  "rows": [
+    {
+      "arm": "L",
+      "attempt_index": 0,
+      "cost": {
+        "known_usd": "0.23778169999999998",
+        "unknown": false
+      },
+      "interpretable": true,
+      "measurement_invalid": false,
+      "private_adjusted": {
+        "examples": [],
+        "expected": 8591,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "private_kind": "pass",
+      "private_pass": true,
+      "private_reason": null,
+      "private_valid": true,
+      "source_digest": "193cf24b5fdb5abada2db1b401dbe7cbf52ff51c56e93116f99301e163441237",
+      "task_id": "yvgude__lean-ctx-1168",
+      "workflow_state": "closed"
+    },
+    {
+      "arm": "R",
+      "attempt_index": 1,
+      "cost": {
+        "known_usd": "0.60874220000000001",
+        "unknown": false
+      },
+      "interpretable": true,
+      "measurement_invalid": false,
+      "private_adjusted": {
+        "examples": [],
+        "expected": 8591,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "private_kind": "pass",
+      "private_pass": true,
+      "private_reason": null,
+      "private_valid": true,
+      "source_digest": "c7b34d6c96699acca7f5d40960ffcfc9eba89f100a38dc39a7a641afa6939e3c",
+      "task_id": "yvgude__lean-ctx-1168",
+      "workflow_state": "closed"
+    },
+    {
+      "arm": "P",
+      "attempt_index": 2,
+      "cost": {
+        "known_usd": "1.1045074",
+        "unknown": false
+      },
+      "interpretable": true,
+      "measurement_invalid": false,
+      "private_adjusted": {
+        "examples": [],
+        "expected": 8591,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "private_kind": "pass",
+      "private_pass": true,
+      "private_reason": null,
+      "private_valid": true,
+      "source_digest": "48f6c2ec89e34e80b4570244f44a32dd37c0dd80de29154ce4935b7a9cdc4f54",
+      "task_id": "yvgude__lean-ctx-1168",
+      "workflow_state": "incomplete"
+    },
+    {
+      "arm": "X",
+      "attempt_index": 3,
+      "cost": {
+        "known_usd": "1.0476432",
+        "unknown": false
+      },
+      "interpretable": true,
+      "measurement_invalid": false,
+      "private_adjusted": {
+        "examples": [
+          "proxy::forward::tests::effort_status_oracle::status_400_survives_repeated_request",
+          "proxy::forward::tests::effort_status_oracle::status_429_survives_repeated_request",
+          "proxy::forward::tests::effort_status_oracle::status_500_survives_repeated_request"
+        ],
+        "expected": 8591,
+        "missing": 0,
+        "not_passing": 3,
+        "pass": false
+      },
+      "private_kind": "test_failure",
+      "private_pass": false,
+      "private_reason": null,
+      "private_valid": true,
+      "source_digest": "6d90d417058429a4575911a6383622d9273f0449b46c6d464df49dbf93a93baa",
+      "task_id": "yvgude__lean-ctx-1168",
+      "workflow_state": "incomplete"
+    },
+    {
+      "arm": "X",
+      "attempt_index": 4,
+      "cost": {
+        "known_usd": "0.5467500999999999",
+        "unknown": false
+      },
+      "interpretable": true,
+      "measurement_invalid": false,
+      "private_adjusted": {
+        "examples": [],
+        "expected": 331,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "private_kind": "pass",
+      "private_pass": true,
+      "private_reason": null,
+      "private_valid": true,
+      "source_digest": "521af086e20ed247392c0e0a7f0ffbf1e2c5deca16b4532058d0e697814fb6c5",
+      "task_id": "h4ckf0r0day__obscura-421",
+      "workflow_state": "closed"
+    },
+    {
+      "arm": "P",
+      "attempt_index": 5,
+      "cost": {
+        "known_usd": "0.54607319999999998",
+        "unknown": false
+      },
+      "interpretable": true,
+      "measurement_invalid": false,
+      "private_adjusted": {
+        "examples": [],
+        "expected": 331,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "private_kind": "pass",
+      "private_pass": true,
+      "private_reason": null,
+      "private_valid": true,
+      "source_digest": "55d28afb830195f11660ddc649724aba7a1bc9bed7f5cc6a6a84adf9f51e9d01",
+      "task_id": "h4ckf0r0day__obscura-421",
+      "workflow_state": "incomplete"
+    },
+    {
+      "arm": "R",
+      "attempt_index": 6,
+      "cost": {
+        "known_usd": "0.3951645",
+        "unknown": false
+      },
+      "interpretable": true,
+      "measurement_invalid": false,
+      "private_adjusted": {
+        "examples": [],
+        "expected": 331,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "private_kind": "pass",
+      "private_pass": true,
+      "private_reason": null,
+      "private_valid": true,
+      "source_digest": "9cc4f3b1550418dfcb413980f93d9a22b1c9a85d92e33a48b18d35ad76b2d10f",
+      "task_id": "h4ckf0r0day__obscura-421",
+      "workflow_state": "closed"
+    },
+    {
+      "arm": "L",
+      "attempt_index": 7,
+      "cost": {
+        "known_usd": "0.1198006",
+        "unknown": false
+      },
+      "interpretable": true,
+      "measurement_invalid": false,
+      "private_adjusted": {
+        "examples": [],
+        "expected": 331,
+        "missing": 0,
+        "not_passing": 0,
+        "pass": true
+      },
+      "private_kind": "pass",
+      "private_pass": true,
+      "private_reason": null,
+      "private_valid": true,
+      "source_digest": "d265b07ba51e2629defd88022e17acdf0d196d1b8ed1d9e4b2509323d604a94b",
+      "task_id": "h4ckf0r0day__obscura-421",
+      "workflow_state": "closed"
+    }
+  ],
+  "schema": "effort-paired-pilot-descriptive-v1",
+  "shared_preparation_usd": "0",
+  "task_ids": [
+    "yvgude__lean-ctx-1168",
+    "h4ckf0r0day__obscura-421"
+  ],
+  "uninterpretable_attempt_indices": [],
+  "unit": "task; two tasks, no resamples"
+}

@@ -1,0 +1,103 @@
+{
+  "duration_api_ms": 664507,
+  "stop_reason": "end_turn",
+  "session_id": "b52d3798-ce62-494d-aa8b-f90d29bea00a",
+  "total_cost_usd": 1.0476432,
+  "usage": {
+    "input_tokens": 6,
+    "cache_creation_input_tokens": 2529,
+    "cache_read_input_tokens": 326218,
+    "output_tokens": 815,
+    "output_tokens_details": {
+      "thinking_tokens": 237
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 2529,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "modelUsage": {
+    "claude-sonnet-5-5": {
+      "inputTokens": 82,
+      "outputTokens": 30442,
+      "cacheReadInputTokens": 3068072,
+      "cacheCreationInputTokens": 109063,
+      "webSearchRequests": 0,
+      "costUSD": 1.0476432,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinkingTokens": 16601,
+      "canonicalModel": "claude-sonnet-5-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "safety_stops": 0,
+  "is_error": false,
+  "num_turns": 5,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "The original buggy line is temporarily restored in `forward/mod.rs`. This is a deliberate check, and I'll revert it as soon as the result is in. Job `@bg_00000006` is running the new test against it, and I'll read the result when the harness reports back.",
+  "ttft_ms": 14419,
+  "type": "result",
+  "duration_ms": 43774,
+  "uuid": "428573cd-cfc8-4a01-be36-ed3c5b2d433f",
+  "ttft_stream_ms": 13816,
+  "time_to_request_ms": 28,
+  "first_content_frame_ms": 13816,
+  "queued_turn_count": 0,
+  "result_index": 2,
+  "model_usage_since_last_result": {
+    "claude-sonnet-5-5": {
+      "inputTokens": 6,
+      "outputTokens": 815,
+      "cacheReadInputTokens": 326218,
+      "cacheCreationInputTokens": 2529,
+      "webSearchRequests": 0,
+      "costUSD": 0.0508998,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinkingTokens": 237,
+      "canonicalModel": "claude-sonnet-5-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  }
+}

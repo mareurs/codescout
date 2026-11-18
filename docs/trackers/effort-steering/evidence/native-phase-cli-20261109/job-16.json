@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000016",
+  "command": "TMPDIR=/home/marius/.cache/codescout-resident/codescout/e9t-01a15 ./scripts/gate.sh --check > /home/marius/.cache/codescout-resident/codescout/effort-protocol-verification-20261109-01a15ca9/logs/product-short-tmp-gate.log 2>&1",
+  "server_pid": 337215,
+  "job_pid": 2493551,
+  "state": "exited",
+  "exit_code": 1,
+  "error": null,
+  "started_at": "2026-11-09T12:14:34.616123906+00:00",
+  "finished_at": "2026-11-09T12:48:00.156993839+00:00",
+  "log_path": "/tmp/codescout-bg-x24n3K.log"
+}

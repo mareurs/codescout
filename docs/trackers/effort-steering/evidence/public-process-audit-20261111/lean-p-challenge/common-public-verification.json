@@ -1,0 +1,15 @@
+{
+  "round": 0,
+  "manifest_sha256": "4995be0e896faa88b4ad184b00c8d66e7b17656a107770df0e365ec2fb8318b1",
+  "status": "completed",
+  "passed": true,
+  "checks": [
+    {
+      "id": "common-public-0",
+      "command": "cd -- rust && cargo check --offline --workspace",
+      "exit_code": 0,
+      "log": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/verification-0/0.log"
+    }
+  ],
+  "error": null
+}

@@ -1,0 +1,1032 @@
+{
+  "documents": [
+    {
+      "original_rel_path": "docs/plans/2026-11-04-onboarding-reuse.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/plans/2026-11-04-onboarding-reuse.md",
+      "title": "Reuse one project onboarding across isolated native runs",
+      "artifact": {
+        "id": "84525e2beb593f25",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/plans/2026-11-04-onboarding-reuse.md"
+      },
+      "original_body_sha256": "b51f5f90df308be4edbe8b6e368e0d8009b10475c30a90b057be7ac51f731148",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/plans/2026-11-04-onboarding-reuse.md",
+          "sha256": "9cdd8f5ef36e3178ae937dd24e4be3e1532078f7319c3ca9f7f9fb5e3a42eb76",
+          "body_sha256": "b51f5f90df308be4edbe8b6e368e0d8009b10475c30a90b057be7ac51f731148"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/plans/2026-11-04-onboarding-reuse.md",
+          "sha256": "9cdd8f5ef36e3178ae937dd24e4be3e1532078f7319c3ca9f7f9fb5e3a42eb76",
+          "body_sha256": "b51f5f90df308be4edbe8b6e368e0d8009b10475c30a90b057be7ac51f731148"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-29-behavior-transfer.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-29-behavior-transfer.md",
+      "title": "2026-10-29-behavior-transfer",
+      "artifact": {
+        "id": "92d8873a330c5edb",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-29-behavior-transfer.md"
+      },
+      "original_body_sha256": "b2ebe7e4f1241375ba3822b9df270d178ad543955c58b7a914cfd8c0a7dfb755",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-29-behavior-transfer.md",
+          "sha256": "b2ebe7e4f1241375ba3822b9df270d178ad543955c58b7a914cfd8c0a7dfb755",
+          "body_sha256": "b2ebe7e4f1241375ba3822b9df270d178ad543955c58b7a914cfd8c0a7dfb755"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-29-behavior-transfer.md",
+          "sha256": "b2ebe7e4f1241375ba3822b9df270d178ad543955c58b7a914cfd8c0a7dfb755",
+          "body_sha256": "b2ebe7e4f1241375ba3822b9df270d178ad543955c58b7a914cfd8c0a7dfb755"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-29-compile-mechanism.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-29-compile-mechanism.md",
+      "title": "2026-10-29-compile-mechanism",
+      "artifact": {
+        "id": "8e492cb6e6aa0ddb",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-29-compile-mechanism.md"
+      },
+      "original_body_sha256": "7eaf1e0aaee3c47eb0d0c4d7c76eacd4d0bfc6c374e7aa54f7e673863a7c65ff",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-29-compile-mechanism.md",
+          "sha256": "7eaf1e0aaee3c47eb0d0c4d7c76eacd4d0bfc6c374e7aa54f7e673863a7c65ff",
+          "body_sha256": "7eaf1e0aaee3c47eb0d0c4d7c76eacd4d0bfc6c374e7aa54f7e673863a7c65ff"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-29-compile-mechanism.md",
+          "sha256": "7eaf1e0aaee3c47eb0d0c4d7c76eacd4d0bfc6c374e7aa54f7e673863a7c65ff",
+          "body_sha256": "7eaf1e0aaee3c47eb0d0c4d7c76eacd4d0bfc6c374e7aa54f7e673863a7c65ff"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-29-external-feedback.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-29-external-feedback.md",
+      "title": "2026-10-29-external-feedback",
+      "artifact": {
+        "id": "72865f18786bb53b",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-29-external-feedback.md"
+      },
+      "original_body_sha256": "b764fad0157f10145d06ce0e5ba6401cd7ab4b4a26924ed96d81fc515a814099",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-29-external-feedback.md",
+          "sha256": "b764fad0157f10145d06ce0e5ba6401cd7ab4b4a26924ed96d81fc515a814099",
+          "body_sha256": "b764fad0157f10145d06ce0e5ba6401cd7ab4b4a26924ed96d81fc515a814099"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-29-external-feedback.md",
+          "sha256": "b764fad0157f10145d06ce0e5ba6401cd7ab4b4a26924ed96d81fc515a814099",
+          "body_sha256": "b764fad0157f10145d06ce0e5ba6401cd7ab4b4a26924ed96d81fc515a814099"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-30-natural-failure-feedback.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-natural-failure-feedback.md",
+      "title": "2026-10-30-natural-failure-feedback",
+      "artifact": {
+        "id": "7985f4604fb9ee66",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-natural-failure-feedback.md"
+      },
+      "original_body_sha256": "2009ea528751aeaf70eec598766b6b280f3256c6b6596490b069e70f1f4fb88d",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-30-natural-failure-feedback.md",
+          "sha256": "2009ea528751aeaf70eec598766b6b280f3256c6b6596490b069e70f1f4fb88d",
+          "body_sha256": "2009ea528751aeaf70eec598766b6b280f3256c6b6596490b069e70f1f4fb88d"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-30-natural-failure-feedback.md",
+          "sha256": "2009ea528751aeaf70eec598766b6b280f3256c6b6596490b069e70f1f4fb88d",
+          "body_sha256": "2009ea528751aeaf70eec598766b6b280f3256c6b6596490b069e70f1f4fb88d"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-30-prechecked-repair.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-prechecked-repair.md",
+      "title": "2026-10-30-prechecked-repair",
+      "artifact": {
+        "id": "01e5326bc30647f8",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-prechecked-repair.md"
+      },
+      "original_body_sha256": "11b28c0df8ebb4bb8ffd8e2d01789729337b1158786cb915ac535b06f8cc4808",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-30-prechecked-repair.md",
+          "sha256": "11b28c0df8ebb4bb8ffd8e2d01789729337b1158786cb915ac535b06f8cc4808",
+          "body_sha256": "11b28c0df8ebb4bb8ffd8e2d01789729337b1158786cb915ac535b06f8cc4808"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-30-prechecked-repair.md",
+          "sha256": "11b28c0df8ebb4bb8ffd8e2d01789729337b1158786cb915ac535b06f8cc4808",
+          "body_sha256": "11b28c0df8ebb4bb8ffd8e2d01789729337b1158786cb915ac535b06f8cc4808"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-30-workflow-transfer.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-workflow-transfer.md",
+      "title": "2026-10-30-workflow-transfer",
+      "artifact": {
+        "id": "04d36c461b25d800",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-workflow-transfer.md"
+      },
+      "original_body_sha256": "ae1978faa1fcd597584d123246aed247cd3f4cb93ed2b9adbc3c506917fb7df3",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-30-workflow-transfer.md",
+          "sha256": "ae1978faa1fcd597584d123246aed247cd3f4cb93ed2b9adbc3c506917fb7df3",
+          "body_sha256": "ae1978faa1fcd597584d123246aed247cd3f4cb93ed2b9adbc3c506917fb7df3"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-30-workflow-transfer.md",
+          "sha256": "ae1978faa1fcd597584d123246aed247cd3f4cb93ed2b9adbc3c506917fb7df3",
+          "body_sha256": "ae1978faa1fcd597584d123246aed247cd3f4cb93ed2b9adbc3c506917fb7df3"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-31-author-cargo-artifacts.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-31-author-cargo-artifacts.md",
+      "title": "2026-10-31-author-cargo-artifacts",
+      "artifact": {
+        "id": "15f945268bb140a6",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-31-author-cargo-artifacts.md"
+      },
+      "original_body_sha256": "cfe064a393b845ba0dc618a7de18171d0794a4a0c88b8340fe98d10b94293bb9",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-31-author-cargo-artifacts.md",
+          "sha256": "cfe064a393b845ba0dc618a7de18171d0794a4a0c88b8340fe98d10b94293bb9",
+          "body_sha256": "cfe064a393b845ba0dc618a7de18171d0794a4a0c88b8340fe98d10b94293bb9"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-31-author-cargo-artifacts.md",
+          "sha256": "cfe064a393b845ba0dc618a7de18171d0794a4a0c88b8340fe98d10b94293bb9",
+          "body_sha256": "cfe064a393b845ba0dc618a7de18171d0794a4a0c88b8340fe98d10b94293bb9"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-31-fixed-checker-loop.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-31-fixed-checker-loop.md",
+      "title": "A fixed callable checker lets low repair the known Ruff failure",
+      "artifact": {
+        "id": "61de41a0aaa04acc",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-31-fixed-checker-loop.md"
+      },
+      "original_body_sha256": "52b87bb475d4f055f724d40bb16613c15fbcf1f867453a071d75c81b3569c3c4",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-31-fixed-checker-loop.md",
+          "sha256": "40273cd6a73bb5ca8f210e02ccc84f642161947e5eedbbb70275233b7194367d",
+          "body_sha256": "52b87bb475d4f055f724d40bb16613c15fbcf1f867453a071d75c81b3569c3c4"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-31-fixed-checker-loop.md",
+          "sha256": "40273cd6a73bb5ca8f210e02ccc84f642161947e5eedbbb70275233b7194367d",
+          "body_sha256": "52b87bb475d4f055f724d40bb16613c15fbcf1f867453a071d75c81b3569c3c4"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-10-31-matched-workflow.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-10-31-matched-workflow.md",
+      "title": "2026-10-31-matched-workflow",
+      "artifact": {
+        "id": "8905299382e2c6cd",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-10-31-matched-workflow.md"
+      },
+      "original_body_sha256": "21c2a53b27f919ee0534c62bd4a49623bc4c01fd1824341e1397029a3866ffae",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-31-matched-workflow.md",
+          "sha256": "21c2a53b27f919ee0534c62bd4a49623bc4c01fd1824341e1397029a3866ffae",
+          "body_sha256": "21c2a53b27f919ee0534c62bd4a49623bc4c01fd1824341e1397029a3866ffae"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-31-matched-workflow.md",
+          "sha256": "21c2a53b27f919ee0534c62bd4a49623bc4c01fd1824341e1397029a3866ffae",
+          "body_sha256": "21c2a53b27f919ee0534c62bd4a49623bc4c01fd1824341e1397029a3866ffae"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-01-blind-challenger.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-01-blind-challenger.md",
+      "title": "Blind low challenger missed the fallback invariant",
+      "artifact": {
+        "id": "f679c7c209c7a44e",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-01-blind-challenger.md"
+      },
+      "original_body_sha256": "b9a23c932bde7458fda83a3a0e49f05f5858d54806dac3664b729f43e1bc3645",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-01-blind-challenger.md",
+          "sha256": "c8173c2739c526868d648c6c417295cf148a90c98436b0bd82e2079b737a0145",
+          "body_sha256": "b9a23c932bde7458fda83a3a0e49f05f5858d54806dac3664b729f43e1bc3645"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-01-blind-challenger.md",
+          "sha256": "c8173c2739c526868d648c6c417295cf148a90c98436b0bd82e2079b737a0145",
+          "body_sha256": "b9a23c932bde7458fda83a3a0e49f05f5858d54806dac3664b729f43e1bc3645"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-01-fixed-acceptance-population.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-01-fixed-acceptance-population.md",
+      "title": "Source-bound required and additional acceptance populations",
+      "artifact": {
+        "id": "826403c929037379",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-01-fixed-acceptance-population.md"
+      },
+      "original_body_sha256": "78261cc64015a2fdaf26dde5b608708c32bcfe2c7767fdde328a81e30d5f7f23",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-01-fixed-acceptance-population.md",
+          "sha256": "9823a1c374911730f120dbbcf531a0e60aec6b47e1e80477ae2e16142b290480",
+          "body_sha256": "78261cc64015a2fdaf26dde5b608708c32bcfe2c7767fdde328a81e30d5f7f23"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-01-fixed-acceptance-population.md",
+          "sha256": "9823a1c374911730f120dbbcf531a0e60aec6b47e1e80477ae2e16142b290480",
+          "body_sha256": "78261cc64015a2fdaf26dde5b608708c32bcfe2c7767fdde328a81e30d5f7f23"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-01-population-transfer.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-01-population-transfer.md",
+      "title": "Population transfer: cheap acceptance does not establish equal quality",
+      "artifact": {
+        "id": "cc7c5651c2c5d5b2",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-01-population-transfer.md"
+      },
+      "original_body_sha256": "74e9d3318ec5145f695af5f00e9affe62324601afc93b9d8ebb1d66450364426",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-01-population-transfer.md",
+          "sha256": "8e86e4c459a2a6d197836e571b6039fef82762cb3486b061a644fdad8b034ac6",
+          "body_sha256": "74e9d3318ec5145f695af5f00e9affe62324601afc93b9d8ebb1d66450364426"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-01-population-transfer.md",
+          "sha256": "8e86e4c459a2a6d197836e571b6039fef82762cb3486b061a644fdad8b034ac6",
+          "body_sha256": "74e9d3318ec5145f695af5f00e9affe62324601afc93b9d8ebb1d66450364426"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-02-case-simplification.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-case-simplification.md",
+      "title": "Bounded topology simplification of recorded low tests",
+      "artifact": {
+        "id": "d433f009630e6de8",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-case-simplification.md"
+      },
+      "original_body_sha256": "e5fc0d2313a112f2e82a76535ea9a6d9cbb0f86b4d810f31abe78e4987bf1658",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-case-simplification.md",
+          "sha256": "5f3fb23d1ca0362474413f95e4eefafc4007f1e553c021482d844e51038fc634",
+          "body_sha256": "e5fc0d2313a112f2e82a76535ea9a6d9cbb0f86b4d810f31abe78e4987bf1658"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-case-simplification.md",
+          "sha256": "5f3fb23d1ca0362474413f95e4eefafc4007f1e553c021482d844e51038fc634",
+          "body_sha256": "e5fc0d2313a112f2e82a76535ea9a6d9cbb0f86b4d810f31abe78e4987bf1658"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-02-case-witness.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-case-witness.md",
+      "title": "Offline case-selection witness diagnostic",
+      "artifact": {
+        "id": "2e35ead0b88e34e6",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-case-witness.md"
+      },
+      "original_body_sha256": "4d70b95d177ed60fb41de3f6f83f250775165ea337003d03bd785deb44e1d244",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-case-witness.md",
+          "sha256": "f091ef1e5e907b4997dac09e14c49f5e3b60357dc3e0fab7864077aa1da1dfa2",
+          "body_sha256": "4d70b95d177ed60fb41de3f6f83f250775165ea337003d03bd785deb44e1d244"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-case-witness.md",
+          "sha256": "f091ef1e5e907b4997dac09e14c49f5e3b60357dc3e0fab7864077aa1da1dfa2",
+          "body_sha256": "4d70b95d177ed60fb41de3f6f83f250775165ea337003d03bd785deb44e1d244"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-02-contract-assertion.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-contract-assertion.md",
+      "title": "Contract-to-assertion diagnostic: observed sensitivity, no discovery",
+      "artifact": {
+        "id": "60f77d69c08a644d",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-contract-assertion.md"
+      },
+      "original_body_sha256": "d0b77ca8ed95a55eba63c33de6bdcc31f89cf885fdba09939c0352501c40cb61",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-contract-assertion.md",
+          "sha256": "7396e4aa2f9ae04292e2e5a0064e1eec428ea143faaea4dfb815410a1829820a",
+          "body_sha256": "d0b77ca8ed95a55eba63c33de6bdcc31f89cf885fdba09939c0352501c40cb61"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-contract-assertion.md",
+          "sha256": "7396e4aa2f9ae04292e2e5a0064e1eec428ea143faaea4dfb815410a1829820a",
+          "body_sha256": "d0b77ca8ed95a55eba63c33de6bdcc31f89cf885fdba09939c0352501c40cb61"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-02-contract-transfer-ripgrep.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-contract-transfer-ripgrep.md",
+      "title": "Contract-first ripgrep transfer diagnostic",
+      "artifact": {
+        "id": "7fbedafeb8bf9985",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-contract-transfer-ripgrep.md"
+      },
+      "original_body_sha256": "c13a97a84024425fa86058e1702b80325470f7a90529e91b7be84af11a790fc8",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-contract-transfer-ripgrep.md",
+          "sha256": "34a03fba3c4904e727375391463598fd47beb5f0b9e0aa13c24354f52a647d7d",
+          "body_sha256": "c13a97a84024425fa86058e1702b80325470f7a90529e91b7be84af11a790fc8"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-contract-transfer-ripgrep.md",
+          "sha256": "34a03fba3c4904e727375391463598fd47beb5f0b9e0aa13c24354f52a647d7d",
+          "body_sha256": "c13a97a84024425fa86058e1702b80325470f7a90529e91b7be84af11a790fc8"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-02-finite-cohort-results.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-finite-cohort-results.md",
+      "title": "Finite cohort results \u2014 verification procedure did not repair the oracle",
+      "artifact": {
+        "id": "4f6741e9a5b2ad4d",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-02-finite-cohort-results.md"
+      },
+      "original_body_sha256": "64d2e00834bf0465558390c82ba79c339cccf9df2fc25d7a2a308c6248af9560",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-finite-cohort-results.md",
+          "sha256": "337c418aaed6409da60953d37ebcd970686844ffc77feb3122bbc829ff795a07",
+          "body_sha256": "64d2e00834bf0465558390c82ba79c339cccf9df2fc25d7a2a308c6248af9560"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-finite-cohort-results.md",
+          "sha256": "337c418aaed6409da60953d37ebcd970686844ffc77feb3122bbc829ff795a07",
+          "body_sha256": "64d2e00834bf0465558390c82ba79c339cccf9df2fc25d7a2a308c6248af9560"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-03-byte-reference-repair.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-byte-reference-repair.md",
+      "title": "Exposed byte reference repair succeeds below recorded xhigh cost",
+      "artifact": {
+        "id": "469dc31e674fecf8",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-byte-reference-repair.md"
+      },
+      "original_body_sha256": "5ca5a0ed870ebf4d0efa5075a5ed081587b5884fcec153f120cd00ba747e7f8a",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-byte-reference-repair.md",
+          "sha256": "ef1c3d265f0a68a893ce244552b597c255dcc842d3f8c0ca4f3db6bc5d9bd002",
+          "body_sha256": "5ca5a0ed870ebf4d0efa5075a5ed081587b5884fcec153f120cd00ba747e7f8a"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-byte-reference-repair.md",
+          "sha256": "ef1c3d265f0a68a893ce244552b597c255dcc842d3f8c0ca4f3db6bc5d9bd002",
+          "body_sha256": "5ca5a0ed870ebf4d0efa5075a5ed081587b5884fcec153f120cd00ba747e7f8a"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-03-cargo-admission.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-cargo-admission.md",
+      "title": "Cargo operation admission \u2014 bounded controls and matched pilot handoff",
+      "artifact": {
+        "id": "f040268a1c713e62",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-cargo-admission.md"
+      },
+      "original_body_sha256": "cf72d8bbb26094d2484161604477e5764253b5bc213a41c6a38864c54f594a89",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-cargo-admission.md",
+          "sha256": "802bff2c13e04ab0a14dbf0e1759b78b681eeb0830065f698e76c4e5914d9c89",
+          "body_sha256": "cf72d8bbb26094d2484161604477e5764253b5bc213a41c6a38864c54f594a89"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-cargo-admission.md",
+          "sha256": "802bff2c13e04ab0a14dbf0e1759b78b681eeb0830065f698e76c4e5914d9c89",
+          "body_sha256": "cf72d8bbb26094d2484161604477e5764253b5bc213a41c6a38864c54f594a89"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-03-cargo-capability.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-cargo-capability.md",
+      "title": "Bounded Cargo MCP and usable completed validation feedback",
+      "artifact": {
+        "id": "1ce15be109385f47",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-cargo-capability.md"
+      },
+      "original_body_sha256": "22d545b3fb4c48e3105e9a91940830e969a5a75a6e1593e63939516d0deed45f",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-cargo-capability.md",
+          "sha256": "f04e298e8ce94a654899afd9ecb1cb172179823b642bbf696ed748683fad9e63",
+          "body_sha256": "22d545b3fb4c48e3105e9a91940830e969a5a75a6e1593e63939516d0deed45f"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-cargo-capability.md",
+          "sha256": "f04e298e8ce94a654899afd9ecb1cb172179823b642bbf696ed748683fad9e63",
+          "body_sha256": "22d545b3fb4c48e3105e9a91940830e969a5a75a6e1593e63939516d0deed45f"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-03-causal-diagnosis-pilot.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-causal-diagnosis-pilot.md",
+      "title": "Causal diagnosis pilot \u2014 admission, outcomes and mechanism evidence",
+      "artifact": {
+        "id": "d2131ff831434913",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-causal-diagnosis-pilot.md"
+      },
+      "original_body_sha256": "213caea6741c377eefd545dfde6e1557c2d8e0c4d5f76235abb463ac861c943d",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-causal-diagnosis-pilot.md",
+          "sha256": "21e6d4405bc6f98dfc6cfd2e4466a9431a8e52824d173ce43d4ee27ca12e11c0",
+          "body_sha256": "213caea6741c377eefd545dfde6e1557c2d8e0c4d5f76235abb463ac861c943d"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-causal-diagnosis-pilot.md",
+          "sha256": "21e6d4405bc6f98dfc6cfd2e4466a9431a8e52824d173ce43d4ee27ca12e11c0",
+          "body_sha256": "213caea6741c377eefd545dfde6e1557c2d8e0c4d5f76235abb463ac861c943d"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-03-matched-cargo-task-admission.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-matched-cargo-task-admission.md",
+      "title": "Matched Cargo task admission and completion feedback pilot",
+      "artifact": {
+        "id": "cd8787619611d87a",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-matched-cargo-task-admission.md"
+      },
+      "original_body_sha256": "0c2c7fd38c621ef5efe62cf6b795a0ec82d03bc81cffff12caa01235b951f934",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-matched-cargo-task-admission.md",
+          "sha256": "f8daeb7bf7c03b1b269a26c013395c64c6242e109c0286eb8b1ae03bd7fd9d10",
+          "body_sha256": "0c2c7fd38c621ef5efe62cf6b795a0ec82d03bc81cffff12caa01235b951f934"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-matched-cargo-task-admission.md",
+          "sha256": "f8daeb7bf7c03b1b269a26c013395c64c6242e109c0286eb8b1ae03bd7fd9d10",
+          "body_sha256": "0c2c7fd38c621ef5efe62cf6b795a0ec82d03bc81cffff12caa01235b951f934"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-03-public-oracle-transfer.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-public-oracle-transfer.md",
+      "title": "Matched public-oracle pilot: calibration and conditional Nushell comparison",
+      "artifact": {
+        "id": "1c2a031283add728",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-public-oracle-transfer.md"
+      },
+      "original_body_sha256": "60aa4509cbfa66097b529bab2ff4beaa5484ff15b4cf4a06b9b937996e4929bc",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-public-oracle-transfer.md",
+          "sha256": "7177544dcb746b10eafd3e1f315400d791711e9bc02bda28d42766becba5e256",
+          "body_sha256": "60aa4509cbfa66097b529bab2ff4beaa5484ff15b4cf4a06b9b937996e4929bc"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-public-oracle-transfer.md",
+          "sha256": "7177544dcb746b10eafd3e1f315400d791711e9bc02bda28d42766becba5e256",
+          "body_sha256": "60aa4509cbfa66097b529bab2ff4beaa5484ff15b4cf4a06b9b937996e4929bc"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-03-recon-factorial.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-recon-factorial.md",
+      "title": "Recon 2x2 development measurement",
+      "artifact": {
+        "id": "1dfe1c3577fb56d9",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-recon-factorial.md"
+      },
+      "original_body_sha256": "d6856998bcc208f3f97f2e9be0181dcec93ffa3515aa45f283b5787aba751fa8",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-recon-factorial.md",
+          "sha256": "5dbfe37b0752c7452eae1fa6fea472ff1c8cf299f779a945c7fa2b1be6f2e048",
+          "body_sha256": "d6856998bcc208f3f97f2e9be0181dcec93ffa3515aa45f283b5787aba751fa8"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-recon-factorial.md",
+          "sha256": "5dbfe37b0752c7452eae1fa6fea472ff1c8cf299f779a945c7fa2b1be6f2e048",
+          "body_sha256": "d6856998bcc208f3f97f2e9be0181dcec93ffa3515aa45f283b5787aba751fa8"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-03-runtime-capability-proof.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-runtime-capability-proof.md",
+      "title": "Model-free CLI inventory and dispatch proof",
+      "artifact": {
+        "id": "d96d4df21c478c74",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-runtime-capability-proof.md"
+      },
+      "original_body_sha256": "7fb6a5b1feee055d64849fa9badf7c57d97f63ac9dd4b5240f9b11bce02ce795",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-runtime-capability-proof.md",
+          "sha256": "da657be6e00345cc57afe8a5760d2dcc5efd84202036370b2def8b705b471d84",
+          "body_sha256": "7fb6a5b1feee055d64849fa9badf7c57d97f63ac9dd4b5240f9b11bce02ce795"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-runtime-capability-proof.md",
+          "sha256": "da657be6e00345cc57afe8a5760d2dcc5efd84202036370b2def8b705b471d84",
+          "body_sha256": "7fb6a5b1feee055d64849fa9badf7c57d97f63ac9dd4b5240f9b11bce02ce795"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/research/2026-11-04-native-environment-admission.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/research/2026-11-04-native-environment-admission.md",
+      "title": "Native environment admission \u2014 corrected effort-steering target",
+      "artifact": {
+        "id": "154eb8fde5d1a5e8",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/research/2026-11-04-native-environment-admission.md"
+      },
+      "original_body_sha256": "646e399b88f6c64b5633cfc36939ae47c2e6d4edc26f8e1f48d9a6a5abbf8d85",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-04-native-environment-admission.md",
+          "sha256": "9b9d6153db84d6d2cf6aec9ae1d293e67c95f2a34fc27ceee9ce0b2c7c06b93c",
+          "body_sha256": "646e399b88f6c64b5633cfc36939ae47c2e6d4edc26f8e1f48d9a6a5abbf8d85"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-04-native-environment-admission.md",
+          "sha256": "9b9d6153db84d6d2cf6aec9ae1d293e67c95f2a34fc27ceee9ce0b2c7c06b93c",
+          "body_sha256": "646e399b88f6c64b5633cfc36939ae47c2e6d4edc26f8e1f48d9a6a5abbf8d85"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/superpowers/plans/2026-10-31-author-cargo-artifacts.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/superpowers/plans/2026-10-31-author-cargo-artifacts.md",
+      "title": "2026-10-31-author-cargo-artifacts",
+      "artifact": {
+        "id": "b82458c498451c1b",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/superpowers/plans/2026-10-31-author-cargo-artifacts.md"
+      },
+      "original_body_sha256": "cf945dcd4fdc160b82facad1e9bc1f1b939deb8c92210809e6a61b48263f4908",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/superpowers/plans/2026-10-31-author-cargo-artifacts.md",
+          "sha256": "cf945dcd4fdc160b82facad1e9bc1f1b939deb8c92210809e6a61b48263f4908",
+          "body_sha256": "cf945dcd4fdc160b82facad1e9bc1f1b939deb8c92210809e6a61b48263f4908"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/superpowers/plans/2026-10-31-author-cargo-artifacts.md",
+          "sha256": "cf945dcd4fdc160b82facad1e9bc1f1b939deb8c92210809e6a61b48263f4908",
+          "body_sha256": "cf945dcd4fdc160b82facad1e9bc1f1b939deb8c92210809e6a61b48263f4908"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/superpowers/plans/2026-10-31-snapshot-workflow-replication.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/superpowers/plans/2026-10-31-snapshot-workflow-replication.md",
+      "title": "2026-10-31-snapshot-workflow-replication",
+      "artifact": {
+        "id": "c319f664f59a4621",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/superpowers/plans/2026-10-31-snapshot-workflow-replication.md"
+      },
+      "original_body_sha256": "f7f1d7d0d3070d7540f810a59686f749dd6735af7341095b7680b6d50620e833",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/superpowers/plans/2026-10-31-snapshot-workflow-replication.md",
+          "sha256": "f7f1d7d0d3070d7540f810a59686f749dd6735af7341095b7680b6d50620e833",
+          "body_sha256": "f7f1d7d0d3070d7540f810a59686f749dd6735af7341095b7680b6d50620e833"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/superpowers/plans/2026-10-31-snapshot-workflow-replication.md",
+          "sha256": "f7f1d7d0d3070d7540f810a59686f749dd6735af7341095b7680b6d50620e833",
+          "body_sha256": "f7f1d7d0d3070d7540f810a59686f749dd6735af7341095b7680b6d50620e833"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/trackers/effort-steering-current.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/trackers/effort-steering-current.md",
+      "title": "Effort steering \u2014 current findings and roadmap",
+      "artifact": {
+        "id": "c95bb1de4c5769ae",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/trackers/effort-steering-current.md"
+      },
+      "original_body_sha256": "0545b7820b62e2414d7d05e28f66a4c76526b8537fccc6f9b7df3a5a87a26ee4",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/trackers/effort-steering-current.md",
+          "sha256": "9f1c1ea9a0ff22e188f2ebc663ea2e9ad8f9959982b5d82212635f750420863c",
+          "body_sha256": "0545b7820b62e2414d7d05e28f66a4c76526b8537fccc6f9b7df3a5a87a26ee4"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/trackers/effort-steering-current.md",
+          "sha256": "9f1c1ea9a0ff22e188f2ebc663ea2e9ad8f9959982b5d82212635f750420863c",
+          "body_sha256": "0545b7820b62e2414d7d05e28f66a4c76526b8537fccc6f9b7df3a5a87a26ee4"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/trackers/low-effort-challenger-mechanisms.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-challenger-mechanisms.md",
+      "title": "Low effort quality mechanisms \u2014 missing invariant discovery",
+      "artifact": {
+        "id": "5d2126f00bb557b5",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-challenger-mechanisms.md"
+      },
+      "original_body_sha256": "0c7944a1116bb9db35e6bbbbea0945dfd2d9e90a3508e24bab83d94f146d06b0",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/trackers/low-effort-challenger-mechanisms.md",
+          "sha256": "d7c9f3aa93d320107b550c14c878e38768d5217e83762db5c36eb5c4aa84ae90",
+          "body_sha256": "0c7944a1116bb9db35e6bbbbea0945dfd2d9e90a3508e24bab83d94f146d06b0"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/trackers/low-effort-challenger-mechanisms.md",
+          "sha256": "d7c9f3aa93d320107b550c14c878e38768d5217e83762db5c36eb5c4aa84ae90",
+          "body_sha256": "0c7944a1116bb9db35e6bbbbea0945dfd2d9e90a3508e24bab83d94f146d06b0"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/trackers/low-effort-population-mechanisms.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-population-mechanisms.md",
+      "title": "Low effort quality mechanisms \u2014 population-bound acceptance",
+      "artifact": {
+        "id": "4a14c1a80a39acab",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-population-mechanisms.md"
+      },
+      "original_body_sha256": "0598922e55eb236dcdcfe09ab7a21610afd48ad3632e0dba017b86bd0fe45fd3",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/trackers/low-effort-population-mechanisms.md",
+          "sha256": "993b4ee5a2e990299f122b33c9ade8d0d0fe2e655cc900121c0e01969962fbbf",
+          "body_sha256": "0598922e55eb236dcdcfe09ab7a21610afd48ad3632e0dba017b86bd0fe45fd3"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/trackers/low-effort-population-mechanisms.md",
+          "sha256": "993b4ee5a2e990299f122b33c9ade8d0d0fe2e655cc900121c0e01969962fbbf",
+          "body_sha256": "0598922e55eb236dcdcfe09ab7a21610afd48ad3632e0dba017b86bd0fe45fd3"
+        }
+      ]
+    },
+    {
+      "original_rel_path": "docs/trackers/low-effort-quality-mechanisms.md",
+      "destination": "docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-quality-mechanisms.md",
+      "title": "Low-effort quality mechanisms \u2014 evidence ledger",
+      "artifact": {
+        "id": "48e290e38effad4e",
+        "abs_path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-quality-mechanisms.md"
+      },
+      "original_body_sha256": "c6c26dc9d2a0935e3e4fcd1d15447510bfb4cf36aad87f83b081da0b90bdf3d4",
+      "body_preserved_verbatim_after_banner": true,
+      "sources": [
+        {
+          "source": "/home/marius/.codex/worktrees/615e/codescout/docs/trackers/low-effort-quality-mechanisms.md",
+          "sha256": "e093194428d8df60bb625418de6f4854a66cb39ff9dfad57f15638d6a650d07f",
+          "body_sha256": "c6c26dc9d2a0935e3e4fcd1d15447510bfb4cf36aad87f83b081da0b90bdf3d4"
+        },
+        {
+          "source": "/home/marius/.codex/worktrees/ca35/codescout/docs/trackers/low-effort-quality-mechanisms.md",
+          "sha256": "e093194428d8df60bb625418de6f4854a66cb39ff9dfad57f15638d6a650d07f",
+          "body_sha256": "c6c26dc9d2a0935e3e4fcd1d15447510bfb4cf36aad87f83b081da0b90bdf3d4"
+        }
+      ]
+    }
+  ],
+  "source_files": [
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/plans/2026-11-04-onboarding-reuse.md",
+      "sha256": "9cdd8f5ef36e3178ae937dd24e4be3e1532078f7319c3ca9f7f9fb5e3a42eb76"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/plans/2026-11-04-onboarding-reuse.md",
+      "sha256": "9cdd8f5ef36e3178ae937dd24e4be3e1532078f7319c3ca9f7f9fb5e3a42eb76"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-29-behavior-transfer.md",
+      "sha256": "b2ebe7e4f1241375ba3822b9df270d178ad543955c58b7a914cfd8c0a7dfb755"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-29-behavior-transfer.md",
+      "sha256": "b2ebe7e4f1241375ba3822b9df270d178ad543955c58b7a914cfd8c0a7dfb755"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-29-compile-mechanism.md",
+      "sha256": "7eaf1e0aaee3c47eb0d0c4d7c76eacd4d0bfc6c374e7aa54f7e673863a7c65ff"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-29-compile-mechanism.md",
+      "sha256": "7eaf1e0aaee3c47eb0d0c4d7c76eacd4d0bfc6c374e7aa54f7e673863a7c65ff"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-29-external-feedback.md",
+      "sha256": "b764fad0157f10145d06ce0e5ba6401cd7ab4b4a26924ed96d81fc515a814099"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-29-external-feedback.md",
+      "sha256": "b764fad0157f10145d06ce0e5ba6401cd7ab4b4a26924ed96d81fc515a814099"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-30-natural-failure-feedback.md",
+      "sha256": "2009ea528751aeaf70eec598766b6b280f3256c6b6596490b069e70f1f4fb88d"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-30-natural-failure-feedback.md",
+      "sha256": "2009ea528751aeaf70eec598766b6b280f3256c6b6596490b069e70f1f4fb88d"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-30-prechecked-repair.md",
+      "sha256": "11b28c0df8ebb4bb8ffd8e2d01789729337b1158786cb915ac535b06f8cc4808"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-30-prechecked-repair.md",
+      "sha256": "11b28c0df8ebb4bb8ffd8e2d01789729337b1158786cb915ac535b06f8cc4808"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-30-workflow-transfer.md",
+      "sha256": "ae1978faa1fcd597584d123246aed247cd3f4cb93ed2b9adbc3c506917fb7df3"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-30-workflow-transfer.md",
+      "sha256": "ae1978faa1fcd597584d123246aed247cd3f4cb93ed2b9adbc3c506917fb7df3"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-31-author-cargo-artifacts.md",
+      "sha256": "cfe064a393b845ba0dc618a7de18171d0794a4a0c88b8340fe98d10b94293bb9"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-31-author-cargo-artifacts.md",
+      "sha256": "cfe064a393b845ba0dc618a7de18171d0794a4a0c88b8340fe98d10b94293bb9"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-31-fixed-checker-loop.md",
+      "sha256": "40273cd6a73bb5ca8f210e02ccc84f642161947e5eedbbb70275233b7194367d"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-31-fixed-checker-loop.md",
+      "sha256": "40273cd6a73bb5ca8f210e02ccc84f642161947e5eedbbb70275233b7194367d"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-10-31-matched-workflow.md",
+      "sha256": "21c2a53b27f919ee0534c62bd4a49623bc4c01fd1824341e1397029a3866ffae"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-10-31-matched-workflow.md",
+      "sha256": "21c2a53b27f919ee0534c62bd4a49623bc4c01fd1824341e1397029a3866ffae"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-01-blind-challenger.md",
+      "sha256": "c8173c2739c526868d648c6c417295cf148a90c98436b0bd82e2079b737a0145"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-01-blind-challenger.md",
+      "sha256": "c8173c2739c526868d648c6c417295cf148a90c98436b0bd82e2079b737a0145"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-01-fixed-acceptance-population.md",
+      "sha256": "9823a1c374911730f120dbbcf531a0e60aec6b47e1e80477ae2e16142b290480"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-01-fixed-acceptance-population.md",
+      "sha256": "9823a1c374911730f120dbbcf531a0e60aec6b47e1e80477ae2e16142b290480"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-01-population-transfer.md",
+      "sha256": "8e86e4c459a2a6d197836e571b6039fef82762cb3486b061a644fdad8b034ac6"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-01-population-transfer.md",
+      "sha256": "8e86e4c459a2a6d197836e571b6039fef82762cb3486b061a644fdad8b034ac6"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-case-simplification.md",
+      "sha256": "5f3fb23d1ca0362474413f95e4eefafc4007f1e553c021482d844e51038fc634"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-case-simplification.md",
+      "sha256": "5f3fb23d1ca0362474413f95e4eefafc4007f1e553c021482d844e51038fc634"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-case-witness.md",
+      "sha256": "f091ef1e5e907b4997dac09e14c49f5e3b60357dc3e0fab7864077aa1da1dfa2"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-case-witness.md",
+      "sha256": "f091ef1e5e907b4997dac09e14c49f5e3b60357dc3e0fab7864077aa1da1dfa2"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-contract-assertion.md",
+      "sha256": "7396e4aa2f9ae04292e2e5a0064e1eec428ea143faaea4dfb815410a1829820a"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-contract-assertion.md",
+      "sha256": "7396e4aa2f9ae04292e2e5a0064e1eec428ea143faaea4dfb815410a1829820a"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-contract-transfer-ripgrep.md",
+      "sha256": "34a03fba3c4904e727375391463598fd47beb5f0b9e0aa13c24354f52a647d7d"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-contract-transfer-ripgrep.md",
+      "sha256": "34a03fba3c4904e727375391463598fd47beb5f0b9e0aa13c24354f52a647d7d"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-02-finite-cohort-results.md",
+      "sha256": "337c418aaed6409da60953d37ebcd970686844ffc77feb3122bbc829ff795a07"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-02-finite-cohort-results.md",
+      "sha256": "337c418aaed6409da60953d37ebcd970686844ffc77feb3122bbc829ff795a07"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-byte-reference-repair.md",
+      "sha256": "ef1c3d265f0a68a893ce244552b597c255dcc842d3f8c0ca4f3db6bc5d9bd002"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-byte-reference-repair.md",
+      "sha256": "ef1c3d265f0a68a893ce244552b597c255dcc842d3f8c0ca4f3db6bc5d9bd002"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-cargo-admission.md",
+      "sha256": "802bff2c13e04ab0a14dbf0e1759b78b681eeb0830065f698e76c4e5914d9c89"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-cargo-admission.md",
+      "sha256": "802bff2c13e04ab0a14dbf0e1759b78b681eeb0830065f698e76c4e5914d9c89"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-cargo-capability.md",
+      "sha256": "f04e298e8ce94a654899afd9ecb1cb172179823b642bbf696ed748683fad9e63"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-cargo-capability.md",
+      "sha256": "f04e298e8ce94a654899afd9ecb1cb172179823b642bbf696ed748683fad9e63"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-causal-diagnosis-pilot.md",
+      "sha256": "21e6d4405bc6f98dfc6cfd2e4466a9431a8e52824d173ce43d4ee27ca12e11c0"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-causal-diagnosis-pilot.md",
+      "sha256": "21e6d4405bc6f98dfc6cfd2e4466a9431a8e52824d173ce43d4ee27ca12e11c0"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-matched-cargo-task-admission.md",
+      "sha256": "f8daeb7bf7c03b1b269a26c013395c64c6242e109c0286eb8b1ae03bd7fd9d10"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-matched-cargo-task-admission.md",
+      "sha256": "f8daeb7bf7c03b1b269a26c013395c64c6242e109c0286eb8b1ae03bd7fd9d10"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-public-oracle-transfer.md",
+      "sha256": "7177544dcb746b10eafd3e1f315400d791711e9bc02bda28d42766becba5e256"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-public-oracle-transfer.md",
+      "sha256": "7177544dcb746b10eafd3e1f315400d791711e9bc02bda28d42766becba5e256"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-recon-factorial.md",
+      "sha256": "5dbfe37b0752c7452eae1fa6fea472ff1c8cf299f779a945c7fa2b1be6f2e048"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-recon-factorial.md",
+      "sha256": "5dbfe37b0752c7452eae1fa6fea472ff1c8cf299f779a945c7fa2b1be6f2e048"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-03-runtime-capability-proof.md",
+      "sha256": "da657be6e00345cc57afe8a5760d2dcc5efd84202036370b2def8b705b471d84"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-03-runtime-capability-proof.md",
+      "sha256": "da657be6e00345cc57afe8a5760d2dcc5efd84202036370b2def8b705b471d84"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/research/2026-11-04-native-environment-admission.md",
+      "sha256": "9b9d6153db84d6d2cf6aec9ae1d293e67c95f2a34fc27ceee9ce0b2c7c06b93c"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/research/2026-11-04-native-environment-admission.md",
+      "sha256": "9b9d6153db84d6d2cf6aec9ae1d293e67c95f2a34fc27ceee9ce0b2c7c06b93c"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/superpowers/plans/2026-10-31-author-cargo-artifacts.md",
+      "sha256": "cf945dcd4fdc160b82facad1e9bc1f1b939deb8c92210809e6a61b48263f4908"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/superpowers/plans/2026-10-31-author-cargo-artifacts.md",
+      "sha256": "cf945dcd4fdc160b82facad1e9bc1f1b939deb8c92210809e6a61b48263f4908"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/superpowers/plans/2026-10-31-snapshot-workflow-replication.md",
+      "sha256": "f7f1d7d0d3070d7540f810a59686f749dd6735af7341095b7680b6d50620e833"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/superpowers/plans/2026-10-31-snapshot-workflow-replication.md",
+      "sha256": "f7f1d7d0d3070d7540f810a59686f749dd6735af7341095b7680b6d50620e833"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/trackers/effort-steering-current.md",
+      "sha256": "9f1c1ea9a0ff22e188f2ebc663ea2e9ad8f9959982b5d82212635f750420863c"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/trackers/effort-steering-current.md",
+      "sha256": "9f1c1ea9a0ff22e188f2ebc663ea2e9ad8f9959982b5d82212635f750420863c"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/trackers/low-effort-challenger-mechanisms.md",
+      "sha256": "d7c9f3aa93d320107b550c14c878e38768d5217e83762db5c36eb5c4aa84ae90"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/trackers/low-effort-challenger-mechanisms.md",
+      "sha256": "d7c9f3aa93d320107b550c14c878e38768d5217e83762db5c36eb5c4aa84ae90"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/trackers/low-effort-population-mechanisms.md",
+      "sha256": "993b4ee5a2e990299f122b33c9ade8d0d0fe2e655cc900121c0e01969962fbbf"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/trackers/low-effort-population-mechanisms.md",
+      "sha256": "993b4ee5a2e990299f122b33c9ade8d0d0fe2e655cc900121c0e01969962fbbf"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/615e/codescout/docs/trackers/low-effort-quality-mechanisms.md",
+      "sha256": "e093194428d8df60bb625418de6f4854a66cb39ff9dfad57f15638d6a650d07f"
+    },
+    {
+      "path": "/home/marius/.codex/worktrees/ca35/codescout/docs/trackers/low-effort-quality-mechanisms.md",
+      "sha256": "e093194428d8df60bb625418de6f4854a66cb39ff9dfad57f15638d6a650d07f"
+    }
+  ],
+  "archive_sha256": "fc129d49d4a7d4e6e37e38b75ffd7b1964535346a6d575f9ed2213aad675d644",
+  "source_policy": "Original retained worktrees were only read. No activation, LSP, reindex, git operation or source write.",
+  "links_policy": "Historical body is verbatim after a banner; original relative links must be interpreted from original_rel_path using the manifest. The catalog below is the reliable navigation surface."
+}

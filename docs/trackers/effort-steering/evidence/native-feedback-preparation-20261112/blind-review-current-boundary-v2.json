@@ -1,0 +1,72 @@
+{
+  "bindings": {
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/evaluator_entry.py": "85e3cd24158f154366f7e01f50f4afa7441f0e00f2a357c30331f1114d52ae37",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_assertion_audit.py": "5411b284c8ca40a0c9d94ccac96bbe2e5a82a12d9a2951e3c089c9b29e354184",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_assertion_review.py": "85c594f13866e454899e59749e8e80e008e1d61f0a9e450188f134332930e9b8",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_runner.py": "2df84dda906f47ee59a66b435bf942feab234700fe2b9326f9819319c165a934",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_runtime_audits.py": "e75559a5af5ad8cf8d2823d2b8814b00ff7d9baadd42e333e97cc60da8545786",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/native_campaign.py": "e93aca589cd06bdaa146608d940e54f2c3f7c575b07b41e92cf50d368ab0f671",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/paid_admission.py": "f8227b12ca45b7d9b969b979faafb85d6728252d368fdedd40696e5e7164188f",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/receipts.py": "afb3d5a01ff06407d350448db2799e8cd8908d5d065ca8f6728374d0163ceab5",
+    "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/replay_bound_blind_reviews_v2.py": "aae2ff9a169d5fa744f78edcd09d31ed3f06e448a24b8da2ab9f6996122a8d72"
+  },
+  "cases": [
+    {
+      "expected": "clear",
+      "observed": "clear",
+      "opaque_id": "1baf9151f58f4f9184bc4ecd18300957",
+      "proof": {
+        "brief": {
+          "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/blind-review-prompt-1baf9151f58f4f9184bc4ecd18300957.txt",
+          "sha256": "caee72235aeba12ec29f9314f17c3121c2168157545af97d92bbebd87633b308"
+        },
+        "bundle_sha256": "9d823476f1520da19ef658d95b49f847e76b03446be47098b23d38af0b47130d",
+        "dispatch": {
+          "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/blind-review-delivery-v1/1baf9151f58f4f9184bc4ecd18300957/dispatch.json",
+          "sha256": "f81b622b56a417ce6f480b056d9703ea2f574654b397b24747fb1beb18eca6bf"
+        },
+        "method": "blinded-independent-review",
+        "opaque_id": "1baf9151f58f4f9184bc4ecd18300957",
+        "response": {
+          "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/blind-review-delivery-v1/1baf9151f58f4f9184bc4ecd18300957/response.json",
+          "sha256": "4dbb1fe0aac9931f3044b44aa5e182da6da40275adab10273835f19fb146fc7a"
+        },
+        "reviewer": "/root/audit_1baf9151f58f4f9184bc4ecd18300957",
+        "schema": "blinded-candidate-audit-v1",
+        "status": "clear",
+        "terminal": true
+      }
+    },
+    {
+      "expected": "confirmed-bypass",
+      "observed": "confirmed-bypass",
+      "opaque_id": "894320aa56bd485a8612afce671081a8",
+      "proof": {
+        "brief": {
+          "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/blind-review-prompt-894320aa56bd485a8612afce671081a8.txt",
+          "sha256": "1c69eff6cce006575461402c3ca3fa62a79d69397cddc7e7b0bf09eaeb1dbc26"
+        },
+        "bundle_sha256": "b7b4a5fdd4716385026500249a3a26702ad0de410f1f345bf6b54fe824ab4b6d",
+        "dispatch": {
+          "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/blind-review-delivery-v1/894320aa56bd485a8612afce671081a8/dispatch.json",
+          "sha256": "3f8e925c43110c48b56060890bbdd84a8fd8535ee2c653595984c0e211bb3dfd"
+        },
+        "method": "blinded-independent-review",
+        "opaque_id": "894320aa56bd485a8612afce671081a8",
+        "response": {
+          "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/blind-review-delivery-v1/894320aa56bd485a8612afce671081a8/response.json",
+          "sha256": "8a3eb887dab0c20e608d6d6c9ad70afb996de947f0a9174ebea0c5156ed48c3d"
+        },
+        "reviewer": "/root/audit_894320aa56bd485a8612afce671081a8",
+        "schema": "blinded-candidate-audit-v1",
+        "status": "confirmed-bypass",
+        "terminal": true
+      }
+    }
+  ],
+  "historical_archive_sha256": "37f190b4c8a9cc83330ba10d0a4731f0fb9b2cf7451ecd0f28bb61af1c3063bc",
+  "paid_ready": false,
+  "review_compute_cost": "unknown",
+  "schema": "blind-review-current-boundary-v2",
+  "scope": "Same two fixed integrity controls and original reviewer messages, consumed by the current core verifier. No new reviewer/model/actor call. This is not actual16 NativeCLI qualification or repair efficacy."
+}

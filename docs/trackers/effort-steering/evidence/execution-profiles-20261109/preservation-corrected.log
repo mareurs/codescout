@@ -1,0 +1,40 @@
+{
+  "schema": 2,
+  "scope": "uncommitted profile code, all retained real-source attempts, test logs and applied review; logical file bytes verified",
+  "session_id": "codex:01a15ca9-f939-7603-acb5-01c6b02f68e2",
+  "source_branch": "research/evidence-protocol-20261109",
+  "source_base": "fe8bb4b34f5e7912f9b16c4c0bf1ff73a3a10a23",
+  "archive_path": "/home/marius/.cache/codescout-resident/codescout/execution-profiles-20261109/execution-profiles.tar.gz",
+  "archive_bytes": 115587963,
+  "archive_sha256": "05ef21706334c7ff72340079fce6a0177ab8b986b166177cdb4e638ce173dcaf",
+  "archive_readback_verified": true,
+  "archive_header_counts": {
+    "regular_headers": 29771,
+    "hardlink_headers": 10,
+    "symlink_headers": 36,
+    "directory_headers": 3227
+  },
+  "logical_entries": 33044,
+  "logical_regular_files": 29781,
+  "compact_archive": "source-and-review.tar.gz",
+  "compact_bytes": 1484875,
+  "compact_sha256": "2726b3d6baeff6e1d3f4e53ce9eadbbebb5d5d256841d8348dd805d290763927",
+  "compact_header_counts": {
+    "regular_headers": 862,
+    "hardlink_headers": 0,
+    "symlink_headers": 0,
+    "directory_headers": 99
+  },
+  "companions": {
+    "verify_archive.py": "e0816e0a330d71e3b8a9312099c52d707d9b6fe8837d99c9d3b87d553bc8a976",
+    "failed-verifier.log": "3d882a254b886560e04b90f64ef799d56e62c57bfcee7a4613b6d7a9d2fc6b5e"
+  },
+  "limits": [
+    "Large source/build closure stays outside the repository at archive_path; compact archive retains code/review/logs/receipts, not all replay inputs.",
+    "No dependency image export; exact existing image ID remains required.",
+    "Receipts contain original absolute host mount paths; preservation does not assert replay at a different path without reconstruction.",
+    "Excludes __pycache__ and review .git directories.",
+    "Initial verifier failed on valid tar hard-links; the completed archive bytes were relocated unchanged and fully reverified.",
+    "No paid cohort admission, generic efficacy, peer deletion or unidentified orphan volume cleanup."
+  ]
+}

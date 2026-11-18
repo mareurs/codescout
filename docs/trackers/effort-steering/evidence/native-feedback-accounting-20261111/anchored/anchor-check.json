@@ -1,0 +1,12 @@
+{
+  "all_closed_audit_bindings_reopened_before_after": 280,
+  "anchor_producer_sha256": "07ed832e7f891f3e481c44c38a1e1f532a4cbe7ae585dacc5ce4fe8011fe8f03",
+  "closed_audit": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/closed-campaign-audit-20261111/audit.json",
+  "closed_audit_sha256": "838b384d8b0c871f32d98324da4686063cdedc3cab5509f5a3a6e620492309af",
+  "producer": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/reconcile_history.py",
+  "producer_sha256": "a98b1010fbc986feb25921ecb758ff938ca4e994efea5265d7b68890966fe2d9",
+  "reconciliation": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-accounting-20261111/anchored/reconciliation.json",
+  "reconciliation_sha256": "f11ad81dabf4c18495281d90601a253cbce40f8ca08117e40a7ca45493b740f5",
+  "same_bytes_as_initial_rescan": true,
+  "schema": "client-session-reconciliation-anchor-v1"
+}

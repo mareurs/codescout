@@ -1,0 +1,154 @@
+{
+  "all_members_reopened": true,
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/fresh-qualification-preparation-v1.tar.gz",
+  "archive_bytes": 882866,
+  "archive_sha256": "b8302ae7686efb6f54f8e6f54b6cc2fc5d552584077443fb108147a913fe4604",
+  "cleanup_performed": false,
+  "efficacy_claim": null,
+  "member_count": 28,
+  "members": {
+    "cache-decision/inventory.json": {
+      "bytes": 5043502,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/closed-ledger-cache-inventory-v1.json",
+      "sha256": "9ade1ea796636595ceae82e34e60b5fefe632d2672441d4e0e72fb4440be7677"
+    },
+    "producer/preserve_fresh_qualification_preparation_v1.py": {
+      "bytes": 3112,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/preserve_fresh_qualification_preparation_v1.py",
+      "sha256": "5ff464f766aa8f05268823779a2096d87f801ee7e1be270ebd53335c5d555831"
+    },
+    "producers-v27-manifest.json": {
+      "bytes": 78868,
+      "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/producers-v27-manifest.json",
+      "sha256": "f537942afa4f38c9564fee3dbbec5a0378e450d893594c21381da957af43b57c"
+    },
+    "registration/capacity-1794514782761342961.json": {
+      "bytes": 267,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/native-feedback-qualification-v4-registration/capacity-1794514782761342961.json",
+      "sha256": "37e72d79842173160b1ca6533e64b6cb661594d13cb16db1ac0213c7be2c5287"
+    },
+    "registration/final-registration.json": {
+      "bytes": 794872,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/native-feedback-qualification-v4-registration/final-registration.json",
+      "sha256": "e8ad02541f1a11a832b67d15c64e66622fb26e91bfb70a9e60f70b602162956e"
+    },
+    "registration/preflight-offline.json": {
+      "bytes": 26220,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/native-feedback-qualification-v4-registration/preflight-offline.json",
+      "sha256": "02c32c4894fa37cd88ff2f6545a19af4af21502952c7b940988d6cf6c0302b59"
+    },
+    "registration/scope.json": {
+      "bytes": 339,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/native-feedback-qualification-v4-registration/scope.json",
+      "sha256": "28b920c7cb35c98a171eebe114c5dd5c10f0f888ec3a997d0c96e639163a8b87"
+    },
+    "review/G01.diff": {
+      "bytes": 588,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G01.diff",
+      "sha256": "96af72ebd2bc303ab62793fd533eebf5a80429827d1bb0317c464d607ceb5db7"
+    },
+    "review/G01.json": {
+      "bytes": 714,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G01.json",
+      "sha256": "546dff74ed13f90ab4d6c679a1ef75006032f6cedb186fd53d49f8b0c871c01d"
+    },
+    "review/G01.log": {
+      "bytes": 5507,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G01.log",
+      "sha256": "87bb006451c7cb3c3587250ef1d1ce1abe92b9203bf593491d4cafebc4190b0b"
+    },
+    "review/G02.diff": {
+      "bytes": 613,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G02.diff",
+      "sha256": "07241453f7bb63c6a9058eef9271137309223a5db537d09c1f1b67f3e40ce2eb"
+    },
+    "review/G02.json": {
+      "bytes": 708,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G02.json",
+      "sha256": "054bbca9b95ebae43c718b0b4aa0e06fab2cba9466357c19fdf8b115159a8fa2"
+    },
+    "review/G02.log": {
+      "bytes": 3758,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G02.log",
+      "sha256": "26c576a30f3eb627498b06f224a29074624452cff053c2f8569e7546cad078a2"
+    },
+    "review/G03.diff": {
+      "bytes": 629,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G03.diff",
+      "sha256": "bed4d4e8b69da13d8c7c3e3f7662ba1f8de64aacbf92114a173b9ac8d2700ff8"
+    },
+    "review/G03.json": {
+      "bytes": 720,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G03.json",
+      "sha256": "546e3e1cde02a535f3bd3d4c5e4f914b70ac1dfe9c09531a63c1b2761176d640"
+    },
+    "review/G03.log": {
+      "bytes": 3772,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/G03.log",
+      "sha256": "7bb386a2854693fe17ffa21d7f650f028fa16e6eee39d7662e29fd23aa4b7b16"
+    },
+    "review/baseline-result.json": {
+      "bytes": 2591,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/baseline-result.json",
+      "sha256": "c0189c122f8d55edac972e8d876ce2dee9765c8777f03c2d66a9e1035068c874"
+    },
+    "review/baseline.log": {
+      "bytes": 2382,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/baseline.log",
+      "sha256": "ca7323d6ee859ac672f07b9ff117388619c2bc81cb8bd5681b3f018bcbcfd863"
+    },
+    "review/compiled-scripts.json": {
+      "bytes": 342,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/compiled-scripts.json",
+      "sha256": "05c27df653bb4a13f5314389d029288b450970ff5aae7804969ec7990f00c1bf"
+    },
+    "review/custody-before.json": {
+      "bytes": 21941,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/custody-before.json",
+      "sha256": "d8b8d174f1cfdcaac68bb4259b8f7a995bd64d241dd342b7512932c5ce4899a2"
+    },
+    "review/failure-sites.json": {
+      "bytes": 1090,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/failure-sites.json",
+      "sha256": "0f910871a80ccdc173eb5dd078d550938b625bec6117ddc8e9f1593cdcba53b4"
+    },
+    "review/mutation-results.json": {
+      "bytes": 2244,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/mutation-results.json",
+      "sha256": "36da598d25b2992fc045a23f4d943d6b44ab9ebf63d78bbe89d1c26d3db5a7b8"
+    },
+    "review/mutations.json": {
+      "bytes": 699,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/mutations.json",
+      "sha256": "651481dd2ba65fa92abdc28d60cbe6fd163a6a31e5cfee978f055d83e0032126"
+    },
+    "review/registration-readback.json": {
+      "bytes": 1337,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/registration-readback.json",
+      "sha256": "f78bc009e6d6f49f58d887f5ada2d99353f48ccb77b693465fb2b32ef033ca4b"
+    },
+    "review/resume-driver-delta.diff": {
+      "bytes": 1490,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/resume-driver-delta.diff",
+      "sha256": "b000445246c2e0837c5cebbfbf4744b1fadcba7fa79f0d7bc6fc402624bd4804"
+    },
+    "review/run_mutations.py": {
+      "bytes": 2836,
+      "path": "/tmp/native-qualification-growth-review-90duaqlt/run_mutations.py",
+      "sha256": "6661fcec6154475d36fb3a1f16ad13ccce5bda2b2b409eca7efec356d41d3031"
+    },
+    "verification/closed-ledger-cache-inventory-v1.log": {
+      "bytes": 614,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/closed-ledger-cache-inventory-v1.log",
+      "sha256": "168f4cc1884ac5f520444cdab08d6dc3adc1211cde85d0f60e403ddfdf7a5ad1"
+    },
+    "verification/qualification-growth-boundaries-v1.log": {
+      "bytes": 1159,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualification-growth-boundaries-v1.log",
+      "sha256": "e2208fd8478f175f063ee4ab0447f11e6efb049b2a488b6cbb7acd987b87cf86"
+    }
+  },
+  "paid_admission": false,
+  "schema": "fresh-qualification-preparation-custody-v1",
+  "scope": "Prepared unlaunched registration, scoped cache decision inventory and guard review only."
+}

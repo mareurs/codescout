@@ -1,0 +1,11 @@
+{
+  "scope": "main-tracker",
+  "source_root": "/home/marius/work/claude/codescout",
+  "path": "docs/trackers/effort-steering/evidence/disk-runtime-checkpoint-20261111/evidence.tar.gz",
+  "type": "file",
+  "bytes": 1330356694,
+  "mode": 420,
+  "sha256": "d5c81f93a75b644505329ae9c65c2a03213d95cd5ce327d0ffeedae1ed6759ce",
+  "storage": "external",
+  "destination": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/disk-runtime-checkpoint-20261111/evidence.tar.gz"
+}

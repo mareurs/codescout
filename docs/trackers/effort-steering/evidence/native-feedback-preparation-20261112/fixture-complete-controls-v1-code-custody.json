@@ -1,0 +1,521 @@
+{
+  "archives": [
+    {
+      "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "sha256": "be685e4cd09611a5f0a4f876aac2d83b637936588f27ae9dcbf5df918540c533"
+    },
+    {
+      "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/producers-v22.tar.gz",
+      "sha256": "35061c703d11cfb2d67b53e7dde574ee7639965da1430712efc7f5edc94cacd7"
+    }
+  ],
+  "changed_live_inputs": [
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_runner.py",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/native_campaign.py",
+    "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_runner.py"
+  ],
+  "client_model_calls": 0,
+  "code_inputs_reopened": 82,
+  "control_audit": {
+    "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/fixture-complete-controls-v1-audit.json",
+    "sha256": "7b7763aa7df0baf5344aa759358f1b65f98c5ab679d22c3c18abbfe1482eaca7"
+  },
+  "inputs": [
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/adapter.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/adapter.py",
+      "sha256": "7ee80270a44b83cf9447292d1551e5e55c4a63b932c8048fb42842c815b6a3c8"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/campaign.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/campaign.py",
+      "sha256": "96ddfbf88d967f0a73d5e77283e50d8a8738cc714466c3cdb24bac6ea35fa194"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/campaign_native.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/campaign_native.py",
+      "sha256": "363391d6b1288daa3a8382e6fda76fdf271cd413a0f785d41bea802b38701443"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/campaign_resources.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/campaign_resources.py",
+      "sha256": "8458da45781b8745e12f47bcd2ce7a3bf294bb33236036429a6c693be910927e"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/context_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/context_inputs.py",
+      "sha256": "4934fccfa689d9e211bff2b8886649ddffd3a73770e529cdcbe9305762883652"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/embedding_relay.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/embedding_relay.py",
+      "sha256": "16ceb890a5c341f8698251c35d486ab09dc70946ece621f316feddc2850e1839"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/embedding_runtime.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/embedding_runtime.py",
+      "sha256": "c57a6e825931fad99cf5460afbe3daa1c1f8fab92f36106cca042294249323d7"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/evaluator_entry.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/evaluator_entry.py",
+      "sha256": "85e3cd24158f154366f7e01f50f4afa7441f0e00f2a357c30331f1114d52ae37"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/execution_profiles.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/execution_profiles.py",
+      "sha256": "8b62631f16cf0fbd9575e76f0f7e40ceb2ab8f38dcbbc8dfb1b439ebc1dde147"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/executor.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/executor.py",
+      "sha256": "2facfc3bf33b89062b5bc920a31004865f22f155a00e76130101150d88e5c945"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_admission.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_admission.py",
+      "sha256": "567fdaab1da6ca477e48cd48cfc985e5c8c2b6328775ae9447375b31fd16caf6"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_gitlinks.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_gitlinks.py",
+      "sha256": "1e36e2bc291935ef76459d3b0d9472b47df1aeaf0686f30d52c1090bf66e7f0b"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_nextest.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_nextest.py",
+      "sha256": "4ff42d1ef672ee7afb49cf8d2fcefe3f99d581d930829870d09b6685c930b385"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_policy.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_policy.py",
+      "sha256": "5c9361c336974acec905cb594b38399f2542bf4470216e6c121894c15353b0ef"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_private_capture.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_private_capture.py",
+      "sha256": "6fc5adb44835f68b53f7a33cbdb08fdb0fd166c2160dd60d594e09e5bf8f6700"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_private_commands.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_private_commands.py",
+      "sha256": "feb8c4eddc45776fe302e552d1b48202b7d9d839d6542c743ec3d864e3183ed4"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_reference_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_reference_inputs.py",
+      "sha256": "a8a2c20846db6979ffe5c0924410aab51ce2199d5ba764f6cccc05c34b2edb3f"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_runner.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_runner.py",
+      "sha256": "a6c1c66586d5e431e32333e6f9b7c23f18e8aaa77bd14e95629f42c71102b63f"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/feedback_trusted_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/feedback_trusted_inputs.py",
+      "sha256": "11668cafa8132f6e63571b1332ddbc3d1633d8d335cdf887a801adb6384849b4"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/native_campaign.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/native_campaign.py",
+      "sha256": "a731d3679f88e1f83656e9fa6442764eb638d90cd9f6895fd4f86e759f990c43"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/native_executor.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/native_executor.py",
+      "sha256": "35de7b201f4138f87d4777c492fb168a568cebbdc18ff17058f309bb565cc2de"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/paid_admission.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/paid_admission.py",
+      "sha256": "c8407172c250bfbff284a870b16beda4dbe9e5ebd094d559492ae232aef1f1bd"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/policy.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/policy.py",
+      "sha256": "ec1626cc8ddfb79ccb75e634ecbdc3831d5837e1ba2638a6a3f928ad1f0bef23"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/preparation.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/preparation.py",
+      "sha256": "d77fbe736e159d83b3a0fad4e8d67bdeea88cc5b58a162fb3e26885018e484f5"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/public_artifacts.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/public_artifacts.py",
+      "sha256": "ffd1232f0b6885d745cab2ff1e71291d88f86808d3b2c8183dee88758f59190f"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/public_build_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/public_build_inputs.py",
+      "sha256": "6c885275cd975935c1e5b280a179d70da732b7c3358be17e4e216e7ac4f3c88d"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/public_clone.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/public_clone.py",
+      "sha256": "b0c85e386298690c985aad38d2ae11844ca4239aabe2bb3cb1074e678d6e535a"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/public_fixture.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/public_fixture.py",
+      "sha256": "e5dca993dc5e72fc5e7eb1e4d4458bdc5212f44086fd523aac08ba77214a609f"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/qualify_native.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/qualify_native.py",
+      "sha256": "4260257d63929dd059a3c280c649beea91295978949d748943c5b8072b9186c9"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/readiness.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/readiness.py",
+      "sha256": "6c551b8206fd515dfa91d5291f37723b25d7cd7d8ca7e5b6495884f74fdff506"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/receipts.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/receipts.py",
+      "sha256": "afb3d5a01ff06407d350448db2799e8cd8908d5d065ca8f6728374d0163ceab5"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/runner.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/runner.py",
+      "sha256": "729dd3b6a5f7117dda3428c8a9a9ba7ee26ae78628b87812057551647e00358a"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_adapter.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_adapter.py",
+      "sha256": "a301e673cb48ad03df252eb7deb07e521a0f20be6d2a2830c7de00b92751bf43"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_campaign.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_campaign.py",
+      "sha256": "f65719b031b718e543cd0444159082d4e706644567a91647e5a7d7a93a51a701"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_campaign_native.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_campaign_native.py",
+      "sha256": "7963f87d6143c5376b399ee769849f07e7b50f38784c032f06c7591df98cbbde"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_campaign_resources.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_campaign_resources.py",
+      "sha256": "7ed86351ff3b702c0620b8f34dab91b282f6e03855bcf8f5296107cf1a4644cb"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_command_budget.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_command_budget.py",
+      "sha256": "7b9d9c0aafbea70be15aa9f7fc29bc6e4098bc2b42d92aeb18c6bed0974f7509"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_context_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_context_inputs.py",
+      "sha256": "055f9149a5f65d370202545727523792a54edcd8831e76a503315580a5fe2e1c"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_embedding_relay.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_embedding_relay.py",
+      "sha256": "b5b5ab523df2688c5d40358d9f7fc0276d77bac0fecddeade0073fe4803f228a"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_embedding_runtime.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_embedding_runtime.py",
+      "sha256": "9b5d5969ab63e820eb7e144e46a634e1e329e2cd6e8e7ef51d107a6d1d084e22"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_evaluator_entry.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_evaluator_entry.py",
+      "sha256": "6c78dcf63fc275c7788dbd14f1f64309710896d8d80d09e11126ed5ffbd2ed2b"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_execution_profiles.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_execution_profiles.py",
+      "sha256": "81675dbbd592de3419053af26aeeb0a069fb7d34ea7501caa5f0fa42c19d926c"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_executor.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_executor.py",
+      "sha256": "113b49e924dc23bc6125bfe027fe10ba991b4c579e149ee536663b4fda2b6376"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_admission.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_admission.py",
+      "sha256": "be2f5a0b3fd1d3c9be5981d3c283c8a85a918bd0c1482a8302e62bee678c51e7"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_backend.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_backend.py",
+      "sha256": "980cf51140a1484c50254e26b9531f847fba1141b70a9893fbefba917da53b5c"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_gitlinks.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_gitlinks.py",
+      "sha256": "7fc9ab87d247a805cc7947ab45ad68432f75366578aa50d1ca5d5dd8ecc1b977"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_native.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_native.py",
+      "sha256": "dd1a00d7d50779289329d132d2df8f0846a29c9549ea4e4b710e075682a5a76d"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_nextest.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_nextest.py",
+      "sha256": "e32b3336c683c875583b9198742b14ed86cec67cbb8ae47f8fe0c629cf8877ec"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_paid_leaves.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_paid_leaves.py",
+      "sha256": "b3acd046c17de79bc0203a2f8c3a0badcb6b43ec8ac357bee37245cd44db0214"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_policy.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_policy.py",
+      "sha256": "67c73b45bb45562a33f201a10d0f72b0366245185ba41c887f176b5515f732bd"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_private_capture.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_private_capture.py",
+      "sha256": "8f154cdcd9c29b26530d331162df3b75bb6662e9fe06ae830a71483812fc41fb"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_private_commands.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_private_commands.py",
+      "sha256": "9de87fbec9f0e1ac87ed88679bdc74d2ef9e2cc4c9033dc5cf819fa3e02c984b"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_private_shell.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_private_shell.py",
+      "sha256": "711069bd142bcb8d3b1e275347b71540246f0cc327ad72131d11555541becbc6"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_public_controls.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_public_controls.py",
+      "sha256": "afb769b918cb6d31932f035ee74915e8d772f9636dfa5a3b8daffb2a65b610dd"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_reference_admission.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_reference_admission.py",
+      "sha256": "0db5e17c98e11ca1effcdc0a26eb6bcf8308e9f31f0fdd0d95689c052e3fb795"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_reference_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_reference_inputs.py",
+      "sha256": "9ef0fea12dcb089fd6d795e4b832169135fe7848b7e7ff0f38dd521156db3760"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_runner.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_runner.py",
+      "sha256": "9097708753a85b5527e140c5e08c98ef7af50cdcc61e9d242a6bb2180000de18"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_trusted_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_trusted_inputs.py",
+      "sha256": "37df388717afadec969dc2c1358664c77c2c020351f57cbadff4379b45f2ef06"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_feedback_workspace_context.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_feedback_workspace_context.py",
+      "sha256": "e526749449e346778d75e230833a993d4386d3f48de27cbd075e020f65ad60b9"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_native.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_native.py",
+      "sha256": "f27f64f9e30d91a063bb53ee326ababbd9461a60324cdc462c839474ccce6dbf"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_native_campaign.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_native_campaign.py",
+      "sha256": "ec047e5cf18659561c0fa81c1e699ab6382504a5d4146630e6eacc9680830333"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_native_executor.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_native_executor.py",
+      "sha256": "be3c40688ebf20d2dfb73031a05247e7d938b07f826d973b732fb86c99b57e56"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_paid_admission.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_paid_admission.py",
+      "sha256": "e5b30015d3912b3478bef06b3c701ba468bd523a824f48fb937b8eb745e85ab2"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_policy.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_policy.py",
+      "sha256": "fe31b2d218ebed843e3a1066453259e69f57d44eec1ef0b0946f5472f5ed2a9c"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_preparation.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_preparation.py",
+      "sha256": "fbdf7bd096c01fd20d6b39859de65ac43e972c63160292a57d429c2d2561ddff"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_public_artifacts.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_public_artifacts.py",
+      "sha256": "c2566ed186a18bd05dc868f275fb053861be2125eb94b9f126ae122a2ea54972"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_public_build_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_public_build_inputs.py",
+      "sha256": "3b3d78d3940d682cb8b1a5030d85469b4e9f081f23dd0006e636db011516402d"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_public_build_native_contract.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_public_build_native_contract.py",
+      "sha256": "12715af410f874608d06a568e42f208c61233a427325fb9ef8a638a385c4a194"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_public_build_profiles.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_public_build_profiles.py",
+      "sha256": "7eda47a3d0700512b4effc9df6f0a27791dfdc965ea0c4b9c735204d0443f489"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_public_clone.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_public_clone.py",
+      "sha256": "450bd7d165e5e89df5895b0916181a9b169d222202ea019b58852453f463b650"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_public_fixture.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_public_fixture.py",
+      "sha256": "981b3278244882f9cb5d01b2deca2fec60ab08da1ed9a228872b4945dcb18f8e"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_public_fixture_executor.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_public_fixture_executor.py",
+      "sha256": "fd04b24c1a0bf3f01d0554c46ef91ebf1110ae23df074e8eeb4aadc6b3acd87e"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_qualification_cleanup.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_qualification_cleanup.py",
+      "sha256": "e0c51e82d3c6e468f648dcc28a42ac72b501680e9cae343d9f91b6df617a1d58"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_readiness.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_readiness.py",
+      "sha256": "8b06025d19090a70c5231d5acdc861ac0f855eb453b927b42d3977283af8b20e"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_receipts.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_receipts.py",
+      "sha256": "9bd708e710ed105c49fcca208618b7ee0210552987d2bc4d1140e5dc189d6cf4"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_registered_readiness.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_registered_readiness.py",
+      "sha256": "019527d101400a7cb927e196d89ab0baa2821f03ae5be9b32179a6d3cf9787b8"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_runner.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_runner.py",
+      "sha256": "7d4c764f744a72c0df038fc4c351f3322347ddbffb37d39d40a971a32aacd256"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_submission_contract.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_submission_contract.py",
+      "sha256": "db222839f5ee59a17790dfea1591d2d666e3fc2fd05cb9ff3b5eb23c9be15fef"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/test_trusted_test_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/test_trusted_test_inputs.py",
+      "sha256": "32a4c0283cf3e20d1adc216109daf1cc9baa37bfffc451f1d1464a8f539bd225"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-baseline-20261111/task5-complete-reference-admission-v1.tar.gz",
+      "member": "tools/effort_protocol/trusted_test_inputs.py",
+      "original_path": "/home/marius/.codex/worktrees/2aa6/codescout/tools/effort_protocol/trusted_test_inputs.py",
+      "sha256": "73fac7c497b1f319c2d60ea52c14d3152876e475c9ce34121c89124cbd9b3704"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/producers-v22.tar.gz",
+      "member": "main/prepare_fixture_complete_controls_v1.py",
+      "original_path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_fixture_complete_controls_v1.py",
+      "sha256": "8e9fdc31feb2c8c13fc2fd9a3678e0012ebd2f26c16d2a4615834a7b09e09828"
+    },
+    {
+      "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/producers-v22.tar.gz",
+      "member": "main/run_fixture_complete_controls_v1.py",
+      "original_path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/run_fixture_complete_controls_v1.py",
+      "sha256": "7480424a777fc776400cf33539fe35f01a0da85ba27489a3c601f1fdb5f04b56"
+    }
+  ],
+  "paid_ready": false,
+  "producer_sha256": "ca97418cb494ce18e75af9ac661616d2b12e17e5979dafa720c5df57b5efeecd",
+  "schema": "qualified-control-code-custody-v1",
+  "scope": "Historical measured code and runtime proofs remain byte-bound in preserved capsules. Later native/controller audit development does not rewrite or re-run these compile controls. This is custody, not current author CLI qualification or efficacy."
+}

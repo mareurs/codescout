@@ -1,0 +1,161 @@
+{
+  "state": "synthetic-P-R-controls-passed_full-product-gate-failed",
+  "source_base": "fe8bb4b34f5e7912f9b16c4c0bf1ff73a3a10a23",
+  "latest_protocol_suite": {
+    "discovered": 137,
+    "executed_passed": 135,
+    "skipped": 2,
+    "exit_code": 0,
+    "wall_s": 106.597
+  },
+  "actual_native_unittest": {
+    "tests_passed": 1,
+    "exit_code": 0,
+    "wall_s": 134.247,
+    "scope": "P synthetic actual CLI before later R packet/prompt correction"
+  },
+  "review_mutants": {
+    "applied": 11,
+    "killed": 6,
+    "survived": 5,
+    "invalid": 0
+  },
+  "reapplied_original_survivors": {
+    "applied": 5,
+    "killed": 5,
+    "survived": 0
+  },
+  "additional_late_binding_mutant": {
+    "before_new_tests": "observed_survived",
+    "after_new_tests": "observed_killed"
+  },
+  "product_gate": {
+    "record": "/tmp/codescout-bg/337215-288e487c-bg_00000016.json",
+    "log": "/home/marius/.cache/codescout-resident/codescout/effort-protocol-verification-20261109-01a15ca9/logs/product-short-tmp-gate.log",
+    "state": "finished_failed",
+    "python_passed": 1311,
+    "python_subtests_passed": 442,
+    "exit_code": 1,
+    "wall_s": 2005.54087,
+    "FMT": 0,
+    "CLIPPY": 0,
+    "LEAN": {
+      "exit_code": 101,
+      "passed": 5233,
+      "failed": 7,
+      "ignored": 11
+    },
+    "DEFAULT": {
+      "exit_code": 101,
+      "passed": 7870,
+      "failed": 12,
+      "ignored": 14
+    },
+    "failure_frames": 19,
+    "unique_failing_test_names": 12,
+    "retroactively_green": false
+  },
+  "paid_ready": false,
+  "new_paid_experiment_calls": 0,
+  "efficacy_established": false,
+  "code_committed": false,
+  "native_R_qualified": "earlier-source synthetic runtime only; full real-task parity remains open",
+  "files": {
+    "protocol-final-short-suite.log": "b1c11a64bc85414aa02a812c6f8d605823b39e95866c5ed2b3ddbc69d35c5988",
+    "protocol-control-final-suite.log": "2892cd0d9af07520d3be2a2b34a61897c314d948b7668e134c8768abc9d9f460",
+    "control-arm-red.log": "29171ab02cddff1ff11182edfc061314fbc9117aee5676f0c071122c52de6ce9",
+    "control-arm-green.log": "968018b82e9bc2ef12abaf24e270bc4ca01143d0d909eb019bee932331d74342",
+    "native-unittest.log": "aa7154bbd5dc31253f39212954214ce28988333cb8e6b722d3f85307b7898b52",
+    "protocol-r-qualified-suite.log": "d2b877c10c1162426fbf519ce22ba4dbc594a36cc99af15405b7f56f6dc2e962",
+    "control-native-red.log": "6d6f8043fe304e30c4f620248c1131c3a3cc255efc75c77c73c891d5f33973ae",
+    "control-native-green.log": "efc22aaa304bc122e85943670e79352119f8da7b5ff72cffb680c5528eccc67f",
+    "product-short-tmp-gate.log": "fe2757f603d76fcd27c5d4c3b45bce24eb54defb6855bd3b7817c935e5f714e6",
+    "gate-lsp-short-root-targeted.log": "ea83c837c0e524ce5fa07f889f4502fb6901ad2c0f4648dfa70b07b52e8fbb62",
+    "gate-memory-short-root-targeted.log": "8b93bcca52c35602f09312872299e87aaaff4f1bcbfa43b2f62b66b999244af6",
+    "gate-class-fit-contained.log": "b8f993b05e4ec84793a4dcb21569ef11444546a210c8b88bc849cb49719b3b1b",
+    "gate-attribution-empty-history.log": "cdae17bcff2763eec82583f950df21e6c46584e40f75b4567ad7286ac2a65263",
+    "gate-directory-empty-history.log": "41590df1033cac25711894d6756ed1b20726a71444dba0ee8451e7367c382ece",
+    "r-qualification-and-gate.tar.gz": "be2c5f5274aaec43238b56c812c94126d309a4dc818d579faeee9c33996eae12",
+    "public-handoff-red.log": "8ed5cb078f3013a817534b945ec313ea6ce69711e5b4bd677a5a37b733b8d9f4",
+    "public-handoff-green.log": "289f98cb4997968f30e736ad6d0007f57291e6aa0b095ba956aef3697186ff5c",
+    "public-handoff-native-red.log": "c2a79e60380cbc286377fc2211d85c31642bbd5eb6badd0557cb1c0dd649e120",
+    "public-handoff-native-green.log": "2191590e6d00ad65c2de6f87af0fffdbac4a5c92bb1a606a7713a0e47b2cf625",
+    "public-handoff-protocol-suite.log": "85fb2f0ba1c67a9fdc09c4dc3e640a5617245ff1e822c81247e090640c9489a7",
+    "public-handoff-edge-green.log": "719231ef4d3bf163ab612f10f186b0271ad3ca48088de7b0933126674850e697",
+    "public-handoff-final-suite.log": "c45a88fca55d7a40bbcf06e71f5ee7db3e19af013e8b9f1e67c9b023bf4dd9b7",
+    "public-handoff-actual-request-replay.log": "9824ae25b0d5af5de573c1756400fab4d145663474c345306792a26961f285ef",
+    "public-handoff-missing-request-control.log": "595c949accbbe9c48d2553ac43cc5ba0734f07e2234f1bf01624f50155b9ddc0",
+    "public-handoff.tar.gz": "eb11e443bc8d404e4f70f7a905d9b2ff0e220d715b39cd6e26505a3e31de8c6d"
+  },
+  "actual_native_R_unittest": {
+    "tests_passed": 1,
+    "exit_code": 0,
+    "wall_s": 39.711,
+    "scope": "synthetic actual CLI R; three invocations; no protocol submissions/instructions; cost and forwarding zero"
+  },
+  "focused_controls": {
+    "short_disk_tmpdir": "/var/tmp/ep9-01a15",
+    "lsp_lean": {
+      "passed": 73,
+      "ignored": 5,
+      "wall_s": 4.05,
+      "exit_code": 0
+    },
+    "memory_default": {
+      "passed": 1,
+      "wall_s": 0.17,
+      "exit_code": 0
+    },
+    "class_fit_after_preserved_probe_containment": {
+      "passed": 1,
+      "wall_s": 0.06,
+      "exit_code": 0
+    },
+    "attribution_empty_history": {
+      "passed": 4,
+      "includes_original_failures": 3,
+      "wall_s": 0.81,
+      "exit_code": 0
+    },
+    "directory_swap_empty_history": {
+      "passed": 1,
+      "wall_s": 0.71,
+      "exit_code": 0
+    }
+  },
+  "native_R_red_root": "/tmp/ep-native-control-x73ojuji/qualification",
+  "native_R_green_root": "/tmp/ep-native-control-aki_qor1/qualification",
+  "source_snapshot": "public-handoff.tar.gz",
+  "generic_quality_gain_established": false,
+  "actual_native_P_handoff_unittest": {
+    "tests_passed": 1,
+    "wall_s": 148.442,
+    "exit_code": 0,
+    "scope": "actual CLI scripted zero-provider handoff; three invocations; next-phase prepared prompts include clauses/actual observations"
+  },
+  "actual_request_evidence_control": {
+    "scope": "replayed strengthened assertions on saved actual native model requests, no new CLI/provider call",
+    "positive_tests_passed": 1,
+    "negative_control_expected_failures": 1,
+    "negative_control_errors": 0
+  },
+  "handoff_mutations": {
+    "initial_applied": 5,
+    "initial_killed": 2,
+    "initial_survived": 3,
+    "initial_invalid": 0,
+    "same_survivors_reapplied": 3,
+    "reapplied_killed": 3,
+    "reapplied_survived": 0,
+    "reapplied_invalid": 0,
+    "final_restored_controls": 3,
+    "tests_per_control": 11,
+    "verdict": "approved within reviewed handoff scope",
+    "scope_files": [
+      "public_artifacts.py",
+      "adapter.py",
+      "test_public_artifacts.py",
+      "test_adapter.py"
+    ]
+  }
+}

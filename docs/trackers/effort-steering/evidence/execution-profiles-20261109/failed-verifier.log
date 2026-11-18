@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/var/tmp/ep9-01a15/real-source-probe-4e959f3765/preserve-execution-evidence.py", line 105, in <module>
+    main()
+    ~~~~^^
+  File "/var/tmp/ep9-01a15/real-source-probe-4e959f3765/preserve-execution-evidence.py", line 67, in main
+    assert item.isfile()
+           ~~~~~~~~~~~^^
+AssertionError

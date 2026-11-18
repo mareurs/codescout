@@ -1,0 +1,14 @@
+   Compiling lean-ctx v3.9.12 (/testbed/rust)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 41.03s
+     Running unittests src/lib.rs (/tmp/target/debug/deps/lean_ctx-44915234b76ec338)
+
+running 6 tests
+test proxy::ocla_cache_bridge::tests::bridge_serves_recorded_response_and_misses_other_requests ... ok
+test proxy::ocla_cache_bridge::tests::bridge_preserves_upstream_error_status ... ok
+test proxy::ocla_cache_bridge::tests::prompt_hash_is_stable_and_content_sensitive ... ok
+test proxy::ocla_cache_bridge::tests::replay_response_never_turns_an_invalid_status_into_success ... ok
+test proxy::ocla_cache_bridge::tests::replay_response_keeps_cached_status_and_body ... ok
+test proxy::forward::tests::cached_upstream_error_replays_with_original_status ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 8606 filtered out; finished in 0.05s
+

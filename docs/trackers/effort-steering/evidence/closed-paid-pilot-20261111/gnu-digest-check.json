@@ -1,0 +1,9 @@
+{
+  "schema": "effort-gnu-custody-check-v1",
+  "checked_at": "2026-11-11T18:34:02.960852+00:00",
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/closed-paid-pilot-20261111/evidence.tar.gz",
+  "actual_gnu_sha256": "42d8f9a0ca4d95eccd177761d9aeb7a3db1d289644e06787b471aa9f977b4fb8",
+  "archive_bytes": 2584835393,
+  "matches_producer": true,
+  "scope": "Independent GNU SHA-256 and current file size, not an independent review of semantic payload sufficiency."
+}

@@ -1,0 +1,20 @@
+{
+  "all_archive_payloads_reopened_and_size_hash_verified": true,
+  "archive": "evidence.tar.gz",
+  "bytes": 1330356694,
+  "logical_regular_file_payloads": 28369,
+  "original_control_and_runtime_source_files_unchanged": true,
+  "originals_changed_after_snapshot": [
+    "integration/disk-checkpoint-seal.log"
+  ],
+  "paid_ready": false,
+  "payload_entries": 32914,
+  "producer_log_limit": "The original sealer archived its own empty live log, then its validation failed because tar encoded Cargo hard-linked files as hard-link entries. Its retained final traceback differs from that empty log snapshot. No other original differs. This independent verifier resolved and measured every logical file payload.",
+  "provider_forwarded": 0,
+  "schema": "disk-runtime-checkpoint-readback-v1",
+  "scope": "Two actual scripted native malformed-submission controls, two private baseline subprocesses, two public compile controls with complete build inputs, and exact current source. No full eight-attempt disk campaign or efficacy/purchase admission.",
+  "sha256": "d5c81f93a75b644505329ae9c65c2a03213d95cd5ce327d0ffeedae1ed6759ce",
+  "tar_hardlink_payloads_resolved_and_hashed": 122,
+  "verifier": "/home/marius/.codex/worktrees/cf66/codescout/.superpowers/sdd/2026-11-10-campaign-integration/recheck_disk_checkpoint.py",
+  "verifier_sha256": "d06f1a9a81acf18385d89167d06cdd73cc03e24bc3395b96e13b266f4b1c0fcb"
+}

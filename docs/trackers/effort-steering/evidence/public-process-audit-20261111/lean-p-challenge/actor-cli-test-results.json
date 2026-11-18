@@ -1,0 +1,62 @@
+{
+  "captured_at": "2026-11-11T17:24:00.840472+00:00",
+  "native_stream": {
+    "path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/stream.jsonl",
+    "sha256": "71b7b4b3005112bd930cb86fadfa6118aea97ce16decc099c56e650ea048e55e"
+  },
+  "selected_literal_cargo_test_calls": [
+    {
+      "tool_id": "toolu_01LENqiLudQyYGsLMAAx6Kvb",
+      "call": {
+        "type": "tool_use",
+        "id": "toolu_01LENqiLudQyYGsLMAAx6Kvb",
+        "name": "mcp__codescout__run_command",
+        "input": {
+          "command": "cargo test --offline --manifest-path rust/Cargo.toml --lib ocla 2>&1 | tail -15",
+          "timeout_secs": 900,
+          "effect": "read"
+        },
+        "caller": {
+          "type": "direct"
+        }
+      },
+      "returned_result": {
+        "tool_use_id": "toolu_01LENqiLudQyYGsLMAAx6Kvb",
+        "type": "tool_result",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"exit_code\": 0,\n  \"stdout\": \"test core::ocla_bus::tests::total_emitted_counts_all ... ok\\ntest core::tool_lifecycle::tests::ocla_read_density_accepts_injected_analyzer ... ok\\ntest proxy::ocla_cache_bridge::tests::bridge_replays_original_upstream_status ... ok\\ntest proxy::ocla_cache_bridge::tests::bridge_serves_recorded_response_and_misses_other_requests ... ok\\ntest proxy::ocla_cache_bridge::tests::prompt_hash_is_stable_and_content_sensitive ... ok\\ntest proxy::usage::tests::ocla_projection_fails_closed_on_overflow_or_invalid_context ... ok\\ntest proxy::usage::tests::ocla_projection_includes_cache_tokens_once ... ok\\ntest proxy::usage::tests::ocla_projection_keeps_missing_lineage_unmanaged ... ok\\ntest tools::server_metrics::activity_score_tests::ocla_metrics_are_payload_free_and_saturating ... ok\\ntest proxy::response_optimizer::tests::ocla_registry_path_measures_response_tokens ... ok\\ntest core::tool_lifecycle::tests::ocla_read_density_uses_etpao_for_accepted_reads ... ok\\ntest core::ocla::content_port::tests::resolve_survives_intermediate_directory_symlink_race ... ok\\n\\ntest result: ok. 223 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.19s\\n\\n\",\n  \"unfiltered_output\": \"@cmd_cb833f26\",\n  \"unfiltered_output_lines\": 737,\n  \"producer_exit_code\": 0\n}"
+          }
+        ]
+      }
+    },
+    {
+      "tool_id": "toolu_01G3wGKnTgwYzxzqNdt2oh8W",
+      "call": {
+        "type": "tool_use",
+        "id": "toolu_01G3wGKnTgwYzxzqNdt2oh8W",
+        "name": "mcp__codescout__run_command",
+        "input": {
+          "command": "cargo test --offline --manifest-path rust/Cargo.toml --test ocla_integration_suite 2>&1 | tail -8",
+          "timeout_secs": 900,
+          "effect": "read"
+        },
+        "caller": {
+          "type": "direct"
+        }
+      },
+      "returned_result": {
+        "tool_use_id": "toolu_01G3wGKnTgwYzxzqNdt2oh8W",
+        "type": "tool_result",
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"exit_code\": 0,\n  \"stdout\": \"test test_dlq_lifecycle ... ok\\ntest test_tracing_spans ... ok\\ntest health_reports_all_components ... ok\\ntest test_full_pipeline ... ok\\ntest all_endpoints_return_valid_status ... ok\\n\\ntest result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s\\n\\n\",\n  \"unfiltered_output\": \"@cmd_cb84e03d\",\n  \"unfiltered_output_lines\": 16,\n  \"producer_exit_code\": 0\n}"
+          }
+        ]
+      }
+    }
+  ],
+  "scope": "Exact model-visible public command results, before private verdicts. No identical-environment, regression or flakiness attribution."
+}

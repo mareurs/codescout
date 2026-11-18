@@ -1,0 +1,11 @@
+{
+  "known_client_cost_usd": "64.768895999999998654",
+  "native_receipts": 32,
+  "unresolved_reserve_usd": "4",
+  "commitment_if_new_allocation_usd": "146.768895999999998654",
+  "unsettled_hold_ids": [
+    "native-client:98aaa6c0-110a-4a19-8789-b39df522284b"
+  ],
+  "earlier_charge_rescan": false,
+  "provider_invoice_reconciliation": false
+}

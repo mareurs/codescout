@@ -1,0 +1,158 @@
+{
+  "scope": "explicit Rust failure frames; repeated test names across feature lanes retained",
+  "summaries": [
+    "test result: FAILED. 5233 passed; 7 failed; 11 ignored; 0 measured; 0 filtered out; finished in 162.62s",
+    "test result: FAILED. 7870 passed; 12 failed; 14 ignored; 0 measured; 0 filtered out; finished in 1423.08s"
+  ],
+  "frames": [
+    {
+      "test": "lsp::manager::tests::a_silent_socket_whose_holder_died_is_not_remembered_as_a_wedged_mux",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_silent_socket_whose_holder_died_is_not_remembered_as_a_wedged_mux' (2591605) panicked at src/lsp/manager.rs:2980:66:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_peer_mux_that_accepts_but_never_sends_init_is_wedged_and_remembered",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_peer_mux_that_accepts_but_never_sends_init_is_wedged_and_remembered' (2591587) panicked at src/lsp/manager.rs:2980:66:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }",
+        "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late' (2591585) panicked at src/lsp/manager.rs:3327:9:",
+        "a mux this call spawned and saw ready is connected to even when it answers late: Some(\"mux process failed to start: Traceback (most recent call last):\\n  File \\\"/home/marius/.cache/codescout-resident/codescout/e9t-01a15/.tmpq77mNN/fake-mux.py\\\", line 4, in <module>\\n    s.bind(sock_path)\\n    ~~~~~~^^^^^^^^^^^\\nOSError: AF_UNIX path too long \u2014 hint: Check that another codescout mux isn't already running for this workspace and that the lock-file directory is writable; the detail above is the mux child's own stderr.\")"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_remembered_wedged_mux_is_still_tried_once_and_connects_when_it_has_come_up",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_remembered_wedged_mux_is_still_tried_once_and_connects_when_it_has_come_up' (2591591) panicked at src/lsp/manager.rs:4429:67:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }"
+      ]
+    },
+    {
+      "test": "tools::memory::tests::a_memory_read_from_the_other_layout_counts_its_provenance_keys_in_the_gate",
+      "diagnostic_lines": [
+        "thread 'tools::memory::tests::a_memory_read_from_the_other_layout_counts_its_provenance_keys_in_the_gate' (2599816) panicked at src/tools/memory/tests.rs:3119:5:",
+        "the sweep must cross the edge: 0 inline, 191 buffered"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_mux_started_by_a_third_process_in_the_gap_after_the_holder_died_is_waited_for",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_mux_started_by_a_third_process_in_the_gap_after_the_holder_died_is_waited_for' (2591583) panicked at src/lsp/manager.rs:3695:83:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }",
+        "",
+        "thread 'lsp::manager::tests::a_mux_started_by_a_third_process_in_the_gap_after_the_holder_died_is_waited_for' (2591583) panicked at src/lsp/manager.rs:3747:9:",
+        "a mux that took the lock after the first holder died is starting, not wedged: Some(\"mux for rust holds its lock (/home/marius/.cache/codescout-resident/codescout/e9t-01a15/codescout-1000/codescout-test-mux-2590386/codescout-rust-mux-409bc9df74261239.lock) but its socket (/home/marius/.cache/codescout-resident/codescout/e9t-01a15/codescout-1000/codescout-test-mux-2590386/codescout-rust-mux-409bc9df74261239.sock) is unreachable \u2014 the mux process is wedged or mid-restart \u2014 hint: A live process holds this workspace's mux lock yet isn't accepting connections. Wait a few seconds and retry (it may be restarting); if it persists, locate the holder with `fuser` on the lock file and stop it, then retry.\")"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_replacement_holder_that_is_still_starting_is_not_remembered_as_a_wedged_mux",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_replacement_holder_that_is_still_starting_is_not_remembered_as_a_wedged_mux' (2591600) panicked at src/lsp/manager.rs:3695:83:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }",
+        "",
+        "thread 'lsp::manager::tests::a_replacement_holder_that_is_still_starting_is_not_remembered_as_a_wedged_mux' (2591600) panicked at src/lsp/manager.rs:3899:9:",
+        "the next call's 5 s wait covers the bind: Some(\"mux for rust holds its lock (/home/marius/.cache/codescout-resident/codescout/e9t-01a15/codescout-1000/codescout-test-mux-2590386/codescout-rust-mux-9e3cccd78810a840.lock) but its socket (/home/marius/.cache/codescout-resident/codescout/e9t-01a15/codescout-1000/codescout-test-mux-2590386/codescout-rust-mux-9e3cccd78810a840.sock) is unreachable \u2014 the mux process is wedged or mid-restart \u2014 hint: A live process holds this workspace's mux lock yet isn't accepting connections. Wait a few seconds and retry (it may be restarting); if it persists, locate the holder with `fuser` on the lock file and stop it, then retry.\")"
+      ]
+    },
+    {
+      "test": "librarian::requirements::tests::every_bug_filed_since_the_class_fit_rule_carries_one",
+      "diagnostic_lines": [
+        "thread 'librarian::requirements::tests::every_bug_filed_since_the_class_fit_rule_carries_one' (2846581) panicked at src/librarian/requirements.rs:853:9:",
+        "these bug files are dated 2026-10-17 or later and have no usable `## Class fit` section (at least 40 letters or digits, outside a code fence):",
+        "  docs/issues/archive/2026-10-17-budget-probe.md",
+        "Add the section to each. Do not edit a class's `**Members:**` line.",
+        "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_peer_mux_that_accepts_but_never_sends_init_is_wedged_and_remembered",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_peer_mux_that_accepts_but_never_sends_init_is_wedged_and_remembered' (2878260) panicked at src/lsp/manager.rs:2980:66:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late' (2878176) panicked at src/lsp/manager.rs:3327:9:",
+        "a mux this call spawned and saw ready is connected to even when it answers late: Some(\"mux process failed to start: Traceback (most recent call last):\\n  File \\\"/home/marius/.cache/codescout-resident/codescout/e9t-01a15/.tmp5uv26M/fake-mux.py\\\", line 4, in <module>\\n    s.bind(sock_path)\\n    ~~~~~~^^^^^^^^^^^\\nOSError: AF_UNIX path too long \u2014 hint: Check that another codescout mux isn't already running for this workspace and that the lock-file directory is writable; the detail above is the mux child's own stderr.\")"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_silent_socket_whose_holder_died_is_not_remembered_as_a_wedged_mux",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_silent_socket_whose_holder_died_is_not_remembered_as_a_wedged_mux' (2878543) panicked at src/lsp/manager.rs:2980:66:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_remembered_wedged_mux_is_still_tried_once_and_connects_when_it_has_come_up",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_remembered_wedged_mux_is_still_tried_once_and_connects_when_it_has_come_up' (2878264) panicked at src/lsp/manager.rs:4429:67:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_mux_started_by_a_third_process_in_the_gap_after_the_holder_died_is_waited_for",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_mux_started_by_a_third_process_in_the_gap_after_the_holder_died_is_waited_for' (2878174) panicked at src/lsp/manager.rs:3695:83:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }",
+        "",
+        "thread 'lsp::manager::tests::a_mux_started_by_a_third_process_in_the_gap_after_the_holder_died_is_waited_for' (2878174) panicked at src/lsp/manager.rs:3747:9:",
+        "a mux that took the lock after the first holder died is starting, not wedged: Some(\"mux for rust holds its lock (/home/marius/.cache/codescout-resident/codescout/e9t-01a15/codescout-1000/codescout-test-mux-2822202/codescout-rust-mux-62caddbd0d1a3fc6.lock) but its socket (/home/marius/.cache/codescout-resident/codescout/e9t-01a15/codescout-1000/codescout-test-mux-2822202/codescout-rust-mux-62caddbd0d1a3fc6.sock) is unreachable \u2014 the mux process is wedged or mid-restart \u2014 hint: A live process holds this workspace's mux lock yet isn't accepting connections. Wait a few seconds and retry (it may be restarting); if it persists, locate the holder with `fuser` on the lock file and stop it, then retry.\")"
+      ]
+    },
+    {
+      "test": "lsp::manager::tests::a_replacement_holder_that_is_still_starting_is_not_remembered_as_a_wedged_mux",
+      "diagnostic_lines": [
+        "thread 'lsp::manager::tests::a_replacement_holder_that_is_still_starting_is_not_remembered_as_a_wedged_mux' (2878370) panicked at src/lsp/manager.rs:3695:83:",
+        "called `Result::unwrap()` on an `Err` value: Error { kind: InvalidInput, message: \"path must be shorter than SUN_LEN\" }",
+        "",
+        "thread 'lsp::manager::tests::a_replacement_holder_that_is_still_starting_is_not_remembered_as_a_wedged_mux' (2878370) panicked at src/lsp/manager.rs:3899:9:",
+        "the next call's 5 s wait covers the bind: Some(\"mux for rust holds its lock (/home/marius/.cache/codescout-resident/codescout/e9t-01a15/codescout-1000/codescout-test-mux-2822202/codescout-rust-mux-6eaf7c3a6df33ba0.lock) but its socket (/home/marius/.cache/codescout-resident/codescout/e9t-01a15/codescout-1000/codescout-test-mux-2822202/codescout-rust-mux-6eaf7c3a6df33ba0.sock) is unreachable \u2014 the mux process is wedged or mid-restart \u2014 hint: A live process holds this workspace's mux lock yet isn't accepting connections. Wait a few seconds and retry (it may be restarting); if it persists, locate the holder with `fuser` on the lock file and stop it, then retry.\")"
+      ]
+    },
+    {
+      "test": "tools::memory::tests::a_memory_read_from_the_other_layout_counts_its_provenance_keys_in_the_gate",
+      "diagnostic_lines": [
+        "thread 'tools::memory::tests::a_memory_read_from_the_other_layout_counts_its_provenance_keys_in_the_gate' (2888142) panicked at src/tools/memory/tests.rs:3119:5:",
+        "the sweep must cross the edge: 0 inline, 191 buffered"
+      ]
+    },
+    {
+      "test": "tools::run_command::tests::a_red_attaches_wip_authors_on_the_buffer_only_arm",
+      "diagnostic_lines": [
+        "thread 'tools::run_command::tests::a_red_attaches_wip_authors_on_the_buffer_only_arm' (2921793) panicked at src/tools/run_command/tests.rs:9810:10:",
+        "the engine answers in this environment, so the buffer-only arm must attach it"
+      ]
+    },
+    {
+      "test": "tools::run_command::tests::a_red_attaches_wip_authors_on_the_main_arm",
+      "diagnostic_lines": [
+        "thread 'tools::run_command::tests::a_red_attaches_wip_authors_on_the_main_arm' (2921863) panicked at src/tools/run_command/tests.rs:9764:10:",
+        "the engine answers in this environment, so the main arm must attach it"
+      ]
+    },
+    {
+      "test": "tools::run_command::tests::a_red_naming_many_dirty_files_carries_a_bounded_wip_authors",
+      "diagnostic_lines": [
+        "thread 'tools::run_command::tests::a_red_naming_many_dirty_files_carries_a_bounded_wip_authors' (2922220) panicked at src/tools/run_command/tests.rs:4020:10:",
+        "the same engine answers for 150 files"
+      ]
+    },
+    {
+      "test": "tools::run_command::attribution::tests::dir_trust::a_directory_swapped_in_after_first_use_is_not_run",
+      "diagnostic_lines": [
+        "thread 'tools::run_command::attribution::tests::dir_trust::a_directory_swapped_in_after_first_use_is_not_run' (2889531) panicked at src/tools/run_command/attribution.rs:1304:17:",
+        "world-writable: precondition, the engine answers on a clean directory; got None"
+      ]
+    }
+  ]
+}

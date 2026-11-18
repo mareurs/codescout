@@ -1,0 +1,599 @@
+{
+  "scope": "final execution-profile checkpoint; not repair efficacy or paid admission",
+  "suite": {
+    "discovered": 156,
+    "skipped": 2,
+    "passed": 154,
+    "seconds": 81.559,
+    "log_sha256": "8d96ec153d6905d51d529fad04e31d83797a7913f2cc0f05061a24862a49d8b8"
+  },
+  "real_source_controls": {
+    "scope": "public real-workspace leaf-crate runtime controls; no actor, provider or private grades; not whole-project repair qualification",
+    "image": "sha256:a7108935ae3cb9c6573af9f0e371dbaaffb4c9a88a92038e334184bf8672cc32",
+    "source_head": "3678da48aebe17797d2f792bde07a46f5bf4a827",
+    "source_digest": "7615f687a70e5fd0b2846c962ba4cbdc177b81e94564046c38dcbd2e24375c94",
+    "source_unchanged": true,
+    "execution_profile": "cargo-v1",
+    "controls": [
+      {
+        "id": "metadata",
+        "facts": {
+          "id": "metadata",
+          "run_id": "real-source-profile-v3-20261109",
+          "phase": "investigate",
+          "source_digest": "7615f687a70e5fd0b2846c962ba4cbdc177b81e94564046c38dcbd2e24375c94",
+          "production_digest": "7615f687a70e5fd0b2846c962ba4cbdc177b81e94564046c38dcbd2e24375c94",
+          "test_digest": "e85957ca45b62e9d53d47d7288a666767189f5b2ed12ff75c41be778d70e4bb5",
+          "exit_code": 0,
+          "complete": true,
+          "resource_valid": true,
+          "kind": "observation",
+          "execution_profile": "cargo-v1",
+          "execution_profile_sha256": "847ebb408fd0debfc249345cd9a84d146fa53c6eecf8a4e5add1201a3259abb8"
+        },
+        "test_file_count": 2,
+        "test_files": [
+          "Cargo.lock",
+          "Cargo.toml"
+        ],
+        "wall_s": 5.064054018817842
+      },
+      {
+        "id": "stdx-public",
+        "facts": {
+          "id": "stdx-public",
+          "run_id": "real-source-profile-v3-20261109",
+          "phase": "investigate",
+          "source_digest": "7615f687a70e5fd0b2846c962ba4cbdc177b81e94564046c38dcbd2e24375c94",
+          "production_digest": "7615f687a70e5fd0b2846c962ba4cbdc177b81e94564046c38dcbd2e24375c94",
+          "test_digest": "d6703ca848bae49be16bdda5d2332fd06c6a480214acbed4d4a9f2fd84cb1a41",
+          "exit_code": 0,
+          "complete": true,
+          "resource_valid": true,
+          "kind": "observation",
+          "execution_profile": "cargo-v1",
+          "execution_profile_sha256": "847ebb408fd0debfc249345cd9a84d146fa53c6eecf8a4e5add1201a3259abb8"
+        },
+        "test_file_count": 15,
+        "test_files": [
+          "Cargo.lock",
+          "Cargo.toml",
+          "crates/stdx/Cargo.toml",
+          "crates/stdx/src/anymap.rs",
+          "crates/stdx/src/assert.rs",
+          "crates/stdx/src/lib.rs",
+          "crates/stdx/src/macros.rs",
+          "crates/stdx/src/non_empty_vec.rs",
+          "crates/stdx/src/panic_context.rs",
+          "crates/stdx/src/process.rs",
+          "crates/stdx/src/rand.rs",
+          "crates/stdx/src/thread.rs",
+          "crates/stdx/src/thread/intent.rs",
+          "crates/stdx/src/thread/pool.rs",
+          "crates/stdx/src/variance.rs"
+        ],
+        "wall_s": 7.617865484207869
+      },
+      {
+        "id": "source-readonly",
+        "facts": {
+          "id": "source-readonly",
+          "run_id": "real-source-profile-v3-20261109",
+          "phase": "investigate",
+          "source_digest": "7615f687a70e5fd0b2846c962ba4cbdc177b81e94564046c38dcbd2e24375c94",
+          "production_digest": "7615f687a70e5fd0b2846c962ba4cbdc177b81e94564046c38dcbd2e24375c94",
+          "test_digest": "b6fc0c748f8ecc2abcbb9358b8dfa5cb0e521cfd719584d8a482f429eae3a95c",
+          "exit_code": 0,
+          "complete": true,
+          "resource_valid": true,
+          "kind": "observation",
+          "execution_profile": "cargo-v1",
+          "execution_profile_sha256": "847ebb408fd0debfc249345cd9a84d146fa53c6eecf8a4e5add1201a3259abb8"
+        },
+        "test_file_count": 1,
+        "test_files": [
+          "Cargo.toml"
+        ],
+        "wall_s": 5.5800557541660964
+      },
+      {
+        "id": "stdx-negative",
+        "facts": {
+          "id": "stdx-negative",
+          "run_id": "real-source-profile-v3-20261109",
+          "phase": "challenge",
+          "source_digest": "ee13ef5bacd1a469721fb8c34c76fcb0b2744706889afce862bc86a226428ae9",
+          "production_digest": "ee13ef5bacd1a469721fb8c34c76fcb0b2744706889afce862bc86a226428ae9",
+          "test_digest": "c5100f44f01352cccb5d7365bc89ee114f3fcbf8c20e904681d0f34221be6304",
+          "exit_code": 101,
+          "complete": true,
+          "resource_valid": true,
+          "kind": "observation",
+          "execution_profile": "cargo-v1",
+          "execution_profile_sha256": "847ebb408fd0debfc249345cd9a84d146fa53c6eecf8a4e5add1201a3259abb8"
+        },
+        "test_file_count": 16,
+        "test_files": [
+          "Cargo.lock",
+          "Cargo.toml",
+          "crates/stdx/Cargo.toml",
+          "crates/stdx/src/anymap.rs",
+          "crates/stdx/src/assert.rs",
+          "crates/stdx/src/lib.rs",
+          "crates/stdx/src/macros.rs",
+          "crates/stdx/src/non_empty_vec.rs",
+          "crates/stdx/src/panic_context.rs",
+          "crates/stdx/src/process.rs",
+          "crates/stdx/src/rand.rs",
+          "crates/stdx/src/thread.rs",
+          "crates/stdx/src/thread/intent.rs",
+          "crates/stdx/src/thread/pool.rs",
+          "crates/stdx/src/variance.rs",
+          "crates/stdx/tests/effort_runtime_negative.rs"
+        ],
+        "wall_s": 7.635001546703279
+      }
+    ],
+    "paid_ready": false
+  },
+  "review": {
+    "head": "fe8bb4b34f5e7912f9b16c4c0bf1ff73a3a10a23",
+    "production_changed_by_review": false,
+    "verdict": "scoped approval: observed initial coverage gap closed by final exact mutation replay",
+    "issue_id": "e9ecec0dff22bf01",
+    "initial_baseline": {
+      "tag": "baseline",
+      "discovered": 12,
+      "executed": 12,
+      "skips": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true,
+      "elapsed": 14.34314177185297
+    },
+    "initial_mutations": [
+      {
+        "id": "m1",
+        "run": {
+          "tag": "m1",
+          "discovered": 12,
+          "executed": 12,
+          "skips": 0,
+          "failures": 1,
+          "errors": 0,
+          "success": false,
+          "elapsed": 14.32804488716647
+        },
+        "outcome": "killed"
+      },
+      {
+        "id": "m2",
+        "run": {
+          "tag": "m2",
+          "discovered": 12,
+          "executed": 12,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 11.56854500900954
+        },
+        "outcome": "survived"
+      },
+      {
+        "id": "m3",
+        "run": {
+          "tag": "m3",
+          "discovered": 12,
+          "executed": 12,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 13.406822124030441
+        },
+        "outcome": "survived"
+      },
+      {
+        "id": "m4",
+        "run": {
+          "tag": "m4",
+          "discovered": 12,
+          "executed": 12,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 13.766967370174825
+        },
+        "outcome": "survived"
+      },
+      {
+        "id": "m5",
+        "run": {
+          "tag": "m5",
+          "discovered": 12,
+          "executed": 12,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 11.383239262271672
+        },
+        "outcome": "survived"
+      },
+      {
+        "id": "m6",
+        "run": {
+          "tag": "m6",
+          "discovered": 12,
+          "executed": 12,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 11.088650316931307
+        },
+        "outcome": "survived"
+      }
+    ],
+    "initial_counts": {
+      "applied": 6,
+      "killed": 1,
+      "survived": 5,
+      "invalid": 0
+    },
+    "edge_baseline": {
+      "tag": "edge-baseline",
+      "executed": 5,
+      "skips": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true
+    },
+    "edge_results": [
+      {
+        "tag": "edge-m2",
+        "executed": 5,
+        "skips": 0,
+        "failures": 1,
+        "errors": 0,
+        "success": false
+      },
+      {
+        "tag": "edge-m3",
+        "executed": 5,
+        "skips": 0,
+        "failures": 1,
+        "errors": 0,
+        "success": false
+      },
+      {
+        "tag": "edge-m4",
+        "executed": 5,
+        "skips": 0,
+        "failures": 1,
+        "errors": 0,
+        "success": false
+      },
+      {
+        "tag": "edge-m5",
+        "executed": 5,
+        "skips": 0,
+        "failures": 1,
+        "errors": 0,
+        "success": false
+      },
+      {
+        "tag": "edge-m6",
+        "executed": 5,
+        "skips": 0,
+        "failures": 1,
+        "errors": 0,
+        "success": false
+      }
+    ],
+    "final_baseline": {
+      "tag": "final/baseline",
+      "discovered": 17,
+      "executed": 17,
+      "skips": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true,
+      "elapsed": 17.388499644119292
+    },
+    "final_inventory_baseline": {
+      "tag": "final/inventory-baseline",
+      "discovered": 2,
+      "executed": 2,
+      "skips": 0,
+      "failures": 0,
+      "errors": 0,
+      "success": true,
+      "elapsed": 1.3813829002901912
+    },
+    "final_counts": {
+      "applied": 8,
+      "killed": 8,
+      "survived": 0,
+      "invalid": 0
+    },
+    "final_mutations": [
+      {
+        "id": "m1",
+        "predicate": "adapter.run_phase.observe: use actor command execution_profile in preference to host profile",
+        "outcome": "killed",
+        "mutant": {
+          "tag": "final/m1",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 1,
+          "errors": 0,
+          "success": false,
+          "elapsed": 16.82197946496308
+        },
+        "restored": {
+          "tag": "final/restored-m1",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 20.57827369077131
+        },
+        "patch": "final/m1.patch",
+        "patch_sha256": "e5fb3313fc11581d6a4ed0565fb3739ad2b53078a89a9b3b7fa55dfc71f309f4"
+      },
+      {
+        "id": "m2",
+        "predicate": "execution_profiles.validate_runtime_profile: disable environment equality requirement",
+        "outcome": "killed",
+        "mutant": {
+          "tag": "final/m2",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 1,
+          "errors": 0,
+          "success": false,
+          "elapsed": 18.54229640075937
+        },
+        "restored": {
+          "tag": "final/restored-m2",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 20.018194586969912
+        },
+        "patch": "final/m2.patch",
+        "patch_sha256": "596d00a22dcb4468ce18ba1b33d829c70c003ce04852cf3892dff6605d600f72"
+      },
+      {
+        "id": "m3",
+        "predicate": "receipts._verified_profile: disable raw worker Id/Image/label ownership requirement",
+        "outcome": "killed",
+        "mutant": {
+          "tag": "final/m3",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 1,
+          "errors": 0,
+          "success": false,
+          "elapsed": 26.940720692276955
+        },
+        "restored": {
+          "tag": "final/restored-m3",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 27.85925787501037
+        },
+        "patch": "final/m3.patch",
+        "patch_sha256": "9cdbac97f3b5d3bbddbe8f9f37a18c4d7af2723585360ec3aa17d9cee146e968"
+      },
+      {
+        "id": "m4",
+        "predicate": "receipts._verified_profile: disable raw inspection SHA256 requirement",
+        "outcome": "killed",
+        "mutant": {
+          "tag": "final/m4",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 1,
+          "errors": 0,
+          "success": false,
+          "elapsed": 24.910867437254637
+        },
+        "restored": {
+          "tag": "final/restored-m4",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 17.67666029604152
+        },
+        "patch": "final/m4.patch",
+        "patch_sha256": "105d66dad8923190b61059f953d7ade6b31d223bfc074f31e425a1ae23c3daa1"
+      },
+      {
+        "id": "m5",
+        "predicate": "executor._cleanup: remove owned-container identity check before removal",
+        "outcome": "killed",
+        "mutant": {
+          "tag": "final/m5",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 1,
+          "errors": 0,
+          "success": false,
+          "elapsed": 17.594302209094167
+        },
+        "restored": {
+          "tag": "final/restored-m5",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 26.180876126047224
+        },
+        "patch": "final/m5.patch",
+        "patch_sha256": "972411b3302034b97c23b72c7f8bf0319c12a6056e35535cd65931f6bfe1c9fc"
+      },
+      {
+        "id": "m6",
+        "predicate": "executor._cleanup: disable anonymous-volume absence requirement",
+        "outcome": "killed",
+        "mutant": {
+          "tag": "final/m6",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 1,
+          "errors": 0,
+          "success": false,
+          "elapsed": 18.348218839615583
+        },
+        "restored": {
+          "tag": "final/restored-m6",
+          "discovered": 17,
+          "executed": 17,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 23.83896880596876
+        },
+        "patch": "final/m6.patch",
+        "patch_sha256": "187ad2de28aba0127f4ceb9acfdd75cef652cc1ff3bd516c8fb5aaaaf220e2d3"
+      },
+      {
+        "id": "m7",
+        "predicate": "executor._request: replace test_input_digest dispatch with input_digest only at request call site",
+        "outcome": "killed",
+        "mutant": {
+          "tag": "final/inventory-m7",
+          "discovered": 2,
+          "executed": 2,
+          "skips": 0,
+          "failures": 2,
+          "errors": 0,
+          "success": false,
+          "elapsed": 1.552270133048296
+        },
+        "restored": {
+          "tag": "final/inventory-restored-m7",
+          "discovered": 2,
+          "executed": 2,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 1.5835475446656346
+        },
+        "patch": "final/m7.patch",
+        "patch_sha256": "b61f35a68b8389d9560508f6b718ac409290fe91cb6a62d051dd3607843b5620"
+      },
+      {
+        "id": "m8",
+        "predicate": "receipts.verify_receipt: replace test_input_digest with input_digest only at readback comparison",
+        "outcome": "killed",
+        "mutant": {
+          "tag": "final/inventory-m8",
+          "discovered": 2,
+          "executed": 2,
+          "skips": 0,
+          "failures": 2,
+          "errors": 0,
+          "success": false,
+          "elapsed": 1.4731516358442605
+        },
+        "restored": {
+          "tag": "final/inventory-restored-m8",
+          "discovered": 2,
+          "executed": 2,
+          "skips": 0,
+          "failures": 0,
+          "errors": 0,
+          "success": true,
+          "elapsed": 1.6642602770589292
+        },
+        "patch": "final/m8.patch",
+        "patch_sha256": "2a1c17f9441f8726db7ff3ab1f19a1640ef8cfed7a00dbb1453feea5ba1cb381"
+      }
+    ],
+    "original_source_sha256": {
+      "README.md": "06b222956dea7c6f46f16120a035f6355a56bd62e5f8cc16ae46ecc674e484b2",
+      "adapter.py": "a9753127d165481fa4091fbec1ae8f71fe7e241eb561996f824cd64c2cf66ceb",
+      "execution_profiles.py": "2d47bcc6e8c39fc3a42c4b3e220264bb17f3ff351a69776d62aa49c30734044f",
+      "executor.py": "0b1002807f670082a43096bffa9ec8414e09c2a8032cbbf84f5ee2254e6ce1e7",
+      "native_executor.py": "0a13a3d0a8443e83d4e34da0711d9fa4ebb7d516d715f6af12a6801dfc447149",
+      "policy.py": "ec1626cc8ddfb79ccb75e634ecbdc3831d5837e1ba2638a6a3f928ad1f0bef23",
+      "prompts.json": "38cb0716231cb035cb846292ea7b9ddbc50746b8c4459f2725bc7615263e8544",
+      "public_artifacts.py": "a6a248a3f9bef9830ac4de9c8442370c6302173a0fb54c9054bc50d1af8ba98f",
+      "qualify_native.py": "462612bb2fcb13ecac858c039ba813a966d626ee40d9eb03be043e55c160561f",
+      "readiness.py": "7c87721bc6e37a209db95dbfa12d6b6cbc41588526f983023fb66ed3bc490910",
+      "receipts.py": "8856b1479c2d0c9244017492a8ab679e32e31ecb69777aa1f7aaefc1a12a5343",
+      "test_adapter.py": "8a8a00514d65fbf7c1496c13dc5b8ee3d21a9c9af26657782349229aed742f66",
+      "test_execution_profiles.py": "81675dbbd592de3419053af26aeeb0a069fb7d34ea7501caa5f0fa42c19d926c",
+      "test_executor.py": "96234a0953b6b1ca3334fae2afd3374220d95aa34b5bd71558bed9916f32707f",
+      "test_native.py": "f27f64f9e30d91a063bb53ee326ababbd9461a60324cdc462c839474ccce6dbf",
+      "test_native_executor.py": "fb6d44e291e53cbdbffbbccbea5a913f94db1445f73b3d79ce856a0c9523e059",
+      "test_policy.py": "fe31b2d218ebed843e3a1066453259e69f57d44eec1ef0b0946f5472f5ed2a9c",
+      "test_public_artifacts.py": "c2566ed186a18bd05dc868f275fb053861be2125eb94b9f126ae122a2ea54972",
+      "test_qualification_cleanup.py": "e0c51e82d3c6e468f648dcc28a42ac72b501680e9cae343d9f91b6df617a1d58",
+      "test_readiness.py": "2f5691256f42f7d4e94a8907b20de21f1628c5d15ad0351d2fac6829a5619cad",
+      "test_receipts.py": "9bd708e710ed105c49fcca208618b7ee0210552987d2bc4d1140e5dc189d6cf4"
+    },
+    "final_source_sha256": {
+      "README.md": "06b222956dea7c6f46f16120a035f6355a56bd62e5f8cc16ae46ecc674e484b2",
+      "adapter.py": "a9753127d165481fa4091fbec1ae8f71fe7e241eb561996f824cd64c2cf66ceb",
+      "execution_profiles.py": "2d47bcc6e8c39fc3a42c4b3e220264bb17f3ff351a69776d62aa49c30734044f",
+      "executor.py": "4589a06c172e56753953e57903812864aedcd641fa97073c73e2ffb85c109b69",
+      "native_executor.py": "0a13a3d0a8443e83d4e34da0711d9fa4ebb7d516d715f6af12a6801dfc447149",
+      "policy.py": "ec1626cc8ddfb79ccb75e634ecbdc3831d5837e1ba2638a6a3f928ad1f0bef23",
+      "prompts.json": "38cb0716231cb035cb846292ea7b9ddbc50746b8c4459f2725bc7615263e8544",
+      "public_artifacts.py": "a6a248a3f9bef9830ac4de9c8442370c6302173a0fb54c9054bc50d1af8ba98f",
+      "qualify_native.py": "462612bb2fcb13ecac858c039ba813a966d626ee40d9eb03be043e55c160561f",
+      "readiness.py": "7c87721bc6e37a209db95dbfa12d6b6cbc41588526f983023fb66ed3bc490910",
+      "receipts.py": "2729de3fb5442df1c3f0e31de518f5c8a9d1e6a71137e2e5b8bc988b9ebdf51d",
+      "test_adapter.py": "8a8a00514d65fbf7c1496c13dc5b8ee3d21a9c9af26657782349229aed742f66",
+      "test_execution_profiles.py": "81675dbbd592de3419053af26aeeb0a069fb7d34ea7501caa5f0fa42c19d926c",
+      "test_executor.py": "56dda2edc422deabb68770c512130a3adce7922fdad821f5a5fc042e884812e7",
+      "test_native.py": "f27f64f9e30d91a063bb53ee326ababbd9461a60324cdc462c839474ccce6dbf",
+      "test_native_executor.py": "fb6d44e291e53cbdbffbbccbea5a913f94db1445f73b3d79ce856a0c9523e059",
+      "test_policy.py": "fe31b2d218ebed843e3a1066453259e69f57d44eec1ef0b0946f5472f5ed2a9c",
+      "test_public_artifacts.py": "c2566ed186a18bd05dc868f275fb053861be2125eb94b9f126ae122a2ea54972",
+      "test_qualification_cleanup.py": "e0c51e82d3c6e468f648dcc28a42ac72b501680e9cae343d9f91b6df617a1d58",
+      "test_readiness.py": "2f5691256f42f7d4e94a8907b20de21f1628c5d15ad0351d2fac6829a5619cad",
+      "test_receipts.py": "9bd708e710ed105c49fcca208618b7ee0210552987d2bc4d1140e5dc189d6cf4"
+    },
+    "final_source_matches_live": true,
+    "excluded_instrument_attempt": "baseline-invalid-import.json/log: 3 setup failures due to missing module import path, fixed before mutation baselining; not a candidate mutation",
+    "limits": [
+      "Selected profile lane 17 tests, inventory lane 2 tests; no native tests included or skipped",
+      "No broad Rust gate, paid actor, provider, native CLI, image build/pull, or credentials used",
+      "Initial 5 survivors observed before writing scratch edge probes",
+      "Cleanup negative probes mock Docker replies; real anonymous-volume removal remains covered by explicit existing-volume-image test",
+      "Scoped result is not proof against all possible mutations or all runtime failures"
+    ]
+  },
+  "paid_ready": false,
+  "source_uncommitted": true,
+  "whole_product_gate": "earlier frozen gate remains failed; not rerun"
+}

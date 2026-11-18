@@ -1,0 +1,17 @@
+{
+  "archive_sha256": "2dd6bb3d81257f768aa2cfd9e3c978e3bc97608f095678ef84e441cd5efbb5da",
+  "public_projects": {
+    "obscura-421": {
+      "public_source_sha256": "e3832fe236e4f0f833dc2971c8be5336c715554cb75a21c8e811e6b1587b6cc4",
+      "manifest_source_entries": 167,
+      "exact_frozen_digest_reconstructed": true
+    },
+    "lean-ctx-1168": {
+      "public_source_sha256": "b0842438b7ff5beee3bbb6ef25e78ba0291a062b6362c6c31267a1437becbe30",
+      "manifest_source_entries": 3006,
+      "exact_frozen_digest_reconstructed": true
+    }
+  },
+  "all_18_owned_source_hashes_still_match": true,
+  "paid_ready": false
+}

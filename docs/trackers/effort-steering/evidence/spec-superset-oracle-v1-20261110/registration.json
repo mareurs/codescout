@@ -1,0 +1,134 @@
+{
+  "acceptance_version_proposed": "original-selected-population AND specification-oracle",
+  "controls": [
+    "base",
+    "reference"
+  ],
+  "decision": "base must fail runtime status assertions, reference all4pass; setup/compile failure invalid; no filtered result grants full population or model admission",
+  "error_cache_bypass_allowed": true,
+  "expected_new_f2p": [
+    "proxy::forward::tests::effort_status_oracle::status_400_survives_repeated_request",
+    "proxy::forward::tests::effort_status_oracle::status_429_survives_repeated_request",
+    "proxy::forward::tests::effort_status_oracle::status_500_survives_repeated_request"
+  ],
+  "expected_new_p2p": [
+    "proxy::forward::tests::effort_status_oracle::status_200_preserves_body_and_cache"
+  ],
+  "experimental_model_calls": 0,
+  "filtered_record_sha256": "45d6c7e325205e76ae0642f0537acdf9a9f39c0c6ee6622f838243d8617e2c80",
+  "gold_production_paths": [
+    "rust/src/core/ocla/response_cache.rs",
+    "rust/src/proxy/forward/mod.rs",
+    "rust/src/proxy/forward/transport.rs",
+    "rust/src/proxy/ocla_cache_bridge.rs"
+  ],
+  "helper_sha256": "53615ad997531d01c35a6a52418971cf3bd6b7cab025c251e93f8473a7e68e28",
+  "image": "sha256:b72f902d24c0a54516e4ef242d8218805f0ea3dc1d26ac809140979ba1f51d56",
+  "old_admission_unchanged": true,
+  "oracle_sha256": "5364ea9a3ea919ae33583b4edf2db063164d7e7d4587990fa221c4f21a806cf4",
+  "original_dataset_sha256": "bf2dd8252a07d0f275663ef8f6ab87571dd9bc4ce386abf9ec98d3cd6bb51a81",
+  "original_expected_sha256": "26b97ee05b18a843e9f026d604b12a2638dd4c4fbf1493be4e432562909dc784",
+  "original_full_expected_population_executed": false,
+  "original_record_canonical_sha256": "aae79222039514912ef36d613fab84a4a844c213fcbb49af5b4aa6c8693167f8",
+  "paid_ready": false,
+  "runtime": {
+    "cpus": 4,
+    "init": true,
+    "memory": "8g",
+    "memory_swap": "8g",
+    "network": "none",
+    "user": "0:0"
+  },
+  "schema": 1,
+  "scope": "filtered new behavioral checks only, not full prospective admission",
+  "source_sha256": {
+    "tools/setup-ab-eval/analyze.py": "562a9285f98a493c0a89683119c92cc93375804683fc1358272cf4455da26295",
+    "tools/setup-ab-eval/analyze_study.py": "12d1474440d72ab3fe948e3954728025c22891f43916cced51df314727649e94",
+    "tools/setup-ab-eval/arms.py": "45480ea1655c76c5d4a7611b75422078631bc062805dec2f077b267e9b61e893",
+    "tools/setup-ab-eval/audit_reparse.py": "d4c253d308d7d5e8ebaccca8ce23aaccaa394250b7e64fed300354bc6145ce43",
+    "tools/setup-ab-eval/baseline.py": "3a1311976af2d9eb8bde99f0219958f2f297919d39c4517ae3a03e3729440db1",
+    "tools/setup-ab-eval/capture_stub.py": "57b7b37927ca920868c63b12947f9b2894623729c9f985ef10adb7e02c231a75",
+    "tools/setup-ab-eval/command_capture.py": "b963d3c34ffd2920dd5d818b8e764300a046d0bcd4b3df1f9fae8a6f38f59df5",
+    "tools/setup-ab-eval/diagnostic_artifacts.py": "adf76d15c9a85f8d7cb5edac1d000e23cb744274dbce5c9ed3b0433254a52a05",
+    "tools/setup-ab-eval/evidence.py": "fa4ce2e1aa77fb4bd3ffae5fb643325a1c8c89fe2ad76b9c38577f4139cedda4",
+    "tools/setup-ab-eval/freeze_screen.py": "9e6690ea15d374822cb82c5e815cd804ef93af294ab5c86335070a7ffa2bcf13",
+    "tools/setup-ab-eval/freeze_setup.py": "def4faaa169a195db4722175e14af6c9ad4f3734110a20413371e98ad5d1a8c1",
+    "tools/setup-ab-eval/freeze_stage1.py": "8484af5187fe7e28ff0a0264cd8f80eaa8f6b20cb4bced0cc459e0e0bf8c3ff8",
+    "tools/setup-ab-eval/freeze_stage2.py": "2abff6be4e98f0c9caa5595bbd0a1823293c228117265c111020da5574d7deff",
+    "tools/setup-ab-eval/fresh_build.py": "d78a45362f23a2a7429b2bd37efa357ca6d0b47adeda4664d282491f4bfdf0ab",
+    "tools/setup-ab-eval/frozen.py": "503bee1ef1b7a4727a4c7493b5603162341637405c3e6a31c6123c68550f8e89",
+    "tools/setup-ab-eval/grade_policy.py": "718198c31ab6fffac14177a4dad15e65df2a1c7c59997803942dc84900911c4e",
+    "tools/setup-ab-eval/integrity.py": "1fae826276e6c9cfccb8bdc0c3330689c556f518374fe6324a013be67b13a3cb",
+    "tools/setup-ab-eval/leak_scan.py": "896e23869fab19668c8d7a61b92cdbd84afb7fb0bb248c2c8564bca2a0716f14",
+    "tools/setup-ab-eval/live_control.py": "459115f89658a486c399ee13cdf31bd886c099dda3ef90dff68eae48c805a5b4",
+    "tools/setup-ab-eval/live_sweep.py": "50cd244136b970e909ec75c0086aea401081434d7da53f5bb8482899cbb81140",
+    "tools/setup-ab-eval/mcp_probe.py": "5265138b67c7510c9a02c9cc6f7036b4785d15579dc1821ffab71c37c161ed07",
+    "tools/setup-ab-eval/multilang_control.py": "57d1e1155b559dd0373b7a59ba2cbd04801e2359b4b5f4a83d2a938aa9c0b2d7",
+    "tools/setup-ab-eval/multilang_grade.py": "2e2d73339cc385f7b4b512ef3168456e4143b505c4f6a61ab7692489901b7682",
+    "tools/setup-ab-eval/multilang_records.py": "714e4d266840887fdf795fb80db4f0fa3f949724f4deaa4ae7321b9f4ce4bb27",
+    "tools/setup-ab-eval/multilang_tasks.py": "6acb079db001ee3c88bfde85d2e91f0b98396a1a9b2f45d6e7a1fd90bfac5e78",
+    "tools/setup-ab-eval/pilot.py": "61d5020fbc4de8791431d367106dac1246afe37bd462ca3100ef6a54afe63c38",
+    "tools/setup-ab-eval/registration.py": "53afe5c969a5c8231a7a030b269e208e098a7589e1359c7fe15a113989671236",
+    "tools/setup-ab-eval/run.py": "c544a494a6285234af3fe527c171b700aca05768e9ca014eb577060e9f2219a1",
+    "tools/setup-ab-eval/select_tasks.py": "f0379cede595b871d962cd8945329b1c66102882f51b9f804700cb9ccedd4439",
+    "tools/setup-ab-eval/smoke.py": "5245d350aa722e69a383f095ab87375505c8e7d3cb62b6c04fb78bc766eda411",
+    "tools/setup-ab-eval/stack.py": "b6450629229fe81c5add15def405424b7cf49a4bd16d5839f31091efd18921b7",
+    "tools/setup-ab-eval/stage3.py": "aa58042884047e94e91ed334b80d09bd6974c8ac69e37d3da251ce5fdd6d77ee",
+    "tools/setup-ab-eval/stream_evidence.py": "3df36e833a96b586466305729c80e199a3f2aa1aa2e3cb0a6771f5c051efe62a",
+    "tools/setup-ab-eval/tasks.py": "363c8896c84f94ab291114944001f9b04d31bc2ceaf814c48649599a671ff10c",
+    "tools/setup-ab-eval/test_analyze.py": "0319e113606240928bbd291ee7d88161dc194f6c54818322591383ab11ab0c31",
+    "tools/setup-ab-eval/test_analyze_study.py": "55c72668efbaf6fde8aaedb6c472204046d531af5a415f9b2445545378b6e6ba",
+    "tools/setup-ab-eval/test_arms.py": "f2ae02fb2e23086b19590eff5701bde05c922d1c0fccbb232bc0b3eab583e020",
+    "tools/setup-ab-eval/test_audit_reparse.py": "2842289e9ae1d2725132684113b85cd8ced38f483f4e2c58f1cc861cdeba5a14",
+    "tools/setup-ab-eval/test_baseline.py": "4679afd5e3ca43dcba3dcb20d01e93bb8a73abb3ca9884eefb65cc52c046d52e",
+    "tools/setup-ab-eval/test_command_capture.py": "a3008321b22a8dacf8128947b5c6989e86d23e7e47bca7bee240309c9f783182",
+    "tools/setup-ab-eval/test_diagnostic_artifacts.py": "1cbe6625f5c495a62a73cf663ab71ef2166211aaa345b637c7ab35448523b4e3",
+    "tools/setup-ab-eval/test_diagnostic_control.py": "478f17d6c38b1c5bbf572908fe6c019a26df5b4b0186930b95daa4fd79749f82",
+    "tools/setup-ab-eval/test_freeze_screen.py": "79b2bd2e126177d3f5928f6a8d0fe9f24abf061162333f4a256fde8dc182e505",
+    "tools/setup-ab-eval/test_freeze_setup.py": "30b5c3da74e3d83ecb643b9b69618285cd361c531997eaaa483eeac65344054e",
+    "tools/setup-ab-eval/test_freeze_stage1.py": "374a20d4bc0bb6b6407b2c28da461ad8066204763f25054750be67ee6e21d6f1",
+    "tools/setup-ab-eval/test_freeze_stage2.py": "5512bb6b86e43f4e2926661c00db2d4708815f6ec7ce7382e7dffee87b457c98",
+    "tools/setup-ab-eval/test_fresh_build.py": "2fa43d886f66ca61724d70b5e89ec43963b2b34e6d90d33cefb8e5f726a3ba62",
+    "tools/setup-ab-eval/test_frozen.py": "40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd",
+    "tools/setup-ab-eval/test_grade_policy.py": "e80e23c213cf4d236e61bc8915ffbff5ede894b9d31768a248f65fdb914855ec",
+    "tools/setup-ab-eval/test_grader_boundary.py": "50c2739e04e7d5dc72c1dbe1d954652353fd14615473c0250cffc9daa909fe74",
+    "tools/setup-ab-eval/test_integrity.py": "24c9fa0ce9ee2016c291dbd18a4b83d8d20afd9c834d890e870b06061cdada66",
+    "tools/setup-ab-eval/test_leak_scan.py": "a21ec0334d336f117f26c50e3149021b60cb393192f998b592f3db24488512bd",
+    "tools/setup-ab-eval/test_multilang_control.py": "7b45af6044b3b77ff69aeb71842849e22260ba28c70a809e80ed632a250e6e1a",
+    "tools/setup-ab-eval/test_multilang_grade.py": "5b4ce1106d25867a73ef896cb2d04b193b40a3f90353c3114c219fbaa035e4b4",
+    "tools/setup-ab-eval/test_multilang_records.py": "d84c114ba6c5ca2a435de0482f56d71245b785de93fd7012dc41572ee606c7e2",
+    "tools/setup-ab-eval/test_multilang_tasks.py": "e3846f04cc56387e31c793bf8a7cf13ab21f61e9d031978d370bb5a3b5ea62a2",
+    "tools/setup-ab-eval/test_pilot.py": "9a0d22a9f35c631583ad0366c2a8b352474f4fa56e90d11c93c9b69bd2984c92",
+    "tools/setup-ab-eval/test_provenance.py": "a0faa189973f34cb10a27a5c3a7fdacaa4327d5c9db988a9d845d56d38eaa7c1",
+    "tools/setup-ab-eval/test_run.py": "d43d0453c413ac9ea0be38a86222ac17fb6d79841ce2d7c588e462ac0fe9a62b",
+    "tools/setup-ab-eval/test_smoke.py": "499cd01d4f56030e61a569731ca8fb2f4c613efb5f90faea503a028c3652cc6a",
+    "tools/setup-ab-eval/test_stack.py": "938c8da8c1743cf016bed6183e8ffc4a449ca3627721d985edcf11a5a2c86101",
+    "tools/setup-ab-eval/test_stage3.py": "30319121454ce59ab24b7cee622ec2ca9a1b509eb9da111410a4ab4b6f98c4af",
+    "tools/setup-ab-eval/test_stream_control.py": "f5f1148bd3014a30682c227bf9f19448c4b1e2295e3f7529b7f5076b38ab7d51",
+    "tools/setup-ab-eval/test_stream_evidence.py": "745a6125643f8628200bb1b4e2c401d3b1d1284a81e5cafabb48f3da71e3d3be",
+    "tools/setup-ab-eval/test_stream_policy.py": "3cfe9d847f24788fd59ce787b1cfa938fd0f156c7620881e03af7095c86f3458",
+    "tools/setup-ab-eval/test_tasks.py": "cef129b69e370a8a1b46310b1a856d7b1556de749f5f4c082c91e7c786d167cb"
+  },
+  "step_timeout_s": 900,
+  "stream_registration": {
+    "commands_sha256": "27bc9ff7733bfe4f28c435298bbd7f254a361dd74f8ed11314217db8ed479af2",
+    "tests": [
+      {
+        "profile": "libtest-rustc-1.97.1-lib",
+        "reports": [
+          0
+        ],
+        "stderr_files": [
+          "rust/effort-oracle.stderr"
+        ]
+      }
+    ],
+    "version": "registered-stream-evidence-v1"
+  },
+  "supplement_paths": [
+    "rust/src/proxy/forward/tests.rs",
+    "rust/src/proxy/forward/effort_status_oracle.rs"
+  ],
+  "supplement_sha256": "5e89d948d0112efba03d97b32013cbcce7da7a68bffeb2ca6797e0870da11697",
+  "task": "yvgude__lean-ctx-1168"
+}

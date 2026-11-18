@@ -1,0 +1,7 @@
+Recorded-evidence assertion replay only: no new CLI/native/provider invocation.
+test_three_native_phases_zero_provider_and_context_bound (test_native.NativeQualificationTests.test_three_native_phases_zero_provider_and_context_bound) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK

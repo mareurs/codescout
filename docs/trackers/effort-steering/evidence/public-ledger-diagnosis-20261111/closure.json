@@ -1,0 +1,9 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz",
+  "archive_bytes": 29137865,
+  "archive_sha256": "21eb2a0a69fd1b199f994425c7140201c8bc9cee6905b3f2574a9a8c4150e5f6",
+  "payload_entries": 6072,
+  "all_selected_payloads_reopened": true,
+  "all_selected_originals_unchanged_at_closure": true,
+  "scope": "Both full actual input snapshots, ten process logs, two closed runtime receipts/inspections, audit/parser/helper sources; compiler caches omitted and untouched."
+}

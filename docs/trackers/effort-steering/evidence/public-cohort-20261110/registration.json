@@ -1,0 +1,1239 @@
+{
+  "experimental_model_calls": 0,
+  "inputs": {
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/common-lean-ctx-1168-v1/native-canaries-v6/cleanup.json": {
+      "bytes": 202,
+      "sha256": "e9f6777a590c211186f6c2f094541f5c39689edd09916a5ec37650e1c257673f"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/common-lean-ctx-1168-v1/native-canaries-v6/readiness-result.json": {
+      "bytes": 1383,
+      "sha256": "416a8af3a82622893a3dd2e789e6f7c4615052de9d3c40d59d985b1f8f8fc8be"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/common-lean-ctx-1168-v1/preparation.json": {
+      "bytes": 1316,
+      "sha256": "553489b53117ba4ddf5d8dbce1bade5e4f683a4750a96fa0956657f921a8fa0a"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/common-obscura-421-v1/native-canaries-v6/cleanup.json": {
+      "bytes": 202,
+      "sha256": "eb26a16369bb0514fd4724e971db1463867782bba415d1488875e9d2e18ccf75"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/common-obscura-421-v1/native-canaries-v6/readiness-result.json": {
+      "bytes": 1082,
+      "sha256": "0c08f68bc068748d8afb6020f2d264d4f86449f57af15a8b29d2f007956668f5"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/common-obscura-421-v1/preparation.json": {
+      "bytes": 1144,
+      "sha256": "1539c5707bd10e925a4103eee002fad9abbe87dba48075cf74c977ccf8dc2db7"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/exposure-exclusions.json": {
+      "bytes": 12505,
+      "sha256": "039c88a35a2929f4bd2d662992e3f455f81a30a9e7e3636391e1adc6a9c26537"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/metadata-universe.json": {
+      "bytes": 67385,
+      "sha256": "4a0a6865c186f62a7adf840797493e2651be3f5ef7f01acbbd7b36ea81f9adc0"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/obscura-421-public-tests-derived-v2/public-lib-tests/receipt.json": {
+      "bytes": 2620,
+      "sha256": "e34b96c8a85a09104d731ad959ec3e7c0a0c12cfa4a33012f14c1a162d8f9c7d"
+    },
+    "/home/marius/.cache/codescout-resident/codescout/evidence-cohort-20261110/selection-rule.json": {
+      "bytes": 829,
+      "sha256": "8a7e0b963251095fbc51f15da63bf2da1da32866c57cd47f90b1ccce32da4048"
+    },
+    "/home/marius/work/claude/codescout/.worktrees/grader-stream-provenance-01a15ca9/.superpowers/sdd/2026-11-10-grader-stream-capture/public-lean-native-900-v1/container-after.json": {
+      "bytes": 7539,
+      "sha256": "a2017f0655113b30d34c02b8e7b74e07a951a82dcac4f5b4aef36bc114e87c07"
+    },
+    "/home/marius/work/claude/codescout/.worktrees/grader-stream-provenance-01a15ca9/.superpowers/sdd/2026-11-10-grader-stream-capture/public-lean-native-900-v1/container-before.json": {
+      "bytes": 6990,
+      "sha256": "a3518fd17baf7efa273efcd478a6a70739109cc5f1278fceb69152396ab99cd1"
+    },
+    "/home/marius/work/claude/codescout/.worktrees/grader-stream-provenance-01a15ca9/.superpowers/sdd/2026-11-10-grader-stream-capture/public-lean-native-900-v1/registration.json": {
+      "bytes": 888,
+      "sha256": "cca38bc0bd293c9e37f744a9149ed00d3f2522f65f6656bd91d81a9e3643f4d7"
+    },
+    "/home/marius/work/claude/codescout/.worktrees/grader-stream-provenance-01a15ca9/.superpowers/sdd/2026-11-10-grader-stream-capture/public-lean-native-900-v1/stderr": {
+      "bytes": 16511,
+      "sha256": "5e3dc43f9d595f4f068e16bcaf9a908bcde1f04a47db3892e8ae142c3a20488c"
+    },
+    "/home/marius/work/claude/codescout/.worktrees/grader-stream-provenance-01a15ca9/.superpowers/sdd/2026-11-10-grader-stream-capture/public-lean-native-900-v1/stdout": {
+      "bytes": 668553,
+      "sha256": "0b0b7268f9bb0c7a4cf5d7c683beb7b2f8933f7267fab4083654622387a5d103"
+    },
+    "/home/marius/work/claude/codescout/.worktrees/grader-stream-provenance-01a15ca9/.superpowers/sdd/2026-11-10-grader-stream-capture/public-lean-native-900-v1/terminal.json": {
+      "bytes": 612,
+      "sha256": "1de5c38de8b1604fbb8e6fd3636a58509bdf6e1263838f748dd09eec5011018f"
+    },
+    "/home/marius/work/claude/codescout/.worktrees/grader-stream-provenance-01a15ca9/.superpowers/sdd/2026-11-10-grader-stream-capture/public-readiness-disposition.json": {
+      "bytes": 1209,
+      "sha256": "be6ea1759f9291af07b1e661e33f282822eb19cb776a50a95a18371bc72ed130"
+    },
+    "/home/marius/work/claude/codescout/.worktrees/grader-stream-provenance-01a15ca9/.superpowers/sdd/2026-11-10-grader-stream-capture/public-selection-v3/qualification-status-v3.json": {
+      "bytes": 22391,
+      "sha256": "aec841d2adc4bdb5e6e3120c0ca56a4c79eebb637f18ec606f2b0a9a27056222"
+    }
+  },
+  "known_limits": [
+    "public failure causation not established",
+    "ordinary linker policy F6 open",
+    "300-second useful observation readiness open",
+    "private evaluator base/reference/repeat open",
+    "exact all-arm context/runtime/controller admission open"
+  ],
+  "paid_ready": false,
+  "private_outcomes_read": false,
+  "profile_sha256": "847ebb408fd0debfc249345cd9a84d146fa53c6eecf8a4e5add1201a3259abb8",
+  "public_readiness_disposition": {
+    "eligible_requires": [
+      "preserved public source and pinned qualified image",
+      "existing one-time onboarding and successful native readiness/canaries",
+      "complete public suite execution with checked image/resource profile, source/log identity, terminal suite summary and cleanup"
+    ],
+    "frozen_rule": "public source/runtime/adapter readiness only; no actor outcomes or private test counts",
+    "functional_public_failure": "A normal completed public test failure does not by itself make a task ineligible. Test pass count is not a selection criterion. Preserve failures and leave attribution limits visible.",
+    "invalid_execution": "Timeout, incomplete capture, source drift, OOM, runtime-profile mismatch, missing native suite terminal, or uncertain cleanup keep eligibility pending. Do not substitute from private/model outcomes.",
+    "lean_control": "Standalone registered 900-second public runtime control, distinct from the protocol's 300-second observation budget; no change to production executor.",
+    "model_calls": 0,
+    "private_outcomes_read": false,
+    "schema": 1,
+    "scope": "public eligibility interpretation; independent private oracle and all-arm/paid admission remain separate"
+  },
+  "qualified": [
+    {
+      "id": "yvgude__lean-ctx-1168",
+      "native_binding": {
+        "executable_sha256": "cdc53728d28a659b5a697048e6e5b719149693df2cf57cb8554ee0751ebf51bb",
+        "image": "sha256:b72f902d24c0a54516e4ef242d8218805f0ea3dc1d26ac809140979ba1f51d56",
+        "knowledge_sha256": "552a38412d8926776b65814f9eae24d8686e49d424d624c759e70a53ff3a168b",
+        "source_snapshot_sha256": "b0842438b7ff5beee3bbb6ef25e78ba0291a062b6362c6c31267a1437becbe30"
+      },
+      "onboarding_reused": true,
+      "paid_ready": false,
+      "prepared_source_sha256": "b0842438b7ff5beee3bbb6ef25e78ba0291a062b6362c6c31267a1437becbe30",
+      "public_execution": {
+        "declared_outer_tests": 8608,
+        "native_outer_summary": "test result: FAILED. 8571 passed; 21 failed; 16 ignored; 0 measured; 0 filtered out; finished in 153.89s",
+        "scope": "outer native libtest suite only; nested child summaries not added"
+      },
+      "public_source_sha256": "789e396582ed4b227c98b3bdc39378c3fa7114e07702450f0f800e26ebe080ad",
+      "qualified_image": "sha256:b72f902d24c0a54516e4ef242d8218805f0ea3dc1d26ac809140979ba1f51d56"
+    },
+    {
+      "id": "h4ckf0r0day__obscura-421",
+      "native_binding": {
+        "executable_sha256": "cdc53728d28a659b5a697048e6e5b719149693df2cf57cb8554ee0751ebf51bb",
+        "image": "sha256:b22988cd6022dd7a428a750799114b9c6f09bcaecc4fd9d8b86a0ef8502772d1",
+        "knowledge_sha256": "be4f60d86ed1d81ae1a75eb32fb75c2abf900b87e8ab68e3b23e1ca21b887370",
+        "source_snapshot_sha256": "dcf1dde23d2882f01f9996ae2a1f404236ab5fe73dbcb9b9adf9942b8b5ac47b"
+      },
+      "onboarding_reused": true,
+      "paid_ready": false,
+      "prepared_source_sha256": "dcf1dde23d2882f01f9996ae2a1f404236ab5fe73dbcb9b9adf9942b8b5ac47b",
+      "public_execution": {
+        "execution": {
+          "complete": true,
+          "execution_profile": "cargo-v1",
+          "execution_profile_sha256": "847ebb408fd0debfc249345cd9a84d146fa53c6eecf8a4e5add1201a3259abb8",
+          "exit_code": 100,
+          "id": "public-lib-tests",
+          "kind": "observation",
+          "phase": "investigate",
+          "production_digest": "b2d815c1a8366c72341d50fcd38b1d011ab01e07d92b713308d0dfb24f735846",
+          "resource_valid": true,
+          "run_id": "cohort-public-obscura-421-derived-v2",
+          "source_digest": "fd014cf1aedfffbb9c485369d54ba5590c81e2b054a43aa549078f4845e39c31",
+          "test_digest": "1998d87af630e7870d0c5581e97c6e619593879c6978d186133dc663d819aac5"
+        },
+        "native_summary": "251 tests run: 183 passed, 68 failed, 0 skipped"
+      },
+      "public_source_sha256": "fd014cf1aedfffbb9c485369d54ba5590c81e2b054a43aa549078f4845e39c31",
+      "qualified_image": "sha256:b22988cd6022dd7a428a750799114b9c6f09bcaecc4fd9d8b86a0ef8502772d1"
+    }
+  ],
+  "replacement_after_private_outcomes": false,
+  "schema": 1,
+  "selected_ids": [
+    "yvgude__lean-ctx-1168",
+    "h4ckf0r0day__obscura-421"
+  ],
+  "selection": {
+    "complete": true,
+    "decisions": [
+      {
+        "id": "gleam-lang__gleam-5493",
+        "rank_sha256": "038e3c191ff0a6d661eb11ee7c74b31bd0bfa88721ce8f80ce99f1bbe0ca0359",
+        "reason": "cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public command did not start",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "yvgude__lean-ctx-1168",
+        "rank_sha256": "05bd38e01731bd9f92b92e4e23defde112627bc3cc0925ffa15bc7a8ad56f5fa",
+        "reason": "selected",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "id": "biomejs__biome-10853",
+        "rank_sha256": "090e0ff3bf2f53e8f6c9dd08a7e7aa74867697b5e70161557f7de2ee56576693",
+        "reason": "33141223122 compressed layer bytes exceeds frozen12000000000 acquisition limit; no image pulled",
+        "repo": "biomejs/biome"
+      },
+      {
+        "id": "apache__datafusion-21121",
+        "rank_sha256": "09ee693a725be710288f3912d8e7c99f0f41c223ef58bd796fdcdb41902504f8",
+        "reason": "cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public metadata adapter incompatibility",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "delta-io__delta-rs-4358",
+        "rank_sha256": "0a3b3b71896c5c3cdf295c65227d3e1674c904f82f5eac5136d904bd423473d3",
+        "reason": "cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public metadata adapter incompatibility",
+        "repo": "delta-io/delta-rs"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-421",
+        "rank_sha256": "0af35ff93440f060f917c9892f65c325aab5efcc21fa7219eb4cc947620e8f53",
+        "reason": "selected",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22855",
+        "rank_sha256": "0c06afd59608af1b395eb2d1c0e21604dcf4a9a049a18bd9f3cf63c76256ca73",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22751",
+        "rank_sha256": "0f2fa55b3a363099799dc9b7541d87c8d61015aa4131dac5068f692806fbbf47",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "web-infra-dev__rspack-14882",
+        "rank_sha256": "0f81599c7e08667007be1cfa5c850d260bc8db4c87991ff7ce3156c079bcc57e",
+        "reason": "selection_quota_reached",
+        "repo": "web-infra-dev/rspack"
+      },
+      {
+        "id": "apache__datafusion-16726",
+        "rank_sha256": "0f8d0fd9e717f11ba913b42af6ab554978a7ab91e8e3384bb6f0fdecb41d07af",
+        "reason": "selection_quota_reached",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-390",
+        "rank_sha256": "11d5746e1d2f777ba0290f9d70eaf5d6b651678e3d2aa6fdaa227ce147951ada",
+        "reason": "research_exposure",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22822",
+        "rank_sha256": "11efc59230badf51c9b95889911d0214853f7c5d742c64976f86145054c184e1",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22046",
+        "rank_sha256": "1279318fad2b1ab17407a856cb5c43b8dbab4e67189697174e05b3edc6841026",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "delta-io__delta-rs-4333",
+        "rank_sha256": "1308091a9ee34d8d333d605246a87cec7d947c771fb2d8bf61445bed74d9d5b5",
+        "reason": "selection_quota_reached",
+        "repo": "delta-io/delta-rs"
+      },
+      {
+        "id": "modelcontextprotocol__rust-sdk-996",
+        "rank_sha256": "146a6cdf6063ffb06d706da600747f771d3b6c932b3554d427c1771b4bfa69f5",
+        "reason": "selection_quota_reached",
+        "repo": "modelcontextprotocol/rust-sdk"
+      },
+      {
+        "id": "gleam-lang__gleam-6030",
+        "rank_sha256": "186ceee6503c26c4221be6d32a62ae59cb41d3b80c8263f328e5e03641007a97",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "gleam-lang__gleam-6049",
+        "rank_sha256": "18cb77d0e45813bbc79ef5507427948719dea7c2526ab6d617191b6d8f3bffb1",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-440",
+        "rank_sha256": "19f53c6ea1f21fa47a223369ca1e58207a20723ff13f4761cfb6e9fb9000d914",
+        "reason": "selection_quota_reached",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "rust-lang__rust-bindgen-3382",
+        "rank_sha256": "1aa95ea659fcc6958f732f36172696767457c4fa8801be61e83830e676ebdaea",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-bindgen"
+      },
+      {
+        "id": "noir-lang__noir-9323",
+        "rank_sha256": "1e85c2f8d8665b33da2517c2f2c587f04be76cc298b01d052a14db0466bc9f36",
+        "reason": "selection_quota_reached",
+        "repo": "noir-lang/noir"
+      },
+      {
+        "id": "immunant__c2rust-1322",
+        "rank_sha256": "2046c8de2633f564ed3b3b08227caafb30ffed3bb8da61df8b76e1af2cac31df",
+        "reason": "selection_quota_reached",
+        "repo": "immunant/c2rust"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-413",
+        "rank_sha256": "209ec77fe3fa29110f3956479ebfec3bc767395887a4c730e35925ac7fc80fb7",
+        "reason": "selection_quota_reached",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "rust-lang__rustfmt-6840",
+        "rank_sha256": "256338ff8506476ceb11da936c3770d3a7f579effb9984554e7620dff0486caf",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rustfmt"
+      },
+      {
+        "id": "linebender__vello-1100",
+        "rank_sha256": "27aa2ca0324aeecf8d7cb3ec04b9d63b76e73f5acee7198ea273d2f6ec3f4624",
+        "reason": "selection_quota_reached",
+        "repo": "linebender/vello"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-477",
+        "rank_sha256": "2b0f2ec0e45f7f4568250b96e15f141763b4d0922772707f6f7426f9ebb9a33c",
+        "reason": "research_exposure",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "pnpm__pnpm-12888",
+        "rank_sha256": "2bb4ad4382c9725cef2f4dae3dc2cf65786769a980be46304639fac8a80887f8",
+        "reason": "selection_quota_reached",
+        "repo": "pnpm/pnpm"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-426",
+        "rank_sha256": "2ed6c4462463a74f8f6aae53c034f7e46325209e5a016f1569afb582ee12b317",
+        "reason": "selection_quota_reached",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "uutils__coreutils-8433",
+        "rank_sha256": "32a23f1209f8337da74c43faee3560b3ff5b69469e61fc98b3192310c9654d00",
+        "reason": "selection_quota_reached",
+        "repo": "uutils/coreutils"
+      },
+      {
+        "id": "notify-rs__notify-701",
+        "rank_sha256": "3429f22f271591ec17b681d2bf711eae8c49d3ace33086339a6fcda7b95860f4",
+        "reason": "selection_quota_reached",
+        "repo": "notify-rs/notify"
+      },
+      {
+        "id": "oxc-project__oxc-21546",
+        "rank_sha256": "34eb1aec20a774bf29cb3e2c6b7b6a393ed14dbce00722a28c459a9903ca8e18",
+        "reason": "selection_quota_reached",
+        "repo": "oxc-project/oxc"
+      },
+      {
+        "id": "gleam-lang__gleam-5510",
+        "rank_sha256": "3afefec3d1da5c424b4639c663a75b6382cb921277ecfd5eb57217f1cd134615",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "web-infra-dev__rspack-14803",
+        "rank_sha256": "3b93a1b1921069cb9d3e52d88507c7737c80be0b521bb2fcf53ba224b2e695c0",
+        "reason": "selection_quota_reached",
+        "repo": "web-infra-dev/rspack"
+      },
+      {
+        "id": "J-F-Liu__lopdf-481",
+        "rank_sha256": "3db1ab40ce5527ba86f194a369bea622b0fb0499a50eeb6334b96791326583ea",
+        "reason": "selection_quota_reached",
+        "repo": "J-F-Liu/lopdf"
+      },
+      {
+        "id": "lakehq__sail-2284",
+        "rank_sha256": "402dc049cf876502465c8d24bd96616011e7e52803cc9d38c954e895e5b6080c",
+        "reason": "selection_quota_reached",
+        "repo": "lakehq/sail"
+      },
+      {
+        "id": "gleam-lang__gleam-4708",
+        "rank_sha256": "40622c4c73e03817b9dea99cf48f9d110889e10273649b6c3ca0a29ad0d909dd",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "lakehq__sail-2292",
+        "rank_sha256": "4241c0dd74b19260d1c3548cb0e8e592ebb19a72a8b32642c57a6802d4b65e33",
+        "reason": "selection_quota_reached",
+        "repo": "lakehq/sail"
+      },
+      {
+        "id": "lance-format__lance-7565",
+        "rank_sha256": "43d09f1642621a8a9baa9b8422c2a21c9e15ae027259ba8822b9f090cbf0a373",
+        "reason": "selection_quota_reached",
+        "repo": "lance-format/lance"
+      },
+      {
+        "id": "tursodatabase__turso-8102",
+        "rank_sha256": "43fd1beb4433ec9314c216c7f1ee4986fec46052a93e0a6e197bc7221540576e",
+        "reason": "selection_quota_reached",
+        "repo": "tursodatabase/turso"
+      },
+      {
+        "id": "redis-rs__redis-rs-1721",
+        "rank_sha256": "4447f3cc23d639802d3f13cea1e15866a7d7cc9c7f43460e43385ae8ef336a84",
+        "reason": "selection_quota_reached",
+        "repo": "redis-rs/redis-rs"
+      },
+      {
+        "id": "apache__datafusion-17139",
+        "rank_sha256": "45fa27b2affe127f3c1153cb223dcc133caccee3410482cc3f323a8290169159",
+        "reason": "selection_quota_reached",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "ruffle-rs__ruffle-23197",
+        "rank_sha256": "465b2ef07f703a60a2be99a24b20354e68f6a569fca11d839bf7a73df80f2617",
+        "reason": "selection_quota_reached",
+        "repo": "ruffle-rs/ruffle"
+      },
+      {
+        "id": "servo__servo-46309",
+        "rank_sha256": "46a34432ae68c0c50db2afb3f07ab4d2d6184ef6218da0b8f94628045458db17",
+        "reason": "selection_quota_reached",
+        "repo": "servo/servo"
+      },
+      {
+        "id": "gfx-rs__wgpu-9367",
+        "rank_sha256": "47b5d7a975180249dc968ae935a208d2ee8321f8b1d80185a83a4baf71cbc6da",
+        "reason": "selection_quota_reached",
+        "repo": "gfx-rs/wgpu"
+      },
+      {
+        "id": "gleam-lang__gleam-5532",
+        "rank_sha256": "48c39f1d4cf877a054cc8411e6281b34aba507d092a471489ff9a3a5766fab9a",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "NVIDIA__OpenShell-810",
+        "rank_sha256": "497df963714e49ce69c6e26d14aaf6e00d044359d5665de76611d8a3858e5742",
+        "reason": "selection_quota_reached",
+        "repo": "NVIDIA/OpenShell"
+      },
+      {
+        "id": "eza-community__eza-1664",
+        "rank_sha256": "4a424e5180fb51619cddcf4fbc80e630766d8e63ad16b1c80f97efdb3231bc70",
+        "reason": "selection_quota_reached",
+        "repo": "eza-community/eza"
+      },
+      {
+        "id": "oxc-project__oxc-21092",
+        "rank_sha256": "4af011a066ed857be4189e412591cbb22ed91f3748f59de117af81ae4de6aed8",
+        "reason": "selection_quota_reached",
+        "repo": "oxc-project/oxc"
+      },
+      {
+        "id": "SeaQL__sea-query-920",
+        "rank_sha256": "4b8fd643172980333a282aea1147dc30834b903d3f47eb4db81ca2615ecd3b4f",
+        "reason": "selection_quota_reached",
+        "repo": "SeaQL/sea-query"
+      },
+      {
+        "id": "oxc-project__oxc-20810",
+        "rank_sha256": "4ca7c73699b43bda3c89d0c216efcd2252d567bcd30b0ee5c57b942b2082162d",
+        "reason": "selection_quota_reached",
+        "repo": "oxc-project/oxc"
+      },
+      {
+        "id": "prefix-dev__pixi-6529",
+        "rank_sha256": "4dc18b69fa920e4e7ddd294d129f4eef27822c7db8c2deece9ec358f2114e846",
+        "reason": "selection_quota_reached",
+        "repo": "prefix-dev/pixi"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22804",
+        "rank_sha256": "4e541869f68d3003b6f3271da6152184d149defc54e667a0e389ac71822e556e",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "skim-rs__skim-1044",
+        "rank_sha256": "4fa4a8386fb90249cf47077c30af32e2d18f97bcfe982c484a29ad81a2dbf5dc",
+        "reason": "selection_quota_reached",
+        "repo": "skim-rs/skim"
+      },
+      {
+        "id": "GitoxideLabs__gitoxide-2476",
+        "rank_sha256": "51fc7fa167b9fa07d01949dd37690658cd87f0b984e5c0c28041412482adf534",
+        "reason": "selection_quota_reached",
+        "repo": "GitoxideLabs/gitoxide"
+      },
+      {
+        "id": "gleam-lang__gleam-5482",
+        "rank_sha256": "536fad7d8b6f6bd472e10e3aa43506568a3eea2d464366ed98b0d99690d60080",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-479",
+        "rank_sha256": "54768fe872e5e7eadfbe27b0949a6b22368a0d62cc36ce6f38a1e252015a5b53",
+        "reason": "selection_quota_reached",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "pnpm__pnpm-12879",
+        "rank_sha256": "549fd18b322b5a6db021cbe51ddd5339b10e13134438b303304b597404c94d07",
+        "reason": "selection_quota_reached",
+        "repo": "pnpm/pnpm"
+      },
+      {
+        "id": "notify-rs__notify-700",
+        "rank_sha256": "54bd763d2e71b603c3550adc075ea8869428e65ab243699b094486a325bead83",
+        "reason": "selection_quota_reached",
+        "repo": "notify-rs/notify"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-20185",
+        "rank_sha256": "553002ad11d637b1d269f4e365370494215d79908f923c2da6af44a82fb74db8",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "lance-format__lance-7545",
+        "rank_sha256": "5917a4c9906df84c5719c0d42d12ea4ce25c553aecbc4f2fd2f6ed472a8ec3bc",
+        "reason": "selection_quota_reached",
+        "repo": "lance-format/lance"
+      },
+      {
+        "id": "uutils__coreutils-8447",
+        "rank_sha256": "5a3955dc29d4349344d97645d8f289dcaaa6698572de5142288245f74e664362",
+        "reason": "selection_quota_reached",
+        "repo": "uutils/coreutils"
+      },
+      {
+        "id": "matrix-org__matrix-rust-sdk-5395",
+        "rank_sha256": "5c2eeb29c7fdbef7ad7c3ddf0ae09ef9872bf97cc0e9a09ef4e345e7a189fb58",
+        "reason": "selection_quota_reached",
+        "repo": "matrix-org/matrix-rust-sdk"
+      },
+      {
+        "id": "casey__just-3200",
+        "rank_sha256": "60d03eb4bb67784642b6340f703740fbea936fbe30991a883e813e03f329809c",
+        "reason": "selection_quota_reached",
+        "repo": "casey/just"
+      },
+      {
+        "id": "ProvableHQ__leo-28814",
+        "rank_sha256": "61474241f14bf24610a16a27336d7dc24a636f42b223a889c73b27dac836390a",
+        "reason": "selection_quota_reached",
+        "repo": "ProvableHQ/leo"
+      },
+      {
+        "id": "prefix-dev__pixi-6500",
+        "rank_sha256": "6179e56f826383fdb2e75147d8203d68ee9850f214c1c94c8c72ad4a4c53de21",
+        "reason": "selection_quota_reached",
+        "repo": "prefix-dev/pixi"
+      },
+      {
+        "id": "apache__datafusion-17081",
+        "rank_sha256": "61a0c8f6757c9bd7514e067e5db424fb81b36971253a50229b499132a00790c2",
+        "reason": "selection_quota_reached",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "rust-lang__rust-bindgen-3390",
+        "rank_sha256": "6384c705d3d6057fde6c9435aba992d663dd2ee0a2a97cbda3ad1f0f784f6d09",
+        "reason": "research_exposure",
+        "repo": "rust-lang/rust-bindgen"
+      },
+      {
+        "id": "nearai__ironclaw-6706",
+        "rank_sha256": "667f75b03f0bb6e3876092b2b82bc2ea6624c421131f308622eafd0e462b08a2",
+        "reason": "selection_quota_reached",
+        "repo": "nearai/ironclaw"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22827",
+        "rank_sha256": "6c657c943000f6b36f113d52aa1ff85ebe43400610e841ca915d76709a9c7894",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "apache__arrow-rs-7783",
+        "rank_sha256": "6ced39b57f94176580a4c2c3dff95a89c81ef097b6bba390a1c572713c78347f",
+        "reason": "selection_quota_reached",
+        "repo": "apache/arrow-rs"
+      },
+      {
+        "id": "biomejs__biome-10767",
+        "rank_sha256": "6e9c52bbf044a8c005d75495374caf3a39ba09b9a158f4184dcdb3b5c4d68a26",
+        "reason": "selection_quota_reached",
+        "repo": "biomejs/biome"
+      },
+      {
+        "id": "apache__datafusion-17201",
+        "rank_sha256": "704914e12968b7ca2d97c7adec0f91623c873ab63b88a8d1511a5f036cbb5c7e",
+        "reason": "selection_quota_reached",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "apache__datafusion-16610",
+        "rank_sha256": "7050cb7a89260b2f01a2467598a6fa51d2599eaa404da72c37c94bdf205f732d",
+        "reason": "selection_quota_reached",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "rust-lang__rust-bindgen-3391",
+        "rank_sha256": "72b95b33a949da8a51d5856a47069c2feda080b1abb3d43ad0164b4140167d34",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-bindgen"
+      },
+      {
+        "id": "DioxusLabs__dioxus-5464",
+        "rank_sha256": "738e379c92dd1197599fa4f328f591098662809893396a180df6369840ee3a96",
+        "reason": "selection_quota_reached",
+        "repo": "DioxusLabs/dioxus"
+      },
+      {
+        "id": "gleam-lang__gleam-5938",
+        "rank_sha256": "76d506c8adc36f795550b220c37c803d869bcf539ac2bc40155f994bdf1e663e",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-392",
+        "rank_sha256": "772705497f72cf3853cf042347c48dad48de10796829aaa72b634193155418ef",
+        "reason": "selection_quota_reached",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "modelcontextprotocol__rust-sdk-760",
+        "rank_sha256": "7b130b803e01786f2739451982bb81643707002c9438d10c7bd074c3f40783b7",
+        "reason": "selection_quota_reached",
+        "repo": "modelcontextprotocol/rust-sdk"
+      },
+      {
+        "id": "lance-format__lance-7618",
+        "rank_sha256": "7e2ef14655169f72e42b12cbf495862818f8f49a5451aff798e487636a675859",
+        "reason": "selection_quota_reached",
+        "repo": "lance-format/lance"
+      },
+      {
+        "id": "gleam-lang__gleam-5958",
+        "rank_sha256": "7ee714ac52adcdc15793dce32b42da37aaca5171b818d907053448fdb02d5bdf",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "astral-sh__uv-18976",
+        "rank_sha256": "7ff8be319263171f0b0b5038822de522513aa5d9826e0441af0091b552cb6727",
+        "reason": "selection_quota_reached",
+        "repo": "astral-sh/uv"
+      },
+      {
+        "id": "DioxusLabs__dioxus-5384",
+        "rank_sha256": "80769e37aeb95bb942c9da768048f2db51006b4af2e7aac2a53a8009b477f9c8",
+        "reason": "selection_quota_reached",
+        "repo": "DioxusLabs/dioxus"
+      },
+      {
+        "id": "pola-rs__polars-28484",
+        "rank_sha256": "83ae8d8ca89be1db3832161610a7e21508450c83347d844ea1f2feef8057d5c9",
+        "reason": "research_exposure",
+        "repo": "pola-rs/polars"
+      },
+      {
+        "id": "apache__datafusion-23201",
+        "rank_sha256": "83d6a5c88e07092a72103f0c1d53ffdd57656e43e341390869aa4a1e63969078",
+        "reason": "selection_quota_reached",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "jj-vcs__jj-7269",
+        "rank_sha256": "842bb16773fc5ca12752928369371d340b7760809f5ce3e264febbbd0e54ec62",
+        "reason": "selection_quota_reached",
+        "repo": "jj-vcs/jj"
+      },
+      {
+        "id": "oxc-project__oxc-20976",
+        "rank_sha256": "866c044a7ba4d2fef5b03f5a63077c4e492883016dfcbc8f66511882ae455a50",
+        "reason": "selection_quota_reached",
+        "repo": "oxc-project/oxc"
+      },
+      {
+        "id": "rust-lang__mdBook-2806",
+        "rank_sha256": "8805c5f13bdcb0f48b69e85bdebffdff11158d6ea3eb4d26e7f996c5ec7db787",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/mdBook"
+      },
+      {
+        "id": "nearai__ironclaw-6712",
+        "rank_sha256": "89129dc33fb30a0d8473862d174abab1672cc05eb0acad4da2332d75fa7541cb",
+        "reason": "selection_quota_reached",
+        "repo": "nearai/ironclaw"
+      },
+      {
+        "id": "uutils__coreutils-8149",
+        "rank_sha256": "8a0235ed234ac577f58218eb23a45c06938f8d13a0b20b30de1520100517f6ca",
+        "reason": "selection_quota_reached",
+        "repo": "uutils/coreutils"
+      },
+      {
+        "id": "casey__just-2785",
+        "rank_sha256": "8b0d4fc03204a95c3704fbd52806c21a4873c8b2bac9c904cb7951bcf5e825c5",
+        "reason": "selection_quota_reached",
+        "repo": "casey/just"
+      },
+      {
+        "id": "yvgude__lean-ctx-816",
+        "rank_sha256": "8c1394325b053228180f931a3535359d9a0f1bda25ba1fa5afe7e62a7d6441ed",
+        "reason": "selection_quota_reached",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "id": "oxc-project__oxc-20857",
+        "rank_sha256": "8c3dc0178bfaedb6a50f216437ed3fed07333931b871fde1239dbaa428ff2ff6",
+        "reason": "selection_quota_reached",
+        "repo": "oxc-project/oxc"
+      },
+      {
+        "id": "agentgateway__agentgateway-2313",
+        "rank_sha256": "8d22eab6c91305be68b74f612924d23293716aff5e2f9f81796099d8c746b372",
+        "reason": "selection_quota_reached",
+        "repo": "agentgateway/agentgateway"
+      },
+      {
+        "id": "jj-vcs__jj-6728",
+        "rank_sha256": "8e36a2dcdbd738024ee1972a55d737478187fc93f7d4216d3d58ce8179d3150f",
+        "reason": "selection_quota_reached",
+        "repo": "jj-vcs/jj"
+      },
+      {
+        "id": "gitbutlerapp__gitbutler-14920",
+        "rank_sha256": "8e97d149767780022c1c24ca0d9a5d96aa379f24b477bfa2c30bf9c1519d2fc4",
+        "reason": "research_exposure",
+        "repo": "gitbutlerapp/gitbutler"
+      },
+      {
+        "id": "uutils__coreutils-8310",
+        "rank_sha256": "8fecd43e95d90b149228f4dec8550631332361ad33014acb1fafb75a5b100bb2",
+        "reason": "selection_quota_reached",
+        "repo": "uutils/coreutils"
+      },
+      {
+        "id": "biomejs__biome-9995",
+        "rank_sha256": "902c74ede2be7d3f58115fa9fbc0c78eff62abc78704af7d84a55f48ea76b37b",
+        "reason": "selection_quota_reached",
+        "repo": "biomejs/biome"
+      },
+      {
+        "id": "gfx-rs__wgpu-9298",
+        "rank_sha256": "909f8c3e0882bc060686b515bd2ba84fa3cf4e8318b92d52ebc70dc76f61f746",
+        "reason": "selection_quota_reached",
+        "repo": "gfx-rs/wgpu"
+      },
+      {
+        "id": "clap-rs__clap-6068",
+        "rank_sha256": "93f4ff831b514b8373d343881fc70d01b5938055744f72fc4e2d48c2bc6f648b",
+        "reason": "selection_quota_reached",
+        "repo": "clap-rs/clap"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-20180",
+        "rank_sha256": "947e26fa8294978dbf62ee4642ce619eede9e8a4e0762a11a067d169d8efaeef",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "Automattic__harper-1737",
+        "rank_sha256": "94e97674e4b869e97fb50660569e3ae4cff29fd11d370b2beaa6648b92dd47b5",
+        "reason": "selection_quota_reached",
+        "repo": "Automattic/harper"
+      },
+      {
+        "id": "Automattic__harper-3112",
+        "rank_sha256": "95606661b732a6e72d1a81177a52ac358af13bb073e08ae531b8c485188f659d",
+        "reason": "selection_quota_reached",
+        "repo": "Automattic/harper"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22061",
+        "rank_sha256": "95f7179b152b571f2f090bd612fc30b0aee0df7a8eb42301171b574fb06876fb",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "NVIDIA__OpenShell-695",
+        "rank_sha256": "9672cdf6660c71ee3e133c45a623eb9ca328365dcc86cdff7d34343ed1deb8ba",
+        "reason": "selection_quota_reached",
+        "repo": "NVIDIA/OpenShell"
+      },
+      {
+        "id": "nearai__ironclaw-6724",
+        "rank_sha256": "97314ef858b561e783e752829fd43b5493b0a505b90644eaa8574576830e06a1",
+        "reason": "selection_quota_reached",
+        "repo": "nearai/ironclaw"
+      },
+      {
+        "id": "ProvableHQ__leo-29265",
+        "rank_sha256": "9f307a2f9b74e064c0ad6bd76466c0373c4c5996dfd28376b5bf318851a37ad6",
+        "reason": "selection_quota_reached",
+        "repo": "ProvableHQ/leo"
+      },
+      {
+        "id": "Automattic__harper-3150",
+        "rank_sha256": "9f45a67f457c9b1fa825e1d277509c42a2a176d8cd1281be14b929f09200c116",
+        "reason": "selection_quota_reached",
+        "repo": "Automattic/harper"
+      },
+      {
+        "id": "wasm-bindgen__wasm-bindgen-5051",
+        "rank_sha256": "9fe1324c2f4e5165b24edaf8b4c0508d253bd059ca3009b3ad85ddbff167aa56",
+        "reason": "selection_quota_reached",
+        "repo": "wasm-bindgen/wasm-bindgen"
+      },
+      {
+        "id": "apache__datafusion-17233",
+        "rank_sha256": "a0fb441da30c39c4940333255ac621cd2c062051fb7fc5a92e6f7d251e9945bd",
+        "reason": "selection_quota_reached",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "prefix-dev__pixi-6518",
+        "rank_sha256": "a78bd6cf80a4321c742a03ad10428ecde3b27d32bfe9290635c21db45352f88f",
+        "reason": "selection_quota_reached",
+        "repo": "prefix-dev/pixi"
+      },
+      {
+        "id": "jtroo__kanata-1681",
+        "rank_sha256": "aaddec150434f4c52197cce15974ee39a2387ef6a52e77acf824c939a7266616",
+        "reason": "selection_quota_reached",
+        "repo": "jtroo/kanata"
+      },
+      {
+        "id": "vercel__turborepo-12599",
+        "rank_sha256": "ab9e1852571fb20298387e9062b6b0bc77b68ff9d385b51acb102fbbc4dcfa1e",
+        "reason": "selection_quota_reached",
+        "repo": "vercel/turborepo"
+      },
+      {
+        "id": "matrix-org__matrix-rust-sdk-5522",
+        "rank_sha256": "abc52f6d2f92b59369b77fd6d08469f65985f8fdb20f8b6fe80e5d83906fd7c1",
+        "reason": "selection_quota_reached",
+        "repo": "matrix-org/matrix-rust-sdk"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-414",
+        "rank_sha256": "ae014b88ddec5c582218426ef860c45c793885541b6b0bee433e97fdd296ed62",
+        "reason": "research_exposure",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "oxc-project__oxc-21330",
+        "rank_sha256": "aef1f1d4730e8c9444eb57dfd18320b72c23c42830043359ee161869d85e7b2b",
+        "reason": "selection_quota_reached",
+        "repo": "oxc-project/oxc"
+      },
+      {
+        "id": "oxc-project__oxc-21163",
+        "rank_sha256": "b03a8e4d0c513c68645f62ba29411c6133efe9f9e93d32134ca2b33a56a60807",
+        "reason": "selection_quota_reached",
+        "repo": "oxc-project/oxc"
+      },
+      {
+        "id": "lance-format__lance-7835",
+        "rank_sha256": "b0c3c7893e09e3f9d7dca2a90e3ef1188d863863bd653d4672b7e68a2bafe847",
+        "reason": "selection_quota_reached",
+        "repo": "lance-format/lance"
+      },
+      {
+        "id": "uutils__coreutils-8197",
+        "rank_sha256": "b1944f81f1778ecc198b198621a23bf095d3a5a112344452c773f6abe07c21dd",
+        "reason": "selection_quota_reached",
+        "repo": "uutils/coreutils"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22789",
+        "rank_sha256": "b2313296086842f560daf391f3b5dee63d5818a6754cf3549c542c84b082ce8c",
+        "reason": "research_exposure",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "ProvableHQ__leo-29291",
+        "rank_sha256": "b3908acf03a9ffeb2623f6828395680f119334df72cf248e09f174740245e21d",
+        "reason": "selection_quota_reached",
+        "repo": "ProvableHQ/leo"
+      },
+      {
+        "id": "modelcontextprotocol__rust-sdk-1021",
+        "rank_sha256": "b496f6001d6e0ac8849e4914467159289beca0d4e4d1cebcbd494c6d783e7430",
+        "reason": "research_exposure",
+        "repo": "modelcontextprotocol/rust-sdk"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-22849",
+        "rank_sha256": "b5dc38bb048057d54c3050d413d1c8c8f5c2b67528975ffdb68a9179224cc75a",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "NVlabs__cuda-oxide-381",
+        "rank_sha256": "b650fdddbdd9b138df915e1c5ceb92349c0a85fd685a88657b60f23bf961be2f",
+        "reason": "selection_quota_reached",
+        "repo": "NVlabs/cuda-oxide"
+      },
+      {
+        "id": "slatedb__slatedb-1461",
+        "rank_sha256": "ba22a90576842d0972be5435263d38aa030322544a9a37bc53deca046df59067",
+        "reason": "selection_quota_reached",
+        "repo": "slatedb/slatedb"
+      },
+      {
+        "id": "prefix-dev__pixi-6457",
+        "rank_sha256": "bb00c9d2ce6cabd32a33f7d64a7958566fbcb8bfeaeb82b990b77f173b185914",
+        "reason": "selection_quota_reached",
+        "repo": "prefix-dev/pixi"
+      },
+      {
+        "id": "biomejs__biome-10867",
+        "rank_sha256": "bbd0ae06f62b44e69b011121d1e02da7dd030c4600ac9c527a8e27d8e2cc9854",
+        "reason": "selection_quota_reached",
+        "repo": "biomejs/biome"
+      },
+      {
+        "id": "casey__just-2835",
+        "rank_sha256": "be3e9f824a46490c4caeaa2701b93e26e8b0eb787f6c48e7878b2acb2fc9f762",
+        "reason": "selection_quota_reached",
+        "repo": "casey/just"
+      },
+      {
+        "id": "apache__datafusion-17130",
+        "rank_sha256": "c086d3c5dc0eece9dc7d99310f7c467f780816e7e5e7dffa965839baaab58c91",
+        "reason": "selection_quota_reached",
+        "repo": "apache/datafusion"
+      },
+      {
+        "id": "apache__arrow-rs-7841",
+        "rank_sha256": "c0fbf87e397ce1bf69bb336ca20b86e8f55752cdbd16fe2fb64731ef9803663e",
+        "reason": "selection_quota_reached",
+        "repo": "apache/arrow-rs"
+      },
+      {
+        "id": "vercel__turborepo-12516",
+        "rank_sha256": "c19ab35f3e105db928964d0ee83450a42a5cfc336bcf58b4bee53969975be07f",
+        "reason": "selection_quota_reached",
+        "repo": "vercel/turborepo"
+      },
+      {
+        "id": "modelcontextprotocol__rust-sdk-1044",
+        "rank_sha256": "c3a3b62065d78b52189c483c9955919306c606ad6c4b80d6093e0b17dfe1e193",
+        "reason": "selection_quota_reached",
+        "repo": "modelcontextprotocol/rust-sdk"
+      },
+      {
+        "id": "web-infra-dev__rspack-14794",
+        "rank_sha256": "c5fd4b13a60192b385c3a07af6a16eef4297bf2cb2e2e37994ecc62dab7affc1",
+        "reason": "selection_quota_reached",
+        "repo": "web-infra-dev/rspack"
+      },
+      {
+        "id": "lance-format__lance-8049",
+        "rank_sha256": "c82654780aaa832586b1d5a93a07b49d4a7d2615c5464e49fe9e887d359c588a",
+        "reason": "selection_quota_reached",
+        "repo": "lance-format/lance"
+      },
+      {
+        "id": "biomejs__biome-10827",
+        "rank_sha256": "cbbfc3b4ea2244adc82d651f5aeed6bd835502e92b0aa4068583ff12a74dba49",
+        "reason": "selection_quota_reached",
+        "repo": "biomejs/biome"
+      },
+      {
+        "id": "biomejs__biome-10875",
+        "rank_sha256": "cee01217aaa995b71091ff098224409453a0346e3e8ba3e366455a9d69032934",
+        "reason": "selection_quota_reached",
+        "repo": "biomejs/biome"
+      },
+      {
+        "id": "pnpm__pnpm-12935",
+        "rank_sha256": "cf6686573cbd5f27d73f2ba0c4a39f95a855ef711c7ac5c32f3d2e64380a5abd",
+        "reason": "selection_quota_reached",
+        "repo": "pnpm/pnpm"
+      },
+      {
+        "id": "ruffle-rs__ruffle-23330",
+        "rank_sha256": "cf9f01248090f4a5e41adb9e1f1b870181ae0305d62d01a6e4ceaeed2a2abff3",
+        "reason": "selection_quota_reached",
+        "repo": "ruffle-rs/ruffle"
+      },
+      {
+        "id": "uutils__coreutils-8336",
+        "rank_sha256": "cfaac798676391d306915013f28b41b1579961da086a80f70b800557c99d25e1",
+        "reason": "selection_quota_reached",
+        "repo": "uutils/coreutils"
+      },
+      {
+        "id": "rust-lang__rust-analyzer-20381",
+        "rank_sha256": "d058bbf2ea8dd1c02bf8b8cd1a2d4248af2eb587c13009738dc6028cdff30579",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/rust-analyzer"
+      },
+      {
+        "id": "napi-rs__napi-rs-2784",
+        "rank_sha256": "d1f7eced0cf82c9fd8c2747941353bd8c49abf8954034345a86cf99a74ce2c6c",
+        "reason": "selection_quota_reached",
+        "repo": "napi-rs/napi-rs"
+      },
+      {
+        "id": "prefix-dev__pixi-5850",
+        "rank_sha256": "d899b119a1e140c3cfa55f5635d73714cb786b46b55bcda87147c5b0d9f6b92f",
+        "reason": "selection_quota_reached",
+        "repo": "prefix-dev/pixi"
+      },
+      {
+        "id": "biomejs__biome-10773",
+        "rank_sha256": "d8c61d8a8502ad25c68844b6af185954711c51485aae777ef56ea8ab7ae09d65",
+        "reason": "selection_quota_reached",
+        "repo": "biomejs/biome"
+      },
+      {
+        "id": "uutils__coreutils-8528",
+        "rank_sha256": "da32646a7e15476a472cc00e35b302393ea9565fc258bd61f1aacaa844ce6c18",
+        "reason": "selection_quota_reached",
+        "repo": "uutils/coreutils"
+      },
+      {
+        "id": "yvgude__lean-ctx-927",
+        "rank_sha256": "da6b45b71aa55d47fd7d54eb379685f6bce600425bb002d802d983f7c8092656",
+        "reason": "selection_quota_reached",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-447",
+        "rank_sha256": "db4129c019936067d98bbf4249000cecd119839d865f2f275b458872e9bdfd19",
+        "reason": "research_exposure",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "zeroclaw-labs__zeroclaw-5165",
+        "rank_sha256": "dbdcd4b10188f016b22808bf596a6e28b54e33415abf26e805109ed702a745fd",
+        "reason": "selection_quota_reached",
+        "repo": "zeroclaw-labs/zeroclaw"
+      },
+      {
+        "id": "noir-lang__noir-9250",
+        "rank_sha256": "dd79f40c54e4b6708737363dd542e197e0cc83740dda41dca14466a8d04a2a1f",
+        "reason": "selection_quota_reached",
+        "repo": "noir-lang/noir"
+      },
+      {
+        "id": "sinelaw__fresh-1642",
+        "rank_sha256": "dfceb793fb3706a1d008a9c808768cd79b63476016eb5f070b82ca6b569db386",
+        "reason": "selection_quota_reached",
+        "repo": "sinelaw/fresh"
+      },
+      {
+        "id": "rust-lang__mdBook-2796",
+        "rank_sha256": "e1815de6ff68f27e37360cd500365a2eef39868e9c1ae1ab17916003bca7afe2",
+        "reason": "selection_quota_reached",
+        "repo": "rust-lang/mdBook"
+      },
+      {
+        "id": "apache__arrow-rs-8214",
+        "rank_sha256": "e35421e43c4d574983166adfc50b5f44346b205b093fd41bce36c38090021655",
+        "reason": "selection_quota_reached",
+        "repo": "apache/arrow-rs"
+      },
+      {
+        "id": "gleam-lang__gleam-6021",
+        "rank_sha256": "e47d5ff5719a9bff1a9723a8f80b7129934cbc84f338b8002750bf96789c4ab6",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "gleam-lang__gleam-5982",
+        "rank_sha256": "e88ad9b22bb7820acda876d5ba8a9ab4d2e84e05913de1a62d2b5be871dbfabe",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "linebender__vello-1132",
+        "rank_sha256": "e9f80e318e5ad5a3baaf13f802d78ec06e5a4386336eb4ddb2b526fc7aff069c",
+        "reason": "selection_quota_reached",
+        "repo": "linebender/vello"
+      },
+      {
+        "id": "yvgude__lean-ctx-632",
+        "rank_sha256": "ea1a927f18e853b5f068a562d84a16d12c994caf85178954dbe06044507c39a9",
+        "reason": "selection_quota_reached",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "id": "ProvableHQ__leo-29334",
+        "rank_sha256": "eb3b83af43c040b409d1c090aea1e4bd6a2717727858754e8d4e875eb54e5950",
+        "reason": "selection_quota_reached",
+        "repo": "ProvableHQ/leo"
+      },
+      {
+        "id": "agentgateway__agentgateway-2452",
+        "rank_sha256": "eb7de302ffd2bbcba05c65104725ea2c7a3e5933e43bbc5bd80d3a1b8c619799",
+        "reason": "selection_quota_reached",
+        "repo": "agentgateway/agentgateway"
+      },
+      {
+        "id": "yvgude__lean-ctx-1179",
+        "rank_sha256": "ec6eb8496031b64296398213b648058565354196defd54966953d8ea185760af",
+        "reason": "selection_quota_reached",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "id": "Automattic__harper-2962",
+        "rank_sha256": "ee712eb7c37a2c3775e68cd99a0b321178a24b329ff1b1f01f1cda93b6e21845",
+        "reason": "selection_quota_reached",
+        "repo": "Automattic/harper"
+      },
+      {
+        "id": "Automattic__harper-2973",
+        "rank_sha256": "ef4b12a4480fd558d59c672c44cfe735b5fe6dd52f3c53ebbce1903e0ff7729c",
+        "reason": "selection_quota_reached",
+        "repo": "Automattic/harper"
+      },
+      {
+        "id": "gleam-lang__gleam-4854",
+        "rank_sha256": "efe47f7e8c9e97c0f2291834897cb0ec611bde3c722c6042b92d72eb2c30273b",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "prefix-dev__pixi-6335",
+        "rank_sha256": "f1df65b603bb8b036a79d65464f5b064fd1d037f155a1d0c6391d87f8566addf",
+        "reason": "selection_quota_reached",
+        "repo": "prefix-dev/pixi"
+      },
+      {
+        "id": "web-infra-dev__rspack-14806",
+        "rank_sha256": "f2eec507c04cbccf92a3a4b405c5fe7d1bf8203e901b8f1a9af59c766610ecf3",
+        "reason": "selection_quota_reached",
+        "repo": "web-infra-dev/rspack"
+      },
+      {
+        "id": "yvgude__lean-ctx-969",
+        "rank_sha256": "f2f9808af417caf0b79cacc547ed20fe113e026a72965b804b8c4184dc31cb47",
+        "reason": "selection_quota_reached",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "id": "modelcontextprotocol__rust-sdk-1005",
+        "rank_sha256": "f611341a8c594f15c755e622e4a4c36404b1c53e42730a86034c0874affa9cc9",
+        "reason": "selection_quota_reached",
+        "repo": "modelcontextprotocol/rust-sdk"
+      },
+      {
+        "id": "h4ckf0r0day__obscura-412",
+        "rank_sha256": "f87797275b3b4650642e0731b9214ab72b775fa8f03cf94cf383004f582f4aa1",
+        "reason": "research_exposure",
+        "repo": "h4ckf0r0day/obscura"
+      },
+      {
+        "id": "gleam-lang__gleam-5971",
+        "rank_sha256": "f99655847fbc8361ac9116cd36713bf712ba91c2d44c99f5171a085fa65e5c44",
+        "reason": "selection_quota_reached",
+        "repo": "gleam-lang/gleam"
+      },
+      {
+        "id": "yvgude__lean-ctx-1164",
+        "rank_sha256": "f9cc773ec31042c6732bc2ba7bb7265a0cac46abe4e169f5309cd04fe3db5fb7",
+        "reason": "selection_quota_reached",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "id": "biomejs__biome-10886",
+        "rank_sha256": "fadb2578f38835c043067090428e154417d41ef8f04f657a87c6dfa3c5543533",
+        "reason": "selection_quota_reached",
+        "repo": "biomejs/biome"
+      },
+      {
+        "id": "delta-io__delta-rs-4357",
+        "rank_sha256": "fbe96a78533637afdf943041ef56686f08f7455a932219daf88a89746c0b9137",
+        "reason": "selection_quota_reached",
+        "repo": "delta-io/delta-rs"
+      },
+      {
+        "id": "lalrpop__lalrpop-1076",
+        "rank_sha256": "fc691411805e072490ddd4ac3236b45503cf3505d14249e1834f1e2ba4202a78",
+        "reason": "selection_quota_reached",
+        "repo": "lalrpop/lalrpop"
+      },
+      {
+        "id": "yvgude__lean-ctx-1180",
+        "rank_sha256": "fe9cc0814c34eb8c3b83d8cd9185bd872da3199760aba5fd724c008f634efaec",
+        "reason": "selection_quota_reached",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "id": "Automattic__harper-2976",
+        "rank_sha256": "fff6ae3447c6622db347a14d4cdc650b71da17fc6e05e742ba60a4237fce88c3",
+        "reason": "selection_quota_reached",
+        "repo": "Automattic/harper"
+      }
+    ],
+    "exposure_sha256": "a2b0a0d8506168fbf08470d1b7ef003d6def3e2e8cc7487bd48e366c5ab7e27b",
+    "metadata_sha256": "e20ed780f09158d04c09dd670e72531f8810005a1b836998291d223c88f49c3e",
+    "seed": "effort-evidence-stage1-20261110-v1",
+    "selected": [
+      {
+        "base_commit": "9910a9f08627360ab6c6c784bd496ca4d5cfbee8",
+        "created_at": "2026-07-22T09:01:35Z",
+        "eligible": true,
+        "id": "yvgude__lean-ctx-1168",
+        "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-1168",
+        "language": "rust",
+        "public_issue_sha256": "f684330004ce3be2e133f8851e35fd8fb66f36b1d53047d4f7b5f6a9d310f4fd",
+        "reason": "public source, pinned compatible runtime, native readiness and complete ordinary public suite execution qualified; public failures retained, not a pass-count selection",
+        "repo": "yvgude/lean-ctx"
+      },
+      {
+        "base_commit": "99ece0e12dd2cace768b5caa76fcbe1b5233f0f6",
+        "created_at": "2026-07-14T16:12:18Z",
+        "eligible": true,
+        "id": "h4ckf0r0day__obscura-421",
+        "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-421",
+        "language": "rust",
+        "public_issue_sha256": "79cf2a33b1618355b0f5cb68e92683859c9435c1fb9d0846450d8b0b0e926479",
+        "reason": "public source, pinned compatible runtime, native readiness and complete ordinary public suite execution qualified; public failures retained, not a pass-count selection",
+        "repo": "h4ckf0r0day/obscura"
+      }
+    ]
+  },
+  "selection_rule": {
+    "count": 2,
+    "eligibility": "public source/runtime/adapter readiness only; no actor outcomes or private test counts",
+    "exposure": "research document IDs, all prior registered pool tasks, and explicit operator-thread controls; conservative exclusions",
+    "order": "sha256(UTF8(seed + NUL + task_id)), ascending hex; task_id tiebreak",
+    "public_fields": [
+      "id",
+      "repo",
+      "base_commit",
+      "image",
+      "created_at",
+      "language",
+      "public_issue_sha256"
+    ],
+    "record_dataset_sha256": "bf2dd8252a07d0f275663ef8f6ab87571dd9bc4ce386abf9ec98d3cd6bb51a81",
+    "replace_after_outcomes": false,
+    "repository_distinct": true,
+    "schema": 1,
+    "scope": "cached171-record Rust dataset; development screen, not held-out validation or model-training decontamination",
+    "seed": "effort-evidence-stage1-20261110-v1"
+  }
+}

@@ -1,0 +1,31 @@
+diff --git a/crates/obscura-js/js/bootstrap.js b/crates/obscura-js/js/bootstrap.js
+index 6fdd488..ead1f2c 100644
+--- a/crates/obscura-js/js/bootstrap.js
++++ b/crates/obscura-js/js/bootstrap.js
+@@ -5269,6 +5269,7 @@ function _structuredClone(value, seen) {
+   if (value instanceof Error) {
+     const Ctor = value.constructor || Error;
+     const e = new Ctor(value.message);
++    seen.set(value, e);
+     if (value.name) e.name = value.name;
+     if (value.stack) e.stack = value.stack;
+     if (value.cause !== undefined) e.cause = _structuredClone(value.cause, seen);
+@@ -5281,11 +5282,16 @@ function _structuredClone(value, seen) {
+     const hook = globalThis.__obscura_clone_hooks[value[Symbol.toStringTag]];
+     if (typeof hook === "function") return hook(value, seen);
+   }
+-  const out = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
++  const out = Array.isArray(value) ? [] : {};
+   seen.set(value, out);
++  // Define (not assign) so an own "__proto__" key stays a data property and
++  // never reaches the Object.prototype setter.
+   for (const k in value) {
+     if (Object.prototype.hasOwnProperty.call(value, k)) {
+-      out[k] = _structuredClone(value[k], seen);
++      Object.defineProperty(out, k, {
++        value: _structuredClone(value[k], seen),
++        writable: true, enumerable: true, configurable: true,
++      });
+     }
+   }
+   // Symbols are not enumerable via for-in; copy own symbol-keyed properties.

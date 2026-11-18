@@ -1,0 +1,77 @@
+{
+  "archive": {
+    "all_members_reopened_byte_equal": true,
+    "all_originals_unchanged_during_seal": true,
+    "bytes": 1797388,
+    "regular_members": 214,
+    "sha256": "ef33dbccbe796dfbdb22ea6baeef603ecbb9955da6fa2b58836c607505e57b20"
+  },
+  "experimental_model_repair_calls": 0,
+  "open": [
+    "common public image delta+namespaced page fixture actor preparation/index/runtime binding",
+    "all-arm CLI/context/prompt/effort qualification",
+    "host resource floor",
+    "F6linker classification",
+    "whole-controller/accounting review and immutable paid preflight",
+    "low/xhigh efficacy"
+  ],
+  "paid_ready": false,
+  "preserved_failed_control_version": "v4hostname collision;2of3controls executed,repeat explicitly notexecuted",
+  "proof": {
+    "common_actor_context_source_runtime_bound": false,
+    "controls": {
+      "base": {
+        "complete_streams_requalified": true,
+        "expected": 331,
+        "failed_names": [
+          "obscura-cdp::structured_clone_crypto_parity$structured_clone_handles_circular_error_cause",
+          "obscura-cdp::structured_clone_crypto_parity$structured_clone_reproduces_own_proto_property"
+        ],
+        "fresh_container_absence": true,
+        "http_entries_including_readiness": 8,
+        "log_sha256": "b423dcebf78bb92ec2b07d95f2e1eacebbaecdf48c6f1852a91bd308be85ef06",
+        "missing": 0,
+        "not_passing": 2,
+        "security_p2p_pass": true,
+        "source_service_and_runtime_verified": true,
+        "wall_seconds": 44.6
+      },
+      "reference": {
+        "complete_streams_requalified": true,
+        "expected": 331,
+        "failed_names": [],
+        "fresh_container_absence": true,
+        "http_entries_including_readiness": 8,
+        "log_sha256": "216cfd6bb4ead7d5a21943d27d4c2e88e930612928ac44c26031ec91070eb876",
+        "missing": 0,
+        "not_passing": 0,
+        "security_p2p_pass": true,
+        "source_service_and_runtime_verified": true,
+        "wall_seconds": 47.0
+      },
+      "reference-repeat": {
+        "complete_streams_requalified": true,
+        "expected": 331,
+        "failed_names": [],
+        "fresh_container_absence": true,
+        "http_entries_including_readiness": 8,
+        "log_sha256": "57b3414cc171dfeb60ee184729a8c27468f6912b2f4070ad710c165e15c53699",
+        "missing": 0,
+        "not_passing": 0,
+        "security_p2p_pass": true,
+        "source_service_and_runtime_verified": true,
+        "wall_seconds": 43.6
+      }
+    },
+    "host_resource_floor_qualified": false,
+    "native_negative_positive_repeat_predicates_satisfied": true,
+    "original_commands_assertions_expected_population_unchanged": true,
+    "paid_ready": false,
+    "public_baseline_delta_explicit": true,
+    "public_host_security_test_preserved": true,
+    "reference_repeat_selected_maps_identical": true,
+    "scope": "full original Obscura acceptance controls only",
+    "whole_campaign_reviewed": false
+  },
+  "schema": 1
+}

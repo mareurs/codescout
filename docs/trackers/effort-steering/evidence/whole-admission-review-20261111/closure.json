@@ -1,0 +1,13 @@
+{
+  "schema": "effort-whole-review-custody-closure-v1",
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/whole-admission-review-20261111/evidence.tar.gz",
+  "archive_bytes": 2709657,
+  "archive_sha256": "72ba05ab0064fddfb6ffbe3fc42be2c6ea0beb5fb9e31211cf263e6f26377ff2",
+  "payload_entries": 943,
+  "all_payloads_reopened": true,
+  "all_originals_unchanged": true,
+  "source_files": 192,
+  "review_sha256": "01e0a290dc724bfe70cea833851e4f4085dc5585f71ee0ac2461295232339c2c",
+  "resolution_sha256": "ab8e22610b8f9992731516ac6613c4f3ea4fd5498688fee394fc2568cab7d5f6",
+  "paid_ready": false
+}

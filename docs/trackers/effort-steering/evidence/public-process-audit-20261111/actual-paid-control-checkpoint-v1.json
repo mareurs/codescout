@@ -1,0 +1,475 @@
+{
+  "schema": "effort-actual-paid-control-audit-v1",
+  "captured_at": "2026-11-11T17:43:14.876397+00:00",
+  "scope": "Only closed native invocations published at capture; exact captured request output_config.effort fields and proxy counts, not internal reasoning or private quality.",
+  "covered_native_phases": 12,
+  "captured_model_request_files": 161,
+  "phases": [
+    {
+      "attempt_index": 0,
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "L",
+      "phase": "repair",
+      "expected_effort": "low",
+      "captured_request_files": 12,
+      "receipt_requests": 12,
+      "receipt_forwarded": 12,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 12
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 12
+        }
+      ]
+    },
+    {
+      "attempt_index": 1,
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "R",
+      "phase": "challenge",
+      "expected_effort": "low",
+      "captured_request_files": 10,
+      "receipt_requests": 10,
+      "receipt_forwarded": 10,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 10
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 10
+        }
+      ]
+    },
+    {
+      "attempt_index": 1,
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "R",
+      "phase": "investigate",
+      "expected_effort": "low",
+      "captured_request_files": 12,
+      "receipt_requests": 12,
+      "receipt_forwarded": 12,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 12
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 12
+        }
+      ]
+    },
+    {
+      "attempt_index": 1,
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "R",
+      "phase": "repair",
+      "expected_effort": "low",
+      "captured_request_files": 10,
+      "receipt_requests": 10,
+      "receipt_forwarded": 10,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 10
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 10
+        }
+      ]
+    },
+    {
+      "attempt_index": 2,
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "P",
+      "phase": "challenge",
+      "expected_effort": "low",
+      "captured_request_files": 9,
+      "receipt_requests": 9,
+      "receipt_forwarded": 9,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 9
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 9
+        }
+      ]
+    },
+    {
+      "attempt_index": 2,
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "P",
+      "phase": "investigate",
+      "expected_effort": "low",
+      "captured_request_files": 9,
+      "receipt_requests": 9,
+      "receipt_forwarded": 9,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 9
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 9
+        }
+      ]
+    },
+    {
+      "attempt_index": 2,
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "P",
+      "phase": "repair",
+      "expected_effort": "low",
+      "captured_request_files": 10,
+      "receipt_requests": 10,
+      "receipt_forwarded": 10,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 10
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 10
+        }
+      ]
+    },
+    {
+      "attempt_index": 3,
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "X",
+      "phase": "repair",
+      "expected_effort": "xhigh",
+      "captured_request_files": 41,
+      "receipt_requests": 41,
+      "receipt_forwarded": 41,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "xhigh",
+          "captures": 41
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 41
+        }
+      ]
+    },
+    {
+      "attempt_index": 4,
+      "task_id": "h4ckf0r0day__obscura-421",
+      "arm": "X",
+      "phase": "repair",
+      "expected_effort": "xhigh",
+      "captured_request_files": 26,
+      "receipt_requests": 26,
+      "receipt_forwarded": 26,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "xhigh",
+          "captures": 26
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 26
+        }
+      ]
+    },
+    {
+      "attempt_index": 5,
+      "task_id": "h4ckf0r0day__obscura-421",
+      "arm": "P",
+      "phase": "challenge",
+      "expected_effort": "low",
+      "captured_request_files": 8,
+      "receipt_requests": 8,
+      "receipt_forwarded": 8,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 8
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 8
+        }
+      ]
+    },
+    {
+      "attempt_index": 5,
+      "task_id": "h4ckf0r0day__obscura-421",
+      "arm": "P",
+      "phase": "investigate",
+      "expected_effort": "low",
+      "captured_request_files": 7,
+      "receipt_requests": 7,
+      "receipt_forwarded": 7,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 7
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 7
+        }
+      ]
+    },
+    {
+      "attempt_index": 5,
+      "task_id": "h4ckf0r0day__obscura-421",
+      "arm": "P",
+      "phase": "repair",
+      "expected_effort": "low",
+      "captured_request_files": 7,
+      "receipt_requests": 7,
+      "receipt_forwarded": 7,
+      "request_census_matches_receipt": true,
+      "effort_value_counts": [
+        {
+          "value": "low",
+          "captures": 7
+        }
+      ],
+      "model_value_counts": [
+        {
+          "value": "claude-sonnet-5-5",
+          "captures": 7
+        }
+      ]
+    }
+  ],
+  "effort_field_mismatches": [],
+  "bindings": {
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-0.json": "a0d8d9eea394a29b434bc1090d42357ff4d89a1a4f9ac0f6b0f99f8e999e2429",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-1.json": "b8ef4566a604143650f7c4d34046b1e690e49a6a0ed5c7ea8aa6f4c3a9a755f9",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-10.json": "325bf368a35ac020d0b0b7ac1089efe8a988462d9748f8c4f611961ca1615be5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-11.json": "514f9460d6ad971d5c5750ed9523dc3af4e801d1c4e98e6530ac05c1dd903b7c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-2.json": "6f4a4040d492b0983a4db0b435eb0340d09dbf83468610748b15699522281106",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-3.json": "eb25556a567fe0e6e5db77c44584fb8a56ab4e1c41463faa92fb29b814093b85",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-4.json": "fc9169a72c39dd1d1af6cb030a096a2efcd422850d232e13cedd6eaba8f79df7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-5.json": "275562b4979ee29b78e3cfe4a1aa72ebc426900b408f87ea89cd3a4bcccecc6a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-6.json": "cbc4d18d16f707ffa86f61e58a510b269d2e842f45485b2e8deaf8a543cef872",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-7.json": "5b94dbf69f747961500e76d3e1d0bace4a6af1468923f148824450dd3fe19b51",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-8.json": "265291dab50e9fcb5a7362f34aa37a553dceb2de073ad72ec6c35d244d978968",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-9.json": "85cd709f40deec712743c991e418cb1211eb0270d40b977ed14b8fc4778dd541",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/invocation.json": "3f9463382cd5a56bc9aca307e14bcbadbcf77edf5040c67df5e4965f15934c13",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/receipt.json": "6dc0854462e28b1ad1376b96dd17b978a9c08c7487a4448cfec1114d7b9613e3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-0.json": "3ef3793671b65728eda6385d099bb1acdc69aebaae6be843b69aa2f859cb5679",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-1.json": "5ed33b56c50e116dccb2f3d07bf82e3185b50eee1a423d6e33f40c1ff9b6649d",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-2.json": "11286eb7eabfcf2bfd097f30ad308697f1911b8771aa9821bbdca62033e8307c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-3.json": "9c731daa1ba67becfab81c2110a5d34eddc4b2ae3e9cb60726cf8a09d777ea80",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-4.json": "b1f2becd7f1ab43069598fc0e65b07921ace3e0894fd912579a397c598070ad4",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-5.json": "aaa33ed31f81f9906ef34df0bbf83cc2c0867d8bdbd0c92cc0594ae716b5738a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-6.json": "0a89d8af9896f3026d4affa51be4162b3ff397f7362b04b20dcc17fcc81f2edc",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-7.json": "b9b8feeb61a3a454d93d34d1368757b62870566eea9cfaccb8789f3ff1b1871a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-8.json": "8f1d47a61ac594ad2f5831cdedc01a8677b3e25d08d87b21d62192108f875069",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/request-9.json": "0c86213a4b0d6de7b20fea0da1d6bd808be458efcc320e8fa4da0a27ab6c5902",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/invocation.json": "2d0dc96b5a9bdc2621d405916120baeef6d01e7a31a41db9c1aadc25114c8378",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/receipt.json": "b349d474237c924290083753378ef2bba416a663e379c60537f6085804f4e8a7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-0.json": "1abf3497f572c7b28378e45a738b7b8a83d1dafc0be745d20f3784d575863c15",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-1.json": "a4c7b05004dd76a28d671750fac586979273cc0c5f5bf2ab3186cdb8f55270a7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-10.json": "1546cfdc280a939d0008963db2ba527406e453954dc886b9e93331b2751a5f06",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-11.json": "63ae7f334f8c6736a8432eb1d9a39ca4bf7fe332aa02ad61a27126c6594f23a9",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-2.json": "5c7680f0386284b40e31dfe9179af12557162f904780b64359a1a65327da219c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-3.json": "78ba8ab9a6635dd945ad1977a81518a3027e3080af75ff00fc20d233715249a3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-4.json": "ab68606e161b051bf56347dc5ad9184ef822df33c50c7feed0f2c0c20c4fe7f6",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-5.json": "0c529583fda167dce99ec19c54dad45c047623f86602241659b2c5bbd7f1915a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-6.json": "66ee3c4a21c54cf12362e660206e9764f8e06b75243f098290d33f77794b5e7b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-7.json": "3cc501f7fff9a8465b3b6c856e8835e19a45c8bbac9708f51c0ae29edd875a90",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-8.json": "1d800c9572e21fb143327cb72118b063caf7d7e108a9af6158328767fce31002",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/request-9.json": "4d193a2918cb15815b1557a271804a90ba7f7ca70267c6695e852755e617d4be",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/invocation.json": "1094d87b7178a7e95a641e9ba6824589274a62d94aa9dedb763d225f5893d60b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/receipt.json": "db3dcb4fd13ca9dda3491da6f22b5052c762f6bddf7598955c8b74aa780a08e5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-0.json": "95c86c2314d8adb55d11ec87af65d4b5e016a2f4e82aa71f9cc397b424105f96",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-1.json": "c9d23f6a26a53020a5e37f92f0e00fbe9947d5c529cdd4622f90139b8603d7d5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-2.json": "508000257461cfa247cb92b242cc68764b4f32ff9579b52ae4e5463977a251c5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-3.json": "392cce64f076b1318e334f7c7f65866e02710da47aa6e1115b73c695b50b7680",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-4.json": "4822d3e657a37c867180cdfddbe0a37bea48bd1b782d22f8f85017d3e0ace136",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-5.json": "dcb87e78d4386babbc9b81dccebff87734589dae288865ba834f6300ecaf06f4",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-6.json": "7037c01fe0beb9860dbb4438cdc65ecde51602c126d2f5cd77696aea18dea078",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-7.json": "f689ff3a6122434a023d1ee23696e5375982c92b2af4f890ae963a635ded32af",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-8.json": "ea3e3c4493848d552b34e8debd8cc1fe4fd3fa369f12c44084064ff7dc4b2628",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/request-9.json": "6ab76a52ca9c1caf6d4787f32d73e269845df746ebcdbaedb4f256592b7d6aed",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/invocation.json": "1cd52236f54ec5eb29fda2a9eb28b1ecc40f940696a0b42116226d53362778d2",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/receipt.json": "78b1b61e6f6f03ada0e9599979a5904c65dac493a7d98bb7f02fa4e669e3405b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-0.json": "a528d6b8e80acbf741247fdf3fcbad8852749dc4ef2d441f8cb4e72f5ec5e69b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-1.json": "b3b66853cab80593ab2b27c7e04e701b0aff4f6d6c62814c6da7ece8e21c3808",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-2.json": "1faf53c5919519fc843d8e38c7b6e610e2215878a8f3523e2a2655913f6a341c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-3.json": "ff7d6e097775d406e17f778bf426406fd7dcbd2abc296c3a45b37c1e789788d4",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-4.json": "bfda724388a845051adc1bc84c50bad4c665a6c7014bee6ed2a24fd35386e66a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-5.json": "6299e60dcf2dec1c3e8c00e458ff8f3d67b4e4d2a4ba1c133d0f2bc0f92c3c74",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-6.json": "604d2680b1064c9d09e2fe5b23562ba63193482a09c052e95fd311f733fc2a8b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-7.json": "30933417e83b26c5d5d44563912dfefca1c23393d435735c486383547e1532d3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/request-8.json": "8f0002c37bc4aa3d1523e312baed5f8daaeaab264c72666a29d1a5c19032e713",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/invocation.json": "d35d59054c80d685ce2fb5b29f1b85eb2146dcc895d87209f96f1201e6d5a4e7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/receipt.json": "18edbd14e773cde24bed2619954ab467d2e41f296568799ae39bc39779c043d4",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-0.json": "3e2411cdba0cc03bf140046d0c1105d15b4e588753aedef15fa8ea1fe34176be",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-1.json": "ac8ce4d368667b42cb500a41e20614a8fcd28efdb809f1857d31e7cc250a9125",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-2.json": "d87a04b8fcfd9a6a970d0a72d9e3efc423fdcb7dd32dd32ad6ac49f556ac5867",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-3.json": "f525102d71fa6a39dd49dc5e6f08540d27a90ca6344dc51525670fa3d32164af",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-4.json": "01e3c23b204e4c715b4e38db2e265c412f32f011914ebcd847696693ac235eba",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-5.json": "ccb0ffad961049605291a08bda8304fc32fc7b07806be467ab778fba91ce472f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-6.json": "c13f79f8b779b4c87fbfb22d598ae29d6ef285a5eccac101d189a0f205781970",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-7.json": "d9a35ca4ca7b2c533884a8c0cae453373f717933237d70e9436a0f084adf1344",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/request-8.json": "1a0807a0feb8f5110824acf7389b3d1b39d4ac322ca0fdb0b44eb16bd143abe7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/invocation.json": "ea4580a1a905d2af180dcddef14e81a6d2d51e50df16388cd3959dd6a1335b63",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/receipt.json": "97a1bf8060f5e2f6fae20bf1869f418e6d83d71cf83853655d856d0276d9c1df",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-0.json": "4bec9495ebdf3baf29e208625f751eec4abfec87485efa454b08471230a6d7f5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-1.json": "19a7818d74b0d809ac9edc1671dd3ba3de605fc0db979e2cfc0806cecc65564e",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-2.json": "3f899f880358656a26a288b98c106fc6c889e9c56ce667f9830fb31725b72626",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-3.json": "5480fca53dc1ebc3d4fb716fecf061f453995dbfc998481f4da77d28962b555b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-4.json": "f7dc28156f73d0be0b4cd0b962cdce626f3ff11afa2eca7f182bd8b8d7a00eba",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-5.json": "1594ee23c7098e995ffa3cac4e1fd9bd307e3685f3099262914e8e8aacc1ed69",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-6.json": "797a2cf0ca59e8bb569f8533df0e1d263f765a56008df77af077893505d9f6a3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-7.json": "64c3e819f22e7fc823b72c5463355b52e80b7fc4da1b286134b2332464bc0ea8",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-8.json": "b71f25d65db3ca200938c74e619058ec0dba5400f8e357fcea0236456f2f97c5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/request-9.json": "c62a2620312b391f90aec4449ef0a8b1897670b81f3b05681b1695189fc44512",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/invocation.json": "394f88deffbae8851da1a174d74381c08641f82839697ee7ab08778e28b817d7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/receipt.json": "41144a4d6c4fa24b7887b429e5a408175fd89e5fb12f645ae7aa71c077199185",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-0.json": "b72ba83199f10fb5215fcf2179f7c5d29fbb79b152e13f35c61b54a3d5acd66f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-1.json": "af6d66315e34921dfd704d456283cba06b06a6350b23030371c66e5a59e9cd33",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-10.json": "8274b683259452f5e675aa8cca800618a257f2ae449a1a1ccb0310a8923596f9",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-11.json": "8fef81a66b1e52ea6b5de56004869220c83054c14c11721b92212bb781afabff",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-12.json": "e02b5d1b80aa12104428c2def5f2a40a44367bbec9159418bd3779d08101607a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-13.json": "2b1a564ff90e0b62ad476cfa870c856c8e7df7839b126256310a41710b4f3c21",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-14.json": "2fecf397b5fccf31f02cbec7d6d9aa139f5a984ddd23a68d272ec8c3c24b525a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-15.json": "5e1fc3463fae52ec316f774286c821de22932211c2e65308e5d46117787f58b6",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-16.json": "0fbd91e058e252bffd8a335554c64946710b843b03928db8eaf808e593a07908",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-17.json": "d3151a39d158e1b52fa438f8c91b0c139c313f22e8904e4abdc79b876104138f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-18.json": "66dc63537485c61f5a70e0b7d868d25bfdc0093e5254ab5f7ec8413c5b9dab4b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-19.json": "bf0c681b846678745b0275f31c370b9a8cbf0f7a097533fc8e8e6e435eca805d",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-2.json": "e2601ed46619ee78fc45fe59601fac295f342acc8feeca1c59bb39170310bfce",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-20.json": "46d17338b8484a39bb957093fd7749fc7bb4c3c80b4eb02c16abfa93f3eebc37",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-21.json": "2820bf3ad722178925ce516198ddb8e2f52b38bdbf71d0e6012ae8c40b7a6805",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-22.json": "ae604d9820cb548f91712c918c48dcc5b05e3962e49647c24b56775bdfa520b9",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-23.json": "a4f730378f21e35de0b83beede1c11049a0c6e16ea7c2426267e5f354d1ef62c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-24.json": "1eefab42491a6b1ac41cf4b196a73bdb3cfef5471ffbf83bf072356eeae4e358",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-25.json": "83c4e0f6c8d7aff7ff7b3451ad1ab367a9a86ab667ea38248ef8c7e062ab7ce3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-26.json": "df3a390cbd6d8b40d7fc26f6a3de4b34c55e0c2c9d95ff96bcf7144461efc40b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-27.json": "e07d7c223c4fc297e8516764a14e2a00b5c6cfbdef5a176c8307cf5d495370f9",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-28.json": "910766167997cc9d89ca33e4b604d0cda666bafc8b890374b0e11f6802025bc5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-29.json": "ae43adc063065669adbd3f368c9dd3548bce8810621eec8d855e963d055e1099",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-3.json": "579f5b6556acf6a3bbba33614be7c66a423be40e426e42897993eb03d10be76e",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-30.json": "4a77bc4b42b8244d26824f658e3331eba0b3855f88e1a3bdb3cedf0e22d89b5e",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-31.json": "4d9bd4e76867303810285d60e8facc3bc6538f39b5930cbf589174f112353e59",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-32.json": "9f86e354f7f132dcca0845aca0f87fb97993c6904a564776655db5ca7a5f758a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-33.json": "89bcb28b5817662548c44c9ca62d33ee900c4e9a06b25a9e1bf7b75e86dff970",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-34.json": "3d0123c524edf9e564e1088cf20caa886ec00b4d4206e8f30f6547369c1b8e0e",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-35.json": "87eb5aa38096e174371d7de2aea1c25783dccb0e26ed3044c0d8fbc3ae87fc72",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-36.json": "4fdbbbaaf12abfbf34f6a73ea393e7cc4efc5512841ff6c17bdd7770a7edcb27",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-37.json": "983434b1a70f067d8018686dd28c8b43921ed8f70ebf397351527259e2692c0f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-38.json": "a2e47a43dda15c9dded220f3c5b316c1210aa44bc6e646e68c6c549cb3200381",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-39.json": "185a7311442fe710836174a7e6d3a3a49fd4aa80a89850e6ec05e1f35a903f9f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-4.json": "d817f06cf1c5b32343e089e029b8c52259b92921a489dec655e2be4c9388e1c8",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-40.json": "0617a561366b9bbbf2a624fded4b76b9e907ff40d9d21a8cfaeffaec63de47fd",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-5.json": "749896921755fca06c46c208be42888d7c0e5abd3eb2efd5f3218a3784f4b8ca",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-6.json": "3635c27ac6c4416e1878914e40d4f04c8bc4a45d00db75bf97b37cbf65773b06",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-7.json": "b310a16d734663403a3e4678b3d5fbd963c6f33357f3ae4500a4cf2f6ccc4ed8",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-8.json": "a1646537cc3239ca68c9d707cb9385bbd8699d8e28f38533f51bbeb86f47c2e5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/request-9.json": "0889efca1b8eade7ff76370d0146e7ab12620c65ab126c5e055675263a2441aa",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/invocation.json": "94d90cfff5cbd9f9c80be4a62477f60fd8be2c9ed66713c3fd7458aa37cfa35d",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/receipt.json": "834f59420cd997ed5a77e15aa7af626ac375ce4eedb087a006d1ab963480dd74",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-0.json": "088e38c8610d296030b54e7753e7cdbf83630efb935b85d5ef5fe951d79ba574",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-1.json": "b7e2403bbbcacbc03ac416c3becd4fb47c614c7f72bebbefb9ea2f03b0893de0",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-10.json": "a1b6fae61cf516c00576c3d2bdda17a475ad795813dc18e79c51aa3c79d1a3fe",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-11.json": "507fc89c4f3c995c7cfe5b3f00c56007b7191bb564a9fe71e9e1152c9d4647fc",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-12.json": "a7d50386e9accff7b02bc6f7e0cd2b67b31222f7b5b6c0e7ffa773e19d95a3bd",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-13.json": "ad3d99d329829d751bbf06f160f648b569acdb02b77fa3dd4c4dd3bbcd21691d",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-14.json": "0026cf0223148dea8d07854632540472363ff6325f1b633e2aa779e5b5a20f3f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-15.json": "c93f8981bcda481c837ea0934d8ce7a2cc81f0650fb934f559d5f115d5ac9a23",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-16.json": "45822b5c885936dc4fcbf5514da0ecdd7257288450169747462a87798d06748d",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-17.json": "07c3ba63d0c5921167647bc350233b6680b2d8fd2935a9ff1e788bb0b1335223",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-18.json": "1b6b0506cd230d0d1b881d5babf245191a9fe1f570665c17747a0e325b544e64",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-19.json": "3176a57de7050fa5674d08de420a133708571f5462fe4edcaba702d52e497551",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-2.json": "f994bad1c842aec2e97c7e5f831876fbbebf806d2d2314fa4daf994dbce4428f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-20.json": "959d3a06288a5a29dc76d148fe1c017c54f37d5770200430f8409bdb8c9d4581",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-21.json": "1fe044bfce7e2373a1243f226d53fa73de9ccbe4eca6b294f87ba3fb22e0b396",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-22.json": "59acb5e8c26091caa8d1dfe9f662a7426d654a2304f5b4e03bcfc3df23e69af1",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-23.json": "543d62fbc74e8a0351ee3a08ce9847979164571070f6e41f71b4c47591f2b99c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-24.json": "8fd2f3dfc94c64fabec6aa1c30339a90aa00a37e9c993a5e978348b45317ef39",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-25.json": "4a3b1d3f06db37c4a311b3a48867820dc20d35fca5d94b825c9e3b5f4eb07d45",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-3.json": "fbef532227785f8889b32934cda5a7968ac61dfef85c9a260d69307cd62eb7e0",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-4.json": "89846d0d931b835366b1046645dc864d557cfbd23128fe1991fd3d41196ef97f",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-5.json": "ee37e15f2d0c238057325621b8ad061f1624f8035a433e726d0cf82c9fe4f450",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-6.json": "51fd43ddde11917aa88a9a114238b742ec87eff9fced5aefa6ebd200dc371890",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-7.json": "2f2312fce9e33667a8c427cd3d784b3f3c6676ce8c5dd099e0247670a0de9adb",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-8.json": "f6872d093304e780535e56626485c22faccf8e92bbb73dce47623988c3ccab4c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/request-9.json": "0277372426b1941c1fb00cb19b8ad46cfe3b5cba99eabd4a5622004381a1c7b8",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/invocation.json": "79ac69958900ca35e03d75a52005fba36ddfd975c9351c7833f6f6ce0144f8f6",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/receipt.json": "dc56875b59c186e7f586c6cc217aac911ce326d5128a68272862e6a708f5d1e5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/request-0.json": "9a10b7ebd3ae326835e50955a177f1a4a7cb4c864b87d5df827ecb4fdf0a6294",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/request-1.json": "3f2cd7ce2a955af04d85c9c92fc4bb3c559377df53fee3f3354e208835d22799",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/request-2.json": "1b082858acc903fb5b05977bf0ff5b451c44fc90a2a3fe1c3889212b6d4bff5a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/request-3.json": "05778d82c4fe6743c8a1ad4edb2b67be8bddc41d3ef2c8730e9987a411199e98",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/request-4.json": "153fd21cb19f153ad3b7ce5d74dfa9189baf91eceea0861fff839318d51ac027",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/request-5.json": "f19b2fc23580cbb9c5f9513d50d118aa2b03fb23d8ec71d3bf023b42e3f61b06",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/request-6.json": "202d709ce678dd194f7f4892ff81c7f6b5cb57b8cd74c426950313bc84f44409",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/request-7.json": "6e090fd23ffc6bda79b0d12795f20a8996b86603956fe56c995f91b03f7c626b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/invocation.json": "fbe796a56b92fcd48cac326f77e18cbef1ca0ca0650aa46dbb2f841af147f92b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/receipt.json": "7ca78524eecc0a104ffeac5aeb190f183352938485c9af1180454a3b11d51db0",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/request-0.json": "6c3f22a2c74c917d7d7d86f4fcec24f06b764c431c194928998e85958c76833b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/request-1.json": "01b12535f0c6888bb04d3c850c4fcb7282f711a57b4ee80d783cd10e3d2da47a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/request-2.json": "25d04ba6fddfff20776c223ba8a434942cbbe6845e50f1ea96c7f33ad7a3f8ca",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/request-3.json": "1e59074ba720a6f8aa4d7ae64f1fc75126a3419481bda1f0fc2434fc9a7ea90c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/request-4.json": "ba3b3849d459b1b3f98106b83aed81d4565d2d60bdb1359cf0a954aa9b220aeb",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/request-5.json": "fd43ff5b2e040f26c987030c35a03f298b8a29d6294161549c402c945d33cf02",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/request-6.json": "491880c48d3b10debaf678a6a96e4d5a098734ecddad1cb09763128e9b0a8ced",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/invocation.json": "d6c24df10bfb6d3421e5ee99d230622ee748bffb2022e6d75697c1654632055a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/receipt.json": "e25eed2bda68d63e28bbc5c9fe3358a1adb659564a195d36c77c06b43a359768",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/request-0.json": "e63908ef7d9116a685af8521b2f5a460632a88ea6e2761efeb7b3f36542ad8e3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/request-1.json": "eb78e75668adb268e5602e21ddb38079acd7994cb7397939879f73c70f352ca5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/request-2.json": "aa57338f47a224efac4e449a2ab70848ab3159fa4401a91acd5d7558f68896dc",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/request-3.json": "0a1bee25a511309c1412081b53eae7033f8e46395ffdb2f24cac6d7df9ce7040",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/request-4.json": "2943d812bcedae27c44dc91befe84e2f8d0e2994c5590354d06a2c005634df8a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/request-5.json": "7fee2fd3c7385fdcca1746c916103b9371694a1b105dac13129e8bcb8174bdaf",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/request-6.json": "5f2100e0bb185770b72d17cfca01a35a30b368c27fbcf49699f227232d1a1362",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/invocation.json": "699b732a05fc89911adc7d5691f40758d63f3bdb5e598301c5a28f2c27990609",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/receipt.json": "58bdde466c14a3628c58cf2c043a79eef16b3b4eefe02c23d63a8e59df22757d"
+  },
+  "is_full_eight_attempt_audit": false,
+  "private_verdict_files_at_capture": 0
+}

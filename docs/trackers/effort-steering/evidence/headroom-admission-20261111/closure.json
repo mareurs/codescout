@@ -1,0 +1,12 @@
+{
+  "schema": "effort-headroom-admission-closure-v1",
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/headroom-admission-20261111/evidence.tar.gz",
+  "archive_bytes": 4951515050,
+  "archive_sha256": "2d115e5e6092fe3dcceaa146a82ef567b608e6876ecbbecee86ecb01e8be7948",
+  "payload_entries": 162973,
+  "regular_payloads": 141270,
+  "all_selected_payloads_reopened": true,
+  "all_selected_originals_unchanged": true,
+  "live_paid_outputs_excluded": true,
+  "is_paid_outcome": false
+}

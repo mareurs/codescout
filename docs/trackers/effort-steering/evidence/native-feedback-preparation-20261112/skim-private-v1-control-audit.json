@@ -1,0 +1,65 @@
+{
+  "all_three_controls_met": true,
+  "canonical_input_entries": 553,
+  "canonical_input_roots": [
+    "tests"
+  ],
+  "config_sha256": "30ab12c2c5e57f3375abb6bfc1fe0e262105e86aeaaf949087c0c1b1ce1d1b10",
+  "controls": [
+    {
+      "canonical_input_entries_verified": 553,
+      "expected": 588,
+      "kind": "test_failure",
+      "missing": 0,
+      "name": "baseline",
+      "not_passing": 1,
+      "owned_cleanup": true,
+      "pass": false,
+      "runtime_complete": true,
+      "valid": true,
+      "verdict_path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/private-preparation-v1/control-baseline/evaluation/verdict.json",
+      "verdict_sha256": "6e806c999210fb3ea2f686f6653f4fbde577fd0d38bbb0f383f5c715bd1c22c1",
+      "wall_s": 60.515098201009096
+    },
+    {
+      "canonical_input_entries_verified": 553,
+      "expected": 588,
+      "kind": "pass",
+      "missing": 0,
+      "name": "reference",
+      "not_passing": 0,
+      "owned_cleanup": true,
+      "pass": true,
+      "runtime_complete": true,
+      "valid": true,
+      "verdict_path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/private-preparation-v1/control-reference/evaluation/verdict.json",
+      "verdict_sha256": "ffdd6653720b8c014e20f8c6e569301790c6b683ac227510938f97c40d09b14c",
+      "wall_s": 64.27285857999232
+    },
+    {
+      "canonical_input_entries_verified": 553,
+      "expected": 588,
+      "kind": "pass",
+      "missing": 0,
+      "name": "reference-repeat",
+      "not_passing": 0,
+      "owned_cleanup": true,
+      "pass": true,
+      "runtime_complete": true,
+      "valid": true,
+      "verdict_path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/skim-rs__skim-1044/private-preparation-v1/control-reference-repeat/evaluation/verdict.json",
+      "verdict_sha256": "ffdd6653720b8c014e20f8c6e569301790c6b683ac227510938f97c40d09b14c",
+      "wall_s": 65.02372453499993
+    }
+  ],
+  "frozen_package_files_reopened": 99,
+  "image": "sha256:338d956b2271853f58da5b29ed6be9acebd1d2a1fdb4f020135446e890185876",
+  "paid_ready": false,
+  "private_bindings_reopened": 18,
+  "producer_sha256": "0687317543169ca64aba361c5967ca941bdde62ed32ae32c87e5da88239a0447",
+  "provider_calls": 0,
+  "registration_sha256": "983781b40d8c073917ebcb627cd09ec547090e9ea36e6a7e73c6687a813cbf4f",
+  "schema": "original-label-private-controls-audit-v1",
+  "scope": "One-task independent acceptance/input/runtime controls only; final public/native/all-cohort/gate/review remain pending.",
+  "task": "skim-rs__skim-1044"
+}

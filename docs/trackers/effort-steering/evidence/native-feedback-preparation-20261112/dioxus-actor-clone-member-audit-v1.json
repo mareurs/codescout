@@ -1,0 +1,18 @@
+{
+  "actor": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/DioxusLabs__dioxus-5384/common-preparation-v1/actor-clone-member-transfer-v1/actor",
+  "additional_index_calls": 0,
+  "client_model_calls": 0,
+  "clone_helper_sha256": "b0c85e386298690c985aad38d2ae11844ca4239aabe2bb3cb1074e678d6e535a",
+  "exact_inventory_parity": true,
+  "index_update_required": false,
+  "member_metadata_reopened": 114,
+  "member_namespaces": 114,
+  "onboarding_author_calls": 0,
+  "paid_ready": false,
+  "schema": "dioxus-actor-member-transfer-v1",
+  "scope": "Actual local actor clone and all114 member metadata byte/mode/link inventory parity; no MCP/CLI/repair efficacy.",
+  "source_and_template_unchanged": true,
+  "source_sha256": "52d34ed35793e99bab0826373b617d471168f77d20174e2f36bbc98d11055836",
+  "template_sha256": "04d41f7d628ee79ebade4a7b5f34f726488bb43c4c572492d74f36806c0d45a1",
+  "tracked_template_metadata_paths": []
+}

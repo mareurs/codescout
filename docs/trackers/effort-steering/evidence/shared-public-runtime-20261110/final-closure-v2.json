@@ -1,0 +1,58 @@
+{
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/shared-public-runtime-20261110/final-verification-v2.tar.gz",
+  "archive_sha256": "2dd6bb3d81257f768aa2cfd9e3c978e3bc97608f095678ef84e441cd5efbb5da",
+  "archive_bytes": 254750617,
+  "reopened_regular_payload_members": 7859,
+  "reopened_symlinks": 0,
+  "reopened_directories": 1147,
+  "regular_payload_bytes": 394831669,
+  "manifest_member": "manifest.json",
+  "all_payloads_reopened_and_source_bytes_rechecked": true,
+  "owned_source_files": 18,
+  "head": "d7236b843a231b63f39e191ee6d85b27619d75a3",
+  "missing_background_streams": [
+    {
+      "handle": "f0",
+      "original_path": "/tmp/codescout-bg-VC0NLo.log",
+      "record_preserved": true,
+      "scope": "original raw stream not present at its registered path; no equivalent-copy absence asserted"
+    },
+    {
+      "handle": "f1",
+      "original_path": "/tmp/codescout-bg-GfC7pk.log",
+      "record_preserved": true,
+      "scope": "original raw stream not present at its registered path; no equivalent-copy absence asserted"
+    },
+    {
+      "handle": "f2",
+      "original_path": "/tmp/codescout-bg-v0WIjZ.log",
+      "record_preserved": true,
+      "scope": "original raw stream not present at its registered path; no equivalent-copy absence asserted"
+    },
+    {
+      "handle": "f3",
+      "original_path": "/tmp/codescout-bg-VNdcYU.log",
+      "record_preserved": true,
+      "scope": "original raw stream not present at its registered path; no equivalent-copy absence asserted"
+    },
+    {
+      "handle": "f6",
+      "original_path": "/tmp/codescout-bg-XmF18W.log",
+      "record_preserved": true,
+      "scope": "original raw stream not present at its registered path; no equivalent-copy absence asserted"
+    },
+    {
+      "handle": "f8",
+      "original_path": "/tmp/codescout-bg-FHBk4x.log",
+      "record_preserved": true,
+      "scope": "original raw stream not present at its registered path; no equivalent-copy absence asserted"
+    },
+    {
+      "handle": "f9",
+      "original_path": "/tmp/codescout-bg-oM12uH.log",
+      "record_preserved": true,
+      "scope": "original raw stream not present at its registered path; no equivalent-copy absence asserted"
+    }
+  ],
+  "paid_ready": false
+}

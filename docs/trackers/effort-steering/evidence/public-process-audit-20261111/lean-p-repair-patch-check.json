@@ -1,0 +1,8 @@
+{
+  "captured_at": "2026-11-11T16:49:53.748211+00:00",
+  "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/candidate.patch",
+  "copy": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/public-process-audit-20261111/lean-p-repair.patch",
+  "sha256": "ac25caba45c2a0e318a7203dd521a6770639925126d7986369477a91a260f4b7",
+  "source_bytes_unchanged": true,
+  "scope": "Immutable public candidate diff, including the actual new unit-test body; no private verdict read or mutation executed"
+}

@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "purpose": "Preserve source-bound grader correction verification; not a model evaluation",
+  "integration_base": "d124e7738f78b220f64080b5ea2c612daa5631ba",
+  "preservation_commit": "1d48e48d58402e77d5af9a7ab5c4bee224bb0949",
+  "peer_test_commit": "2794bb196752d7a0bc8e5efcf80d3cc6245f1dc5",
+  "source_patch_sha256": "60f17f1048ebba7dde33cddff751342b50a57b4fc75fb5431304f6bcd81506d4",
+  "capsule": {
+    "name": "verification.tar.gz",
+    "bytes": 1344570,
+    "sha256": "f6dab3ea168585abaa5d7e4a18c69824bb293946a25e1440b9130b8a6e85a5c4"
+  },
+  "members": {
+    "baseline.log": {
+      "bytes": 387,
+      "sha256": "7df370d2949b532cecefcc068be0548671f36abfa84cdb59b3f6ed2d5a77d4b0"
+    },
+    "commit-message.txt": {
+      "bytes": 972,
+      "sha256": "2849e25e7ac0dc6761ad250123d0157087edaaf040f69ecb84a46e60edb90a65"
+    },
+    "gate.log": {
+      "bytes": 1904601,
+      "sha256": "add301ff6be76975e3388ce6fea63dbd44ee78aeed980d7f08eaa0a7481e4f41"
+    },
+    "integrated-staged.patch": {
+      "bytes": 51621,
+      "sha256": "60f17f1048ebba7dde33cddff751342b50a57b4fc75fb5431304f6bcd81506d4"
+    },
+    "integration-candidate.patch": {
+      "bytes": 50761,
+      "sha256": "fbb7f609fe68cdcab7aecc0c791d0c01874ca5bea4e8b2b4c7303a00656342cd"
+    },
+    "integration-gate.log": {
+      "bytes": 1946536,
+      "sha256": "4acdffd9c2dbb8dfcd11d74459e780bcc39ce05d2e8c1ce9ebbfda92ef2dbe3a"
+    },
+    "integration-source-before.json": {
+      "bytes": 859027,
+      "sha256": "1f6bbd65dc7f72adc01aada7917264ec75de2fa1701143c16ae19930b953e1e5"
+    },
+    "integration-targeted.log": {
+      "bytes": 381,
+      "sha256": "f30cfa399d1431f47a5993f15c84aa019995e9d70e139402501878652525efce"
+    },
+    "integration-verification-receipt.json": {
+      "bytes": 861100,
+      "sha256": "0e1a8a81c062228d086448593b0e531ce039056b64a85fd5cfd6111436fc12b2"
+    },
+    "peer-2794bb196-tests.patch": {
+      "bytes": 3493,
+      "sha256": "8365abf01f591407212660bf334a6e8f80d2818ccf2648370be80eed29eadd3c"
+    },
+    "source-before-commit.json": {
+      "bytes": 1251,
+      "sha256": "722464370c39942a9e8346823f8501511229905b1286880985d9fb79e58168e8"
+    },
+    "targeted.log": {
+      "bytes": 377,
+      "sha256": "b362560d75528d7b74d5b985b0b7d49db9795314f3eb047106d1af1b1f54bf78"
+    },
+    "verification-receipt.json": {
+      "bytes": 4230,
+      "sha256": "cdfa661115258303b9fb8ba2c00c3517c5143765599cbfc800e4ee882a162629"
+    }
+  },
+  "limits": [
+    "The integration source was gated before these evidence-only data files were added.",
+    "No new model run, private regrade or historical outcome rewrite.",
+    "The tested integration base is explicit; a later main tree is not qualified by this receipt."
+  ]
+}

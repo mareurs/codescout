@@ -1,0 +1,688 @@
+{
+  "Automattic__harper-1737": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "Automattic__harper-2962": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "Automattic__harper-2973": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "Automattic__harper-2976": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "Automattic__harper-3112": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "Automattic__harper-3150": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "DioxusLabs__dioxus-5384": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "DioxusLabs__dioxus-5464": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "GitoxideLabs__gitoxide-2476": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "J-F-Liu__lopdf-481": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "NVIDIA__OpenShell-695": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "NVIDIA__OpenShell-810": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "NVlabs__cuda-oxide-381": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "ProvableHQ__leo-28814": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "ProvableHQ__leo-29265": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "ProvableHQ__leo-29291": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "ProvableHQ__leo-29334": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "SeaQL__sea-query-920": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "agentgateway__agentgateway-2313": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "agentgateway__agentgateway-2452": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__arrow-rs-7783": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__arrow-rs-7841": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__arrow-rs-8214": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__datafusion-16610": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__datafusion-16726": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__datafusion-17081": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__datafusion-17130": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__datafusion-17139": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__datafusion-17201": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__datafusion-17233": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "apache__datafusion-21121": {
+    "eligible": false,
+    "reason": "cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public metadata adapter incompatibility"
+  },
+  "apache__datafusion-23201": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "astral-sh__uv-18976": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "biomejs__biome-10767": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "biomejs__biome-10773": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "biomejs__biome-10827": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "biomejs__biome-10853": {
+    "eligible": false,
+    "evidence": "biome-10853-manifest-verbose.json",
+    "reason": "33141223122 compressed layer bytes exceeds frozen12000000000 acquisition limit; no image pulled"
+  },
+  "biomejs__biome-10867": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "biomejs__biome-10875": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "biomejs__biome-10886": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "biomejs__biome-9995": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "casey__just-2785": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "casey__just-2835": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "casey__just-3200": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "clap-rs__clap-6068": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "delta-io__delta-rs-4333": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "delta-io__delta-rs-4357": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "delta-io__delta-rs-4358": {
+    "eligible": false,
+    "reason": "cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public metadata adapter incompatibility"
+  },
+  "eza-community__eza-1664": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gfx-rs__wgpu-9298": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gfx-rs__wgpu-9367": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gitbutlerapp__gitbutler-14920": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-4708": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-4854": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-5482": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-5493": {
+    "eligible": false,
+    "evidence": "gleam-5493-cargo-metadata-v1/public-cargo-metadata/failure.json",
+    "reason": "cargo-v1 rejects image-declared writable volume /testbed/mnt_tmp; public command did not start"
+  },
+  "gleam-lang__gleam-5510": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-5532": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-5938": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-5958": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-5971": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-5982": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-6021": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-6030": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "gleam-lang__gleam-6049": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-390": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-392": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-412": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-413": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-414": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-421": {
+    "eligible": true,
+    "reason": "public source, pinned compatible runtime, native readiness and complete ordinary public suite execution qualified; public failures retained, not a pass-count selection"
+  },
+  "h4ckf0r0day__obscura-426": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-440": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-447": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-477": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "h4ckf0r0day__obscura-479": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "immunant__c2rust-1322": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "jj-vcs__jj-6728": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "jj-vcs__jj-7269": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "jtroo__kanata-1681": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "lakehq__sail-2284": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "lakehq__sail-2292": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "lalrpop__lalrpop-1076": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "lance-format__lance-7545": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "lance-format__lance-7565": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "lance-format__lance-7618": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "lance-format__lance-7835": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "lance-format__lance-8049": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "linebender__vello-1100": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "linebender__vello-1132": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "matrix-org__matrix-rust-sdk-5395": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "matrix-org__matrix-rust-sdk-5522": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "modelcontextprotocol__rust-sdk-1005": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "modelcontextprotocol__rust-sdk-1021": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "modelcontextprotocol__rust-sdk-1044": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "modelcontextprotocol__rust-sdk-760": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "modelcontextprotocol__rust-sdk-996": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "napi-rs__napi-rs-2784": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "nearai__ironclaw-6706": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "nearai__ironclaw-6712": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "nearai__ironclaw-6724": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "noir-lang__noir-9250": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "noir-lang__noir-9323": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "notify-rs__notify-700": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "notify-rs__notify-701": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "oxc-project__oxc-20810": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "oxc-project__oxc-20857": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "oxc-project__oxc-20976": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "oxc-project__oxc-21092": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "oxc-project__oxc-21163": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "oxc-project__oxc-21330": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "oxc-project__oxc-21546": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "pnpm__pnpm-12879": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "pnpm__pnpm-12888": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "pnpm__pnpm-12935": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "pola-rs__polars-28484": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "prefix-dev__pixi-5850": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "prefix-dev__pixi-6335": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "prefix-dev__pixi-6457": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "prefix-dev__pixi-6500": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "prefix-dev__pixi-6518": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "prefix-dev__pixi-6529": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "redis-rs__redis-rs-1721": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "ruffle-rs__ruffle-23197": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "ruffle-rs__ruffle-23330": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__mdBook-2796": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__mdBook-2806": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-20180": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-20185": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-20381": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22046": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22061": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22751": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22789": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22804": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22822": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22827": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22849": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-analyzer-22855": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-bindgen-3382": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-bindgen-3390": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rust-bindgen-3391": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "rust-lang__rustfmt-6840": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "servo__servo-46309": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "sinelaw__fresh-1642": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "skim-rs__skim-1044": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "slatedb__slatedb-1461": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "tursodatabase__turso-8102": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "uutils__coreutils-8149": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "uutils__coreutils-8197": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "uutils__coreutils-8310": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "uutils__coreutils-8336": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "uutils__coreutils-8433": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "uutils__coreutils-8447": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "uutils__coreutils-8528": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "vercel__turborepo-12516": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "vercel__turborepo-12599": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "wasm-bindgen__wasm-bindgen-5051": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "web-infra-dev__rspack-14794": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "web-infra-dev__rspack-14803": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "web-infra-dev__rspack-14806": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "web-infra-dev__rspack-14882": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "yvgude__lean-ctx-1164": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "yvgude__lean-ctx-1168": {
+    "eligible": true,
+    "reason": "public source, pinned compatible runtime, native readiness and complete ordinary public suite execution qualified; public failures retained, not a pass-count selection"
+  },
+  "yvgude__lean-ctx-1179": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "yvgude__lean-ctx-1180": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "yvgude__lean-ctx-632": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "yvgude__lean-ctx-816": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "yvgude__lean-ctx-927": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "yvgude__lean-ctx-969": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  },
+  "zeroclaw-labs__zeroclaw-5165": {
+    "eligible": null,
+    "reason": "public source/runtime/onboarding qualification pending"
+  }
+}

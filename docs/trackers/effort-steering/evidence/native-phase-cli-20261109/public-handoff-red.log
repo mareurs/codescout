@@ -1,0 +1,85 @@
+test_R_has_no_protocol_submission_and_cannot_export_one (test_public_artifacts.PublicArtifactTests.test_R_has_no_protocol_submission_and_cannot_export_one) ... FAIL
+test_actual_observations_and_actor_clauses_survive_json_transfer (test_public_artifacts.PublicArtifactTests.test_actual_observations_and_actor_clauses_survive_json_transfer) ... FAIL
+test_binary_logs_are_exact_and_explicitly_encoded (test_public_artifacts.PublicArtifactTests.test_binary_logs_are_exact_and_explicitly_encoded) ... FAIL
+test_duplicate_receipt_ids_and_source_drift_are_rejected (test_public_artifacts.PublicArtifactTests.test_duplicate_receipt_ids_and_source_drift_are_rejected) ... FAIL
+test_host_private_fields_and_cost_are_not_exported (test_public_artifacts.PublicArtifactTests.test_host_private_fields_and_cost_are_not_exported) ... FAIL
+test_tampered_stream_or_receipt_is_rejected (test_public_artifacts.PublicArtifactTests.test_tampered_stream_or_receipt_is_rejected) ... FAIL
+test_wrong_run_and_phase_are_rejected (test_public_artifacts.PublicArtifactTests.test_wrong_run_and_phase_are_rejected) ... FAIL
+test_frozen_public_handoff_contains_observations_not_lifecycle_metadata (test_adapter.AdapterTests.test_frozen_public_handoff_contains_observations_not_lifecycle_metadata) ... ERROR
+
+======================================================================
+ERROR: test_frozen_public_handoff_contains_observations_not_lifecycle_metadata (test_adapter.AdapterTests.test_frozen_public_handoff_contains_observations_not_lifecycle_metadata)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_adapter.py", line 95, in test_frozen_public_handoff_contains_observations_not_lifecycle_metadata
+    artifact = result["public_artifact"]
+               ~~~~~~^^^^^^^^^^^^^^^^^^^
+KeyError: 'public_artifact'
+
+======================================================================
+FAIL: test_R_has_no_protocol_submission_and_cannot_export_one (test_public_artifacts.PublicArtifactTests.test_R_has_no_protocol_submission_and_cannot_export_one)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_public_artifacts.py", line 18, in setUp
+    self.assertIsNotNone(handoff, "public evidence handoff is not implemented")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : public evidence handoff is not implemented
+
+======================================================================
+FAIL: test_actual_observations_and_actor_clauses_survive_json_transfer (test_public_artifacts.PublicArtifactTests.test_actual_observations_and_actor_clauses_survive_json_transfer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_public_artifacts.py", line 18, in setUp
+    self.assertIsNotNone(handoff, "public evidence handoff is not implemented")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : public evidence handoff is not implemented
+
+======================================================================
+FAIL: test_binary_logs_are_exact_and_explicitly_encoded (test_public_artifacts.PublicArtifactTests.test_binary_logs_are_exact_and_explicitly_encoded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_public_artifacts.py", line 18, in setUp
+    self.assertIsNotNone(handoff, "public evidence handoff is not implemented")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : public evidence handoff is not implemented
+
+======================================================================
+FAIL: test_duplicate_receipt_ids_and_source_drift_are_rejected (test_public_artifacts.PublicArtifactTests.test_duplicate_receipt_ids_and_source_drift_are_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_public_artifacts.py", line 18, in setUp
+    self.assertIsNotNone(handoff, "public evidence handoff is not implemented")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : public evidence handoff is not implemented
+
+======================================================================
+FAIL: test_host_private_fields_and_cost_are_not_exported (test_public_artifacts.PublicArtifactTests.test_host_private_fields_and_cost_are_not_exported)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_public_artifacts.py", line 18, in setUp
+    self.assertIsNotNone(handoff, "public evidence handoff is not implemented")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : public evidence handoff is not implemented
+
+======================================================================
+FAIL: test_tampered_stream_or_receipt_is_rejected (test_public_artifacts.PublicArtifactTests.test_tampered_stream_or_receipt_is_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_public_artifacts.py", line 18, in setUp
+    self.assertIsNotNone(handoff, "public evidence handoff is not implemented")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : public evidence handoff is not implemented
+
+======================================================================
+FAIL: test_wrong_run_and_phase_are_rejected (test_public_artifacts.PublicArtifactTests.test_wrong_run_and_phase_are_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_public_artifacts.py", line 18, in setUp
+    self.assertIsNotNone(handoff, "public evidence handoff is not implemented")
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : public evidence handoff is not implemented
+
+----------------------------------------------------------------------
+Ran 8 tests in 5.167s
+
+FAILED (failures=7, errors=1)

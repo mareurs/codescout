@@ -1,0 +1,12 @@
+{
+  "scope": "Literal document paths extracted from the 107 original note bodies; not every id or private cache reference",
+  "paths": [
+    "docs/superpowers/plans/2026-10-07-effort-steering-quality-test.md",
+    "docs/trackers/effort-steering-second-phase.md"
+  ],
+  "search_roots": [
+    "/home/marius/.codex/worktrees/615e/codescout",
+    "/home/marius/.codex/worktrees/ca35/codescout"
+  ],
+  "interpretation": "Not found by this bounded search; not a claim that the documents never existed."
+}

@@ -1,0 +1,32 @@
+{
+  "schema": "native-feedback-public-selection-v1",
+  "seed": "native-public-feedback-20261111-v1",
+  "order_seed": 20261111,
+  "task_count": 4,
+  "unit": "four canonical task IDs from distinct casefolded repositories",
+  "rank": "ascending SHA256(seed+NUL+canonical_id),then canonical_id",
+  "exposure": "original36IDs plus closed pair plus all listed peer-pool/study IDs;only explicit aliases",
+  "selection": "qualify in frozen order;after a repository qualifies,skip later tasks of that repository;stop after four repositories",
+  "ordinary_argv": [
+    "cargo",
+    "check",
+    "--offline",
+    "--workspace"
+  ],
+  "broader_argv": [
+    "cargo",
+    "check",
+    "--offline",
+    "--workspace",
+    "--all-targets"
+  ],
+  "workspace": "root Cargo.toml first;otherwise a unique top-level Rust workspace/package from public manifests/config;ambiguous is unsupported",
+  "preparation": "source-only onboarding once per project/version;independent physical actor copies;actual CLI/global/project/Recon/tool/language/LSP/index delivery qualification",
+  "acceptance_controls": "independent fixed private baseline-negative/reference/reference-repeat;both public compile scopes on baseline and reference",
+  "preparation_exclusions": "retain each unsupported source/ambiguous workspace/failed baseline or reference/oracle reason before actors",
+  "infrastructure": "disk/RAM/noexec/transport/toolchain crash/common harness failure stops preparation;do not resample around it",
+  "dependency_bootstrap": "one source-bound generic preparation step may fetch locked dependencies/install declared toolchain before frozen offline checks;record exact commands/images/resource results",
+  "forbidden": "selection by model success/failure,issue-keyword difficulty,gold implementation shape,or private repair feedback",
+  "if_unavailable": "no shrink/replacement after paid outcomes;report if four repositories cannot qualify and explicitly version any population revision",
+  "paid_admission": false
+}

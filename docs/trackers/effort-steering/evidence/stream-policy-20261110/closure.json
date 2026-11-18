@@ -1,0 +1,9 @@
+{
+  "archive": "verification.tar.gz",
+  "archive_bytes": 27429295,
+  "sha256": "548cd0cc94537ae06dfc76ca5f87ea66f575f57ed7ac46753a145b146da8bf2a",
+  "regular_members": 5409,
+  "all_members_reopened_byte_equal": true,
+  "original_files_unchanged_during_preservation": true,
+  "scope": "Task3 instrument/policy correction, no paid/all-arm/efficacy admission"
+}

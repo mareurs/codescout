@@ -1,0 +1,12 @@
+{
+  "actual_native_source_bindings": 59,
+  "all_payloads_reopened": true,
+  "archive": "evidence.tar.gz",
+  "bytes": 301383544,
+  "paid_ready": false,
+  "payload_entries": 16999,
+  "regular_files": 14809,
+  "scope": "Two intentionally incomplete P investigate controls, source snapshots and local unit evidence; no efficacy or full admission.",
+  "sha256": "07fca37fce6f3afc7976d1d3d8defc4c07996bb7cc0e26722b6fd7081dfe8860",
+  "symlinks": 0
+}

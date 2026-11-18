@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "stage": "registration before any evaluator call",
+  "exception": "AssertionError: sha(original patch) != sha(review reconstructed patch)",
+  "original_patch_bytes": 4873,
+  "review_patch_bytes": 4399,
+  "experimental_model_calls": 0,
+  "native_controls_started": 0,
+  "preserved_helper": "/tmp/qualify-lean-full-superset-20261110.failed-v1.py",
+  "superseded_by": "../full-lean-superset-controls-v2-20261110/registration.json"
+}

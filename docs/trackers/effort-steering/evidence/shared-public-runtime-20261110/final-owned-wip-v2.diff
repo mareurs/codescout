@@ -1,0 +1,966 @@
+diff --git a/tools/agent_lifecycle/external.py b/tools/agent_lifecycle/external.py
+index bed258a51..36beeca03 100644
+--- a/tools/agent_lifecycle/external.py
++++ b/tools/agent_lifecycle/external.py
+@@ -1,5 +1,6 @@
+ """Prepared external task entry; admission and shared-knowledge assembly stay controller-owned."""
+ import hashlib
++import importlib.util
+ import json
+ import pathlib
+ import re
+@@ -13,6 +14,13 @@ import transport
+ import workflow
+ from artifacts import capture_patch
+ from core import amount
++from embedding_profile import validate_embedding_profile
++
++# Load the standalone shared contract without changing global module search order.
++_fixture_spec = importlib.util.spec_from_file_location(
++    "lifecycle_public_fixture", pathlib.Path(__file__).resolve().parents[1] / "effort_protocol/public_fixture.py")
++public_fixture = importlib.util.module_from_spec(_fixture_spec)
++_fixture_spec.loader.exec_module(public_fixture)
+ 
+ 
+ def save(path, value):
+@@ -34,6 +42,9 @@ def validate_prepared(out, effort, allowance, cli_cap):
+         raise ValueError("external CLI context must avoid host-home ancestry")
+     required = {str(out / "mcp-native-argv.json"), cfg["global_rules"], cfg["cli"],
+                 str(actor / "CLAUDE.md")}
++    if "public_fixture" in cfg:
++        public_fixture.read_fixture_bundle(cfg["public_fixture"])
++        required |= {str(path) for path in pathlib.Path(cfg["public_fixture"]["root"]).iterdir()}
+     if not required <= cfg["files"].keys():
+         raise ValueError("external required input hashes missing")
+     for name, expected in cfg["files"].items():
+@@ -47,8 +58,13 @@ def validate_prepared(out, effort, allowance, cli_cap):
+     valued = {"--pull", "--network", "--user", "--cpus", "--memory", "--memory-swap",
+               "--pids-limit", "--name", "--label", "--tmpfs", "--mount", "--workdir",
+               "--entrypoint", "-e", "--env"}
++    if "public_fixture" in cfg:
++        valued.add("--add-host")
+     repeated = {"--mount", "-e", "--env"}
+     flags = {"--init", "-i"}
++    if "embedding_profile" in cfg:
++        valued |= {"--cap-drop", "--security-opt"}
++        flags.add("--read-only")
+     args = native[2:-4]
+     index = 0
+     while index < len(args):
+@@ -70,12 +86,19 @@ def validate_prepared(out, effort, allowance, cli_cap):
+             raise ValueError("duplicate external native option " + option)
+         options.setdefault(option, []).append(value)
+         index += 1
+-    for option, expected in [("--network", "none"), ("--user", "1000:1000"),
++    if "public_fixture" in cfg:
++        public_fixture.validate_fixture_options(options, cfg["public_fixture"], "native", actor=actor)
++    if "embedding_profile" in cfg:
++        validate_embedding_profile(cfg["embedding_profile"], options, cfg["image"])
++    else:
++        if options.get("--network") != ["none"]:
++            raise ValueError("unexpected external native option --network")
++        if options.get("--tmpfs") != ["/tmp:rw,exec,size=4g,uid=1000,gid=1000"]:
++            raise ValueError("unexpected external native temporary storage")
++    for option, expected in [("--user", "1000:1000"),
+                              ("--cpus", "4"), ("--memory", "32g"), ("--pids-limit", "4096")]:
+         if options.get(option) != [expected]:
+             raise ValueError("unexpected external native option " + option)
+-    if options.get("--tmpfs") != ["/tmp:rw,exec,size=4g,uid=1000,gid=1000"]:
+-        raise ValueError("unexpected external native temporary storage")
+     if options.get("--memory-swap", ["32g"]) != ["32g"]:
+         raise ValueError("unexpected external native swap limit")
+     if options.get("--pull", ["never"]) != ["never"]:
+diff --git a/tools/agent_lifecycle/test_external_entry.py b/tools/agent_lifecycle/test_external_entry.py
+index 0142cc6bb..4d57d0448 100644
+--- a/tools/agent_lifecycle/test_external_entry.py
++++ b/tools/agent_lifecycle/test_external_entry.py
+@@ -33,6 +33,43 @@ class ExternalEntryTests(unittest.TestCase):
+         (root / "prepared.json").write_text(json.dumps(cfg))
+         return cfg
+ 
++    def test_public_fixture_native_options_and_hashes_are_admitted_exactly(self):
++        with tempfile.TemporaryDirectory(prefix="external-public-fixture-") as directory:
++            root = pathlib.Path(directory)
++            cfg = self.fixture(root)
++            descriptor = external.public_fixture.create_fixture_bundle(
++                root / "fixture",
++                {"version": "public-http-fixture-v1", "hostname": "fixture.sample.test",
++                 "port": 18081, "routes": {"/": {
++                     "status": 200, "content_type": "text/plain", "body": "public"}}})
++            cfg["public_fixture"] = descriptor
++            argv_path = root / "mcp-native-argv.json"
++            argv = json.loads(argv_path.read_text())
++            argv[-4:-4] = external.public_fixture.fixture_docker_options(descriptor, "native")
++            argv_path.write_text(json.dumps(argv))
++            for path in (argv_path, *pathlib.Path(descriptor["root"]).iterdir()):
++                cfg["files"][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            external.validate_prepared(root, "low", "1.00", None)
++            original = argv_path.read_text()
++            for before, after in (
++                    ("fixture.sample.test:127.0.0.1", "example.com:127.0.0.1"),
++                    ("/bench/public-fixture/launch-native", "/bench/bin/codescout"),
++                    (f"type=bind,src={descriptor['root']},dst=/bench/public-fixture,readonly",
++                     f"type=bind,src={descriptor['root']},dst=/bench/public-fixture")):
++                bad = [after if x == before else x for x in json.loads(original)]
++                argv_path.write_text(json.dumps(bad))
++                cfg["files"][str(argv_path)] = hashlib.sha256(argv_path.read_bytes()).hexdigest()
++                (root / "prepared.json").write_text(json.dumps(cfg))
++                with self.subTest(before=before), self.assertRaises(ValueError):
++                    external.validate_prepared(root, "low", "1.00", None)
++            argv_path.write_text(original)
++            cfg["files"][str(argv_path)] = hashlib.sha256(argv_path.read_bytes()).hexdigest()
++            del cfg["files"][str(pathlib.Path(descriptor["root"]) / "spec.json")]
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            with self.assertRaises(ValueError):
++                external.validate_prepared(root, "low", "1.00", None)
++
+     def test_drift_and_empty_checks_block_before_credentials_or_start_marker(self):
+         self.assertIsNotNone(external, "external entry is not implemented")
+         class Forbidden:
+@@ -175,3 +212,58 @@ class ExternalEntryTests(unittest.TestCase):
+                 external.launch(root, effort="low", allowance="8",
+                                 scripted_plan=[], supervisor=supervisor)
+             self.assertEqual(observed, ["checked"])
++
++    def test_registered_embedding_profile_preserves_fail_before_launch_boundary(self):
++        import embedding_profile
++        from test_embedding_profile import EmbeddingProfileTests
++        fixture = EmbeddingProfileTests("test_only_registered_owned_internal_relay_graph_is_admitted")
++        fixture.setUp()
++        self.addCleanup(fixture.temp.cleanup)
++        with tempfile.TemporaryDirectory(prefix="external-relay-profile-") as td:
++            root = pathlib.Path(td)
++            cfg = self.fixture(root)
++            native_path = root / "mcp-native-argv.json"
++            native = json.loads(native_path.read_text())
++            native[native.index("--network") + 1] = fixture.net
++            native[native.index("--tmpfs") + 1] = "/tmp:rw,exec,size=16g,uid=1000,gid=1000"
++            native[2:2] = ["--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
++            native_path.write_text(json.dumps(native))
++            cfg["files"][str(native_path)] = hashlib.sha256(native_path.read_bytes()).hexdigest()
++            cfg["embedding_profile"] = fixture.profile
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            with patch.object(embedding_profile, "_inspect", side_effect=lambda kind, identity: fixture.rows[identity]):
++                try:
++                    actual = external.validate_prepared(root, "low", "0.50", None)
++                except ValueError as exc:
++                    self.fail("registered live relay should validate: " + str(exc))
++                self.assertEqual(actual[0]["embedding_profile"]["network_id"], fixture.net)
++                fixture.rows[fixture.net]["Internal"] = False
++                with self.assertRaises(ValueError):
++                    external.launch(root, effort="low", allowance="0.50", token_path="/must-not-read-token")
++            self.assertFalse((root / "started.json").exists())
++
++    def test_unregistered_embedding_declaration_cannot_hide_behind_default_network_none(self):
++        with tempfile.TemporaryDirectory(prefix="external-bad-relay-profile-") as td:
++            root = pathlib.Path(td)
++            cfg = self.fixture(root)
++            cfg["embedding_profile"] = {"version": "arbitrary-network"}
++            (root / "prepared.json").write_text(json.dumps(cfg))
++            with self.assertRaises(ValueError):
++                external.validate_prepared(root, "low", "0.50", None)
++
++    def test_profile_only_flags_cannot_be_admitted_on_default_network_none(self):
++        for extra in [
++            ["--read-only"], ["--cap-drop", "ALL"], ["--security-opt", "no-new-privileges"],
++        ]:
++            with self.subTest(extra=extra), tempfile.TemporaryDirectory(prefix="external-default-option-") as td:
++                root = pathlib.Path(td)
++                cfg = self.fixture(root)
++                path = root / "mcp-native-argv.json"
++                argv = json.loads(path.read_text())
++                argv[2:2] = extra
++                path.write_text(json.dumps(argv))
++                cfg["files"][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
++                (root / "prepared.json").write_text(json.dumps(cfg))
++                with self.assertRaises(ValueError):
++                    external.validate_prepared(root, "low", "0.50", None)
++                self.assertFalse((root / "started.json").exists())
+diff --git a/tools/effort_protocol/adapter.py b/tools/effort_protocol/adapter.py
+index f30e611d6..33de2d759 100644
+--- a/tools/effort_protocol/adapter.py
++++ b/tools/effort_protocol/adapter.py
+@@ -17,7 +17,8 @@ from policy import ProtocolViolation, validate_transition
+ from receipts import ReceiptViolation, input_digest, publish_exclusive
+ from readiness import ReadinessViolation, validate_readiness
+ from public_artifacts import build_public_artifact
+-from execution_profiles import ProfileViolation, get_profile, profile_digest
++from execution_profiles import (ProfileViolation, get_profile, profile_digest,
++                                validate_command_budget, validate_profile_fixture)
+ 
+ _ACTIVE = {"investigate": "repair", "repair": "challenge", "challenge": "closed"}
+ _PUBLIC_KEYS = {"issue", "project_rules", "global_rules", "onboarding", "prior_public_artifacts"}
+@@ -83,7 +84,15 @@ def _admit_backend(request, executor):
+     if not isinstance(proof, dict) or set(proof) != {"expected", "wire"}:
+         raise PhaseInvalid("native preparation evidence missing")
+     try:
+-        ready = validate_readiness(proof["expected"], proof["wire"])
++        source_reader = getattr(executor, "readiness_source", None)
++        source = source_reader() if callable(source_reader) else None
++        ready = validate_readiness(proof["expected"], proof["wire"], source=source)
++        fixture = validate_profile_fixture(request.get("execution_profile", "fixture-v1"),
++                                           request.get("public_fixture"))
++        native_fixture = ready["binding"].get("public_fixture_sha256")
++        command_fixture = fixture["fingerprint"] if fixture is not None else None
++        if native_fixture != command_fixture:
++            raise ValueError("native and command public fixture bindings differ")
+         binder = getattr(executor, "bind_readiness", None)
+         if not callable(binder):
+             raise ValueError("native backend cannot bind concrete preparation")
+@@ -104,10 +113,17 @@ def run_phase(request: dict, executor) -> dict:
+     execution_profile = request.get("execution_profile", "fixture-v1")
+     try:
+         get_profile(execution_profile)
++        validate_profile_fixture(execution_profile, request.get("public_fixture"))
+     except ProfileViolation as exc:
+         raise PhaseInvalid("unregistered execution profile") from exc
+     if arm not in ("P", "R"):
+         raise PhaseInvalid("phase adapter supports protocol and continuation-control arms only")
++    if arm == "P" or "command_timeout_s" in request or "max_log_bytes" in request:
++        try:
++            validate_command_budget(execution_profile, request.get("command_timeout_s"),
++                                    request.get("max_log_bytes"))
++        except ProfileViolation as exc:
++            raise PhaseInvalid(str(exc)) from exc
+     budget = _amount(request.get("phase_budget_usd"))
+     if budget is None or budget <= 0:
+         raise PhaseInvalid("invalid phase budget")
+@@ -194,7 +210,8 @@ def run_phase(request: dict, executor) -> dict:
+                     "test_files": command.get("test_files"), "production_files": production,
+                     "image": request["image"], "kind": kind,
+                     "timeout_s": request["command_timeout_s"],
+-                    "max_log_bytes": request["max_log_bytes"], "execution_profile": execution_profile}
++                    "max_log_bytes": request["max_log_bytes"], "execution_profile": execution_profile,
++                    **({"public_fixture": request["public_fixture"]} if "public_fixture" in request else {})}
+                 try:
+                     return execute_observation(execution_request, candidate, out / "commands")
+                 except ExecutionInvalid as exc:
+@@ -232,7 +249,8 @@ def run_phase(request: dict, executor) -> dict:
+             public_artifact = build_public_artifact(
+                 run_id=state["run_id"], phase=phase, arm=arm, source=candidate,
+                 commands=out / "commands", receipt_ids=list(facts),
+-                submission=submission if arm == "P" else None)
++                submission=submission if arm == "P" else None,
++                expected_profile=execution_profile, expected_fixture=request.get("public_fixture"))
+             publish_exclusive(out / "public-artifact.json", public_artifact)
+             outcome["public_artifact"] = public_artifact
+         except ProtocolViolation as exc:
+diff --git a/tools/effort_protocol/execution_profiles.py b/tools/effort_protocol/execution_profiles.py
+index 7a7db62ea..17d2dfbdc 100644
+--- a/tools/effort_protocol/execution_profiles.py
++++ b/tools/effort_protocol/execution_profiles.py
+@@ -4,6 +4,8 @@ import hashlib
+ import json
+ from pathlib import Path
+ 
++from public_fixture import VERSION, DESTINATION, read_fixture_bundle, validate_fixture_runtime
++
+ _PROFILES = {
+     "fixture-v1": {
+         "memory_bytes": 256 * 1024 * 1024, "nano_cpus": 1_000_000_000, "pids": 128,
+@@ -17,6 +19,14 @@ _PROFILES = {
+                 "CARGO_TARGET_DIR": "/build/target", "CARGO_NET_OFFLINE": "true"}}}
+ 
+ 
++# A new identity binds the cold-command budget; old dictionaries stay frozen.
++_PROFILES["cargo-v2"] = {**copy.deepcopy(_PROFILES["cargo-v1"]), "max_command_timeout_s": 900}
++_PROFILES["fixture-public-v1"] = {**copy.deepcopy(_PROFILES["fixture-v1"]),
++                                  "public_fixture": "public-fixture-bundle-v1"}
++_PROFILES["cargo-public-v1"] = {**copy.deepcopy(_PROFILES["cargo-v2"]),
++                                "public_fixture": "public-fixture-bundle-v1"}
++
++
+ class ProfileViolation(ValueError):
+     """Registered execution contract is absent or not observed at runtime."""
+ 
+@@ -30,6 +40,27 @@ def get_profile(name):
+     _require(isinstance(name, str) and name in _PROFILES, "unsupported execution profile")
+     return copy.deepcopy(_PROFILES[name])
+ 
++def validate_profile_fixture(name, descriptor):
++    profile = get_profile(name)
++    if profile.get("public_fixture") is None:
++        _require(descriptor is None, "old execution profile cannot accept a public fixture")
++        return None
++    _require(profile["public_fixture"] == VERSION and descriptor is not None,
++             "public execution profile requires an expected fixture")
++    try:
++        read_fixture_bundle(descriptor)
++    except (ValueError, OSError, TypeError) as exc:
++        raise ProfileViolation("invalid expected public fixture: " + str(exc)) from exc
++    return descriptor
++
++def validate_command_budget(name, timeout_s, max_log_bytes):
++    """Validate host command bounds before any actor or container effect."""
++    maximum = get_profile(name).get("max_command_timeout_s", 300)
++    _require(type(max_log_bytes) is int and 0 < max_log_bytes <= 64 * 1024 * 1024,
++             "unsupported_log_limit")
++    _require(type(timeout_s) in (int, float) and 0 < timeout_s <= maximum,
++             "unsupported_timeout")
++
+ 
+ def profile_digest(name):
+     return hashlib.sha256(json.dumps(get_profile(name), sort_keys=True,
+@@ -47,7 +78,8 @@ def runtime_contract(name):
+             "Environment": profile["env"], **({"BuildMounts": extra} if extra else {})}
+ 
+ 
+-def validate_runtime_profile(row, source, build, name):
++def validate_runtime_profile(row, source, build, name, *, public_fixture=None):
++    validate_profile_fixture(name, public_fixture)
+     contract = runtime_contract(name)
+     host = row.get("HostConfig", {})
+     config = row.get("Config", {})
+@@ -61,7 +93,7 @@ def validate_runtime_profile(row, source, build, name):
+     binds = {m["Destination"]: m for m in mounts if m.get("Type") == "bind"}
+     source_mount = contract["SourceMount"]
+     extra = contract.get("BuildMounts", {})
+-    _require(set(binds) == {source_mount, "/build", *extra}, "container profile unexpected host mount")
++    _require(set(binds) == {source_mount, "/build", *extra, *({DESTINATION} if public_fixture else set())}, "container profile unexpected host mount")
+     _require(binds[source_mount].get("Source") == str(Path(source))
+              and binds[source_mount].get("RW") is False
+              and binds["/build"].get("Source") == str(Path(build))
+@@ -75,4 +107,9 @@ def validate_runtime_profile(row, source, build, name):
+     environment = dict(item.split("=", 1) for item in config.get("Env", []))
+     _require(all(environment.get(key) == value for key, value in contract["Environment"].items()),
+              "container profile environment mismatch")
++    if public_fixture is not None:
++        try:
++            contract["PublicFixture"] = validate_fixture_runtime(row, public_fixture, "command")
++        except (ValueError, OSError, TypeError) as exc:
++            raise ProfileViolation("public fixture runtime mismatch: " + str(exc)) from exc
+     return contract
+diff --git a/tools/effort_protocol/executor.py b/tools/effort_protocol/executor.py
+index ea8814656..d46f0931f 100644
+--- a/tools/effort_protocol/executor.py
++++ b/tools/effort_protocol/executor.py
+@@ -15,7 +15,9 @@ import uuid
+ from pathlib import Path
+ 
+ from receipts import ReceiptViolation, input_digest, test_input_digest, publish_exclusive, verify_receipt
+-from execution_profiles import ProfileViolation, get_profile, profile_digest, validate_runtime_profile
++from execution_profiles import (ProfileViolation, get_profile, profile_digest,
++                                validate_runtime_profile, validate_command_budget, validate_profile_fixture)
++from public_fixture import fixture_docker_options, verify_fixture_startup
+ 
+ LABEL = "codescout.effort-protocol"
+ MEMORY = 256 * 1024 * 1024
+@@ -48,9 +50,9 @@ def _owned(row, cid, name, image):
+              and row.get("Config", {}).get("Labels", {}).get(LABEL) == name,
+              "container_ownership_mismatch")
+ 
+-def _profile(row, source, build, name="fixture-v1"):
++def _profile(row, source, build, name="fixture-v1", public_fixture=None):
+     try:
+-        return validate_runtime_profile(row, source, build, name)
++        return validate_runtime_profile(row, source, build, name, public_fixture=public_fixture)
+     except ProfileViolation as exc:
+         raise ExecutionInvalid("container_profile_mismatch: " + str(exc)) from exc
+ 
+@@ -90,6 +92,7 @@ def _request(request, source, out):
+     profile_name = request.get("execution_profile", "fixture-v1")
+     try:
+         get_profile(profile_name)
++        validate_profile_fixture(profile_name, request.get("public_fixture"))
+     except ProfileViolation as exc:
+         raise ExecutionInvalid("unsupported_execution_profile") from exc
+     image = request.get("image")
+@@ -103,8 +106,10 @@ def _request(request, source, out):
+              and ".." not in Path(cwd).parts, "unsupported_working_directory")
+     _require(request.get("kind") in ("observation", "verification"), "unsupported_evidence_kind")
+     limit, timeout = request.get("max_log_bytes"), request.get("timeout_s")
+-    _require(type(limit) is int and 0 < limit <= 64 * 1024 * 1024, "unsupported_log_limit")
+-    _require(type(timeout) in (int, float) and 0 < timeout <= 300, "unsupported_timeout")
++    try:
++        validate_command_budget(profile_name, timeout, limit)
++    except ProfileViolation as exc:
++        raise ExecutionInvalid(str(exc)) from exc
+     _require(source.is_dir() and not source.is_symlink(), "unsupported_source_root")
+     _require(not out.is_relative_to(source) and not source.is_relative_to(out),
+              "host_output_overlaps_source")
+@@ -125,6 +130,7 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+     source, out = Path(source).absolute(), Path(out).absolute()
+     image, argv, limit, timeout, profile_name = _request(request, source, out)
+     settings = get_profile(profile_name)
++    fixture = request.get("public_fixture")
+     original_digest = input_digest(source)
+     directory = out / request["id"]
+     directory.mkdir(parents=True, exist_ok=False)
+@@ -166,7 +172,8 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+                   "--workdir", settings["source_mount"] + "/" + request["cwd"],
+                   *[part for key, value in sorted(settings["env"].items())
+                     for part in ("--env", key + "=" + value)],
+-                  "--entrypoint", argv[0], image, *argv[1:]]
++                  *(fixture_docker_options(fixture, "command") if fixture else ["--entrypoint", argv[0]]),
++                image, *(argv if fixture else argv[1:])]
+         created = _docker(create)
+         _require(created.returncode == 0 and re.fullmatch(r"[0-9a-f]{64}", created.stdout.strip()),
+                  "container_creation_failed")
+@@ -174,7 +181,7 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+         before = _inspect(cid)
+         _owned(before, cid, name, image)
+         publish_exclusive(directory / "container-before.json", before)
+-        profile = _profile(before, snapshot, build, profile_name)
++        profile = _profile(before, snapshot, build, profile_name, fixture)
+         samples.append({"at": "before_start", "state": before["State"]})
+         deadline = time.monotonic() + timeout
+         with (directory / "stdout").open("xb") as stdout, (directory / "stderr").open("xb") as stderr:
+@@ -193,7 +200,7 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+         final = _inspect(cid)
+         _owned(final, cid, name, image)
+         publish_exclusive(directory / "container-after.json", final)
+-        _profile(final, snapshot, build, profile_name)
++        _profile(final, snapshot, build, profile_name, fixture)
+         _require(not final["State"]["Running"] and final["State"]["Status"] == "exited",
+                  "command_not_closed")
+         _require(not final["State"]["OOMKilled"], "oom")
+@@ -202,6 +209,11 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+                  "log_limit")
+         code = final["State"]["ExitCode"]
+         _require(type(code) is int and attach.returncode in (0, code), "attach_transport_failure")
++        if fixture is not None:
++            try:
++                verify_fixture_startup((directory / "stderr").read_bytes(), fixture)
++            except (ValueError, OSError, TypeError) as exc:
++                raise ExecutionInvalid("public_fixture_startup_failed") from exc
+         after = input_digest(snapshot)
+         _require(after == frozen, "frozen_source_changed")
+         publish_exclusive(directory / "samples.json", samples)
+@@ -245,4 +257,5 @@ def execute_observation(request: dict, source: Path, out: Path) -> dict:
+         raise ExecutionInvalid(reason)
+     record["cleanup_complete"] = clean
+     publish_exclusive(directory / "receipt.json", record)
+-    return verify_receipt({"id": request["id"]}, out, snapshot, expected_profile=profile_name)
++    return verify_receipt({"id": request["id"]}, out, snapshot, expected_profile=profile_name,
++                          expected_fixture=fixture)
+diff --git a/tools/effort_protocol/native_executor.py b/tools/effort_protocol/native_executor.py
+index 0a339992b..b1c60708b 100644
+--- a/tools/effort_protocol/native_executor.py
++++ b/tools/effort_protocol/native_executor.py
+@@ -12,6 +12,7 @@ from pathlib import Path
+ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agent_lifecycle"))
+ import external
+ from receipts import input_digest, publish_exclusive
++import public_fixture
+ 
+ # Explicit runner roles, identical to lifecycle artifact exclusions plus Git and
+ # the phase submission. These are not inferred from extensions or file contents.
+@@ -81,7 +82,14 @@ def _options(argv, key):
+ def _runtime_binding(prepared):
+     cfg = json.loads((prepared / "prepared.json").read_text())
+     argv = json.loads((prepared / "mcp-native-argv.json").read_text())
+-    if _options(argv, "--entrypoint") != ["/bench/bin/codescout"]:
++    descriptor = cfg.get("public_fixture")
++    fixture_binding = {}
++    if "public_fixture" in cfg:
++        public_fixture.validate_fixture_options(
++            {key: _options(argv, key) for key in ("--mount", "--entrypoint", "--add-host")},
++            descriptor, "native", actor=Path(cfg["actor"]))
++        fixture_binding["public_fixture_sha256"] = descriptor["fingerprint"]
++    elif _options(argv, "--entrypoint") != ["/bench/bin/codescout"]:
+         raise ValueError("native executable binding requires the registered entrypoint")
+     mounts = [dict(part.split("=", 1) if "=" in part else (part, True)
+                    for part in mount.split(",")) for mount in _options(argv, "--mount")]
+@@ -95,7 +103,8 @@ def _runtime_binding(prepared):
+     binding = {"image": cfg["image"],
+         "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+         "source_snapshot_sha256": _public_digest(Path(cfg["actor"])),
+-        "knowledge_sha256": input_digest(Path(cfg["actor"]) / ".codescout", knowledge)}
++        "knowledge_sha256": input_digest(Path(cfg["actor"]) / ".codescout", knowledge),
++        **fixture_binding}
+     return binding, executable
+ 
+ def _capture(actor, destination):
+@@ -129,6 +138,12 @@ class NativeExecutor:
+         self.allow_paid = allow_paid
+         self.token_path = token_path
+ 
++    def readiness_source(self):
++        """Return the concrete actor source for source-bound readiness checks."""
++        cfg = json.loads((self.prepared / "prepared.json").read_text())
++        return Path(cfg["actor"])
++
++
+     def bind_readiness(self, binding):
+         measured, executable = _runtime_binding(self.prepared)
+         if measured != binding:
+@@ -137,10 +152,17 @@ class NativeExecutor:
+         path = self.prepared / "prepared.json"
+         cfg = json.loads(path.read_text())
+         cfg.setdefault("files", {})[str(executable)] = measured["executable_sha256"]
++        if "public_fixture" in cfg:
++            public_fixture.read_fixture_bundle(cfg["public_fixture"])
++            for item in Path(cfg["public_fixture"]["root"]).iterdir():
++                cfg["files"][str(item)] = hashlib.sha256(item.read_bytes()).hexdigest()
+         path.write_text(json.dumps(cfg, indent=2) + "\n")
+         return measured
+ 
+     def execute(self, request):
++        arm = request.get("arm", "P")
++        if arm not in ("L", "R", "P", "X"):
++            raise ValueError("unsupported native arm")
+         if self.scripted_plan is None and not self.allow_paid:
+             raise ValueError("paid native execution has not been admitted")
+         if getattr(self, "_bound_readiness", None) != _runtime_binding(self.prepared)[0]:
+@@ -153,11 +175,11 @@ class NativeExecutor:
+             raise ValueError("native phase cannot restart an existing attempt")
+         cfg["prompt"] = request["prompt"] + "\n\nFrozen public packet:\n" + json.dumps(
+             request["public_packet"], sort_keys=True)
+-        if request.get("arm", "P") == "P":
++        if arm == "P":
+             cfg["prompt"] += "\n\nWrite submission.json in the project root."
+         cfg["max_continuations"] = 2
+         cfg_path.write_text(json.dumps(cfg, indent=2) + "\n")
+-        kwargs = {"effort": "low", "allowance": request["allowance_usd"],
++        kwargs = {"effort": "xhigh" if arm == "X" else "low", "allowance": request["allowance_usd"],
+                   "cli_cap": request["allowance_usd"], "scripted_plan": self.scripted_plan}
+         if self.token_path is not None:
+             kwargs["token_path"] = self.token_path
+diff --git a/tools/effort_protocol/public_artifacts.py b/tools/effort_protocol/public_artifacts.py
+index 4d769a7a8..a03eba9bb 100644
+--- a/tools/effort_protocol/public_artifacts.py
++++ b/tools/effort_protocol/public_artifacts.py
+@@ -20,7 +20,8 @@ def _stream(raw):
+         return {"encoding": "base64", "content": base64.b64encode(raw).decode("ascii")}
+ 
+ 
+-def build_public_artifact(*, run_id, phase, arm, source, commands, receipt_ids, submission):
++def build_public_artifact(*, run_id, phase, arm, source, commands, receipt_ids, submission,
++                          expected_profile=None, expected_fixture=None):
+     """Export actor-authored public claims and independently verified observations.
+ 
+     No lifecycle outcome, controller path, provider charge or private grading field
+@@ -38,7 +39,8 @@ def build_public_artifact(*, run_id, phase, arm, source, commands, receipt_ids,
+     source_digest = input_digest(source)
+     observations = []
+     for rid in receipt_ids:
+-        facts = verify_receipt({"id": rid}, commands, source)
++        facts = verify_receipt({"id": rid}, commands, source, expected_profile=expected_profile,
++                               expected_fixture=expected_fixture)
+         _require(facts["run_id"] == run_id and facts["phase"] == phase,
+                  "handoff execution identity mismatch")
+         directory = commands / rid
+@@ -50,7 +52,8 @@ def build_public_artifact(*, run_id, phase, arm, source, commands, receipt_ids,
+             _require(hashlib.sha256(raw).hexdigest() == record[name + "_sha256"],
+                      "handoff execution log drift")
+             streams[name] = _stream(raw)
+-        _require(verify_receipt({"id": rid}, commands, source) == facts
++        _require(verify_receipt({"id": rid}, commands, source, expected_profile=expected_profile,
++                                expected_fixture=expected_fixture) == facts
+                  and _host_file(directory, "receipt.json", 1024 * 1024) == frozen_record,
+                  "handoff receipt changed during export")
+         observations.append({"id": rid, "source_digest": facts["source_digest"],
+diff --git a/tools/effort_protocol/readiness.py b/tools/effort_protocol/readiness.py
+index b34bccd8d..9b31d9ecb 100644
+--- a/tools/effort_protocol/readiness.py
++++ b/tools/effort_protocol/readiness.py
+@@ -125,7 +125,8 @@ def validate_readiness(expected, wire, *, source=None):
+     _require(isinstance(expected.get("project_root"), str) and expected["project_root"].startswith("/"),
+              "registered absolute project root required")
+     binding = expected.get("binding")
+-    _require(isinstance(binding, dict) and set(binding) == BINDING_FIELDS, "registered runtime binding incomplete")
++    _require(isinstance(binding, dict) and set(binding) in (
++        BINDING_FIELDS, BINDING_FIELDS | {"public_fixture_sha256"}), "registered runtime binding incomplete")
+     for key, value in binding.items():
+         pattern = r"sha256:[0-9a-f]{64}" if key == "image" else r"[0-9a-f]{64}"
+         _require(isinstance(value, str) and re.fullmatch(pattern, value), "invalid runtime binding " + key)
+diff --git a/tools/effort_protocol/receipts.py b/tools/effort_protocol/receipts.py
+index 9b8ad1d57..d05268714 100644
+--- a/tools/effort_protocol/receipts.py
++++ b/tools/effort_protocol/receipts.py
+@@ -9,9 +9,10 @@ import json
+ import os
+ import re
+ import stat
+-from pathlib import Path
++from pathlib import Path, PurePosixPath
+ 
+ from execution_profiles import ProfileViolation, get_profile, profile_digest, validate_runtime_profile
++from public_fixture import verify_fixture_startup
+ 
+ class ReceiptViolation(ValueError):
+     """Evidence is absent, altered, unsupported or from the wrong boundary."""
+@@ -76,19 +77,20 @@ def _host_file(directory, name, limit):
+     _require(path.stat().st_size <= limit, "host evidence exceeds complete-capture limit")
+     return path.read_bytes()
+ 
+-def _verified_profile(record, directory, expected_profile):
++def _verified_profile(record, directory, expected_profile, expected_fixture):
+     # Old frozen fixture receipts predate this contract. New raw runtime records
+     # prevent a fresh receipt from silently falling back after binding deletion.
+     fresh = any(key in record for key in ("execution_profile", "execution_profile_sha256")) or any(
+         (directory / ("container-" + stage + ".json")).exists() for stage in ("before", "after"))
+-    if not fresh and expected_profile is None:
++    if not fresh and expected_profile is None and expected_fixture is None:
+         return {}
+     name = record.get("execution_profile")
+     try:
+-        get_profile(name)
++        settings = get_profile(name)
+         _require(expected_profile is None or name == expected_profile, "execution profile mismatch")
+         _require(record.get("execution_profile_sha256") == profile_digest(name),
+                  "execution profile binding mismatch")
++        expected_cwd = str(PurePosixPath(settings["source_mount"]) / record["cwd"])
+         for stage in ("before", "after"):
+             raw = _host_file(directory, "container-" + stage + ".json", 1024 * 1024)
+             _require(record.get("runtime_" + stage + "_sha256") == _hash(raw),
+@@ -98,15 +100,37 @@ def _verified_profile(record, directory, expected_profile):
+                      and row.get("Image") == record.get("image")
+                      and row.get("Config", {}).get("Labels", {}).get("codescout.effort-protocol")
+                          == record.get("container_name"), "execution profile worker identity mismatch")
+-            observed = validate_runtime_profile(row, directory / "input", directory / "build", name)
++            config = row.get("Config", {})
++            expected_entry = "/bench/public-fixture/launch-command" if expected_fixture else record["argv"][0]
++            expected_argv = record["argv"] if expected_fixture else record["argv"][1:]
++            _require(config.get("Entrypoint") == [expected_entry]
++                     and (config.get("Cmd") or []) == expected_argv
++                     and config.get("WorkingDir") == expected_cwd,
++                     "execution command runtime binding mismatch")
++            observed = validate_runtime_profile(row, directory / "input", directory / "build", name,
++                                                public_fixture=expected_fixture)
+             _require(record.get("container_profile") == observed, "execution profile observation mismatch")
+-    except (ProfileViolation, OSError, TypeError, KeyError) as exc:
++            if stage == "after":
++                state = row.get("State")
++                _require(isinstance(state, dict) and state.get("Status") == "exited"
++                         and state.get("Running") is False and state.get("OOMKilled") is False
++                         and not state.get("Error"), "execution final state is not valid and closed")
++                code = state.get("ExitCode")
++                attach = record.get("docker_attach_exit")
++                _require(type(code) is int and type(record.get("exit_code")) is int
++                         and code == record["exit_code"]
++                         and record.get("final_container_state") == state,
++                         "execution final exit binding mismatch")
++                _require(type(attach) is int and attach in (0, code),
++                         "execution attach transport binding mismatch")
++    except (ValueError, OSError, TypeError, KeyError) as exc:
+         raise ReceiptViolation("invalid execution profile: " + str(exc)) from exc
+-    return {"execution_profile": name, "execution_profile_sha256": profile_digest(name)}
++    return {"execution_profile": name, "execution_profile_sha256": profile_digest(name),
++            **({"public_fixture": observed["PublicFixture"]} if expected_fixture else {})}
+ 
+ 
+ def verify_receipt(receipt: dict, execution_root: Path, source_snapshot: Path,
+-                   *, expected_profile=None) -> dict:
++                   *, expected_profile=None, expected_fixture=None) -> dict:
+     """Resolve an opaque receipt ID in host storage; never trust actor-supplied facts."""
+     _require(isinstance(receipt, dict) and set(receipt) == {"id"},
+              "actor may reference an ID only")
+@@ -145,11 +169,16 @@ def verify_receipt(receipt: dict, execution_root: Path, source_snapshot: Path,
+              "missing generated input inventory")
+     _require(record["build_after"] == input_digest(directory / "build"),
+              "generated execution input drift")
+-    profile = _verified_profile(record, directory, expected_profile)
++    profile = _verified_profile(record, directory, expected_profile, expected_fixture)
+     streams = {}
+     for name in ("stdout", "stderr"):
+         streams[name] = _host_file(directory, name, 64 * 1024 * 1024)
+         _require(record.get(name + "_sha256") == _hash(streams[name]), "execution log drift")
++    if expected_fixture is not None:
++        try:
++            verify_fixture_startup(streams["stderr"], expected_fixture)
++        except (ValueError, OSError, TypeError) as exc:
++            raise ReceiptViolation("public fixture startup invalid") from exc
+     if record["kind"] == "observation":
+         _require(bool(streams["stdout"] or streams["stderr"]), "empty observation")
+     _require(isinstance(record.get("run_id"), str) and bool(record["run_id"])
+diff --git a/tools/effort_protocol/test_adapter.py b/tools/effort_protocol/test_adapter.py
+index 1233c082f..b8e148575 100644
+--- a/tools/effort_protocol/test_adapter.py
++++ b/tools/effort_protocol/test_adapter.py
+@@ -16,6 +16,7 @@ except ModuleNotFoundError as exc:
+         raise
+     adapter = None
+ import receipts
++import public_fixture
+ 
+ IMAGE = os.environ.get("EFFORT_PROTOCOL_TEST_IMAGE")
+ 
+@@ -137,6 +138,31 @@ class AdapterTests(unittest.TestCase):
+             record = json.loads((self.root / "phase/commands" / rid / "receipt.json").read_text())
+             self.assertEqual(record["execution_profile"], "fixture-v1")
+ 
++    def test_missing_public_fixture_stops_before_actor_spend(self):
++        self.request["execution_profile"] = "fixture-public-v1"
++        with self.assertRaises(adapter.PhaseInvalid):
++            self.run_phase()
++        self.assertEqual(self.actor.calls, [])
++        self.assertFalse((self.root / "phase").exists())
++
++    def test_actor_descriptor_cannot_override_trusted_fixture_or_break_public_export(self):
++        descriptor = public_fixture.create_fixture_bundle(
++            self.root / "public-fixture",
++            {"version": "public-http-fixture-v1", "hostname": "fixture.sample.test",
++             "port": 18081, "routes": {"/": {
++                 "status": 200, "content_type": "text/plain", "body": "public"}}})
++        self.request.update(execution_profile="fixture-public-v1", public_fixture=descriptor)
++        for command in self.submission["commands"]:
++            command["public_fixture"] = {"root": "/actor-controlled"}
++        result = self.run_phase()
++        self.assertEqual(result["state"]["phase"], "repair")
++        self.assertEqual(len(result["public_artifact"]["observations"]), 2)
++        for rid, facts in result["receipts"].items():
++            self.assertEqual(facts["public_fixture"]["fingerprint"], descriptor["fingerprint"])
++            record = json.loads((self.root / "phase/commands" / rid / "receipt.json").read_text())
++            self.assertEqual(record["container_profile"]["PublicFixture"]["fingerprint"],
++                             descriptor["fingerprint"])
++
+     def test_host_cargo_profile_is_forwarded_to_actual_evidence_commands(self):
+         self.request["execution_profile"] = "cargo-v1"
+         for command in self.submission["commands"]:
+@@ -149,6 +175,35 @@ class AdapterTests(unittest.TestCase):
+             actual = json.loads((self.root / "phase/commands" / rid / "container-before.json").read_text())
+             self.assertEqual(actual["HostConfig"]["Memory"], 8 * 1024**3)
+ 
++    def test_host_long_budget_cannot_be_overridden_by_actor_commands(self):
++        from unittest.mock import patch
++        self.request["execution_profile"] = "cargo-v2"
++        self.request["command_timeout_s"] = 900
++        for command in self.submission["commands"]:
++            command["argv"][2] = "/testbed/probe.py"
++            command["timeout_s"] = 999999
++            command["max_log_bytes"] = 0
++            command["execution_profile"] = "fixture-v1"
++        forwarded = []
++        actual = adapter.execute_observation
++        def observe(request, *args, **kwargs):
++            forwarded.append(copy.deepcopy(request))
++            return actual(request, *args, **kwargs)
++        with patch.object(adapter, "execute_observation", side_effect=observe):
++            result = self.run_phase()
++        self.assertEqual(result["state"]["phase"], "repair")
++        self.assertEqual(result["cost"]["known_usd"], "0.12")
++        self.assertEqual(len(forwarded), 2)
++        for request in forwarded:
++            self.assertEqual(request["timeout_s"], 900)
++            self.assertEqual(request["max_log_bytes"], 1048576)
++            self.assertEqual(request["execution_profile"], "cargo-v2")
++        for rid in result["receipts"]:
++            record = json.loads((self.root / "phase/commands" / rid / "receipt.json").read_text())
++            self.assertEqual(record["execution_profile"], "cargo-v2")
++            self.assertEqual(record["execution_profile_sha256"],
++                             adapter.profile_digest("cargo-v2"))
++
+     def test_phase_zero_production_drift_keeps_cost_and_is_incomplete(self):
+         (self.source / "program.txt").write_text("unauthorized phase-zero repair")
+         result = self.run_phase()
+diff --git a/tools/effort_protocol/test_native_executor.py b/tools/effort_protocol/test_native_executor.py
+index 6015a97fb..2369297fb 100644
+--- a/tools/effort_protocol/test_native_executor.py
++++ b/tools/effort_protocol/test_native_executor.py
+@@ -6,6 +6,7 @@ import tempfile
+ import unittest
+ from pathlib import Path
+ from unittest.mock import patch
++import public_fixture
+ 
+ sys.path.insert(0, str(Path(__file__).parent))
+ try:
+@@ -77,6 +78,150 @@ class NativeExecutorTests(unittest.TestCase):
+         (self.actor / ".git/metadata").write_text("tool role, never source")
+         self.executor.bind_readiness(self.binding)
+ 
++    def add_fixture(self, root=None):
++        descriptor = public_fixture.create_fixture_bundle(
++            root or self.root / "public-fixture",
++            {"version": "public-http-fixture-v1", "hostname": "fixture.sample.test",
++             "port": 18081, "routes": {"/": {
++                 "status": 200, "content_type": "text/plain", "body": "public"}}})
++        path = self.prepared / "prepared.json"
++        cfg = json.loads(path.read_text())
++        cfg["public_fixture"] = descriptor
++        path.write_text(json.dumps(cfg))
++        argv_path = self.prepared / "mcp-native-argv.json"
++        argv = json.loads(argv_path.read_text())
++        entry = argv.index("--entrypoint")
++        del argv[entry:entry + 2]
++        argv[-4:-4] = public_fixture.fixture_docker_options(descriptor, "native")
++        argv_path.write_text(json.dumps(argv))
++        return descriptor
++
++    def test_native_fixture_binding_preserves_binary_and_adds_exact_bundle(self):
++        descriptor = self.add_fixture()
++        expected = dict(self.binding, public_fixture_sha256=descriptor["fingerprint"])
++        self.assertEqual(native._runtime_binding(self.prepared)[0], expected)
++        self.assertEqual(self.executor.bind_readiness(expected), expected)
++        cfg = json.loads((self.prepared / "prepared.json").read_text())
++        for path in Path(descriptor["root"]).iterdir():
++            self.assertIn(str(path), cfg["files"])
++        binary = self.root / "runtime-bin/codescout"
++        binary.write_bytes(b"different native executable")
++        with self.assertRaises(ValueError):
++            self.executor.bind_readiness(expected)
++
++    def test_native_and_command_fixture_must_have_equal_presence_and_identity_before_launch(self):
++        import shutil
++        from adapter import run_phase, PhaseInvalid, _admit_backend
++        from test_readiness import fixture
++        original_cfg = (self.prepared / "prepared.json").read_text()
++        original_argv = (self.prepared / "mcp-native-argv.json").read_text()
++        declared = self.add_fixture()
++        fixture_cfg = (self.prepared / "prepared.json").read_text()
++        fixture_argv = (self.prepared / "mcp-native-argv.json").read_text()
++        alternate = public_fixture.create_fixture_bundle(
++            self.root / "other-fixture",
++            {"version": "public-http-fixture-v1", "hostname": "fixture.sample.test",
++             "port": 18081, "routes": {"/": {
++                 "status": 200, "content_type": "text/plain", "body": "different public body"}}})
++        for index, (native_has_fixture, command_fixture) in enumerate(
++                ((True, alternate), (True, None), (False, alternate))):
++            prepared = self.root / ("prepared-case-" + str(index))
++            shutil.copytree(self.prepared, prepared)
++            (prepared / "prepared.json").write_text(fixture_cfg if native_has_fixture else original_cfg)
++            (prepared / "mcp-native-argv.json").write_text(fixture_argv if native_has_fixture else original_argv)
++            backend = native.NativeExecutor(prepared, self.root / ("capture-" + str(index)),
++                system_lines=["Shared source-only guidance."], recon_marker="RECON_LOADED", scripted_plan=[])
++            expected, wire = fixture()
++            binding = dict(self.binding)
++            if native_has_fixture:
++                binding["public_fixture_sha256"] = declared["fingerprint"]
++            expected["binding"] = binding
++            wire["binding"] = dict(binding)
++            request = {"state": {"run_id": "r", "phase": "investigate",
++                                "baseline_paths": ["program.txt"],
++                                "baseline_digest": self.binding["source_snapshot_sha256"]},
++                "arm": "R", "execution_mode": "native",
++                "native_preflight": {"expected": expected, "wire": wire},
++                "phase_budget_usd": "0.50", "public_packet": {"issue": "Public request"},
++                "out": str(self.root / ("phase-case-" + str(index))),
++                "execution_profile": "fixture-public-v1" if command_fixture else "fixture-v1",
++                **({"public_fixture": command_fixture} if command_fixture else {})}
++            with self.subTest(index=index):
++                with patch.object(native.external, "launch", side_effect=RuntimeError("unexpected launch")) as launch:
++                    with self.assertRaises(PhaseInvalid):
++                        run_phase(request, backend)
++                    launch.assert_not_called()
++                self.assertFalse(Path(request["out"]).exists())
++        # The guard also admits the matched new profile, without launching a client.
++        expected, wire = fixture()
++        binding = dict(self.binding, public_fixture_sha256=declared["fingerprint"])
++        expected["binding"], wire["binding"] = binding, dict(binding)
++        admitted = _admit_backend(
++            {"execution_mode": "native", "native_preflight": {"expected": expected, "wire": wire},
++             "execution_profile": "fixture-public-v1", "public_fixture": declared}, self.executor)
++        self.assertEqual(admitted["binding"], binding)
++
++    def empty_omission_proof(self):
++        from test_readiness import fixture, reply
++        (self.actor / "empty.rs").write_bytes(b"")
++        expected, wire = fixture()
++        binding = native._runtime_binding(self.prepared)[0]
++        expected["binding"], wire["binding"] = binding, dict(binding)
++        value = {"verdict": "incomplete", "expected_files": 2, "stored_files": 1,
++                 "missing_count": 1, "missing_sample": ["empty.rs"], "orphan_count": 0,
++                 "chunks_without_vectors": 0, "memories": {"missing_count": 0, "orphan_count": 0}}
++        wire["index_verification"] = reply(json.dumps(value))
++        return {"execution_mode": "native", "native_preflight": {"expected": expected, "wire": wire}}
++
++    def test_consuming_native_admission_checks_actual_empty_omission_without_rewriting_verdict(self):
++        import copy
++        from adapter import _admit_backend
++        request = self.empty_omission_proof()
++        before = copy.deepcopy(request)
++        result = _admit_backend(request, self.executor)
++        self.assertEqual(result["index_coverage"]["native_verdict"], "incomplete")
++        self.assertEqual(result["index_coverage"]["coverage"], "all_nonempty_eligible_files")
++        self.assertEqual(result["index_coverage"]["empty_missing_files"][0]["path"], "empty.rs")
++        self.assertEqual(request, before)
++
++    def test_consuming_native_admission_refuses_nonempty_missing_file_on_bound_source(self):
++        from adapter import _admit_backend, PhaseInvalid
++        request = self.empty_omission_proof()
++        (self.actor / "empty.rs").write_text("pub fn omitted() {}")
++        binding = native._runtime_binding(self.prepared)[0]
++        request["native_preflight"]["expected"]["binding"] = binding
++        request["native_preflight"]["wire"]["binding"] = dict(binding)
++        with self.assertRaisesRegex(PhaseInvalid, "missing file is not empty regular source"):
++            _admit_backend(request, self.executor)
++
++    def test_consuming_native_admission_refuses_changed_source_before_coverage(self):
++        from adapter import _admit_backend, PhaseInvalid
++        request = self.empty_omission_proof()
++        (self.actor / "program.txt").write_text("changed after preparation")
++        with self.assertRaisesRegex(PhaseInvalid, "actual public source mismatch"):
++            _admit_backend(request, self.executor)
++
++    def test_native_fixture_alias_mount_and_entrypoint_cannot_drift(self):
++        descriptor = self.add_fixture()
++        path = self.prepared / "mcp-native-argv.json"
++        original = path.read_text()
++        argv = json.loads(original)
++        for before, after in (
++                ("fixture.sample.test:127.0.0.1", "example.com:127.0.0.1"),
++                ("/bench/public-fixture/launch-native", "/bench/public-fixture/launch-command"),
++                (f"type=bind,src={descriptor['root']},dst=/bench/public-fixture,readonly",
++                 f"type=bind,src={descriptor['root']},dst=/bench/public-fixture")):
++            bad = [after if value == before else value for value in argv]
++            path.write_text(json.dumps(bad))
++            with self.subTest(before=before), self.assertRaises(ValueError):
++                native._runtime_binding(self.prepared)
++        path.write_text(original)
++
++    def test_native_fixture_under_actor_source_is_rejected(self):
++        self.add_fixture(self.actor / "mutable-fixture")
++        with self.assertRaises(ValueError):
++            native._runtime_binding(self.prepared)
++
+     def launch(self, *args, **kwargs):
+         self.launched = kwargs
+         (self.actor / "program.txt").write_text("repaired\n")
+@@ -269,6 +414,36 @@ class NativeExecutorTests(unittest.TestCase):
+         self.assertNotIn("submission.json", cfg["prompt"])
+         self.assertIsNone(result["submission"])
+ 
++    def test_fixed_xhigh_baseline_reaches_the_native_launch_at_xhigh(self):
++        self.packet.update(arm="X", phase="ordinary", prompt="Repair the public task.")
++        with patch.object(native.external, "launch", return_value=self.receipt) as launched:
++            result = self.executor.execute(self.packet)
++        self.assertEqual(launched.call_args.kwargs["effort"], "xhigh")
++        self.assertNotIn("submission.json", json.loads(
++            (self.prepared / "prepared.json").read_text())["prompt"])
++        self.assertIsNone(result["submission"])
++
++    def test_ordinary_low_baseline_retains_the_same_native_boundary(self):
++        self.packet.update(arm="L", phase="ordinary", prompt="Repair the public task.")
++        with patch.object(native.external, "launch", return_value=self.receipt) as launched:
++            result = self.executor.execute(self.packet)
++        self.assertEqual(launched.call_args.kwargs["effort"], "low")
++        self.assertEqual(launched.call_args.kwargs["allowance"], "0.50")
++        self.assertEqual(result["cost_usd"], "0.07")
++        self.assertTrue(result["context_valid"])
++        self.assertNotIn("submission.json", json.loads(
++            (self.prepared / "prepared.json").read_text())["prompt"])
++
++    def test_unknown_arm_is_rejected_before_launch_or_prepared_prompt_change(self):
++        self.packet["arm"] = "unregistered"
++        original = (self.prepared / "prepared.json").read_bytes()
++        with patch.object(native.external, "launch", return_value=self.receipt) as launched:
++            with self.assertRaisesRegex(ValueError, "unsupported native arm"):
++                self.executor.execute(self.packet)
++        launched.assert_not_called()
++        self.assertEqual((self.prepared / "prepared.json").read_bytes(), original)
++        self.assertFalse(self.executor.capture.exists())
++
+     def test_phase_adapter_forwards_control_identity_to_the_actor_boundary(self):
+         from adapter import run_phase
+         from types import SimpleNamespace
+diff --git a/tools/effort_protocol/test_readiness.py b/tools/effort_protocol/test_readiness.py
+index f4b4766c3..267ecebd3 100644
+--- a/tools/effort_protocol/test_readiness.py
++++ b/tools/effort_protocol/test_readiness.py
+@@ -60,6 +60,14 @@ class ReadinessTests(unittest.TestCase):
+         self.assertTrue(result["ready"])
+         self.assertEqual(self.wire, before)
+ 
++    def test_explicit_public_fixture_binding_must_match_actual_wire(self):
++        self.expected["binding"]["public_fixture_sha256"] = "e" * 64
++        self.wire["binding"] = dict(self.expected["binding"])
++        result = readiness.validate_readiness(self.expected, self.wire)
++        self.assertEqual(result["binding"]["public_fixture_sha256"], "e" * 64)
++        self.wire["binding"]["public_fixture_sha256"] = "f" * 64
++        self.reject()
++
+     def test_empty_languages_are_rejected_even_with_all_tool_names(self):
+         self.wire["status"] = reply(json.dumps({"project_root": "/testbed", "languages": []}))
+         self.reject()

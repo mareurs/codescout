@@ -1,0 +1,10 @@
+{
+  "schema": "effort-path-recovery-closure-v1",
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/path-recovery-20261111/evidence.tar.gz",
+  "archive_bytes": 809770,
+  "archive_sha256": "132c19e26d07e2b56cfbd048ca23e66f0e7b2d9cd3a6df8529cf950c0dc4e719",
+  "payload_entries": 139,
+  "all_selected_payloads_reopened": true,
+  "all_selected_originals_unchanged": true,
+  "active_replacement_included": false
+}

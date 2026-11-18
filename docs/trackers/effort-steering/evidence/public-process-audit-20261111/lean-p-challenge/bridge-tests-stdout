@@ -1,0 +1,8 @@
+
+running 3 tests
+test proxy::ocla_cache_bridge::tests::prompt_hash_is_stable_and_content_sensitive ... ok
+test proxy::ocla_cache_bridge::tests::bridge_serves_recorded_response_and_misses_other_requests ... ok
+test proxy::ocla_cache_bridge::tests::bridge_replays_original_upstream_status ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 8606 filtered out; finished in 0.00s
+

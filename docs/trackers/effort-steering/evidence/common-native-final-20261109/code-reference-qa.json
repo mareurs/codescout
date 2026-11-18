@@ -1,0 +1,17 @@
+{
+  "n_files_scanned": 6,
+  "n_refs_found": 306,
+  "n_refs_resolved": 306,
+  "n_refs_broken": 0,
+  "n_refs_unknown": 0,
+  "exit_code": 0,
+  "scan_meta": {
+    "degraded": false,
+    "lsp_languages_degraded": [],
+    "degraded_causes": {},
+    "basename_index_truncated": false
+  },
+  "findings_displayed": 50,
+  "scope": "six named main experiment documents; pre-final prose-only paragraph edit; link target inventory unchanged",
+  "source_handle": "@tool_c15ea3e2"
+}

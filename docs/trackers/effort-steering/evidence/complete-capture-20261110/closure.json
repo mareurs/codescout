@@ -1,0 +1,8 @@
+{
+  "archive": "verification.tar.gz",
+  "archive_bytes": 19130614,
+  "sha256": "6d63b56cb1803ce2355f25ef468aeaaea8746948c0b77d8e116d7f8bf9a51cc3",
+  "regular_members": 3606,
+  "all_members_reopened_byte_equal": true,
+  "original_files_unchanged_during_preservation": true
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_0000001e",
+  "command": "TMPDIR=/var/tmp/ep9-01a15 ./scripts/with-slot.sh cargo test --workspace --no-default-features lsp::manager::tests -- --nocapture > /home/marius/.cache/codescout-resident/codescout/effort-protocol-verification-20261109-01a15ca9/logs/gate-lsp-short-root-targeted.log 2>&1",
+  "server_pid": 337215,
+  "job_pid": 420361,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T12:56:17.349693034+00:00",
+  "finished_at": "2026-11-09T12:56:55.189819960+00:00",
+  "log_path": "/tmp/codescout-bg-JZ1anV.log"
+}

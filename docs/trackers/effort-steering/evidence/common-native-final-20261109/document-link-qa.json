@@ -1,0 +1,1340 @@
+{
+  "parser": "markdown_it commonmark",
+  "predicate": "all link_open href destinations in explicit files; local target existence only, fragment validity not assessed",
+  "files": [
+    {
+      "path": "docs/trackers/effort-steering/README.md",
+      "sha256": "e37c593c569a84af64b00fdd49f0c288308fe32d5e9f52a13aef4400d4df4eac"
+    },
+    {
+      "path": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "sha256": "1c8b98535322626441bd757454e391f41f3106987dae82b3aadc7468913eac7f"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence-protocol-plan-20261109.md",
+      "sha256": "a75e25cd84a904ade3b707c84be851b06f8a95dd0093fb7f2414400eadbd6d5d"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence.md",
+      "sha256": "a937ec288dab3e94f48c885e328d94c792dfbc06040cced756748051937bb36f"
+    },
+    {
+      "path": "docs/trackers/effort-steering/issues.md",
+      "sha256": "ddc91abb2f6f545c443dc76fe87aafd6dd8c986c49db94bbb362feaf6f792601"
+    },
+    {
+      "path": "docs/trackers/effort-steering/reports/README.md",
+      "sha256": "061195589d1a9a0e67f5ecdb59cee3ab9c96840a97a70d548f84a328e980f45e"
+    },
+    {
+      "path": "docs/trackers/effort-steering/session-log.md",
+      "sha256": "a5a8611c6adb1a87d4ad53ce75fa7f64700b422fee152c2bb44309d6c563745b"
+    },
+    {
+      "path": "docs/issues/2026-11-09-embedding-relay-redirect-escapes-fixed-upstream.md",
+      "sha256": "e99de8a7463473392e3d3617cd694efbb553ee1d268e6f36694a90fdfad05829"
+    },
+    {
+      "path": "docs/issues/2026-11-09-embedding-relay-truncated-http-bodies-succeed.md",
+      "sha256": "993c32af2b07d86b4f0162f5e4546a4f6fab044a0189aab5c139412019e3c62b"
+    },
+    {
+      "path": "docs/issues/2026-11-09-embedding-relay-unbounded-partial-clients.md",
+      "sha256": "91fd120980bee6212c21f57edb9c537a46bcae8cfba12f73ee2958718cfb31d2"
+    },
+    {
+      "path": "docs/issues/2026-11-09-embedding-relay-large-integer-disconnect.md",
+      "sha256": "600cc0b166c7ff4bb5ded053330f3127028bce332ffccaf9e8f290fd267a6603"
+    },
+    {
+      "path": "docs/issues/2026-11-09-embedding-relay-transfer-encoding-test-masked.md",
+      "sha256": "f43307804595119839b4dd05d544ad8847fb26d41b1021c010a95edc680072d8"
+    },
+    {
+      "path": "docs/issues/2026-11-09-readiness-witness-includes-supplemental-guides.md",
+      "sha256": "4674357dce77407964c418dc3a88b13e10747122c1403bd4505a689ab2cfdb0f"
+    },
+    {
+      "path": "docs/issues/2026-11-09-native-index-verify-empty-files-missing.md",
+      "sha256": "ac3f4bf374d8a64a9b7ef053b06c37cf82417aa568899bcbb582965cd119ff2d"
+    },
+    {
+      "path": "docs/issues/2026-11-09-empty-coverage-guard-test-gaps.md",
+      "sha256": "d9766531e780540e205e0a49068bdddad6c811cf0ca154fb2e32170b95e10b84"
+    },
+    {
+      "path": "docs/issues/2026-11-09-common-corpus-collector-single-db-assumption.md",
+      "sha256": "26a27202dc11bc0c477aec85ee6529ef8b77f5d5f89e59d21241093e7f8b3447"
+    },
+    {
+      "path": "docs/issues/2026-11-09-source-capsule-omits-static-prompt-inputs.md",
+      "sha256": "a50438c92206423188a3e29a390394c4aefba658005aa120866f497a1148835e"
+    }
+  ],
+  "files_count": 17,
+  "link_destination_occurrences": 315,
+  "distinct_local_targets": 260,
+  "broken": [],
+  "links": [
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-09-native-phase-cli-qualification.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-09-real-project-execution-profiles.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-09-common-source-preparation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-09-onboarding-readiness-audit.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-04-worker-context-verification.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "issues.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-07-semantic-contract-diagnosis.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-07-baseline-first-oracle.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-08-oracle-uncertainty-resolution.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-09-common-source-preparation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-09-real-project-execution-profiles.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/2026-11-06-private-grade-disk-audit.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "issues.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "retained-worktrees/README.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "evidence-protocol-design-20261109.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "session-log.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "evidence-protocol-design-20261109.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "evidence-protocol-plan-20261109.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "reports/README.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "plans/README.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "notes/README.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "retained-worktrees/README.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "issues.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "evidence.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "document-reorganization-manifest-20261109.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "document-reorganization-verification-20261109.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "migration-manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/README.md",
+      "href": "migration-verification.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-embedding-relay-redirect-escapes-fixed-upstream.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-embedding-relay-truncated-http-bodies-succeed.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-embedding-relay-unbounded-partial-clients.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-embedding-relay-large-integer-disconnect.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-embedding-relay-transfer-encoding-test-masked.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-native-index-verify-empty-files-missing.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-readiness-witness-includes-supplemental-guides.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-empty-coverage-guard-test-gaps.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../evidence/common-preparation-20261109/source-and-review.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../evidence/common-preparation-20261109/manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-common-corpus-collector-single-db-assumption.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../evidence/common-native-final-20261109/manifest-with-static.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../evidence/common-native-final-20261109/source-and-native-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../evidence/common-native-final-20261109/static-runtime-inputs.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/2026-11-09-common-source-preparation.md",
+      "href": "../../../issues/2026-11-09-source-capsule-omits-static-prompt-inputs.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence-protocol-plan-20261109.md",
+      "href": "evidence-protocol-design-20261109.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence-protocol-plan-20261109.md",
+      "href": "reports/2026-11-09-native-phase-cli-qualification.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence-protocol-plan-20261109.md",
+      "href": "reports/2026-11-09-native-phase-cli-qualification.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence-protocol-plan-20261109.md",
+      "href": "evidence/execution-profiles-20261109/manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/common-native-final-20261109/manifest-with-static.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/common-native-final-20261109/static-runtime-inputs.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/common-native-final-20261109/manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/common-native-final-20261109/source-and-native-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "reports/2026-11-09-common-source-preparation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/common-preparation-20261109/manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/common-preparation-20261109/source-and-review.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "reports/2026-11-09-common-source-preparation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "reports/2026-11-09-real-project-execution-profiles.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/execution-profiles-20261109/manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/execution-profiles-20261109/source-and-review.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/execution-profiles-20261109/qualification-summary.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/execution-profiles-20261109/verifier-calibration.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/native-phase-cli-20261109/public-handoff-manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/native-phase-cli-20261109/verification-summary.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/native-phase-cli-20261109/r-qualification-and-gate-manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/native-phase-cli-20261109/verification-summary.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "reports/2026-11-09-native-phase-cli-qualification.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/native-phase-cli-20261109/checkpoint.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/native-phase-cli-20261109/manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "evidence/native-phase-cli-20261109/control-followup-manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "document-reorganization-manifest-20261109.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-04-hint-authority-budget-mutations-initial.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-04-hint-authority-gate.log.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-04-hint-authority-inputs.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-04-hint-completion-results.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-04-hint-completion-validation-protocol.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-04-native-build-provenance.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-04-native-readiness-recheck.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-04-worker-context-verification.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-action-budget-preflight-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-agent-lifecycle-results.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-external-onboarding-admission-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-external-prepared-entry-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-external-transfer-admission-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-public-profile-final-verification.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-transfer-candidate-selection.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-transfer-cli-wire-audit.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-transfer-control-replay.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-verified-runtime-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-verified-runtime-gate.log.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-verified-runtime-verification.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-verified-worker-v2-results.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-workflow-calibration-runtime-inventory.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-05-xhigh-expost-public-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-executable-native-baseline-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-grader-validity-audit-v2.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-grader-validity-audit.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-grader-validity-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-grader-validity-evidence.tar.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-private-grade-disk-audit-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-prospective-grader-policy-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-semantic-contract-controller-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-semantic-contract-controller-evidence.tar.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-semantic-contract-plugin-binding-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-semantic-contract-preparation-evidence.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-semantic-contract-preparation-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-semantic-contract-runtime-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-06-semantic-contract-wire-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-baseline-first-controller-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-baseline-first-partial-audit.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-blind-contrast-verifier-audit.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-blind-contrast-verifier-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-differential-observations.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-differential-oracle-audit.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-differential-oracle-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-native-probe-compatibility-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-semantic-contract-actor-diagnosis.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-semantic-contract-pilot-audit.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-semantic-contract-source-diagnosis.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-08-baseline-first-scientific-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-08-baseline-first-xhigh-audit.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-08-oracle-uncertainty-audit.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-08-oracle-uncertainty-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-09-onboarding-readiness-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-09-onboarding-readiness-final-evidence.tar.gz"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-09-onboarding-readiness-final-manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-09-onboarding-readiness-manifest.json"
+    },
+    {
+      "document": "docs/trackers/effort-steering/evidence.md",
+      "href": "../../research/data/2026-11-07-semantic-contract-source-diagnosis.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-source-capsule-omits-static-prompt-inputs.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-readiness-witness-includes-supplemental-guides.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-index-verify-empty-files-missing.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-empty-coverage-guard-test-gaps.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-common-corpus-collector-single-db-assumption.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "reports/2026-11-09-common-source-preparation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-embedding-relay-redirect-escapes-fixed-upstream.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-embedding-relay-truncated-http-bodies-succeed.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-embedding-relay-unbounded-partial-clients.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-embedding-relay-large-integer-disconnect.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-embedding-relay-transfer-encoding-test-masked.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-real-source-image-has-no-onboarding-corpus.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-common-preparation-guard-test-gaps.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-preparation-frozen-rules-parent-link-escape.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-preparation-dangling-output-link-redirects-write.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-preparation-runtime-mode-drift-unbound.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-preparation-readonly-input-produces-readonly-actor.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-onboarding-source-binding-ignores-gitignore-change.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-rejected-execution-profile-loses-runtime-inspection.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-cargo-profile-image-declared-volume.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-executor-cleanup-leaves-anonymous-image-volume.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-test-input-inventory-accepts-directory-only-digest.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-execution-profile-guard-test-gaps.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-evidence-archive-verifier-rejects-hardlinks.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "reports/2026-11-09-real-project-execution-profiles.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-phases-miss-public-evidence-handoff.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-public-handoff-export-guards-untested.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "session-log.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-in-workspace-temp-tests-leave-repository-probes.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-control-submission-instruction.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-control-submission-instruction.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-phase-skill-delivery-shape.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-phase-preparation-input-drift.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-readiness-not-bound-to-executor.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-readiness-logging-skips-cleanup.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-context-error-loses-known-charge.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-model-mount-host-ownership.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-native-verification-tmpfs-quota.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-verification-disk-tmpdir-constraints.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-effort-native-phase-misses-preparation-admission.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-effort-evidence-cleanup-timeout-diagnostic.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-effort-readiness-fixture-aliases-expected-and-observed.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-effort-protocol-generated-input-drift-not-checked.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-effort-protocol-missing-test-inventory-falls-back-to-source.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-08-uncertainty-admission-test-gaps.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-08-uncertainty-entry-module-name-collision.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-baseline-pair-nested-runtime-wrapper.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-baseline-controller-integration-test-gaps.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-oracle-capture-undeclared-tests.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-oracle-contract-nonobject-clause.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-baseline-native-equals-mount-bypass.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-differential-oracle-native-startup-exit.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-generated-contrast-tests-invert-repair-oracle.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-native-startup-stderr-overwritten-on-reconnect.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-memory-calibration-wrong-cargo-target.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-rust-grader-parser-misses-concatenated-test-status.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-memory-calibration-error-receipt.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-private-grader-linker-crash-counted-as-model-failure.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-admission-clock-control-misses-third-sample.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-observation-probe-print-closure.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-contrast-selector-counts-helper-functions.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-contrast-probe-image-id-build-reference.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-contrast-evaluator-cargo-exit-assumption.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-contrast-evaluator-git-context.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-contrast-verifier-zero-continuation-limit.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-p2p-test-visibility-misreported.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-saved-grader-boundary-mutation-gaps.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-07-saved-grader-output-path-allows-retry.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-04-semantic-bootstrap-disagrees-with-queryable-index.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-10-31-cargo-shim-hides-generated-snapshots.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-adapter-workflow-session-guard-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-adapter-common-reconcile-bypass.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-adapter-freeze-gate-source-binding.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-adapter-immutable-drift-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-supervisor-policy-drift-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-adapter-daemon-proof-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-adapter-public-round-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-adapter-plugin-drift-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-adapter-writable-drift-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-supervisor-process-group-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-supervisor-label-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-workflow-final-failure-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-prospective-runner-integration-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-prospective-registration-digest-schema.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-prospective-policy-missing-step-tails.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-prospective-policy-cargo-summary-compiler-false-positive.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-audit-tests-miss-p2p-recovery.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-audit-reparse-cumulative-line-misattribution.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-toolchain-classifier-source-excerpt-false-signal.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-campaign-registration-not-pinned-through-run.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-campaign-receipt-coherence-unchecked.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-wire-plugin-identity-unbound.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-plugin-identity-nested-hash-unpinned.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-plugin-identity-stable-read-guard-unpinned.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-wire-native-inputs-unchecked.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-wire-recon-marker-not-body.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-wire-verifier-assumes-eager-mcp-tools.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-wire-prompt-control-removes-guidance-too.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-runtime-snapshot-identity-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-runtime-agents-rules-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-runtime-clone-guard-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-runtime-preparation-validation-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-contract-verifier-budget-bounds.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-contract-verifier-unbound-arm-identity.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-semantic-contract-verifier-controls-miss-guards.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-focused-probe-assumes-cargo-exit-101.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-external-public-verification-temporary-execution-failures.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-qualification-guard-prefix-uncovered.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-baseline-qualifier-rejects-native-gitignore-initialization.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-06-lifecycle-readme-stale-cpu-profile.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-private-grader-zero-substring-rejects-forty-tests.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-closed-recovery-arm-identity-guard-untested.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-xhigh-censored-by-legacy-turn-cap.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-readback-requires-reference-only-tests.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-cold-workflow-deadline-unqualified.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-aborted-history-raw-cost-guard-untested.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-cold-admission-command-guard-untested.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-cleanup-ignores-pinned-container-id.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-timeout-loses-native-background-logs.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-background-reader-ignores-pinned-container-id.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-default-cli-budget-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-lifecycle-endpoint-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-forwarded-total-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-latest-terminal-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-default-fingerprint-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-workflow-ledger-unknown-cost-state.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-runtime-qualification-parent-directory.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-native-reference-orphan-reaping.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-native-full-gate-test-worker-exhaustion.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-public-profile-reference-temporary-build-quota.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-verified-worker-resource-conflict-coverage.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-verified-worker-malformed-native-argv.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-verified-worker-unknown-filesystem.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-reference-readback-runtime-metadata.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-public-reference-control-missing-git-baseline.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-05-cpu-probe-temp-execution-permission.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-04-native-build-verifier-rejects-lowercase-docker-absence.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-04-context-clone-overlay-recreates-existing-symlinks.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-04-native-worker-omits-trimmed-codescout-guidance.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-04-context-audit-mistakes-html-comment-stripping-for-rule-loss.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-04-isolated-home-still-loads-host-claude-instructions.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-04-isolated-worker-recon-plugin-not-loaded.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-04-claude-mcp-discovery-retry-reuses-container-name.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-10-28-attribution-directory-swap-gate-flake.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/issues.md",
+      "href": "../../issues/2026-11-09-shared-gate-lean-holder-cap-observation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-09-common-source-preparation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-09-real-project-execution-profiles.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-09-native-phase-cli-qualification.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "../README.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-09-onboarding-readiness-audit.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-08-oracle-uncertainty-resolution.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-07-semantic-contract-pilot-results.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-07-semantic-contract-diagnosis.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-07-differential-oracle.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-07-blind-contrast-verifier.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-07-baseline-first-oracle.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-semantic-contract-wire.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-semantic-contract-runtime.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-semantic-contract-preparation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-semantic-contract-plugin-binding.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-semantic-contract-controller.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-semantic-contract-adapter.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-prospective-grader-policy.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-private-grade-disk-audit.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-06-grader-validity.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-05-verified-worker-runtime.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-05-verified-worker-composition.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-05-effort-steering-situation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-05-complete-workflow-calibration.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-05-agent-background-continuation.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-04-worker-context-verification.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-04-hint-authority-functional-pilot.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-11-04-claude-instructions-comparison.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-10-14-effort-steering-when-to-switch.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-10-14-effort-steering-when-to-switch-industry.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-10-14-effort-steering-when-to-switch-forums.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-10-14-effort-steering-when-to-switch-academic.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-10-04-effort-steering-spike-findings.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "2026-10-04-effort-steering-branch-review-notes.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/reports/README.md",
+      "href": "../retained-worktrees/README.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "README.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "../../issues/2026-11-09-native-phases-miss-public-evidence-handoff.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "../../issues/2026-11-09-cargo-profile-image-declared-volume.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "../../issues/2026-11-09-rejected-execution-profile-loses-runtime-inspection.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "../../issues/2026-11-09-executor-cleanup-leaves-anonymous-image-volume.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "../../issues/2026-11-09-test-input-inventory-accepts-directory-only-digest.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "reports/2026-11-09-real-project-execution-profiles.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "../../issues/2026-11-09-real-source-image-has-no-onboarding-corpus.md"
+    },
+    {
+      "document": "docs/trackers/effort-steering/session-log.md",
+      "href": "reports/2026-11-09-native-phase-cli-qualification.md"
+    }
+  ]
+}

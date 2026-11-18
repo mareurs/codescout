@@ -1,0 +1,11 @@
+{
+  "scope": "main-tracker",
+  "source_root": "/home/marius/work/claude/codescout",
+  "path": "docs/trackers/effort-steering/evidence/persistent-native-admission-20261111/evidence.tar.gz",
+  "type": "file",
+  "bytes": 7041278551,
+  "mode": 420,
+  "sha256": "ccdc360d73de3bac91c53c908d770837b618e1a385da5a1cabe62032e12a7ca4",
+  "storage": "external",
+  "destination": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/persistent-native-admission-20261111/evidence.tar.gz"
+}

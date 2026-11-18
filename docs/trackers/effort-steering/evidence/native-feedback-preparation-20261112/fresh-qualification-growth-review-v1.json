@@ -1,0 +1,68 @@
+{
+  "scope": "Final producer delta: normal v4 driver/preparer, resume v5 preparer and added12GiBguard. Core142source not edited; previous instrument review retained in its scope.",
+  "baseline": {
+    "root": "/tmp/native-qualification-growth-review-90duaqlt",
+    "exit": 0,
+    "tests": 14,
+    "log": "test_below_threshold_refuses_before_dispatch (test_qualification_growth_v4.GrowthAdmissionTests.test_below_threshold_refuses_before_dispatch) ... ok\ntest_capacity_only_pass_never_dispatches (test_qualification_growth_v4.GrowthAdmissionTests.test_capacity_only_pass_never_dispatches) ... ok\ntest_exact_threshold_reaches_controlled_dispatch (test_qualification_growth_v4.GrowthAdmissionTests.test_exact_threshold_reaches_controlled_dispatch) ... ok\ntest_lowered_original_floor_is_refused (test_qualification_growth_v4.GrowthAdmissionTests.test_lowered_original_floor_is_refused) ... ok\ntest_resume_at_margin_reaches_controlled_backend (test_qualification_growth_v4.ResumeGrowthAdmissionTests.test_resume_at_margin_reaches_controlled_backend) ... ok\ntest_resume_below_margin_refuses_before_backend (test_qualification_growth_v4.ResumeGrowthAdmissionTests.test_resume_below_margin_refuses_before_backend) ... ok\ntest_resume_cannot_lower_the_original_floor (test_qualification_growth_v4.ResumeGrowthAdmissionTests.test_resume_cannot_lower_the_original_floor) ... ok\ntest_actual_processes_are_observed_across_both_phases (test_resume_qualification_v5.ProcessControls.test_actual_processes_are_observed_across_both_phases) ... ok\ntest_observer_reenters_for_the_actual_two_context_driver_shape (test_resume_qualification_v5.ProcessControls.test_observer_reenters_for_the_actual_two_context_driver_shape) ... ok\ntest_real_failure_code_and_matching_scope (test_resume_qualification_v5.ProcessControls.test_real_failure_code_and_matching_scope) ... ok\ntest_candidate_mode_and_empty_directory_are_measured (test_resume_qualification_v5.SnapshotControls.test_candidate_mode_and_empty_directory_are_measured) ... ok\ntest_excluded_cache_and_separate_final_outputs_are_outside_scope (test_resume_qualification_v5.SnapshotControls.test_excluded_cache_and_separate_final_outputs_are_outside_scope) ... ok\ntest_existing_symlink_retarget_is_detected_even_with_identical_target_bytes (test_resume_qualification_v5.SnapshotControls.test_existing_symlink_retarget_is_detected_even_with_identical_target_bytes) ... ok\ntest_original_audit_bytes_modes_links_and_new_entries_are_measured (test_resume_qualification_v5.SnapshotControls.test_original_audit_bytes_modes_links_and_new_entries_are_measured) ... ok\n\n----------------------------------------------------------------------\nRan 14 tests in 0.128s\n\nOK\n",
+    "log_sha256": "ca7323d6ee859ac672f07b9ff117388619c2bc81cb8bd5681b3f018bcbcfd863"
+  },
+  "mutation_counts": {
+    "applied": 3,
+    "killed": 3,
+    "survived": 0,
+    "inconclusive": 0,
+    "tests_per_mutant": 14
+  },
+  "mutation_meaning": "G01 removes normal launch margin; G02 removes copied resume margin; G03 allows lowered original resume floor. Observed failures are controlled dispatch/backend sentinel errors and expected threshold assertions; no import or readonly-mode false kills. Scratch mutations restored0444 before execution.",
+  "producer_readback": [
+    "Prepared normal v4 registration is scripted with new expected campaign/root. Schedule and all tasks exactly equal v3; only changed preexisting binding is test_feedback_audit_resume.py. Every current bound file hash matches.",
+    "Normal v4 wrapper measures shared registered root with f_bavail*f_frsize, requires original80GiBfloor plus12GiBmargin, preserves exact-boundary admission, and returns without importing driver when capacity-only. Delegated v1 __file__ is rebound to v4 so existing self-binding/readonly checks inspect the registered wrapper.",
+    "Normal preparer binds driver, itself, v1 transport, current reviewed142member source capsule and terminal predecessor evidence; all inspected frozen scripts are0444.",
+    "Resume preparer points to completed normalv4, requires completed16/native16/closed/provider0, checks frozenCLI version calibration binding, and binds driver/self/v1/instrument helper plus prior qualification artifacts. New resume root/id agree with declared control.",
+    "Resume growth guard runs after registration binding verification and before backend construction/preflight. Diff versus approved v5 consists only of os/time imports and capacity block; observer/snapshot implementation is unchanged.",
+    "Registered resource_root under /home and output parent /var/tmp report different subvolume st_dev values, but mountinfo shows Btrfs /@home and /@ on same /dev/nvme0n1p2 backing filesystem; measured statvfs available/block counts agree. No present backing-volume mismatch found."
+  ],
+  "recorded_capacity": [
+    {
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/native-feedback-qualification-v4-registration/capacity-1794514782761342961.json",
+      "sha256": "37e72d79842173160b1ca6533e64b6cb661594d13cb16db1ac0213c7be2c5287",
+      "record": {
+        "available_bytes": 87508193280,
+        "launch_admitted": false,
+        "minimum_launch_bytes": 98784247808,
+        "paid_ready": false,
+        "registered_floor_bytes": 85899345920,
+        "scope": "Current root capacity before any qualification dispatch",
+        "stage": "not_dispatched"
+      }
+    }
+  ],
+  "finding_status": "No new Important correctness or applied-mutation regression gap found in this producer delta.",
+  "limits": [
+    "Launch margin is a point-in-time capacity admission check, not reserved disk or proof that the campaign will fit. Original per-runtime resource floor remains unchanged.",
+    "Only temporary unit registrations executed, with dispatch/backend replaced by explicit sentinels. Real normal/resume entrypoints and preparers were not invoked.",
+    "Recorded capacity artifact shows87,508,193,280available versus98,784,247,808required and not_dispatched; it is historical readback, not a promise about current free capacity."
+  ],
+  "declined_to_judge": [
+    "User cache/disk decision, future live capacity and dispatch authorization.",
+    "Actual normal16 qualification, actor-free resume control or private evaluator results; none launched.",
+    "Full protocol/project gate totals, efficacy, paid admission and unknown review/CPU/embedding costs."
+  ],
+  "verdict": "Focused producer/growth-guard review passes. Prepared normal registration matches the reviewed producer/source. No launch or full-runtime success verdict; existing capacity refusal and unbound/unrun resume qualification remain.",
+  "custody": {
+    "scratch_baseline_changes": [],
+    "script_original_changes": [],
+    "original_script_modes": {
+      "qualify_native_feedback_campaign_v1.py": "0o444",
+      "test_resume_qualification_v5.py": "0o644",
+      "test_qualification_growth_v4.py": "0o644",
+      "resume_qualification_instruments_v5.py": "0o444",
+      "qualify_native_feedback_resume_v5.py": "0o444",
+      "prepare_native_feedback_resume_v5.py": "0o444",
+      "prepare_native_feedback_qualification_v4.py": "0o444",
+      "qualify_native_feedback_campaign_v4.py": "0o444"
+    }
+  },
+  "previous_instrument_report": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/review-report.json"
+}

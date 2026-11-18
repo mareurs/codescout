@@ -1,0 +1,64 @@
+{
+  "captured_at": "2026-11-11T17:39:55.432472+00:00",
+  "scope": "Closed X public lifecycle, trace and captured candidate; no restoration or private verdict read. Background log ordering is not assumed to match job handles.",
+  "files": {
+    "invocation.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/invocation.json",
+      "bytes": 117214,
+      "sha256": "94d90cfff5cbd9f9c80be4a62477f60fd8be2c9ed66713c3fd7458aa37cfa35d"
+    },
+    "receipt.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/receipt.json",
+      "bytes": 4796,
+      "sha256": "834f59420cd997ed5a77e15aa7af626ac375ce4eedb087a006d1ab963480dd74"
+    },
+    "lifecycle-receipt.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/lifecycle-receipt.json",
+      "bytes": 1561,
+      "sha256": "02e51b84c8efc72453211df914e577545ca57d15db81e29adaa030340bbcf148"
+    },
+    "background-evidence.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-evidence.json",
+      "bytes": 1401,
+      "sha256": "6fdf31bcd7eb9478bf0776b07ca5c4bbc89797d060f0d7731c7273237a6aaa13"
+    },
+    "turn-results.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/turn-results.json",
+      "bytes": 10924,
+      "sha256": "89f20add01518b73c9ee73cb0c1729bb803dab3915b3043340fb070f6486c1fc"
+    },
+    "stdout.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/stdout.json",
+      "bytes": 2833,
+      "sha256": "053456aa32434b2093b85d5744606203d481e2c11f90a2a5bf6ba96fe1a914f4"
+    },
+    "candidate.patch": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/candidate.patch",
+      "bytes": 11133,
+      "sha256": "9f198d54feaa394ff1151ba6c3d6b4a2e62e17085c1361549736b5a2818822b8"
+    },
+    "stream.jsonl": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/stream.jsonl",
+      "bytes": 650882,
+      "sha256": "87357b279c9418c85c65e00d643d567e0c459368e1eea0100cf44ef363c86b43"
+    },
+    "background-0.log": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/0.log",
+      "bytes": 877,
+      "sha256": "b85e30f82abeb2306c2e37e30f2290f359c00ab6a12dfbd5c5003b4c6b0542d6"
+    },
+    "background-1.log": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/1.log",
+      "bytes": 16487,
+      "sha256": "5a6d1edcd58d764b581c7ef2bc04847ae4cf6f0357d63bf4b9a374d84930e68c"
+    },
+    "background-2.log": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/2.log",
+      "bytes": 709,
+      "sha256": "984947a04ab6f516fe83ab043ec9a1fbb03fb3366327800c73832c3a94f72402"
+    }
+  },
+  "private_entry_markers": 0,
+  "private_verdict_files": 0,
+  "originals_unchanged": true
+}

@@ -1,0 +1,19 @@
+{
+  "schema": "effort-headroom-archive-independent-check-v1",
+  "producer": {
+    "path": "/home/marius/.codex/worktrees/cf66/codescout/.superpowers/sdd/2026-11-11-transport-headroom-correction/audit_headroom_archive.py",
+    "sha256": "5df27eede25e3c7d44312e1d883f076abaa21d755e46564f7e4463a95bf79c8e"
+  },
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/headroom-admission-20261111/evidence.tar.gz",
+  "archive_sha256_gnu": "2d115e5e6092fe3dcceaa146a82ef567b608e6876ecbbecee86ecb01e8be7948",
+  "closure_sha256": "edea390461d6723f323aa53ac005130248a81c0bf71e3eace52fc16d2a3aa666",
+  "verification_sha256": "0b70d4e2d618a9f123453e29764b9688c38f9f15b2ef35c6aef2dff03301b0ab",
+  "payload_members": 162973,
+  "regular_payloads": 141270,
+  "expected_bound_inputs": 192,
+  "independently_hashed_bound_inputs": 192,
+  "all_known_inputs_match": true,
+  "forbidden_file_members": [],
+  "scope": "GNU checks whole compressed digest; independent Python streams all member headers and hashes only the192known code/input payloads against the consuming verification, not a producer-derived input count.",
+  "limits": "Does not rehash other payloads a third time; the archive producer separately reopened all selected payloads. No extraction, live paid output read, provider call, invoice proof or efficacy claim."
+}

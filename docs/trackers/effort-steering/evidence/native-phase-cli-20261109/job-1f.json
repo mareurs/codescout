@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_0000001f",
+  "command": "TMPDIR=/var/tmp/ep9-01a15 ./scripts/with-slot.sh cargo test --workspace a_memory_read_from_the_other_layout_counts_its_provenance_keys_in_the_gate -- --nocapture > /home/marius/.cache/codescout-resident/codescout/effort-protocol-verification-20261109-01a15ca9/logs/gate-memory-short-root-targeted.log 2>&1",
+  "server_pid": 337215,
+  "job_pid": 421052,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T12:56:18.473524333+00:00",
+  "finished_at": "2026-11-09T12:56:57.845454208+00:00",
+  "log_path": "/tmp/codescout-bg-E0lGSI.log"
+}

@@ -1,0 +1,88 @@
+{
+  "client_model_calls": 0,
+  "controls": [
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "complete": true,
+      "container": "9823f99537993ef9351e7b4d213ab0f19f71c5e9173a9c6bf60112159db8641d",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "registration_sha256": "b8b865a2d9bce4fe345fa240ce8ae3ff2460468f61b5fe376c2e1b0ca19b4048",
+      "resource_valid": true,
+      "result_sha256": "86c836852bf8b730268bcc1e0664e55b96b5f865e40d88ef3ad83bb37fa3df43",
+      "source_case": "baseline",
+      "source_sha256": "52d34ed35793e99bab0826373b617d471168f77d20174e2f36bbc98d11055836"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "complete": true,
+      "container": "b9cdab04762853ed288cad718d08324503b8e1af79b0e578eef24fc00edc12da",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "registration_sha256": "71f4025d48fd59af99db255d12d61273cda05abd8c2b20a2bdbe9c3cafd65961",
+      "resource_valid": true,
+      "result_sha256": "67ad4b6f42056e84ea58130711329b728119b6847db7c1bd37b3948ea9999ef7",
+      "source_case": "baseline",
+      "source_sha256": "52d34ed35793e99bab0826373b617d471168f77d20174e2f36bbc98d11055836"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "complete": true,
+      "container": "0d0bc6027c84b9a84456dc60475db905121184990806f58e8443f8ff7ed68363",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "registration_sha256": "816823a8c89fe6610a1c6f846cfa0a81c26c0019c79ba1053374b0d53e57b84b",
+      "resource_valid": true,
+      "result_sha256": "daf139ddd28199231fd49cd96d6a64e793ae65953b2b30428b61fb7491758abe",
+      "source_case": "reference",
+      "source_sha256": "586efd0de592f1faaee302da7d86f61e36f357a3efb726fbca61b3f1f70ba91e"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "complete": true,
+      "container": "ecf0a2e6175163efed66320369489262410f5c15f8b9b58ffd145677e9ab6489",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "registration_sha256": "29482b04baedf9cd9b25e78d55f8f9d7fe3ed3320814c5d865eaa70b5f51df2f",
+      "resource_valid": true,
+      "result_sha256": "6bcfef2fc9d2a234ad22656b32a85899fd20764cea2a9c83f955ceded7696333",
+      "source_case": "reference",
+      "source_sha256": "586efd0de592f1faaee302da7d86f61e36f357a3efb726fbca61b3f1f70ba91e"
+    }
+  ],
+  "image": "sha256:77aecd5d793bd7720ce7700f0fdddfae81cfe423d944b58d235e981522f12e30",
+  "negative_reference_gate_observed": false,
+  "paid_ready": false,
+  "positive_qualification": true,
+  "producer_sha256": "722d4e37c41615eba8b8115bb0a3ce8d4316cf11ef31f39973d343ee60e8d447",
+  "schema": "exact-source-public-controls-audit-v1",
+  "scope": "Actual current paid-admission public-command reader, exact source/profile/dependency inputs, raw receipt/generated output reopens and fresh cleanup. Negative compiler reference is retained and must not authorize paid work.",
+  "source_binding_files_reopened": 77,
+  "task": "DioxusLabs__dioxus-5384"
+}

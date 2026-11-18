@@ -1,0 +1,300 @@
+{
+  "custody_rows": 6754,
+  "originals_compared": true,
+  "custody_errors": [],
+  "publish_files": 603,
+  "distinct_payloads_scanned": 8552,
+  "recursive_payload_bytes": 320211111,
+  "credential_pattern_findings": [
+    {
+      "path": "archive/effort-steering-20261118/main-sdd-recipes.tar.gz!.superpowers/sdd/2026-11-11-native-public-feedback-transfer/native-closed-mutation/clone/tools/agent_lifecycle/qualify.py",
+      "kind": "assigned_token",
+      "offset": 11503,
+      "match_sha256": "bfa3a08e500469d18adc72ea3588ea8877a1950deb7ca27df43c0d85be6d6fe3"
+    },
+    {
+      "path": "archive/effort-steering-20261118/main-sdd-recipes.tar.gz!.superpowers/sdd/2026-11-11-native-public-feedback-transfer/native-closed-mutation/clone/tools/agent_lifecycle/test_native_stdio.py",
+      "kind": "assigned_token",
+      "offset": 1203,
+      "match_sha256": "d4907655f4ae8db8f14933fee07620cb359d2cf3c033e4a24bd0f731a09d5812"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd",
+      "kind": "private_key",
+      "offset": 16369,
+      "match_sha256": "03d104c669e3c7b6be7f989db8b12c8b910d3be8c1e2a73c9369d3cc0ba803b5"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd",
+      "kind": "anthropic_token",
+      "offset": 226,
+      "match_sha256": "0dc0b80404653b616db8f9050ee41704ab41dc7cf2f1309fd0e272c5b0233948"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd",
+      "kind": "openai_token",
+      "offset": 226,
+      "match_sha256": "0dc0b80404653b616db8f9050ee41704ab41dc7cf2f1309fd0e272c5b0233948"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/459115f89658a486c399ee13cdf31bd886c099dda3ef90dff68eae48c805a5b4",
+      "kind": "assigned_token",
+      "offset": 2234,
+      "match_sha256": "b361da217a18d59ff6bb156e736c284c12a0bbb6ac91338b507bd3975fad9ace"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/a5e8af417ce7d5df46a939ed749de69871b10781e6e0a2b593c912fe8b53ae29",
+      "kind": "assigned_token",
+      "offset": 2789,
+      "match_sha256": "fc4529b657c196b67bdeaed9c30c2272c83833dd354909149a6b1f50d8c49574"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/complete-capture-20261110/verification.tar.gz!ledger/effort-wire-v3/probe_effort_wire.py",
+      "kind": "assigned_token",
+      "offset": 1555,
+      "match_sha256": "fb45a236090bf2f6b5805fb0159314f786afffaa91b4c48a1bfefacff449d6db"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/addons/runtime.rs",
+      "kind": "github_token",
+      "offset": 1975,
+      "match_sha256": "6ec359a75c2ee8ad4448fca89533d17e4978c4d0fc979f931dd18658bf329dcf"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/addons/runtime.rs",
+      "kind": "github_token",
+      "offset": 2099,
+      "match_sha256": "6ec359a75c2ee8ad4448fca89533d17e4978c4d0fc979f931dd18658bf329dcf"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/claim_extractor.rs",
+      "kind": "private_key",
+      "offset": 8239,
+      "match_sha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/claim_extractor.rs",
+      "kind": "aws_access_key",
+      "offset": 5121,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/claim_extractor.rs",
+      "kind": "aws_access_key",
+      "offset": 9365,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/context_package/skills.rs",
+      "kind": "openai_token",
+      "offset": 15414,
+      "match_sha256": "02d41c2e58900657c03c400f7698d93f55edb7558ba2819d0b66df821505df52"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/context_package/skills.rs",
+      "kind": "openai_token",
+      "offset": 15848,
+      "match_sha256": "02d41c2e58900657c03c400f7698d93f55edb7558ba2819d0b66df821505df52"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/policy/coverage.rs",
+      "kind": "private_key",
+      "offset": 2035,
+      "match_sha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/policy/coverage.rs",
+      "kind": "aws_access_key",
+      "offset": 2096,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs",
+      "kind": "private_key",
+      "offset": 14706,
+      "match_sha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs",
+      "kind": "openai_token",
+      "offset": 24636,
+      "match_sha256": "2dfacb4231b34bb49d21078789671c29b3e07f980cef969882a56ebe4450589b"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs",
+      "kind": "github_token",
+      "offset": 17463,
+      "match_sha256": "f419886e26c74511ac3a28b1f9f8a7dff3ad6196518b8445d5b441c565b917e2"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs",
+      "kind": "aws_access_key",
+      "offset": 16638,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs",
+      "kind": "aws_access_key",
+      "offset": 16706,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs",
+      "kind": "bearer_value",
+      "offset": 14451,
+      "match_sha256": "b4f384f56881fcbb587d1908c1f64a28abf1008a1ef5590405f27033b7b6851b"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "private_key",
+      "offset": 9129,
+      "match_sha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "private_key",
+      "offset": 15300,
+      "match_sha256": "33ea101ddbe7c33be8f143a2779736d0264a4f4c8f323331a4aa9a1f72d8ab2a"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "private_key",
+      "offset": 15532,
+      "match_sha256": "03d104c669e3c7b6be7f989db8b12c8b910d3be8c1e2a73c9369d3cc0ba803b5"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "github_token",
+      "offset": 9387,
+      "match_sha256": "705248bd2146e242c39f500581e5b336767a88c35b7ba60f72a065b3f751791b"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "aws_access_key",
+      "offset": 8913,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "aws_access_key",
+      "offset": 12335,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "aws_access_key",
+      "offset": 12868,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "aws_access_key",
+      "offset": 13087,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "aws_access_key",
+      "offset": 13347,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "aws_access_key",
+      "offset": 13739,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "aws_access_key",
+      "offset": 14514,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs",
+      "kind": "aws_access_key",
+      "offset": 14761,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/sensitivity/classify.rs",
+      "kind": "github_token",
+      "offset": 5377,
+      "match_sha256": "fc25e1a8a3075e9f2e1a457f7b25351671610c2115c3b4d5633458a55e478823"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/sensitivity/mod.rs",
+      "kind": "github_token",
+      "offset": 8464,
+      "match_sha256": "fc25e1a8a3075e9f2e1a457f7b25351671610c2115c3b4d5633458a55e478823"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/sensitivity/mod.rs",
+      "kind": "aws_access_key",
+      "offset": 9307,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/sensitivity/mod.rs",
+      "kind": "aws_access_key",
+      "offset": 9918,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/sensitivity/mod.rs",
+      "kind": "aws_access_key",
+      "offset": 10260,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/tests/compliance_frameworks.rs",
+      "kind": "private_key",
+      "offset": 8959,
+      "match_sha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/tests/compliance_frameworks.rs",
+      "kind": "aws_access_key",
+      "offset": 9002,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/tests/gateway_postprocess_e2e.rs",
+      "kind": "github_token",
+      "offset": 8222,
+      "match_sha256": "6ec359a75c2ee8ad4448fca89533d17e4978c4d0fc979f931dd18658bf329dcf"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/tests/sensitivity_floor.rs",
+      "kind": "github_token",
+      "offset": 1620,
+      "match_sha256": "fc25e1a8a3075e9f2e1a457f7b25351671610c2115c3b4d5633458a55e478823"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/tests/sensitivity_floor.rs",
+      "kind": "github_token",
+      "offset": 4217,
+      "match_sha256": "fc25e1a8a3075e9f2e1a457f7b25351671610c2115c3b4d5633458a55e478823"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/tests/sensitivity_floor.rs",
+      "kind": "aws_access_key",
+      "offset": 790,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/tests/sensitivity_floor.rs",
+      "kind": "aws_access_key",
+      "offset": 1092,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    },
+    {
+      "path": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/tests/sensitivity_floor.rs",
+      "kind": "aws_access_key",
+      "offset": 1358,
+      "match_sha256": "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3"
+    }
+  ],
+  "unresolved_credential_pattern_findings": [],
+  "limits": "Pattern scan, not proof of absence of every possible credential. Deduplicates identical payload SHA-256 values. External large capsules and history bundle are not Git payloads."
+}

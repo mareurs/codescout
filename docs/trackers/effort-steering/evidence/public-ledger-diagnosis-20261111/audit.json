@@ -1,0 +1,352 @@
+{
+  "schema": "public-ledger-independent-audit-v1",
+  "rows": [
+    {
+      "source": "baseline",
+      "index": 0,
+      "mode": "default",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla"
+      ],
+      "returncode": 0,
+      "wall_s": 221.21497402200475,
+      "summary": "ok. 222 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.24s",
+      "parsed_status_count": 222,
+      "passed": 222,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "00a856ffb853fb0b83af1e4bbf583d2881010e4bb2374cd7c84e58c5cf738659",
+      "stderr_sha256": "99f730b5f02d6d357159d7acbd0d248cdac377bea6b3f4d5851aba9285762265",
+      "independent_parser_counts": {
+        "pass": 222
+      },
+      "independent_status_map_sha256": "94d76d5bae6e21c26cef05ae9a1cc4fb6dfdfc9db63bb4201894ef10af80c8fd"
+    },
+    {
+      "source": "baseline",
+      "index": 1,
+      "mode": "serial",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "wall_s": 29.961369128002843,
+      "summary": "ok. 222 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.38s",
+      "parsed_status_count": 222,
+      "passed": 222,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "5c6ddac80218fa72291270a14c5e88db4226a1f68ee489e6b86b7b89d582af37",
+      "stderr_sha256": "32ed85148811af51d8114a541fa2330003bb2b3fcc80df77294f0d3dfa157072",
+      "independent_parser_counts": {
+        "pass": 222
+      },
+      "independent_status_map_sha256": "94d76d5bae6e21c26cef05ae9a1cc4fb6dfdfc9db63bb4201894ef10af80c8fd"
+    },
+    {
+      "source": "baseline",
+      "index": 2,
+      "mode": "default",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla"
+      ],
+      "returncode": 0,
+      "wall_s": 27.458646728999156,
+      "summary": "ok. 222 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.19s",
+      "parsed_status_count": 222,
+      "passed": 222,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "5b50bf89a644387682b324c51150c428fd247f9ceb2a31ea6bee76b1e7eead66",
+      "stderr_sha256": "51c9ad2e43619e7b7556b6db85ab691af6461851a4c0a460c6ffe42ecb10cdf2",
+      "independent_parser_counts": {
+        "pass": 222
+      },
+      "independent_status_map_sha256": "94d76d5bae6e21c26cef05ae9a1cc4fb6dfdfc9db63bb4201894ef10af80c8fd"
+    },
+    {
+      "source": "baseline",
+      "index": 3,
+      "mode": "serial",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "wall_s": 27.076928112001042,
+      "summary": "ok. 222 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.39s",
+      "parsed_status_count": 222,
+      "passed": 222,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "f1fb9bda951f0d3dac31c16a8fbd58c62ee327dc9a789917dcf222de60447c6d",
+      "stderr_sha256": "8cdeeffed9547cddb9aabec1327f049c58d35dbe6c69c2adca2a98e2ad427353",
+      "independent_parser_counts": {
+        "pass": 222
+      },
+      "independent_status_map_sha256": "94d76d5bae6e21c26cef05ae9a1cc4fb6dfdfc9db63bb4201894ef10af80c8fd"
+    },
+    {
+      "source": "baseline",
+      "index": 4,
+      "mode": "default",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla"
+      ],
+      "returncode": 0,
+      "wall_s": 26.60758876199543,
+      "summary": "ok. 222 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.21s",
+      "parsed_status_count": 222,
+      "passed": 222,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "701cc8d89ad1cf59feebee15d011648824c1a9f4638dfb044636a3967c29757d",
+      "stderr_sha256": "28032850df8b13f65f9959a4c35daf5ba7a0cd621e61590f0dcadd557778193a",
+      "independent_parser_counts": {
+        "pass": 222
+      },
+      "independent_status_map_sha256": "94d76d5bae6e21c26cef05ae9a1cc4fb6dfdfc9db63bb4201894ef10af80c8fd"
+    },
+    {
+      "source": "candidate",
+      "index": 0,
+      "mode": "serial",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "wall_s": 221.00241451599868,
+      "summary": "ok. 223 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.48s",
+      "parsed_status_count": 223,
+      "passed": 223,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "d29c06d0583eaf8c5ad88e3cce773b82ed895c036cf09a028cbbe5056b115033",
+      "stderr_sha256": "00253265914212a8c9f3dd12d19bf2e1ba8c840f7a0524983cb0687552c85947",
+      "independent_parser_counts": {
+        "pass": 223
+      },
+      "independent_status_map_sha256": "bbe6b3ed7ed3b559d13602a0ca6eeb2c29480c88e94b77668187aa1070f11bac"
+    },
+    {
+      "source": "candidate",
+      "index": 1,
+      "mode": "default",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla"
+      ],
+      "returncode": 101,
+      "wall_s": 29.09562278100202,
+      "summary": "FAILED. 222 passed; 1 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.29s",
+      "parsed_status_count": 223,
+      "passed": 222,
+      "failed": 1,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [
+        "core::ocla::builtin::savings_ledger::tests::delegates_to_verified_ledger"
+      ],
+      "stdout_sha256": "5cca010e72da99de3f2e66bb24d3c1618137b0e2b900292d59eb2ddd9029edc7",
+      "stderr_sha256": "3265c79bfdb1967ce8165579c9b207b30b72cd617e46db07fa79402e63fd1f0f",
+      "independent_parser_counts": {
+        "pass": 222,
+        "fail": 1
+      },
+      "independent_status_map_sha256": "5ce9c8e943551eaf335637b106ada9a746ee8f2aa692342689cde0bc079dda19"
+    },
+    {
+      "source": "candidate",
+      "index": 2,
+      "mode": "serial",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla",
+        "--",
+        "--test-threads=1"
+      ],
+      "returncode": 0,
+      "wall_s": 28.00027380100073,
+      "summary": "ok. 223 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.46s",
+      "parsed_status_count": 223,
+      "passed": 223,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "bb17d7777cf1ab72b70ccc9dd50fc92ad483e7aa594f2b28103598b686e9f289",
+      "stderr_sha256": "2ce969784a64f9484657f00beced34945b3c61ddf1ad9a6d4e885d8790890498",
+      "independent_parser_counts": {
+        "pass": 223
+      },
+      "independent_status_map_sha256": "bbe6b3ed7ed3b559d13602a0ca6eeb2c29480c88e94b77668187aa1070f11bac"
+    },
+    {
+      "source": "candidate",
+      "index": 3,
+      "mode": "default",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla"
+      ],
+      "returncode": 0,
+      "wall_s": 28.74954357900424,
+      "summary": "ok. 223 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 2.28s",
+      "parsed_status_count": 223,
+      "passed": 223,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "fbcbce325ef5e98ce8285f584441970fa06cf0b87610a4a8e20961dcc6321900",
+      "stderr_sha256": "dba100e43f584361493fd82184735ac8638886763dde89a27d35cf0457aad9d0",
+      "independent_parser_counts": {
+        "pass": 223
+      },
+      "independent_status_map_sha256": "bbe6b3ed7ed3b559d13602a0ca6eeb2c29480c88e94b77668187aa1070f11bac"
+    },
+    {
+      "source": "candidate",
+      "index": 4,
+      "mode": "default",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "rust/Cargo.toml",
+        "--lib",
+        "ocla"
+      ],
+      "returncode": 0,
+      "wall_s": 32.60445541399531,
+      "summary": "ok. 223 passed; 0 failed; 0 ignored; 0 measured; 8386 filtered out; finished in 3.45s",
+      "parsed_status_count": 223,
+      "passed": 223,
+      "failed": 0,
+      "ignored": 0,
+      "filtered": 8386,
+      "failed_tests": [],
+      "stdout_sha256": "aab80f79770c8e285f591e09f121c09acbba459d84853b2768482d69dff1fd5d",
+      "stderr_sha256": "7ef3acd1ed6c7ac51406a0d914c98eb971a22ad9ec107674fe5fbae5f1529745",
+      "independent_parser_counts": {
+        "pass": 223
+      },
+      "independent_status_map_sha256": "bbe6b3ed7ed3b559d13602a0ca6eeb2c29480c88e94b77668187aa1070f11bac"
+    }
+  ],
+  "summary": [
+    {
+      "source": "baseline",
+      "mode": "default",
+      "suite_processes": 3,
+      "passing_suite_processes": 3,
+      "failing_suite_processes": 0
+    },
+    {
+      "source": "baseline",
+      "mode": "serial",
+      "suite_processes": 2,
+      "passing_suite_processes": 2,
+      "failing_suite_processes": 0
+    },
+    {
+      "source": "candidate",
+      "mode": "default",
+      "suite_processes": 3,
+      "passing_suite_processes": 2,
+      "failing_suite_processes": 1
+    },
+    {
+      "source": "candidate",
+      "mode": "serial",
+      "suite_processes": 2,
+      "passing_suite_processes": 2,
+      "failing_suite_processes": 0
+    }
+  ],
+  "qualified_parser_record": {
+    "path": "/var/tmp/ep11-01a15/private-package/lean/native-controls/full-record.json",
+    "sha256": "49c2d88c9d6faca866146951a9c3b40e8c66d5f61a674a8e21a049ac3a9a90b0"
+  },
+  "parser_sha256": "2f196e0a380f236639d04eedead10066c0973285cfeb38bce2c571e50b399270",
+  "all_ten_raw_status_censuses_match": true,
+  "all_original_sources_unchanged": true,
+  "provider_calls": 0,
+  "client_model_cost_usd": "0",
+  "limits": [
+    "Repeat units are public test-suite processes, not independent repair tasks.",
+    "Candidate nondeterminism established; baseline failure not observed in the bounded matrix.",
+    "Shared-path noncooperating writers are source-confirmed, not an instrumented attribution of the original writer.",
+    "Serial observations support a prospective workaround, not a permanent source fix.",
+    "Primary model results, charges and original failing public receipt remain unchanged."
+  ]
+}

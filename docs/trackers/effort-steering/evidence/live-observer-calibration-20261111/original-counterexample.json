@@ -1,0 +1,23 @@
+{
+  "calibration": [
+    {
+      "root": "headroom-native-qualification-v1",
+      "attempt_receipts": 8,
+      "receipt_grade_nonnull": 0,
+      "actual_private_entry_markers": 8,
+      "actual_verdict_files": 8,
+      "actor_batch_closed": true
+    },
+    {
+      "root": "paid-campaign-headroom-v3",
+      "attempt_receipts": 1,
+      "receipt_grade_nonnull": 0,
+      "actual_private_entry_markers": 0,
+      "actual_verdict_files": 0,
+      "actor_batch_closed": false
+    }
+  ],
+  "predicate_scope": "literal counts of private-entry-started.json and verdict.json, not immutable receipt grade fields",
+  "provider_calls": 0,
+  "actor_or_evaluator_changes": false
+}

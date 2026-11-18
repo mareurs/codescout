@@ -1,0 +1,33 @@
+{
+  "all_bindings_and_source_unchanged": true,
+  "client_model_calls": 0,
+  "configured_nonroot_count": 114,
+  "fresh_absence": [
+    {
+      "id": "9256fec3bbb9321bc11e5902706599f994bb393e6b5c2532d14a9f0828e28c99",
+      "kind": "container",
+      "returncode": 1,
+      "stderr_sha256": "bbff86a2b2575b480666ef164002a0a2f78703176c75646c342a4ae3ae37da39"
+    },
+    {
+      "id": "d00711a234615214a842d1d39afa420f52ba5b8195b996581b7dbbcca82034ad",
+      "kind": "container",
+      "returncode": 1,
+      "stderr_sha256": "fd3cc94888fb24f49a04e5656d3d34d3bb26cee39427e40302fca04819a8266e"
+    },
+    {
+      "id": "05c34b1482156cea11faac223c99f9a9326c2b743ee9ae9d83e8ebe9ef60ecbb",
+      "kind": "network",
+      "returncode": 1,
+      "stderr_sha256": "3086c0f87f9d4d1d687590f66721f676e39be8160969b8f1e5c6077f0c7b7eba"
+    }
+  ],
+  "new_explicit_index_cli_calls": 37,
+  "onboarding_calls": 0,
+  "paid_ready": false,
+  "reopened_member_results": 114,
+  "reopened_returned_hits": 334,
+  "reused_index_commands": 77,
+  "schema": "dioxus-member-checkpoint-audit-v1",
+  "scope": "Payload text/namespace/custody only; no relevance, AST ownership, author context or repair-quality conclusion."
+}

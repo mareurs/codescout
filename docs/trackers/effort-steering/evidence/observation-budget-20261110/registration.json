@@ -1,0 +1,86 @@
+{
+  "archive": {
+    "bytes": 2225938,
+    "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/observation-budget-20261110/verification.tar.gz",
+    "regular_members": 1055,
+    "reopened_all_bytes_equal": true,
+    "sha256": "27ca2cbe695cb00fbed32d59a52e1c39b55576b6622a08a2781f78e00d427ba6"
+  },
+  "bounded_author_replay": {
+    "applied": 10,
+    "invalid": 0,
+    "killed": 10,
+    "survived": 0,
+    "timeout": 0
+  },
+  "excluded_originals_retained": [
+    "native input/build caches",
+    "Python bytecode/test caches"
+  ],
+  "execution_profile": "cargo-v2",
+  "execution_profile_sha256": "65cd10638041fb90a31fac66b89d85e66aa30de08c64f8d7047d834fceab1a65",
+  "experimental_model_calls": 0,
+  "known_limits": [
+    "not independent private oracle qualification",
+    "not all-arm native admission or whole campaign/controller review",
+    "corrected tests author-replayed, not independently re-reviewed",
+    "no cache or efficacy/cost evidence",
+    "private fixed-population stability open"
+  ],
+  "paid_ready": false,
+  "private_records_read": false,
+  "production_source_sha256": {
+    "tools/effort_protocol/adapter.py": "d9325f74f3d5f3b7437a75acf7bc2b9c825ee60c8def710c73422049fdfcdf84",
+    "tools/effort_protocol/execution_profiles.py": "bb7e9469b6a891aaf46712b53f074155718b0613a4883745cb672095fc547b67",
+    "tools/effort_protocol/executor.py": "3b1a69b7e871a9a10efc6ac64f7fb2e4da778606ab8eb476151bccb5c97bc34a"
+  },
+  "protocol": {
+    "passed": 242,
+    "skipped": 3,
+    "subtests_passed": 140
+  },
+  "public_control": {
+    "complete": true,
+    "model_calls": 0,
+    "private_records_read": false,
+    "receipt": {
+      "complete": true,
+      "execution_profile": "cargo-v2",
+      "execution_profile_sha256": "65cd10638041fb90a31fac66b89d85e66aa30de08c64f8d7047d834fceab1a65",
+      "exit_code": 101,
+      "id": "public-cargo-v2",
+      "kind": "observation",
+      "phase": "investigate",
+      "production_digest": "f4f9b1496c669147ceef2a3114195036aa2f1c86ba991924eab2b449880b8a93",
+      "resource_valid": true,
+      "run_id": "public-cargo-v2-20261110-v1",
+      "source_digest": "789e396582ed4b227c98b3bdc39378c3fa7114e07702450f0f800e26ebe080ad",
+      "test_digest": "98468bf3cd26e3ad9bb53d8ceca129f7bc435ff7ef71dc4ec67c7683a564d166"
+    }
+  },
+  "public_selection": {
+    "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/public-cohort-20261110/registration.json",
+    "selected_ids": [
+      "yvgude__lean-ctx-1168",
+      "h4ckf0r0day__obscura-421"
+    ],
+    "sha256": "785c62db89b874f027fd7d2fa99c9c015ba75f5a6d8f46b055d47eb5aa834115"
+  },
+  "review": {
+    "independent_applied": 10,
+    "killed": 8,
+    "survived": 2
+  },
+  "root_gate_exit": 0,
+  "schema": 1,
+  "scope": "cold-command budget qualification only",
+  "six_prior_wip_unchanged": {
+    "tools/agent_lifecycle/embedding_profile.py": true,
+    "tools/agent_lifecycle/external.py": true,
+    "tools/agent_lifecycle/test_embedding_profile.py": true,
+    "tools/agent_lifecycle/test_external_entry.py": true,
+    "tools/effort_protocol/native_executor.py": true,
+    "tools/effort_protocol/test_native_executor.py": true
+  },
+  "timeout_s": 900
+}

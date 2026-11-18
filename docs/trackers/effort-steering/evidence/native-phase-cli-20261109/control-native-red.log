@@ -1,0 +1,15 @@
+test_native_continuation_control_has_no_protocol_submission (test_native.NativeQualificationTests.test_native_continuation_control_has_no_protocol_submission) ... FAIL
+
+======================================================================
+FAIL: test_native_continuation_control_has_no_protocol_submission (test_native.NativeQualificationTests.test_native_continuation_control_has_no_protocol_submission)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_native.py", line 56, in test_native_continuation_control_has_no_protocol_submission
+    self.assertEqual(result.get("arm"), "R")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 'R'
+
+----------------------------------------------------------------------
+Ran 1 test in 56.498s
+
+FAILED (failures=1)

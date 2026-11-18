@@ -1,0 +1,62 @@
+{
+  "schema": "effort-public-challenge-evidence-v1",
+  "captured_at": "2026-11-11T17:19:29.739174+00:00",
+  "files": {
+    "invocation.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/invocation.json",
+      "sha256": "d35d59054c80d685ce2fb5b29f1b85eb2146dcc895d87209f96f1201e6d5a4e7",
+      "bytes": 117456
+    },
+    "native-executor.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/native-executor.json",
+      "sha256": "a84e319bff9a07d87adee7f14b16ee02a68d13dae3424018fcf8e58e6a77d189",
+      "bytes": 2445
+    },
+    "candidate.patch": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/candidate.patch",
+      "sha256": "4907b134e9e66534fde096ca67a541b2be5d3a1a1b5e07bf152099a800d33665",
+      "bytes": 7601
+    },
+    "common-public-verification.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/public-verification.json",
+      "sha256": "037e03a27ed95d940dc5d57c06f36ec25c91853a228f3efcef0b4769b0fec7e9",
+      "bytes": 431
+    },
+    "protocol-outcome.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/protocol/outcome.json",
+      "sha256": "a997bc974bc9cde6f967e4ce8b113fbed7c1aaf992969e413c975e52cff1802b",
+      "bytes": 119458
+    },
+    "lib-ocla-stdout": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/protocol/commands/challenge--lib-ocla/stdout",
+      "sha256": "408701793f9d0fbdd95eda0b6b66c706542485a889ee389c00f09bc0f49df815",
+      "bytes": 19631
+    },
+    "lib-ocla-stderr": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/protocol/commands/challenge--lib-ocla/stderr",
+      "sha256": "3e5e8bc3943b54d1c0ea6428f50c31c66c8ddf676d2ece89bc0a9c06dd4fcc75",
+      "bytes": 16511
+    },
+    "lib-ocla-receipt.json": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/protocol/commands/challenge--lib-ocla/receipt.json",
+      "sha256": "84803621be15227b57a6ef4416b70972877773b5d207004f5b7f24ed1336bfbf",
+      "bytes": 2605
+    },
+    "bridge-tests-stdout": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/protocol/commands/challenge--bridge-tests/stdout",
+      "sha256": "6b0294f21f972e36007d1ebe63b91113fe9e63e6c90bb394787fd91c08649e6c",
+      "bytes": 393
+    },
+    "integration-suite-stdout": {
+      "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/protocol/commands/challenge--integration-suite/stdout",
+      "sha256": "7efd0ec8abd6e5794fcebd9c009f32a6e9292067b424dae12a40271c1de4f2a9",
+      "bytes": 479
+    }
+  },
+  "private_output_counts": {
+    "entry_markers": 0,
+    "verdict_files": 0
+  },
+  "scope": "Selected immutable public challenge receipts/logs and candidate diff, not full live batch or private verdicts.",
+  "originals_unchanged": true
+}

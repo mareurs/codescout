@@ -1,0 +1,12 @@
+{
+  "all_archive_payloads_reopened": true,
+  "all_originals_rechecked_unchanged": true,
+  "archive": "evidence.tar.gz",
+  "bytes": 7041278551,
+  "limits": "External pinned images, CLI/plugin/binary/embedding service and shared template paths remain referenced by measured hashes. This is not a standalone runtime image. Historical charges/unknown4USDhold remain unchanged.",
+  "logical_regular_file_payloads": 194592,
+  "paid_ready": false,
+  "payload_entries": 224315,
+  "scope": "Eight scripted zero-forward native workflow attempts/16invocations/8privatebaselinegrades, actual preload/candidate/public controls, exact final verification and reviewable pilot inputs/source. Whole-admission reviewer report is not included yet; no repair efficacy or paid admission is asserted.",
+  "sha256": "ccdc360d73de3bac91c53c908d770837b618e1a385da5a1cabe62032e12a7ca4"
+}

@@ -1,0 +1,16 @@
+{
+  "archive": "verification.tar.gz",
+  "archive_bytes": 256310,
+  "sha256": "98500549aabe4b1101229f489595d562c2a77519b372f723835943c87bd16145",
+  "regular_members": 42,
+  "all_members_reopened_byte_equal": true,
+  "original_files_unchanged": true,
+  "selected_ids": [
+    "yvgude__lean-ctx-1168",
+    "h4ckf0r0day__obscura-421"
+  ],
+  "selection_complete": true,
+  "paid_ready": false,
+  "private_outcomes_read": false,
+  "scope": "public-only qualification and task identity freeze; no private oracle or model repair outcome; input/build caches excluded"
+}

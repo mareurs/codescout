@@ -1,0 +1,214 @@
+{
+  "source_commit": "f586d35f4b0d41768931648dd1a9a33f1cdd450f",
+  "source_modified": false,
+  "llm_calls": 0,
+  "benchmark_candidate_regrades": 0,
+  "independent_new_mutation_replay": false,
+  "members": [
+    {
+      "path": "controls/characterization.json",
+      "bytes": 4759,
+      "sha256": "7366f2b02061c6d600f8098346103f6d7b370cf07884e05512a51b8121e3b0de"
+    },
+    {
+      "path": "controls/characterize.py",
+      "bytes": 3981,
+      "sha256": "20574f3aa06c774582cf708c9f6cc52b04c774b1702d17e9a07c947ae79f1541"
+    },
+    {
+      "path": "controls/characterize_v2.py",
+      "bytes": 561,
+      "sha256": "66556e5c1a314b065fb2e3feed6994b7635215d8f9b62d612be92b7bd307a2fa"
+    },
+    {
+      "path": "controls/characterize_v3.py",
+      "bytes": 657,
+      "sha256": "6bfaee081fc68fbe168da65cdbf0ab78e3e501e33b2c5d44e7001a9b26033405"
+    },
+    {
+      "path": "controls/native-policy-results.json",
+      "bytes": 2347,
+      "sha256": "ef3082a169ab06bf3154912761d71a98b9f89fe52ed6f4673898f93afe83f244"
+    },
+    {
+      "path": "controls/native_policy_probe.py",
+      "bytes": 2374,
+      "sha256": "28a362f65313774bce9a2eaa73c387cc4a5bb0ffaf71e6dab1236e44b7ef3e86"
+    },
+    {
+      "path": "controls/nushell-version.stderr",
+      "bytes": 217,
+      "sha256": "8559d1788a5a8109267d3a59a5a4f3ac1f238d6e7200a974a472d6b72b8deb8f"
+    },
+    {
+      "path": "controls/nushell-version.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/obscura-probe.stderr",
+      "bytes": 438,
+      "sha256": "c8ffa0d6f3623b6cb3d5477d5ad9209a77abc218c28363ed03d1b5f9ac349a62"
+    },
+    {
+      "path": "controls/obscura-probe.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/obscura-probe.tail",
+      "bytes": 438,
+      "sha256": "c8ffa0d6f3623b6cb3d5477d5ad9209a77abc218c28363ed03d1b5f9ac349a62"
+    },
+    {
+      "path": "controls/obscura-version.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/obscura-version.stdout",
+      "bytes": 171,
+      "sha256": "baa16a47200a20519d80b291a90481b7bbee98271df44e1dcba1a9013a75af82"
+    },
+    {
+      "path": "controls/peer-probes-reproduced.txt",
+      "bytes": 5266,
+      "sha256": "c2994148ef937fb249f90595575b5e1a306a35b4fbd27f04b5dbcb74cc87c014"
+    },
+    {
+      "path": "controls/preserve.py",
+      "bytes": 2690,
+      "sha256": "dec7f2822d56947ba4da29c91dac00f33d38d2305f2b42fbcb27ce0112484463"
+    },
+    {
+      "path": "controls/rust-analyzer-version.stderr",
+      "bytes": 217,
+      "sha256": "8559d1788a5a8109267d3a59a5a4f3ac1f238d6e7200a974a472d6b72b8deb8f"
+    },
+    {
+      "path": "controls/rust-analyzer-version.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/v2/characterization.json",
+      "bytes": 4769,
+      "sha256": "3effc2b90a9bb70bd653f1235030c9b31f69dbfc287a2c1312e4d78ec4efb20e"
+    },
+    {
+      "path": "controls/v2/nushell-version.stderr",
+      "bytes": 217,
+      "sha256": "8559d1788a5a8109267d3a59a5a4f3ac1f238d6e7200a974a472d6b72b8deb8f"
+    },
+    {
+      "path": "controls/v2/nushell-version.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/v2/obscura-probe.stderr",
+      "bytes": 385,
+      "sha256": "d26a833a494dd421619408a8a8aa93619e97a244cc00302979e91eaa3d068525"
+    },
+    {
+      "path": "controls/v2/obscura-probe.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/v2/obscura-probe.tail",
+      "bytes": 385,
+      "sha256": "d26a833a494dd421619408a8a8aa93619e97a244cc00302979e91eaa3d068525"
+    },
+    {
+      "path": "controls/v2/obscura-version.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/v2/obscura-version.stdout",
+      "bytes": 171,
+      "sha256": "baa16a47200a20519d80b291a90481b7bbee98271df44e1dcba1a9013a75af82"
+    },
+    {
+      "path": "controls/v2/rust-analyzer-version.stderr",
+      "bytes": 217,
+      "sha256": "8559d1788a5a8109267d3a59a5a4f3ac1f238d6e7200a974a472d6b72b8deb8f"
+    },
+    {
+      "path": "controls/v2/rust-analyzer-version.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/v3/characterization.json",
+      "bytes": 4942,
+      "sha256": "20b42777ef3f20ffba6b629a33138d798d13fb38922a773566c5c4213d72fcb3"
+    },
+    {
+      "path": "controls/v3/nushell-version.stderr",
+      "bytes": 217,
+      "sha256": "8559d1788a5a8109267d3a59a5a4f3ac1f238d6e7200a974a472d6b72b8deb8f"
+    },
+    {
+      "path": "controls/v3/nushell-version.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/v3/obscura-probe.stderr",
+      "bytes": 12502,
+      "sha256": "406b28f7e596cd4186f5c93c1ae64d7e5f0a1687d38936812f3e5bde80d205ad"
+    },
+    {
+      "path": "controls/v3/obscura-probe.stdout",
+      "bytes": 12032,
+      "sha256": "62bf09ec68029016c50bb06b6b90433bb4f902f497f28119472f1b416a0a56db"
+    },
+    {
+      "path": "controls/v3/obscura-probe.tail",
+      "bytes": 4096,
+      "sha256": "56c3446428be969458d801a215fe17b407acb28905f268ab22de0acb9923579d"
+    },
+    {
+      "path": "controls/v3/obscura-version.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "controls/v3/obscura-version.stdout",
+      "bytes": 171,
+      "sha256": "baa16a47200a20519d80b291a90481b7bbee98271df44e1dcba1a9013a75af82"
+    },
+    {
+      "path": "controls/v3/rust-analyzer-version.stderr",
+      "bytes": 217,
+      "sha256": "8559d1788a5a8109267d3a59a5a4f3ac1f238d6e7200a974a472d6b72b8deb8f"
+    },
+    {
+      "path": "controls/v3/rust-analyzer-version.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "peer/probe2.py",
+      "bytes": 11498,
+      "sha256": "4b7584e7695df73c8c3653812e78a577618894a8e5086b8ee8d50f8eac5645e0"
+    },
+    {
+      "path": "reviewed-source/tools/setup-ab-eval/grade_policy.py",
+      "bytes": 10054,
+      "sha256": "9d1e13ed949f7bf0f9aac74c17c261e6996d5c324e2fda88f738b49c1e1c0c56"
+    },
+    {
+      "path": "reviewed-source/tools/setup-ab-eval/multilang_control.py",
+      "bytes": 25127,
+      "sha256": "2678d7d76e2506cbc72cac449a886827ccf0d039a8aae98f6a59dff1cbbede53"
+    },
+    {
+      "path": "reviewed-source/tools/setup-ab-eval/test_grade_policy.py",
+      "bytes": 30657,
+      "sha256": "e80e23c213cf4d236e61bc8915ffbff5ede894b9d31768a248f65fdb914855ec"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/.superpowers/sdd/2026-11-10-campaign-integration/seal_disk_checkpoint.py", line 94, in <module>
+    main()
+    ~~~~^^
+  File "/home/marius/.codex/worktrees/cf66/codescout/.superpowers/sdd/2026-11-10-campaign-integration/seal_disk_checkpoint.py", line 81, in main
+    assert member.isfile() and member.size==row["size"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

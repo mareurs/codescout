@@ -1,0 +1,11 @@
+{
+  "scope": "main-tracker",
+  "source_root": "/home/marius/work/claude/codescout",
+  "path": "docs/trackers/effort-steering/evidence/shared-public-runtime-20261110/final-verification-v2.tar.gz",
+  "type": "file",
+  "bytes": 254750617,
+  "mode": 420,
+  "sha256": "2dd6bb3d81257f768aa2cfd9e3c978e3bc97608f095678ef84e441cd5efbb5da",
+  "storage": "external",
+  "destination": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/shared-public-runtime-20261110/final-verification-v2.tar.gz"
+}

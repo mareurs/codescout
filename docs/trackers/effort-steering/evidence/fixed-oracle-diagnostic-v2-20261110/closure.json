@@ -1,0 +1,174 @@
+{
+  "archive": {
+    "bytes": 2890464,
+    "regular_members": 139,
+    "reopened_all_bytes_equal": true,
+    "sha256": "2b8f12d6c5e54ec6e39ed7b26c03c25498ec032e3bcf368f3f6d8035159764b0"
+  },
+  "expected_sets_changed": false,
+  "experimental_model_calls": 0,
+  "known_limits": [
+    "no host resource-floor qualification",
+    "network service positive control absent",
+    "same-binary init fixes one test, not whole suite",
+    "no model efficacy or charge reconciliation"
+  ],
+  "model_arm_results": [],
+  "paid_ready": false,
+  "pair_admitted": false,
+  "registration_sha256": "7a759442b829532b6e9c6d5fbd1373b205d925e102a23d357ab2e766bb1fa7bb",
+  "retained_outside_archive": [
+    "416520576-byte exact reaping binary at /tmp/effort-reaping-binary-01a15ca9/lean-tests; hash in probe registration",
+    "original frozen dataset and task images",
+    "native input/build caches"
+  ],
+  "schema": 1,
+  "scope": "fixed-task diagnostic only; no full runtime/paid admission",
+  "source_unchanged": true,
+  "tasks": {
+    "h4ckf0r0day__obscura-421": {
+      "admitted": false,
+      "controls": [
+        {
+          "container_removed": true,
+          "control": "base",
+          "error": null,
+          "expected": 331,
+          "f2p": {
+            "obscura-cdp::structured_clone_crypto_parity$structured_clone_handles_circular_error_cause": "fail",
+            "obscura-cdp::structured_clone_crypto_parity$structured_clone_reproduces_own_proto_property": "fail"
+          },
+          "fresh_absence_confirmed": true,
+          "log_sha256": "6bc4acb963830ace4590208dff4024d0d614d682b9d842bfbfaaab8e8a527121",
+          "missing": 0,
+          "not_passing": 5,
+          "p2p_not_pass": {
+            "obscura-cli::mcp_client$test_evaluate": "fail",
+            "obscura-cli::mcp_client$test_navigate_and_snapshot": "fail",
+            "obscura-cli::mcp_client$test_wait_for_selector": "fail"
+          },
+          "raw_pass": false,
+          "wall_seconds": 71.3
+        },
+        {
+          "container_removed": true,
+          "control": "reference",
+          "error": null,
+          "expected": 331,
+          "f2p": {
+            "obscura-cdp::structured_clone_crypto_parity$structured_clone_handles_circular_error_cause": "pass",
+            "obscura-cdp::structured_clone_crypto_parity$structured_clone_reproduces_own_proto_property": "pass"
+          },
+          "fresh_absence_confirmed": true,
+          "log_sha256": "dfc75b883fd4c2a3ced2497cc3f666abd95140500e4c8c6c16ad45844e3df50c",
+          "missing": 0,
+          "not_passing": 3,
+          "p2p_not_pass": {
+            "obscura-cli::mcp_client$test_evaluate": "fail",
+            "obscura-cli::mcp_client$test_navigate_and_snapshot": "fail",
+            "obscura-cli::mcp_client$test_wait_for_selector": "fail"
+          },
+          "raw_pass": false,
+          "wall_seconds": 75.8
+        },
+        {
+          "container_removed": true,
+          "control": "reference-repeat",
+          "error": null,
+          "expected": 331,
+          "f2p": {
+            "obscura-cdp::structured_clone_crypto_parity$structured_clone_handles_circular_error_cause": "pass",
+            "obscura-cdp::structured_clone_crypto_parity$structured_clone_reproduces_own_proto_property": "pass"
+          },
+          "fresh_absence_confirmed": true,
+          "log_sha256": "8e0b7deafe4973494cc1caedab2d080c84574a7d1577ea249fd2f62b6136d895",
+          "missing": 0,
+          "not_passing": 3,
+          "p2p_not_pass": {
+            "obscura-cli::mcp_client$test_evaluate": "fail",
+            "obscura-cli::mcp_client$test_navigate_and_snapshot": "fail",
+            "obscura-cli::mcp_client$test_wait_for_selector": "fail"
+          },
+          "raw_pass": false,
+          "wall_seconds": 63.6
+        }
+      ],
+      "diagnostic_predicates": {
+        "all_controls_setup_error_free": true,
+        "all_expected_statuses_present": true,
+        "base_all_f2p_fail": true,
+        "base_all_p2p_pass": false,
+        "reference_repeat_selected_equal": true,
+        "references_all_selected_pass": false
+      }
+    },
+    "yvgude__lean-ctx-1168": {
+      "admitted": false,
+      "controls": [
+        {
+          "container_removed": true,
+          "control": "base",
+          "error": null,
+          "expected": 8587,
+          "f2p": {
+            "server::execute::tests::forwards_captured_agent_runtime_env": "pass"
+          },
+          "fresh_absence_confirmed": true,
+          "log_sha256": "308fa00a553bb9e510187ca184b627157d1df5cf85b2fbf5d30161c4975acb49",
+          "missing": 0,
+          "not_passing": 1,
+          "p2p_not_pass": {
+            "shell::exec::exec_tests::wait_with_limits_group_kill_reaps_grandchildren": "fail"
+          },
+          "raw_pass": false,
+          "wall_seconds": 493.8
+        },
+        {
+          "container_removed": true,
+          "control": "reference",
+          "error": null,
+          "expected": 8587,
+          "f2p": {
+            "server::execute::tests::forwards_captured_agent_runtime_env": "pass"
+          },
+          "fresh_absence_confirmed": true,
+          "log_sha256": "3ab15797f3e226af8f764f4d3eb4fd52fca73a49d5311180a35696c0ba874b64",
+          "missing": 0,
+          "not_passing": 1,
+          "p2p_not_pass": {
+            "shell::exec::exec_tests::wait_with_limits_group_kill_reaps_grandchildren": "fail"
+          },
+          "raw_pass": false,
+          "wall_seconds": 463.8
+        },
+        {
+          "container_removed": true,
+          "control": "reference-repeat",
+          "error": null,
+          "expected": 8587,
+          "f2p": {
+            "server::execute::tests::forwards_captured_agent_runtime_env": "pass"
+          },
+          "fresh_absence_confirmed": true,
+          "log_sha256": "15a49328f0fb88ea719051c5bbde824d34b03410537aaa830ea2df359f976f96",
+          "missing": 0,
+          "not_passing": 1,
+          "p2p_not_pass": {
+            "shell::exec::exec_tests::wait_with_limits_group_kill_reaps_grandchildren": "fail"
+          },
+          "raw_pass": false,
+          "wall_seconds": 488.2
+        }
+      ],
+      "diagnostic_predicates": {
+        "all_controls_setup_error_free": true,
+        "all_expected_statuses_present": true,
+        "base_all_f2p_fail": false,
+        "base_all_p2p_pass": false,
+        "reference_repeat_selected_equal": true,
+        "references_all_selected_pass": false
+      }
+    }
+  },
+  "tasks_replaced": false
+}

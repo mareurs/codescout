@@ -1,0 +1,45 @@
+{
+  "all_private_bindings_unchanged": true,
+  "bindings_reopened": 8,
+  "client_model_calls": 0,
+  "controls": [
+    {
+      "control": "baseline",
+      "kind": "compile_failure",
+      "pass": false,
+      "runtime_closed": true,
+      "runtime_sha256": "3fd8dd9cea5a1b26cc1e50aff10fa8be91958ebafa72879cb7a97a850be5b39b",
+      "selected_labels": 3968,
+      "selected_statuses_present": 0,
+      "valid": true,
+      "verdict_sha256": "1d5868dd7d94cbc9a146bac078e87b40b487ed08552723751d52177bd7709bea"
+    },
+    {
+      "control": "reference",
+      "kind": "pass",
+      "pass": true,
+      "runtime_closed": true,
+      "runtime_sha256": "3fd8dd9cea5a1b26cc1e50aff10fa8be91958ebafa72879cb7a97a850be5b39b",
+      "selected_labels": 3968,
+      "selected_statuses_present": 3968,
+      "valid": true,
+      "verdict_sha256": "ce92b93c5c960a952ad10c0d69cc126704ab634ca53c169800707eb57a5951a1"
+    },
+    {
+      "control": "reference-repeat",
+      "kind": "pass",
+      "pass": true,
+      "runtime_closed": true,
+      "runtime_sha256": "3fd8dd9cea5a1b26cc1e50aff10fa8be91958ebafa72879cb7a97a850be5b39b",
+      "selected_labels": 3968,
+      "selected_statuses_present": 3968,
+      "valid": true,
+      "verdict_sha256": "ce92b93c5c960a952ad10c0d69cc126704ab634ca53c169800707eb57a5951a1"
+    }
+  ],
+  "frozen_package_files_reopened": 99,
+  "original_fields_assertions_labels_unchanged": true,
+  "paid_ready": false,
+  "schema": "native-feedback-arrow-private-control-audit-v1",
+  "scope": "One task controls only; baseline compiler failure has no observed test statuses; root/review/CPU cost unmeasured."
+}

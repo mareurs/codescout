@@ -1,0 +1,35 @@
+{
+  "instrument": "codescout librarian audit_doc_refs",
+  "tool_buffer": "@tool_c0c8f906",
+  "scope": "13 selected current README/report/plan/index/session/issue documents",
+  "n_files_scanned": 13,
+  "n_refs_found": 292,
+  "n_refs_resolved": 292,
+  "n_refs_broken": 0,
+  "n_refs_unknown": 0,
+  "exit_code": 0,
+  "parse_warnings": 0,
+  "scan_meta": {
+    "degraded": false,
+    "lsp_languages_degraded": [],
+    "degraded_causes": {},
+    "basename_index_truncated": false
+  },
+  "output_limit": "The rendered findings array held50 of292 findings. Full scanner counters above are from the tool summary; output truncation is not counted as scan truncation.",
+  "ignored_parameter": "findings_limit is not supported by audit_doc_refs; it was ignored.",
+  "limits": "This first audit precedes adding two QA artifact links to the report. A final audit is recorded separately below when completed.",
+  "final_audit": {
+    "tool_buffer": "@tool_c0cae372",
+    "n_files_scanned": 13,
+    "n_refs_found": 294,
+    "n_refs_resolved": 294,
+    "n_refs_broken": 0,
+    "n_refs_unknown": 0,
+    "exit_code": 0,
+    "parse_warnings": 0,
+    "scan_degraded": false,
+    "basename_index_truncated": false,
+    "rendered_findings": 50,
+    "scope": "same13 selected documents after adding2 QA artifact links; no tracker emitted; renderer capped findings, scanner counters cover294 refs"
+  }
+}

@@ -1,0 +1,359 @@
+with-slot.sh: evicted 4 compiled units of workspace crates from /home/marius/.cache/codescout-gate/slot-0: it was last leased for /tmp/stock-observations-final-review/codescout, not for /home/marius/.codex/worktrees/cf66/codescout
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-0 (leased until this command exits)
+   Compiling codescout-embed v0.2.0 (/home/marius/.codex/worktrees/cf66/codescout/crates/codescout-embed)
+   Compiling codescout v0.15.0 (/home/marius/.codex/worktrees/cf66/codescout)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.21s
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/codescout-e6dc2d91b2b23543)
+
+running 78 tests
+test lsp::manager::tests::build_mux_args_defaults_idle_timeout_to_300_when_none ... ok
+test lsp::manager::tests::build_mux_args_includes_env_forwarding ... ok
+test lsp::manager::tests::each_kind_of_round_connects_with_the_documented_window_and_init_floor ... ok
+test lsp::manager::tests::get_or_start_mux_success_records_lsp_event ... ignored, spawns a real kotlin-lsp mux process; requires kotlin-lsp installed
+test lsp::manager::tests::get_or_start_via_mux_surfaces_wedged_error_when_flock_held_socket_absent ... ignored, spawns a python3 flock holder + drives the mux connect path; gated like the posix_write_lock tests
+test lsp::manager::tests::is_test_runner_exe_classifies_by_deps_location ... ok
+test lsp::manager::tests::kotlin_gets_2h_ttl_regardless_of_global ... ok
+test lsp::manager::tests::lsp_key_display ... ok
+test lsp::manager::tests::lsp_key_same_language_same_root_is_equal ... ok
+test lsp::manager::tests::mux_contention_report_round_trips_through_get_or_start_guard ... ok
+test lsp::manager::tests::mux_failure_is_index_contention_detects_lock_signatures ... ok
+test lsp::manager::tests::mux_failure_report_surfaces_stderr_cause_with_index_hint ... ok
+test lsp::manager::tests::mux_failure_report_handles_silent_exit_with_generic_hint ... ok
+test lsp::manager::tests::mux_socket_unreachable_error_names_situation_and_routes_to_holder ... ok
+test lsp::manager::tests::non_contention_mux_report_does_not_trip_get_or_start_guard ... ok
+test lsp::manager::tests::non_kotlin_languages_use_global_ttl ... ok
+test lsp::manager::tests::posix_write_lock_is_held_true_when_another_process_holds_it ... ignored, spawns a python3 fcntl holder; gated like the rust-analyzer mux test
+test lsp::manager::tests::reap_holders_of_lock_kills_an_orphan_holder ... ignored, spawns a python3 fcntl holder; gated like posix_write_lock tests
+test lsp::manager::tests::resolve_mux_flag_none_uses_default ... ok
+test lsp::manager::tests::resolve_mux_flag_override_wins ... ok
+test lsp::manager::tests::restart_cost_tier_orders_cheap_languages_first ... ok
+test lsp::manager::tests::strip_deleted_suffix_recovers_rebuilt_path ... ok
+test lsp::manager::tests::the_mux_connect_constants_have_the_values_the_docs_quote ... ok
+test lsp::manager::tests::two_clients_waiting_on_one_dead_holder_are_never_told_a_live_mux_wedged_it ... ignored, stress, about 150 s for 300 trials: the natural-interleaving attempt at race (1)
+test lsp::manager::tests::claim_mux_lock_some_when_free_none_when_held ... ok
+test lsp::manager::tests::a_peer_mux_that_never_binds_is_reported_wedged_after_the_wait ... ok
+test lsp::manager::tests::a_peer_mux_that_never_binds_costs_one_wait_not_one_per_file ... ok
+test lsp::manager::tests::kotlin_index_lock_held_false_for_non_kotlin_and_missing_home ... ok
+test lsp::manager::tests::lru_eviction_evicts_kotlin_only_when_pool_is_all_expensive ... ok
+test lsp::manager::tests::cold_start_grace_expired_counts_failure ... ok
+test lsp::manager::tests::evict_idle_preserves_recent_entries ... ok
+test lsp::manager::tests::cold_start_grace_suppresses_circuit_breaker_increment ... ok
+test lsp::manager::tests::manager_starts_empty ... ok
+test lsp::manager::tests::evict_idle_clears_stale_last_used_entries ... ok
+test lsp::manager::tests::manager_shutdown_all_empty ... ok
+test lsp::manager::tests::same_language_different_roots_get_separate_clients ... ok
+test lsp::manager::tests::lru_eviction_prefers_cheap_languages_over_kotlin ... ok
+test lsp::manager::tests::failed_start_cleans_up_starting_map ... ok
+test lsp::manager::tests::project_override_forces_direct_path_for_rust ... ok
+test lsp::manager::tests::posix_write_lock_is_held_false_on_unlocked_file ... ok
+test lsp::manager::tests::record_first_response_noop_when_no_pending ... ok
+test lsp::manager::tests::mem_kill_marker_counts_toward_the_breaker_then_is_consumed ... ok
+test lsp::manager::tests::manager_errors_for_unknown_language ... ok
+test lsp::manager::tests::reap_holders_of_lock_noop_when_unheld ... ok
+test lsp::manager::tests::the_wedge_memory_lasts_sixty_seconds_and_not_longer ... ok
+test lsp::manager::tests::the_production_peer_wait_is_thirty_seconds ... ok
+test lsp::manager::tests::cancelled_get_or_start_cleans_up_starting_map ... ok
+test lsp::manager::tests::a_window_of_zero_still_lets_a_live_mux_send_its_init_message ... ok
+test lsp::manager::tests::shutdown_all_stops_running_servers ... ok
+test lsp::manager::tests::a_remembered_wedged_mux_is_still_tried_once_and_connects_when_it_has_come_up ... ok
+test lsp::manager::tests::connect_to_mux_stops_waiting_when_the_lock_holder_dies ... ok
+test lsp::manager::tests::an_early_stop_because_the_holder_died_is_not_remembered_as_a_wedged_mux ... ok
+test lsp::manager::tests::idle_background_task_evicts_after_ttl ... ok
+test lsp::manager::tests::an_attempt_that_gets_no_init_message_closes_its_connection_and_leaves_no_task ... ok
+test lsp::manager::tests::a_replacement_holder_that_dies_too_hands_the_lock_to_a_respawn ... ok
+test lsp::manager::tests::a_holder_that_dies_just_before_the_deadline_is_reported_gone_not_wedged ... ok
+test lsp::manager::tests::a_mux_started_by_a_third_process_in_the_gap_after_the_holder_died_is_waited_for ... ok
+test lsp::manager::tests::a_silent_socket_ends_the_connect_when_the_window_ends ... ok
+test lsp::manager::tests::connect_to_mux_gives_up_on_a_socket_that_never_sends_its_init_message ... ok
+test lsp::manager::tests::a_silent_socket_whose_holder_died_is_not_remembered_as_a_wedged_mux ... ok
+test lsp::manager::tests::a_waiting_clients_lock_probe_never_makes_a_starting_mux_give_up ... ok
+test lsp::manager::tests::a_lock_that_changes_hands_in_every_round_ends_in_the_changed_hands_error ... ok
+test lsp::manager::tests::connect_to_mux_waits_for_a_peer_mux_that_binds_its_socket_late ... ok
+test lsp::manager::tests::rounds_that_run_out_with_the_lock_free_do_not_blame_a_holder ... ok
+test lsp::manager::tests::an_attempts_init_bound_is_what_is_left_of_the_window_and_never_below_the_floor ... ok
+test lsp::manager::tests::do_start_records_failure_event_when_start_fails ... ok
+test lsp::manager::tests::do_start_records_lsp_event_to_db ... ok
+test lsp::manager::tests::do_start_reason_evicted_consumes_pending_reason ... ok
+test lsp::manager::tests::a_mux_we_just_spawned_gets_the_full_init_bound_not_the_connect_window ... ok
+test lsp::manager::tests::a_replacement_holder_that_never_binds_is_wedged_within_the_same_wait ... ok
+test lsp::manager::tests::a_mux_this_call_spawned_is_connected_to_although_it_answers_its_init_late ... ok
+test lsp::manager::tests::record_first_response_second_call_is_noop ... ok
+test lsp::manager::tests::record_first_response_consumes_pending_and_updates_db ... ok
+test lsp::manager::tests::a_peer_mux_that_accepts_but_never_sends_init_is_wedged_and_remembered ... ok
+test lsp::manager::tests::a_replacement_holder_that_is_still_starting_is_not_remembered_as_a_wedged_mux ... ok
+test lsp::manager::tests::a_silent_socket_that_appears_late_still_ends_the_connect_with_the_window ... ok
+test lsp::manager::tests::rounds_that_run_out_with_the_last_holder_alive_still_name_it ... ok
+test lsp::manager::tests::a_replacement_that_never_binds_costs_a_second_full_wait_on_the_next_call ... ok
+
+test result: ok. 73 passed; 0 failed; 5 ignored; 0 measured; 5173 filtered out; finished in 4.05s
+
+     Running unittests src/main.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/codescout-2a4d8bfd9c170a55)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/sync_project.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/sync_project-0b7d9e0d41d1d31d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/audit_shards_cross_machine.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/audit_shards_cross_machine-f0d84e5bf3ca8c74)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/buffer_stream_policy.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/buffer_stream_policy-034b7d8783548495)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/bug_regression.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/bug_regression-1949d442928c1985)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+     Running tests/build_rs_reads_its_own_tree.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/build_rs_reads_its_own_tree-22d87f22bdeb774d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/call_graph_live.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/call_graph_live-f1d4226d9b83d65d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/ci_wine_pin.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/ci_wine_pin-3f65517a4352eba2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/committed_paths.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/committed_paths-61fad1bb7fceb7e2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/config_propagation.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/config_propagation-967fd9b605c479f3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/cross_process_write_lock.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/cross_process_write_lock-b87e4c2f03ed4d73)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/doc_tool_refs.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/doc_tool_refs-f31b33fb6e90aeac)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.00s
+
+     Running tests/e2e_tests.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/e2e_tests-11e6f5398f2ece31)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.00s
+
+     Running tests/edit_markdown_catalog_sync.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/edit_markdown_catalog_sync-43b4ca1fa9987c6c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/embedder_env_isolation.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/embedder_env_isolation-381f3b8cee330242)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/env_mutation_isolation.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/env_mutation_isolation-a6190e7ef47ac42a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/feature_lanes.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/feature_lanes-97425e4d49bca7ea)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/hook_config.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/hook_config-99d8a080458b64b7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/inline_gates.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/inline_gates-43ffd97d71d0f30c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running tests/integration.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/integration-a504ef4c4307c9d5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/issue_clusters.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/issue_clusters-2944091f6b8e88a9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s
+
+     Running tests/issue_frontmatter.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/issue_frontmatter-ca0fb774d0ac9ccc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running tests/kotlin_server_name_in_installer_and_manual_matches_code.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/kotlin_server_name_in_installer_and_manual_matches_code-f255c4e73326c9ec)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/link_scan.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/link_scan-7f7af388b38821f6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/manual_toc.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/manual_toc-f9be5be839f65a28)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/mcp_smoke_scripts_reference_real_tools.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/mcp_smoke_scripts_reference_real_tools-6811d32da9072fdb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/memory_write_history.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/memory_write_history-30c9f16cb5f15161)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running tests/mux_event_loop_cancel_repro.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/mux_event_loop_cancel_repro-fae834efa17311d0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/packaged_includes.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/packaged_includes-eaea8a3db7225a89)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/python_test_entry_guard.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/python_test_entry_guard-63c83ab20bb69cc2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/rebuild_memory_vectors.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/rebuild_memory_vectors-6979db1ddad584f3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/rename_symbol.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/rename_symbol-4bd30da740722faf)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+     Running tests/result_caps.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/result_caps-ecfa163c38005043)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 71 filtered out; finished in 0.00s
+
+     Running tests/retrieval_e2e.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/retrieval_e2e-f3e288ff708e7d66)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/retrieval_integration.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/retrieval_integration-30d1ba9692779cf7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/retrieval_overlap.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/retrieval_overlap-13270dc2c979475e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/retrieval_unit.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/retrieval_unit-3f8a0ccf936cd21d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/safety_comments.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/safety_comments-9fc0492b5de57478)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/symbol_lsp.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/symbol_lsp-4e070ed622c4a46c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 75 filtered out; finished in 0.00s
+
+     Running tests/tool_reachability.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/tool_reachability-9f632f7bc7f6ac50)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/workspace_pin_parity.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/workspace_pin_parity-eceb0d5fb3068fbc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/worktree_write_scope.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/worktree_write_scope-c086b18d684613d8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/worktree_write_scope_review.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/worktree_write_scope_review-7c8e140245ebaa67)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/codescout_embed-72d900dd55d3ca87)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 36 filtered out; finished in 0.00s
+
+     Running tests/ollama_probe_installs_its_own_crypto_provider.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/ollama_probe_installs_its_own_crypto_provider-6a21df0fcdf4c752)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

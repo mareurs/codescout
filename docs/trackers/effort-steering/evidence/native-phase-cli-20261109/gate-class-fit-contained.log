@@ -1,0 +1,305 @@
+with-slot.sh: CARGO_TARGET_DIR=/home/marius/.cache/codescout-gate/slot-0 (leased until this command exits)
+   Compiling codescout-embed v0.2.0 (/home/marius/.codex/worktrees/cf66/codescout/crates/codescout-embed)
+   Compiling codescout v0.15.0 (/home/marius/.codex/worktrees/cf66/codescout)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 35.87s
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/codescout-eb6cda95cb0f185c)
+
+running 1 test
+test librarian::requirements::tests::every_bug_filed_since_the_class_fit_rule_carries_one ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7895 filtered out; finished in 0.06s
+
+     Running unittests src/main.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/codescout-4e19fdea17584560)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/sync_project.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/sync_project-abfa057930179d3c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/audit_doc_refs.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/audit_doc_refs-ab19e3ef7649018f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/audit_shards_cross_machine.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/audit_shards_cross_machine-86e4882f4dfd1098)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/buffer_stream_policy.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/buffer_stream_policy-3219c0b55f7b2166)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/bug_regression.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/bug_regression-e13258c226070918)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+     Running tests/build_rs_reads_its_own_tree.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/build_rs_reads_its_own_tree-730ea99ab3d24448)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/call_graph_live.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/call_graph_live-5a4b0981b885c7b8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/ci_wine_pin.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/ci_wine_pin-503d26ddffb94671)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/cli_doc.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/cli_doc-b5b863b814297441)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 16 filtered out; finished in 0.00s
+
+     Running tests/committed_paths.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/committed_paths-9ec701cfcaf3741a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/config_propagation.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/config_propagation-ebcfa9ab3c72e579)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/cross_process_write_lock.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/cross_process_write_lock-54c71d3c45e79f9b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/doc_tool_refs.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/doc_tool_refs-f594e06addae7e47)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.00s
+
+     Running tests/e2e_tests.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/e2e_tests-1a7a24e3a54f320a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.00s
+
+     Running tests/edit_markdown_catalog_sync.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/edit_markdown_catalog_sync-49ec5ddbf74d77a2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/embedder_env_isolation.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/embedder_env_isolation-a546c1fff10bfe62)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/env_mutation_isolation.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/env_mutation_isolation-ee45593aa7a0c36c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/feature_lanes.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/feature_lanes-69770290021621f5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/hook_config.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/hook_config-54b3a5c54d169807)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/inline_gates.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/inline_gates-d6b4aaf5415ceba8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running tests/integration.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/integration-308826d86d42eed7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/issue_clusters.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/issue_clusters-0d9d852ed04d8997)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s
+
+     Running tests/issue_frontmatter.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/issue_frontmatter-ae9931b9b373d3be)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running tests/kotlin_server_name_in_installer_and_manual_matches_code.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/kotlin_server_name_in_installer_and_manual_matches_code-011a832e928dee94)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/librarian/main.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/librarian-99175215a2bcf603)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 19 filtered out; finished in 0.00s
+
+     Running tests/link_scan.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/link_scan-c965ef0590a2aa06)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/manual_toc.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/manual_toc-c8f6638d980fb7c9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/mcp_smoke_scripts_reference_real_tools.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/mcp_smoke_scripts_reference_real_tools-77a127bc2279c9b2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/memory_write_history.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/memory_write_history-7851cc22700e62d5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running tests/mux_event_loop_cancel_repro.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/mux_event_loop_cancel_repro-b66e22d815bd8979)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/packaged_includes.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/packaged_includes-134dba4389654001)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/python_test_entry_guard.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/python_test_entry_guard-e7d8eacc19d909c2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/rebuild_memory_vectors.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/rebuild_memory_vectors-85721029fe7bc9f6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/rename_symbol.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/rename_symbol-856671fe2a7d5aa3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+     Running tests/result_caps.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/result_caps-f5a59e987118a4dc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 71 filtered out; finished in 0.00s
+
+     Running tests/retrieval_e2e.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/retrieval_e2e-9634ca462f74174f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/retrieval_integration.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/retrieval_integration-f1881cf6e9586dfa)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/retrieval_overlap.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/retrieval_overlap-5282c19d17ae81dc)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/retrieval_unit.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/retrieval_unit-5aaf43e5cfa74302)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
+     Running tests/safety_comments.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/safety_comments-cf9ca27e1c4cfc79)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/server_installs_librarian_hooks.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/server_installs_librarian_hooks-c56bc82ed5d5258f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/symbol_lsp.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/symbol_lsp-e91474e5be344458)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 75 filtered out; finished in 0.00s
+
+     Running tests/tool_reachability.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/tool_reachability-1f81c4c4d7260378)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/workspace_pin_parity.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/workspace_pin_parity-e0027afd2e17bc0c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/worktree_write_scope.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/worktree_write_scope-6842b7b446c3ca44)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/worktree_write_scope_review.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/worktree_write_scope_review-eda7dfd0f7e899e5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/codescout_embed-1f273f19a157ed27)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 96 filtered out; finished in 0.00s
+
+     Running tests/ollama_probe_installs_its_own_crypto_provider.rs (/home/marius/.cache/codescout-gate/slot-0/debug/deps/ollama_probe_installs_its_own_crypto_provider-4d845aaf8b01206e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

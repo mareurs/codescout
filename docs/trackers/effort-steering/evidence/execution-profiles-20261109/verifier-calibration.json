@@ -1,0 +1,36 @@
+{
+  "scope": "known four-entry tar fixture; one positive and four deliberately invalid archives",
+  "verifier_sha256": "e0816e0a330d71e3b8a9312099c52d707d9b6fe8837d99c9d3b87d553bc8a976",
+  "cases": [
+    {
+      "case": "valid",
+      "accepted": true,
+      "header_counts": {
+        "regular_headers": 1,
+        "hardlink_headers": 1,
+        "symlink_headers": 1,
+        "directory_headers": 1
+      }
+    },
+    {
+      "case": "changed-bytes",
+      "rejected": true,
+      "exception": "AssertionError"
+    },
+    {
+      "case": "unknown-hardlink-target",
+      "rejected": true,
+      "exception": "KeyError"
+    },
+    {
+      "case": "missing-member",
+      "rejected": true,
+      "exception": "AssertionError"
+    },
+    {
+      "case": "changed-mode",
+      "rejected": true,
+      "exception": "AssertionError"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+test_R_has_no_protocol_submission_and_cannot_export_one (test_public_artifacts.PublicArtifactTests.test_R_has_no_protocol_submission_and_cannot_export_one) ... ok
+test_actual_observations_and_actor_clauses_survive_json_transfer (test_public_artifacts.PublicArtifactTests.test_actual_observations_and_actor_clauses_survive_json_transfer) ... ok
+test_binary_logs_are_exact_and_explicitly_encoded (test_public_artifacts.PublicArtifactTests.test_binary_logs_are_exact_and_explicitly_encoded) ... ok
+test_duplicate_receipt_ids_and_source_drift_are_rejected (test_public_artifacts.PublicArtifactTests.test_duplicate_receipt_ids_and_source_drift_are_rejected) ... ok
+test_host_private_fields_and_cost_are_not_exported (test_public_artifacts.PublicArtifactTests.test_host_private_fields_and_cost_are_not_exported) ... ok
+test_tampered_stream_or_receipt_is_rejected (test_public_artifacts.PublicArtifactTests.test_tampered_stream_or_receipt_is_rejected) ... ok
+test_wrong_run_and_phase_are_rejected (test_public_artifacts.PublicArtifactTests.test_wrong_run_and_phase_are_rejected) ... ok
+test_frozen_public_handoff_contains_observations_not_lifecycle_metadata (test_adapter.AdapterTests.test_frozen_public_handoff_contains_observations_not_lifecycle_metadata) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 10.450s
+
+OK

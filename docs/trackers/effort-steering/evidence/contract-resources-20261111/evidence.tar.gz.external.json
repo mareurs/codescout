@@ -1,0 +1,11 @@
+{
+  "scope": "main-tracker",
+  "source_root": "/home/marius/work/claude/codescout",
+  "path": "docs/trackers/effort-steering/evidence/contract-resources-20261111/evidence.tar.gz",
+  "type": "file",
+  "bytes": 301383544,
+  "mode": 420,
+  "sha256": "07fca37fce6f3afc7976d1d3d8defc4c07996bb7cc0e26722b6fd7081dfe8860",
+  "storage": "external",
+  "destination": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/contract-resources-20261111/evidence.tar.gz"
+}

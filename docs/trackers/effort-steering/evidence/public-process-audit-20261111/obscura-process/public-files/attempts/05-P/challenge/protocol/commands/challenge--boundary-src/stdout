@@ -1,0 +1,9 @@
+error seen.set before cause: True
+map/set record seen first: True
+clone hook path kept before generic: True
+function/symbol rejection kept: True
+typed array/DataView/ArrayBuffer kept: True
+plain base is {} and arrays kept: True
+string keys defined, not assigned: True
+own-property filter kept: True
+symbol keys still copied: True

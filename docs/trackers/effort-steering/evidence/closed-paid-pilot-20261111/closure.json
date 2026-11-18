@@ -1,0 +1,14 @@
+{
+  "schema": "effort-closed-paid-closure-v1",
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/closed-paid-pilot-20261111/evidence.tar.gz",
+  "archive_bytes": 2584835393,
+  "archive_sha256": "42d8f9a0ca4d95eccd177761d9aeb7a3db1d289644e06787b471aa9f977b4fb8",
+  "payload_entries": 151829,
+  "regular_payloads": 132183,
+  "selected_regular_bytes": 4220453140,
+  "omitted_build_mounts": 19,
+  "all_selected_payloads_reopened": true,
+  "all_selected_originals_unchanged": true,
+  "original_build_caches_untouched": true,
+  "credential_bytes_absent_from_selected_payloads": true
+}

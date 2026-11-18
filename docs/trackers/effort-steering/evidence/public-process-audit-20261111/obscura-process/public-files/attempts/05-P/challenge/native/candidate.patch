@@ -1,0 +1,100 @@
+diff --git a/crates/obscura-js/js/bootstrap.js b/crates/obscura-js/js/bootstrap.js
+index 6fdd488..b860a42 100644
+--- a/crates/obscura-js/js/bootstrap.js
++++ b/crates/obscura-js/js/bootstrap.js
+@@ -5270,6 +5270,7 @@ function _structuredClone(value, seen) {
+     const Ctor = value.constructor || Error;
+     const e = new Ctor(value.message);
+     if (value.name) e.name = value.name;
++    seen.set(value, e);
+     if (value.stack) e.stack = value.stack;
+     if (value.cause !== undefined) e.cause = _structuredClone(value.cause, seen);
+     return e;
+@@ -5281,11 +5282,14 @@ function _structuredClone(value, seen) {
+     const hook = globalThis.__obscura_clone_hooks[value[Symbol.toStringTag]];
+     if (typeof hook === "function") return hook(value, seen);
+   }
+-  const out = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));
++  const out = Array.isArray(value) ? [] : {};
+   seen.set(value, out);
+   for (const k in value) {
+     if (Object.prototype.hasOwnProperty.call(value, k)) {
+-      out[k] = _structuredClone(value[k], seen);
++      Object.defineProperty(out, k, {
++        value: _structuredClone(value[k], seen),
++        writable: true, enumerable: true, configurable: true,
++      });
+     }
+   }
+   // Symbols are not enumerable via for-in; copy own symbol-keyed properties.
+diff --git a/probes/check_clone_boundary.py b/probes/check_clone_boundary.py
+new file mode 100644
+index 0000000..e06bad6
+--- /dev/null
++++ b/probes/check_clone_boundary.py
+@@ -0,0 +1,22 @@
++import sys
++
++src = open(sys.argv[1], encoding="utf-8").read()
++start = src.index("function _structuredClone(value, seen)")
++body = src[start:src.index("\nglobalThis", start) if "\nglobalThis" in src[start:] else start + 4000]
++err = body[body.index("value instanceof Error"):body.index("__obscura_clone_hooks")]
++gen = body[body.index("const out = Array.isArray(value)"):]
++checks = {
++    "error seen.set before cause": err.index("seen.set(value, e)") < err.index("_structuredClone(value.cause"),
++    "map/set record seen first": body.index("seen.set(value, m)") < body.index("m.set(_structuredClone")
++        and body.index("seen.set(value, s)") < body.index("s.add(_structuredClone"),
++    "clone hook path kept before generic": body.index("hook(value, seen)") < body.index("const out ="),
++    "function/symbol rejection kept": "DataCloneError" in body[:400],
++    "typed array/DataView/ArrayBuffer kept": all(t in body for t in ("DataView", "value.slice()", "value instanceof ArrayBuffer")),
++    "plain base is {} and arrays kept": "Array.isArray(value) ? [] : {}" in gen,
++    "string keys defined, not assigned": "Object.defineProperty(out, k" in gen and "out[k] =" not in gen,
++    "own-property filter kept": "hasOwnProperty.call(value, k)" in gen,
++    "symbol keys still copied": "getOwnPropertySymbols" in gen,
++}
++for k, v in checks.items():
++    print(k + ":", v)
++sys.exit(0 if all(checks.values()) else 1)
+diff --git a/probes/check_clone_source.py b/probes/check_clone_source.py
+new file mode 100644
+index 0000000..86edfc5
+--- /dev/null
++++ b/probes/check_clone_source.py
+@@ -0,0 +1,14 @@
++import re, sys
++src = open(sys.argv[1], encoding="utf-8").read()
++start = src.index("function _structuredClone(")
++body = src[start:start + 4000]
++i = body.index("value instanceof Error")
++blk = body[i:body.index("return e;", i)]
++print("error-branch:\n" + blk)
++ok_seen = "seen.set(value, e)" in blk
++print("error branch records seen before cause recursion:", ok_seen)
++g = body[body.index("Object.create(Object.getPrototypeOf(value))") - 80:][:600]
++print("generic branch:\n" + g)
++assign = "out[k] = _structuredClone" in body
++print("generic branch uses assignment:", assign)
++sys.exit(0 if ok_seen and not assign else 1)
+diff --git a/submission.json b/submission.json
+new file mode 100644
+index 0000000..27d4f5b
+--- /dev/null
++++ b/submission.json
+@@ -0,0 +1,17 @@
++{
++  "status": "submitted",
++  "clauses": [
++    {"id": "c-error-cycle", "kind": "requirement", "role": "reproduction", "receipts": ["boundary-src"],
++     "statement": "Public source: the Error branch of _structuredClone calls seen.set(value, e) before recursing into cause, so cycles and shared Errors resolve to one clone. Observed only statically (no JS engine in this environment); not a runtime result."},
++    {"id": "c-proto", "kind": "requirement", "role": "reproduction", "receipts": ["boundary-src"],
++     "statement": "Public source: the generic branch builds on {} or [] and copies own string keys with Object.defineProperty, so an own __proto__ key becomes an own data property and no setter runs. Observed statically only."},
++    {"id": "c-boundary", "kind": "preservation", "role": "legitimate", "receipts": ["boundary-src", "legit-tests"],
++     "statement": "Boundary probe (static) found the fix confined to the Error and generic branches: Map/Set seen-first handling, clone-hook dispatch before the generic path, function/symbol DataCloneError, typed array/DataView/ArrayBuffer handling, the own-property filter and symbol-key copying are all intact. Existing structured_clone_crypto_parity tests are the preservation check; the host replays them."},
++    {"id": "u-runtime", "kind": "uncertainty", "role": "legitimate", "receipts": ["boundary-src"], "unresolved": true,
++     "statement": "Unresolved: no JS engine was available, so cycle and __proto__ behavior is not runtime-verified. Class instances without a clone hook now clone onto Object.prototype (per the issue); Date and RegExp are not recorded in seen, and symbol-keyed properties are still copied by assignment. These were left unchanged and are untested."}
++  ],
++  "commands": [
++    {"id": "boundary-src", "argv": ["python3", "-I", "probes/check_clone_boundary.py", "crates/obscura-js/js/bootstrap.js"], "cwd": ".", "test_files": ["crates/obscura-js/js/bootstrap.js"]},
++    {"id": "legit-tests", "argv": ["cargo", "test", "-p", "obscura-cdp", "--test", "structured_clone_crypto_parity", "--offline"], "cwd": ".", "test_files": ["crates/obscura-cdp/tests/structured_clone_crypto_parity.rs"]}
++  ]
++}

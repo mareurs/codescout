@@ -1,0 +1,289 @@
+{
+  "commitment_if_new_allocation_usd": "106.401093499999998654",
+  "earlier_charge_rescan": false,
+  "inventory_sha256": "397aa39053d74fb7f3509f5d8fb3dc4e66f89b607ae0a29708c6823d370ddce1",
+  "known_client_cost_usd": "64.401093499999998654",
+  "ledger": {
+    "ceiling_usd": "200",
+    "charges": [
+      {
+        "basis": "Previously recorded opening balance; earlier raw charges NOT freshly rescanned.",
+        "cost_usd": "29.221154299999999834",
+        "id": "recorded-pre-native-opening-balance",
+        "receipt_sha256": "9eea38d69a9233bbb12c6a4e2ec4769464dc1098ec7c0e066d78c0778d46a5b6",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/rulings.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.35570720000000006",
+        "id": "native-client:04a9ddb6-156b-4dbd-ab8e-40a0e24302f6",
+        "receipt_sha256": "996750add761bbb61894f76c02abf47c2d2bc9e0324e14e9c04875f0e47a3f5b",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-3/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.5673488000000001",
+        "id": "native-client:0f31f116-bd92-4d45-94d2-1e31464ba8f8",
+        "receipt_sha256": "72f043012925e66410527fdbec0525ab57f915865440a9e978bd97f192e165f2",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104/completion-1/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.5132156999999999",
+        "id": "native-client:1b5ab3b1-08b7-4f6e-8ad3-3b77e6facc2f",
+        "receipt_sha256": "0a54e165fda9f5edd1ca3783e261339f646c8dacedabef73b3e26f7165ece9ac",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--low/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "1.4046817999999996",
+        "id": "native-client:1cce4cec-62af-4b4b-b375-a5049d827c41",
+        "receipt_sha256": "ffa4a73fc48b3b4d4742c45f9cf98930824c4732187dfd70834c1ea7167c9ebc",
+        "source": "/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107/xhigh/verifier/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.4412445",
+        "id": "native-client:1dc8afe2-b4c3-49c1-85ba-596d41ca23e8",
+        "receipt_sha256": "32984f4d1d90e4016b7c5aae19b3fa3bdafd433dcaa3521f9cb0e40fdd8fbb75",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.3749639999999999",
+        "id": "native-client:21cefd82-864f-4daf-bb6f-1f307b51fd28",
+        "receipt_sha256": "b1e96e360ed51b13fe14fcd0307dad8e6aa1d9c6a564b9269ee1ef91594b98ed",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-contract/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "7.2944552",
+        "id": "native-client:2b40c849-d3cd-4b42-9271-8c97c1db7003",
+        "receipt_sha256": "ffe8504582cdb8a1bc92346c0667772797571b60d8cd2bfd26726c9577adb2bc",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-onboarding-once-20261105/rust-lang__rust-analyzer-22992/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.7586436999999999",
+        "id": "native-client:2cf57aaf-1563-4378-bc4e-24daf0737f2e",
+        "receipt_sha256": "7d77c092eb609d3ba6b77014dfc939a80715473899cbbb0f6c4738af9395e809",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--xhigh-control/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.2720019",
+        "id": "native-client:32b92d82-a1b9-45fb-89f6-89fe816c2919",
+        "receipt_sha256": "fa0011a749cc90ec5bcd8e8fa1b0a1b250e3e46132fd1857cc0f31daeb21dddd",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-control/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.9287684",
+        "id": "native-client:485f0af2-8ab4-4d43-b67b-f2798286d621",
+        "receipt_sha256": "0ea148c537ff118b6b56a689c5d40c93dc6f69d61c8299376d33d0bc1e31c406",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-cold-recovery-20261105/workflow-1-xhigh/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "1.7324704000000006",
+        "id": "native-client:49c82f1f-6586-43c5-a0a0-25f1369e6957",
+        "receipt_sha256": "b82557682e0b8fb8329766b3591fe42d9f0c3082e733ccf74e7326a8e1c6bd2c",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.3669376999999999",
+        "id": "native-client:4a8b2540-7e74-4cb2-ad68-f91e04e5d000",
+        "receipt_sha256": "1f40c0f2bb60328ff14b7dc4ad509722496d3a93dc2006f42bc421d7c35a9c29",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-1/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "10.542661899999999",
+        "id": "native-client:4c753503-52fa-49c9-96ce-02720eee7bfe",
+        "receipt_sha256": "157b2a1285513eeedee6555aebb273aef4a345f28de3f7d5341a4378d01b063f",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-onboarding-once-20261105/nushell__nushell-18863/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.2291159",
+        "id": "native-client:529806f1-0536-4a30-850b-933f56ec36a7",
+        "receipt_sha256": "962970b9b73347b4915cf024e2574b4b9d75dd000888b59202aed440b2454d8d",
+        "source": "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-followup-20261107/verifier/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.2914831",
+        "id": "native-client:80203108-824d-49bb-9aac-61cd79789710",
+        "receipt_sha256": "fb8733d8d07c463d82614ccfaa204579f04ca340e690be56060a0f71a08b0312",
+        "source": "/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107/low/verifier/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.4249394",
+        "id": "native-client:859afe80-c7d5-47cd-9d2f-385015d25a9b",
+        "receipt_sha256": "6c8e2bae4346568aeb8c5239e16ea51d146d88ffa1fb4ac01ec942a8b7e151ac",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-calibration-20261105/workflow-0-low/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.49563349999999995",
+        "id": "native-client:9457eec1-9be8-47a1-8925-7c549114d052",
+        "receipt_sha256": "78c8ebf7d4b47285314b19cb17968c0572534f6ad7e0321274807ea720b642c0",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--low-contract/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "1.3404695000000002",
+        "id": "native-client:9967f13c-2388-48a6-9f2c-9b9ffb120eab",
+        "receipt_sha256": "c18a513cd7826863245076795b73b14051960bd1be3ec80a7c1ee22eba0e56c3",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--xhigh-control/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.1780582",
+        "id": "native-client:9e5ded01-54d7-4f2c-b43a-a34ccccd483a",
+        "receipt_sha256": "2e56b09432577128b6d16106165125c741990fe30868abd96b3dc35a371501eb",
+        "source": "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-20261107/verifier/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.40236020000000006",
+        "id": "native-client:ab3f8854-e2ed-4cf0-85c5-e1931b0a4464",
+        "receipt_sha256": "b2c797a5fb35817a860147cd4bccf9a202a5cd52546c273fdf0333282815566e",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104/completion-0/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.2566531",
+        "id": "native-client:adc33e46-ae44-4a53-9cce-a93c5f4a44cd",
+        "receipt_sha256": "32cc8bef797dcebe4a42357dc961465bd5afb737d3f26d660b344341cdfad394",
+        "source": "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/verifier/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.36428510000000003",
+        "id": "native-client:b97b76fe-66de-4fa8-bd22-073bd8d6d933",
+        "receipt_sha256": "200e55bc894f8cec11832594ab17e8dd33dc9db4e357bb7d6c44df81a0be664c",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-0/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.16765020000000003",
+        "id": "native-client:bdadae93-e16e-473c-bf5d-c76e83206804",
+        "receipt_sha256": "478e18823b7d4ec6b76419f418b80f109d32b0a23797dbf56783fa34879e5e39",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-0/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "1.1965462999999996",
+        "id": "native-client:c52a70e8-e90b-4d41-80dd-a629455cef30",
+        "receipt_sha256": "69466462400ee4bb71689963637241dd1409a21bc64cafab0b092b67126c4c1e",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/workflow-1-xhigh/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.4205932",
+        "id": "native-client:ca31555a-7ecc-4aff-8eb6-62bcf0e2b3b4",
+        "receipt_sha256": "f1a5f7c21d65103cb0deeeda8bfb0779bbbcc69e050448f2c7a140697b402b65",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-cold-recovery-20261105/workflow-0-low/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.35197569999999995",
+        "id": "native-client:cd25d05a-7988-4f2c-b7a5-fb700df48f37",
+        "receipt_sha256": "53a88dc5129298ff8bcfaee885a8e75f26b3e97a6f17eeec2642659487d2c63a",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-2/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.2943323",
+        "id": "native-client:d1fb9a9b-0e03-43b1-ae23-b728e5a85ead",
+        "receipt_sha256": "a43ded118445c7ec304f656a26f4e096074a7649360d1dd94e37e24c37e4f55b",
+        "source": "/home/marius/.cache/codescout-resident/codescout/oracle-uncertainty-20261108/low/verifier/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.48744760000000004",
+        "id": "native-client:d490e012-7196-43bb-8941-03828fbd3b8a",
+        "receipt_sha256": "74aae341b12f43beb6e8632e1747e4da636a52cdbf1a3a9d85bc8d06aed07631",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/workflow-0-low/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "0.3245251",
+        "id": "native-client:dc6707e6-2ccb-47fc-abf0-3412167a9d10",
+        "receipt_sha256": "1d704798b38c1699956e1487f0d0f88dff53d23f800d938ecda0e2052c367f53",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--low-control/receipt.json"
+      },
+      {
+        "basis": "Final non-scripted native client receipt.",
+        "cost_usd": "2.4007696",
+        "id": "native-client:ff0d9568-2cb5-4182-8ee5-967ab1a8bf71",
+        "receipt_sha256": "1bebca310ce2cce576b26d8a58361a2c61b80285232dc5253ac30831f6a09010",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--xhigh/receipt.json"
+      }
+    ],
+    "holds": [
+      {
+        "basis": "Original unresolved pre-provider-startup hold. Zero observed forwards is not a final invoice.",
+        "cost_usd": null,
+        "id": "native-client:98aaa6c0-110a-4a19-8789-b39df522284b",
+        "receipt_sha256": "51850d609ea094df9b3a46bd2cc4f0549690d63d7b2df86263a3fe48234f51e1",
+        "reserved_usd": "4",
+        "settled": false,
+        "source": "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/verifier/receipt.json"
+      }
+    ],
+    "reservations": []
+  },
+  "limits": [
+    "Opening balance retained from a previously recorded reconciliation, not a fresh earlier-charge rescan.",
+    "Original unknown remains unknown and fully reserved; no hold is released here.",
+    "This artifact does not alter the current admission rule or authorize a provider call."
+  ],
+  "native_client_cost_usd": "35.17993919999999882",
+  "native_receipts": 30,
+  "opening_balance_sha256": "9eea38d69a9233bbb12c6a4e2ec4769464dc1098ec7c0e066d78c0778d46a5b6",
+  "opening_balance_source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/rulings.json",
+  "opening_balance_usd": "29.221154299999999834",
+  "orchestration_review_embedding_compute_cost": "unmeasured",
+  "paid_ready": false,
+  "proposed_new_allocation_usd": "38",
+  "provider_invoice_reconciliation": false,
+  "receipt_bindings": {
+    "/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107/low/verifier/receipt.json": "fb8733d8d07c463d82614ccfaa204579f04ca340e690be56060a0f71a08b0312",
+    "/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107/xhigh/verifier/receipt.json": "ffa4a73fc48b3b4d4742c45f9cf98930824c4732187dfd70834c1ea7167c9ebc",
+    "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-20261107/verifier/receipt.json": "2e56b09432577128b6d16106165125c741990fe30868abd96b3dc35a371501eb",
+    "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-followup-20261107/verifier/receipt.json": "962970b9b73347b4915cf024e2574b4b9d75dd000888b59202aed440b2454d8d",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/workflow-0-low/receipt.json": "74aae341b12f43beb6e8632e1747e4da636a52cdbf1a3a9d85bc8d06aed07631",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/workflow-1-xhigh/receipt.json": "69466462400ee4bb71689963637241dd1409a21bc64cafab0b092b67126c4c1e",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-calibration-20261105/workflow-0-low/receipt.json": "6c8e2bae4346568aeb8c5239e16ea51d146d88ffa1fb4ac01ec942a8b7e151ac",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-cold-recovery-20261105/workflow-0-low/receipt.json": "f1a5f7c21d65103cb0deeeda8bfb0779bbbcc69e050448f2c7a140697b402b65",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-cold-recovery-20261105/workflow-1-xhigh/receipt.json": "0ea148c537ff118b6b56a689c5d40c93dc6f69d61c8299376d33d0bc1e31c406",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/verifier/receipt.json": "51850d609ea094df9b3a46bd2cc4f0549690d63d7b2df86263a3fe48234f51e1",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/verifier/receipt.json": "32cc8bef797dcebe4a42357dc961465bd5afb737d3f26d660b344341cdfad394",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/receipt.json": "32984f4d1d90e4016b7c5aae19b3fa3bdafd433dcaa3521f9cb0e40fdd8fbb75",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--xhigh/receipt.json": "1bebca310ce2cce576b26d8a58361a2c61b80285232dc5253ac30831f6a09010",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--low/receipt.json": "0a54e165fda9f5edd1ca3783e261339f646c8dacedabef73b3e26f7165ece9ac",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/receipt.json": "b82557682e0b8fb8329766b3591fe42d9f0c3082e733ccf74e7326a8e1c6bd2c",
+    "/home/marius/.cache/codescout-resident/codescout/external-onboarding-once-20261105/nushell__nushell-18863/receipt.json": "157b2a1285513eeedee6555aebb273aef4a345f28de3f7d5341a4378d01b063f",
+    "/home/marius/.cache/codescout-resident/codescout/external-onboarding-once-20261105/rust-lang__rust-analyzer-22992/receipt.json": "ffe8504582cdb8a1bc92346c0667772797571b60d8cd2bfd26726c9577adb2bc",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104/completion-0/receipt.json": "b2c797a5fb35817a860147cd4bccf9a202a5cd52546c273fdf0333282815566e",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104/completion-1/receipt.json": "72f043012925e66410527fdbec0525ab57f915865440a9e978bd97f192e165f2",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-0/receipt.json": "478e18823b7d4ec6b76419f418b80f109d32b0a23797dbf56783fa34879e5e39",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-0/receipt.json": "200e55bc894f8cec11832594ab17e8dd33dc9db4e357bb7d6c44df81a0be664c",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-1/receipt.json": "1f40c0f2bb60328ff14b7dc4ad509722496d3a93dc2006f42bc421d7c35a9c29",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-2/receipt.json": "53a88dc5129298ff8bcfaee885a8e75f26b3e97a6f17eeec2642659487d2c63a",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-3/receipt.json": "996750add761bbb61894f76c02abf47c2d2bc9e0324e14e9c04875f0e47a3f5b",
+    "/home/marius/.cache/codescout-resident/codescout/oracle-uncertainty-20261108/low/verifier/receipt.json": "a43ded118445c7ec304f656a26f4e096074a7649360d1dd94e37e24c37e4f55b",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-contract/receipt.json": "b1e96e360ed51b13fe14fcd0307dad8e6aa1d9c6a564b9269ee1ef91594b98ed",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-control/receipt.json": "fa0011a749cc90ec5bcd8e8fa1b0a1b250e3e46132fd1857cc0f31daeb21dddd",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--xhigh-control/receipt.json": "7d77c092eb609d3ba6b77014dfc939a80715473899cbbb0f6c4738af9395e809",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--low-contract/receipt.json": "78c8ebf7d4b47285314b19cb17968c0572534f6ad7e0321274807ea720b642c0",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--low-control/receipt.json": "1d704798b38c1699956e1487f0d0f88dff53d23f800d938ecda0e2052c367f53",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--xhigh-control/receipt.json": "c18a513cd7826863245076795b73b14051960bd1be3ec80a7c1ee22eba0e56c3"
+  },
+  "schema": "client-ledger-reconciliation-v1",
+  "unresolved_reserve_usd": "4"
+}

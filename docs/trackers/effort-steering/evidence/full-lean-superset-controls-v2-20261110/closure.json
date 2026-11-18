@@ -1,0 +1,132 @@
+{
+  "archive": {
+    "all_members_reopened_byte_equal": true,
+    "all_origin_bytes_unchanged_during_seal": true,
+    "bytes": 2844515,
+    "regular_members": 99,
+    "sha256": "a052683ec061ada7d6f283b9d47e215cf322f0b3cbd6709a45a41d6f4d403fde"
+  },
+  "experimental_model_repair_calls": 0,
+  "known_limits": [
+    "Obscura fixture/source binding unqualified",
+    "host resource floor not qualified",
+    "F6 linker classification",
+    "whole actor/context/runtime/controller/accounting and final review pending",
+    "no low/xhigh efficacy observation"
+  ],
+  "paid_ready": false,
+  "proof": {
+    "controls": {
+      "base": {
+        "actual_source_hashes": true,
+        "all_step_returncodes": [
+          {
+            "name": "grade:rebuild",
+            "returncode": 0
+          },
+          {
+            "name": "grade:test[0]",
+            "returncode": 1
+          },
+          {
+            "name": "grade:print[0]",
+            "returncode": 0
+          }
+        ],
+        "complete_streams": true,
+        "expected": 8591,
+        "fresh_container_absence": true,
+        "log_sha256": "25d659f02fcf34ff31cebb6a410dbf5cbbad4532c9165d97b861f36e81afbae4",
+        "missing": 0,
+        "new_statuses": {
+          "proxy::forward::tests::effort_status_oracle::status_200_preserves_body_and_cache": "pass",
+          "proxy::forward::tests::effort_status_oracle::status_400_survives_repeated_request": "fail",
+          "proxy::forward::tests::effort_status_oracle::status_429_survives_repeated_request": "fail",
+          "proxy::forward::tests::effort_status_oracle::status_500_survives_repeated_request": "fail"
+        },
+        "not_passing": 3,
+        "old_selected_all_pass": true,
+        "oom_zero": true,
+        "runtime_limits_init_and_no_host_binds": true,
+        "wall_seconds": 433.7
+      },
+      "reference": {
+        "actual_source_hashes": true,
+        "all_step_returncodes": [
+          {
+            "name": "grade:rebuild",
+            "returncode": 0
+          },
+          {
+            "name": "grade:test[0]",
+            "returncode": 0
+          },
+          {
+            "name": "grade:print[0]",
+            "returncode": 0
+          }
+        ],
+        "complete_streams": true,
+        "expected": 8591,
+        "fresh_container_absence": true,
+        "log_sha256": "1845959d35ccc26ee20952905a877dad1e9f4c16fdf76e7bd7917a2c6c3e97ca",
+        "missing": 0,
+        "new_statuses": {
+          "proxy::forward::tests::effort_status_oracle::status_200_preserves_body_and_cache": "pass",
+          "proxy::forward::tests::effort_status_oracle::status_400_survives_repeated_request": "pass",
+          "proxy::forward::tests::effort_status_oracle::status_429_survives_repeated_request": "pass",
+          "proxy::forward::tests::effort_status_oracle::status_500_survives_repeated_request": "pass"
+        },
+        "not_passing": 0,
+        "old_selected_all_pass": true,
+        "oom_zero": true,
+        "runtime_limits_init_and_no_host_binds": true,
+        "wall_seconds": 435.3
+      },
+      "reference-repeat": {
+        "actual_source_hashes": true,
+        "all_step_returncodes": [
+          {
+            "name": "grade:rebuild",
+            "returncode": 0
+          },
+          {
+            "name": "grade:test[0]",
+            "returncode": 0
+          },
+          {
+            "name": "grade:print[0]",
+            "returncode": 0
+          }
+        ],
+        "complete_streams": true,
+        "expected": 8591,
+        "fresh_container_absence": true,
+        "log_sha256": "7b4430b831aebe21d57eaf2d2601a7abe17429fd5d2389314aea95cf5a125d4e",
+        "missing": 0,
+        "new_statuses": {
+          "proxy::forward::tests::effort_status_oracle::status_200_preserves_body_and_cache": "pass",
+          "proxy::forward::tests::effort_status_oracle::status_400_survives_repeated_request": "pass",
+          "proxy::forward::tests::effort_status_oracle::status_429_survives_repeated_request": "pass",
+          "proxy::forward::tests::effort_status_oracle::status_500_survives_repeated_request": "pass"
+        },
+        "not_passing": 0,
+        "old_selected_all_pass": true,
+        "oom_zero": true,
+        "runtime_limits_init_and_no_host_binds": true,
+        "wall_seconds": 414.2
+      }
+    },
+    "host_resource_floor_qualified": false,
+    "native_negative_positive_repeat_predicates_satisfied": true,
+    "new_expected_count": 4,
+    "original_dataset_and_expected_arrays_unchanged": true,
+    "original_expected_count": 8587,
+    "paid_ready": false,
+    "reference_repeat_selected_maps_identical": true,
+    "scope": "Lean full acceptance-superset controls only",
+    "whole_pair_or_actor_admitted": false
+  },
+  "retained_prior_oracle_archive_sha256": "adfcced3ce816b094584874178e58ed91a6438a311b0129014c89dcd8a429f07",
+  "schema": 1
+}

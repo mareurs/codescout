@@ -1,0 +1,58 @@
+{
+  "schema": "effort-registered-screen-checkpoint-v1",
+  "captured_at": "2026-11-11T17:48:36.701101+00:00",
+  "scope": "Closed P/X attempt charges across both tasks and necessary protocol/cost screen conditions; no private quality, accepted-patch cost or completed-repair claim.",
+  "p_all_protocol_states_closed": false,
+  "p_known_attempt_usd": "1.65058059999999998",
+  "x_known_attempt_usd": "1.5943932999999999",
+  "p_cost_strictly_below_x": false,
+  "difference_p_minus_x_usd": "0.05618730000000008",
+  "private_verdict_files": 0,
+  "attempts": [
+    {
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "P",
+      "workflow_state": "incomplete",
+      "measurement_invalid": false,
+      "cost": {
+        "known_usd": "1.1045074",
+        "unknown": false
+      },
+      "attempt_receipt": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/attempt.json"
+    },
+    {
+      "task_id": "yvgude__lean-ctx-1168",
+      "arm": "X",
+      "workflow_state": "incomplete",
+      "measurement_invalid": false,
+      "cost": {
+        "known_usd": "1.0476432",
+        "unknown": false
+      },
+      "attempt_receipt": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/attempt.json"
+    },
+    {
+      "task_id": "h4ckf0r0day__obscura-421",
+      "arm": "X",
+      "workflow_state": "closed",
+      "measurement_invalid": false,
+      "cost": {
+        "known_usd": "0.5467500999999999",
+        "unknown": false
+      },
+      "attempt_receipt": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/attempt.json"
+    },
+    {
+      "task_id": "h4ckf0r0day__obscura-421",
+      "arm": "P",
+      "workflow_state": "incomplete",
+      "measurement_invalid": false,
+      "cost": {
+        "known_usd": "0.54607319999999998",
+        "unknown": false
+      },
+      "attempt_receipt": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/attempt.json"
+    }
+  ],
+  "advance_possible_under_frozen_rule": false
+}

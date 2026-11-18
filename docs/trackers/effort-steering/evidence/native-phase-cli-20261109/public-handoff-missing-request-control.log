@@ -1,0 +1,19 @@
+Negative instrument control on copied recorded requests only; original untouched; no CLI/provider call.
+test_three_native_phases_zero_provider_and_context_bound (test_native.NativeQualificationTests.test_three_native_phases_zero_provider_and_context_bound) ... FAIL
+
+======================================================================
+FAIL: test_three_native_phases_zero_provider_and_context_bound (test_native.NativeQualificationTests.test_three_native_phases_zero_provider_and_context_bound)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_native.py", line 57, in test_three_native_phases_zero_provider_and_context_bound
+    self.assertTrue(any(cfg["prompt"] in text for text in user_texts),
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    "prepared public artifact was absent from the actual model request")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : prepared public artifact was absent from the actual model request
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (failures=1)
+EXPECTED-RED: exactly one assertion failed for missing actual-request delivery.

@@ -1,0 +1,15 @@
+test_three_native_phases_zero_provider_and_context_bound (test_native.NativeQualificationTests.test_three_native_phases_zero_provider_and_context_bound) ... FAIL
+
+======================================================================
+FAIL: test_three_native_phases_zero_provider_and_context_bound (test_native.NativeQualificationTests.test_three_native_phases_zero_provider_and_context_bound)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_native.py", line 51, in test_three_native_phases_zero_provider_and_context_bound
+    self.assertIn("observations", artifacts[-1])
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'observations' not found in {'cleanup_complete': True, 'context_valid': True, 'cost_usd': '0', 'phase': 'investigate', 'provider_forwarded': 0, 'state': 'repair'}
+
+----------------------------------------------------------------------
+Ran 1 test in 105.673s
+
+FAILED (failures=1)

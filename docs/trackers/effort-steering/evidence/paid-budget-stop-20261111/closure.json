@@ -1,0 +1,12 @@
+{
+  "schema": "effort-paid-budget-stop-closure-v1",
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/paid-budget-stop-20261111/evidence.tar.gz",
+  "archive_bytes": 503072529,
+  "archive_sha256": "18c1665382759b1e8cb27c7663aa6da63f4b9c40a1c43588b0c54d2afe82a014",
+  "payload_entries": 19329,
+  "regular_payloads": 17104,
+  "all_selected_payloads_reopened": true,
+  "all_selected_originals_unchanged": true,
+  "campaign_completed": false,
+  "known_closed_native_client_usd": "0.3678025"
+}

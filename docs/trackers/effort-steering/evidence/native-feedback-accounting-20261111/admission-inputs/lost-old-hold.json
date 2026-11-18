@@ -1,0 +1,385 @@
+{
+  "canonical_history": {
+    "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-accounting-20261111/anchored/reconciliation.json",
+    "sha256": "f11ad81dabf4c18495281d90601a253cbce40f8ca08117e40a7ca45493b740f5"
+  },
+  "commitment_if_new_allocation_usd": "185.375358899999998524",
+  "earlier_charge_rescan": "Opening remains recorded;48native sessions reopened.",
+  "history_anchor": {
+    "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-accounting-20261111/anchored/anchor-check.json",
+    "sha256": "5142ec0ad82589a69f31eb17973b850cd5d397893bfab6ad1487685bb92fa43d"
+  },
+  "known_client_cost_usd": "69.375358899999998524",
+  "ledger": {
+    "ceiling_usd": "200",
+    "charges": [
+      {
+        "basis": "Previously recorded opening balance; earlier raw charges NOT freshly rescanned.",
+        "cost_usd": "29.221154299999999834",
+        "id": "recorded-pre-native-opening-balance",
+        "receipt_sha256": "9eea38d69a9233bbb12c6a4e2ec4769464dc1098ec7c0e066d78c0778d46a5b6",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/rulings.json"
+      },
+      {
+        "cost_usd": "0.35570720000000006",
+        "id": "native-client:04a9ddb6-156b-4dbd-ab8e-40a0e24302f6",
+        "receipt_sha256": "996750add761bbb61894f76c02abf47c2d2bc9e0324e14e9c04875f0e47a3f5b",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-3/receipt.json"
+      },
+      {
+        "cost_usd": "0.5673488000000001",
+        "id": "native-client:0f31f116-bd92-4d45-94d2-1e31464ba8f8",
+        "receipt_sha256": "72f043012925e66410527fdbec0525ab57f915865440a9e978bd97f192e165f2",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104/completion-1/receipt.json"
+      },
+      {
+        "cost_usd": "0.5132156999999999",
+        "id": "native-client:1b5ab3b1-08b7-4f6e-8ad3-3b77e6facc2f",
+        "receipt_sha256": "0a54e165fda9f5edd1ca3783e261339f646c8dacedabef73b3e26f7165ece9ac",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--low/receipt.json"
+      },
+      {
+        "cost_usd": "1.4046817999999996",
+        "id": "native-client:1cce4cec-62af-4b4b-b375-a5049d827c41",
+        "receipt_sha256": "ffa4a73fc48b3b4d4742c45f9cf98930824c4732187dfd70834c1ea7167c9ebc",
+        "source": "/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107/xhigh/verifier/receipt.json"
+      },
+      {
+        "cost_usd": "0.4412445",
+        "id": "native-client:1dc8afe2-b4c3-49c1-85ba-596d41ca23e8",
+        "receipt_sha256": "32984f4d1d90e4016b7c5aae19b3fa3bdafd433dcaa3521f9cb0e40fdd8fbb75",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/receipt.json"
+      },
+      {
+        "cost_usd": "0.3749639999999999",
+        "id": "native-client:21cefd82-864f-4daf-bb6f-1f307b51fd28",
+        "receipt_sha256": "b1e96e360ed51b13fe14fcd0307dad8e6aa1d9c6a564b9269ee1ef91594b98ed",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-contract/receipt.json"
+      },
+      {
+        "cost_usd": "7.2944552",
+        "id": "native-client:2b40c849-d3cd-4b42-9271-8c97c1db7003",
+        "receipt_sha256": "ffe8504582cdb8a1bc92346c0667772797571b60d8cd2bfd26726c9577adb2bc",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-onboarding-once-20261105/rust-lang__rust-analyzer-22992/receipt.json"
+      },
+      {
+        "cost_usd": "0.7586436999999999",
+        "id": "native-client:2cf57aaf-1563-4378-bc4e-24daf0737f2e",
+        "receipt_sha256": "7d77c092eb609d3ba6b77014dfc939a80715473899cbbb0f6c4738af9395e809",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--xhigh-control/receipt.json"
+      },
+      {
+        "cost_usd": "0.2720019",
+        "id": "native-client:32b92d82-a1b9-45fb-89f6-89fe816c2919",
+        "receipt_sha256": "fa0011a749cc90ec5bcd8e8fa1b0a1b250e3e46132fd1857cc0f31daeb21dddd",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-control/receipt.json"
+      },
+      {
+        "cost_usd": "0.9287684",
+        "id": "native-client:485f0af2-8ab4-4d43-b67b-f2798286d621",
+        "receipt_sha256": "0ea148c537ff118b6b56a689c5d40c93dc6f69d61c8299376d33d0bc1e31c406",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-cold-recovery-20261105/workflow-1-xhigh/receipt.json"
+      },
+      {
+        "cost_usd": "1.7324704000000006",
+        "id": "native-client:49c82f1f-6586-43c5-a0a0-25f1369e6957",
+        "receipt_sha256": "b82557682e0b8fb8329766b3591fe42d9f0c3082e733ccf74e7326a8e1c6bd2c",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/receipt.json"
+      },
+      {
+        "cost_usd": "0.3669376999999999",
+        "id": "native-client:4a8b2540-7e74-4cb2-ad68-f91e04e5d000",
+        "receipt_sha256": "1f40c0f2bb60328ff14b7dc4ad509722496d3a93dc2006f42bc421d7c35a9c29",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-1/receipt.json"
+      },
+      {
+        "cost_usd": "10.542661899999999",
+        "id": "native-client:4c753503-52fa-49c9-96ce-02720eee7bfe",
+        "receipt_sha256": "157b2a1285513eeedee6555aebb273aef4a345f28de3f7d5341a4378d01b063f",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-onboarding-once-20261105/nushell__nushell-18863/receipt.json"
+      },
+      {
+        "cost_usd": "0.2291159",
+        "id": "native-client:529806f1-0536-4a30-850b-933f56ec36a7",
+        "receipt_sha256": "962970b9b73347b4915cf024e2574b4b9d75dd000888b59202aed440b2454d8d",
+        "source": "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-followup-20261107/verifier/receipt.json"
+      },
+      {
+        "cost_usd": "0.2914831",
+        "id": "native-client:80203108-824d-49bb-9aac-61cd79789710",
+        "receipt_sha256": "fb8733d8d07c463d82614ccfaa204579f04ca340e690be56060a0f71a08b0312",
+        "source": "/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107/low/verifier/receipt.json"
+      },
+      {
+        "cost_usd": "0.4249394",
+        "id": "native-client:859afe80-c7d5-47cd-9d2f-385015d25a9b",
+        "receipt_sha256": "6c8e2bae4346568aeb8c5239e16ea51d146d88ffa1fb4ac01ec942a8b7e151ac",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-calibration-20261105/workflow-0-low/receipt.json"
+      },
+      {
+        "cost_usd": "0.49563349999999995",
+        "id": "native-client:9457eec1-9be8-47a1-8925-7c549114d052",
+        "receipt_sha256": "78c8ebf7d4b47285314b19cb17968c0572534f6ad7e0321274807ea720b642c0",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--low-contract/receipt.json"
+      },
+      {
+        "cost_usd": "1.3404695000000002",
+        "id": "native-client:9967f13c-2388-48a6-9f2c-9b9ffb120eab",
+        "receipt_sha256": "c18a513cd7826863245076795b73b14051960bd1be3ec80a7c1ee22eba0e56c3",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--xhigh-control/receipt.json"
+      },
+      {
+        "cost_usd": "0.1780582",
+        "id": "native-client:9e5ded01-54d7-4f2c-b43a-a34ccccd483a",
+        "receipt_sha256": "2e56b09432577128b6d16106165125c741990fe30868abd96b3dc35a371501eb",
+        "source": "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-20261107/verifier/receipt.json"
+      },
+      {
+        "cost_usd": "0.40236020000000006",
+        "id": "native-client:ab3f8854-e2ed-4cf0-85c5-e1931b0a4464",
+        "receipt_sha256": "b2c797a5fb35817a860147cd4bccf9a202a5cd52546c273fdf0333282815566e",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104/completion-0/receipt.json"
+      },
+      {
+        "cost_usd": "0.2566531",
+        "id": "native-client:adc33e46-ae44-4a53-9cce-a93c5f4a44cd",
+        "receipt_sha256": "32cc8bef797dcebe4a42357dc961465bd5afb737d3f26d660b344341cdfad394",
+        "source": "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/verifier/receipt.json"
+      },
+      {
+        "cost_usd": "0.36428510000000003",
+        "id": "native-client:b97b76fe-66de-4fa8-bd22-073bd8d6d933",
+        "receipt_sha256": "200e55bc894f8cec11832594ab17e8dd33dc9db4e357bb7d6c44df81a0be664c",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-0/receipt.json"
+      },
+      {
+        "cost_usd": "0.16765020000000003",
+        "id": "native-client:bdadae93-e16e-473c-bf5d-c76e83206804",
+        "receipt_sha256": "478e18823b7d4ec6b76419f418b80f109d32b0a23797dbf56783fa34879e5e39",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-0/receipt.json"
+      },
+      {
+        "cost_usd": "1.1965462999999996",
+        "id": "native-client:c52a70e8-e90b-4d41-80dd-a629455cef30",
+        "receipt_sha256": "69466462400ee4bb71689963637241dd1409a21bc64cafab0b092b67126c4c1e",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/workflow-1-xhigh/receipt.json"
+      },
+      {
+        "cost_usd": "0.4205932",
+        "id": "native-client:ca31555a-7ecc-4aff-8eb6-62bcf0e2b3b4",
+        "receipt_sha256": "f1a5f7c21d65103cb0deeeda8bfb0779bbbcc69e050448f2c7a140697b402b65",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-cold-recovery-20261105/workflow-0-low/receipt.json"
+      },
+      {
+        "cost_usd": "0.35197569999999995",
+        "id": "native-client:cd25d05a-7988-4f2c-b7a5-fb700df48f37",
+        "receipt_sha256": "53a88dc5129298ff8bcfaee885a8e75f26b3e97a6f17eeec2642659487d2c63a",
+        "source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-2/receipt.json"
+      },
+      {
+        "cost_usd": "0.2943323",
+        "id": "native-client:d1fb9a9b-0e03-43b1-ae23-b728e5a85ead",
+        "receipt_sha256": "a43ded118445c7ec304f656a26f4e096074a7649360d1dd94e37e24c37e4f55b",
+        "source": "/home/marius/.cache/codescout-resident/codescout/oracle-uncertainty-20261108/low/verifier/receipt.json"
+      },
+      {
+        "cost_usd": "0.48744760000000004",
+        "id": "native-client:d490e012-7196-43bb-8941-03828fbd3b8a",
+        "receipt_sha256": "74aae341b12f43beb6e8632e1747e4da636a52cdbf1a3a9d85bc8d06aed07631",
+        "source": "/home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/workflow-0-low/receipt.json"
+      },
+      {
+        "cost_usd": "0.3245251",
+        "id": "native-client:dc6707e6-2ccb-47fc-abf0-3412167a9d10",
+        "receipt_sha256": "1d704798b38c1699956e1487f0d0f88dff53d23f800d938ecda0e2052c367f53",
+        "source": "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--low-control/receipt.json"
+      },
+      {
+        "cost_usd": "2.4007696",
+        "id": "native-client:ff0d9568-2cb5-4182-8ee5-967ab1a8bf71",
+        "receipt_sha256": "1bebca310ce2cce576b26d8a58361a2c61b80285232dc5253ac30831f6a09010",
+        "source": "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--xhigh/receipt.json"
+      },
+      {
+        "cost_usd": "0.204106",
+        "id": "native-client:79bc8e60-d119-4556-a1dc-117191e16091",
+        "receipt_sha256": "a8e1156ca2ab49cbc144ea7a7e9a00a319eb1caec3069dca808d9ed3deb2f339",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-path-v2/attempts/00-L/repair/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.1636965",
+        "id": "native-client:3af8c540-e367-412e-84a5-54f6193a6dcb",
+        "receipt_sha256": "09b522b38417963536408f9b77a1464c4e75c52c439cfc97c0e3ae349a61a372",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-path-v2/attempts/01-R/investigate/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.23778169999999998",
+        "id": "native-client:ef5eaa6c-10a4-4df6-a658-3eb1d6a081d3",
+        "receipt_sha256": "6dc0854462e28b1ad1376b96dd17b978a9c08c7487a4448cfec1114d7b9613e3",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.22958990000000004",
+        "id": "native-client:bc2bb994-33ed-4398-9e9d-579bf5f63def",
+        "receipt_sha256": "db3dcb4fd13ca9dda3491da6f22b5052c762f6bddf7598955c8b74aa780a08e5",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.18878079999999997",
+        "id": "native-client:f85ffcb8-2787-44f8-b3e2-f07180932da7",
+        "receipt_sha256": "78b1b61e6f6f03ada0e9599979a5904c65dac493a7d98bb7f02fa4e669e3405b",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.1903715",
+        "id": "native-client:87fd88f3-cf0b-4faf-82c0-fdeba43fef0f",
+        "receipt_sha256": "b349d474237c924290083753378ef2bba416a663e379c60537f6085804f4e8a7",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.5289648",
+        "id": "native-client:2a41cb88-6b88-475a-8786-a9f4b7b6873d",
+        "receipt_sha256": "97a1bf8060f5e2f6fae20bf1869f418e6d83d71cf83853655d856d0276d9c1df",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.2933459",
+        "id": "native-client:ef08d5c3-a7fc-46e8-968e-202044c65ef3",
+        "receipt_sha256": "41144a4d6c4fa24b7887b429e5a408175fd89e5fb12f645ae7aa71c077199185",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.2821967",
+        "id": "native-client:972ae189-b7e1-483d-bbc9-518a9ab9d771",
+        "receipt_sha256": "18edbd14e773cde24bed2619954ab467d2e41f296568799ae39bc39779c043d4",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/receipt.json"
+      },
+      {
+        "cost_usd": "1.0476432",
+        "id": "native-client:b52d3798-ce62-494d-aa8b-f90d29bea00a",
+        "receipt_sha256": "834f59420cd997ed5a77e15aa7af626ac375ce4eedb087a006d1ab963480dd74",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.5467500999999999",
+        "id": "native-client:67e6d6f6-c13d-4f53-96aa-fb89ffc8f361",
+        "receipt_sha256": "dc56875b59c186e7f586c6cc217aac911ce326d5128a68272862e6a708f5d1e5",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.1381029",
+        "id": "native-client:2fab45d3-6ef4-4bc7-84e1-ab38d811e7af",
+        "receipt_sha256": "e25eed2bda68d63e28bbc5c9fe3358a1adb659564a195d36c77c06b43a359768",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.17775929999999998",
+        "id": "native-client:2b75dce2-8b4d-4fba-a593-f881be2faadc",
+        "receipt_sha256": "58bdde466c14a3628c58cf2c043a79eef16b3b4eefe02c23d63a8e59df22757d",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.230211",
+        "id": "native-client:08d8f537-ffbe-4de4-9d96-deaf444ab306",
+        "receipt_sha256": "7ca78524eecc0a104ffeac5aeb190f183352938485c9af1180454a3b11d51db0",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.1411048",
+        "id": "native-client:df3382a1-0bd2-4670-a2ee-efd41cba7dae",
+        "receipt_sha256": "9dd966e21a4c02d1b18d97422bfddbcdf0d92fa4903ab58c0ce9288f1cd6d98e",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/06-R/investigate/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.122613",
+        "id": "native-client:3d4f7999-7cbd-4bc5-998e-b4ba3c82e335",
+        "receipt_sha256": "9b9848845270baa0d77a3512ef5601e87a1b01306ed7e0b6629d4a4043dda552",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/06-R/repair/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.1314467",
+        "id": "native-client:0c50bf8f-5c2e-4a7f-bf83-099f0b888266",
+        "receipt_sha256": "b25689e25bbe936c5165b2d15867c2b395637c8403a5a8bba7ac49861ea1bb43",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/06-R/challenge/native/receipt.json"
+      },
+      {
+        "cost_usd": "0.1198006",
+        "id": "native-client:c3532edc-16e8-402e-8ba9-8332133e95e0",
+        "receipt_sha256": "0109a8fe5c0ce409918715c3958042d43bbdc6ff8e41781fc03d95a242530705",
+        "source": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/07-L/repair/native/receipt.json"
+      }
+    ],
+    "holds": [
+      {
+        "basis": "Original unresolved pre-provider-startup hold. Zero observed forwards is not a final invoice.",
+        "cost_usd": null,
+        "id": "native-client:98aaa6c0-110a-4a19-8789-b39df522284b",
+        "receipt_sha256": "51850d609ea094df9b3a46bd2cc4f0549690d63d7b2df86263a3fe48234f51e1",
+        "reserved_usd": "0",
+        "settled": false,
+        "source": "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/verifier/receipt.json"
+      }
+    ],
+    "reservations": []
+  },
+  "native_client_cost_usd": "40.15420459999999869",
+  "native_receipts": 48,
+  "opening_balance_sha256": "9eea38d69a9233bbb12c6a4e2ec4769464dc1098ec7c0e066d78c0778d46a5b6",
+  "opening_balance_source": "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/rulings.json",
+  "opening_balance_usd": "29.221154299999999834",
+  "proposed_new_allocation_usd": "112",
+  "provider_invoice_reconciliation": "unmeasured",
+  "receipt_bindings": {
+    "/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107/low/verifier/receipt.json": "fb8733d8d07c463d82614ccfaa204579f04ca340e690be56060a0f71a08b0312",
+    "/home/marius/.cache/codescout-resident/codescout/baseline-first-oracle-20261107/xhigh/verifier/receipt.json": "ffa4a73fc48b3b4d4742c45f9cf98930824c4732187dfd70834c1ea7167c9ebc",
+    "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-20261107/verifier/receipt.json": "2e56b09432577128b6d16106165125c741990fe30868abd96b3dc35a371501eb",
+    "/home/marius/.cache/codescout-resident/codescout/blind-contrast-verifier-followup-20261107/verifier/receipt.json": "962970b9b73347b4915cf024e2574b4b9d75dd000888b59202aed440b2454d8d",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/workflow-0-low/receipt.json": "74aae341b12f43beb6e8632e1747e4da636a52cdbf1a3a9d85bc8d06aed07631",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-action-budget-20261105/workflow-1-xhigh/receipt.json": "69466462400ee4bb71689963637241dd1409a21bc64cafab0b092b67126c4c1e",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-calibration-20261105/workflow-0-low/receipt.json": "6c8e2bae4346568aeb8c5239e16ea51d146d88ffa1fb4ac01ec942a8b7e151ac",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-cold-recovery-20261105/workflow-0-low/receipt.json": "f1a5f7c21d65103cb0deeeda8bfb0779bbbcc69e050448f2c7a140697b402b65",
+    "/home/marius/.cache/codescout-resident/codescout/complete-workflow-cold-recovery-20261105/workflow-1-xhigh/receipt.json": "0ea148c537ff118b6b56a689c5d40c93dc6f69d61c8299376d33d0bc1e31c406",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-20261107/verifier/receipt.json": "51850d609ea094df9b3a46bd2cc4f0549690d63d7b2df86263a3fe48234f51e1",
+    "/home/marius/.cache/codescout-resident/codescout/differential-oracle-recovery-20261107/verifier/receipt.json": "32cc8bef797dcebe4a42357dc961465bd5afb737d3f26d660b344341cdfad394",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--low/receipt.json": "32984f4d1d90e4016b7c5aae19b3fa3bdafd433dcaa3521f9cb0e40fdd8fbb75",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/nushell__nushell-18863--xhigh/receipt.json": "1bebca310ce2cce576b26d8a58361a2c61b80285232dc5253ac30831f6a09010",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--low/receipt.json": "0a54e165fda9f5edd1ca3783e261339f646c8dacedabef73b3e26f7165ece9ac",
+    "/home/marius/.cache/codescout-resident/codescout/external-matched-repairs-20261105/rust-lang__rust-analyzer-22992--xhigh/receipt.json": "b82557682e0b8fb8329766b3591fe42d9f0c3082e733ccf74e7326a8e1c6bd2c",
+    "/home/marius/.cache/codescout-resident/codescout/external-onboarding-once-20261105/nushell__nushell-18863/receipt.json": "157b2a1285513eeedee6555aebb273aef4a345f28de3f7d5341a4378d01b063f",
+    "/home/marius/.cache/codescout-resident/codescout/external-onboarding-once-20261105/rust-lang__rust-analyzer-22992/receipt.json": "ffe8504582cdb8a1bc92346c0667772797571b60d8cd2bfd26726c9577adb2bc",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104/completion-0/receipt.json": "b2c797a5fb35817a860147cd4bccf9a202a5cd52546c273fdf0333282815566e",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-budget-requalification-20261104/completion-1/receipt.json": "72f043012925e66410527fdbec0525ab57f915865440a9e978bd97f192e165f2",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-0/receipt.json": "478e18823b7d4ec6b76419f418b80f109d32b0a23797dbf56783fa34879e5e39",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-0/receipt.json": "200e55bc894f8cec11832594ab17e8dd33dc9db4e357bb7d6c44df81a0be664c",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-1/receipt.json": "1f40c0f2bb60328ff14b7dc4ad509722496d3a93dc2006f42bc421d7c35a9c29",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-2/receipt.json": "53a88dc5129298ff8bcfaee885a8e75f26b3e97a6f17eeec2642659487d2c63a",
+    "/home/marius/.cache/codescout-resident/codescout/hint-authority-effort-20261104/launch-v1/paid-v2-3/receipt.json": "996750add761bbb61894f76c02abf47c2d2bc9e0324e14e9c04875f0e47a3f5b",
+    "/home/marius/.cache/codescout-resident/codescout/oracle-uncertainty-20261108/low/verifier/receipt.json": "a43ded118445c7ec304f656a26f4e096074a7649360d1dd94e37e24c37e4f55b",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-contract/receipt.json": "b1e96e360ed51b13fe14fcd0307dad8e6aa1d9c6a564b9269ee1ef91594b98ed",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--low-control/receipt.json": "fa0011a749cc90ec5bcd8e8fa1b0a1b250e3e46132fd1857cc0f31daeb21dddd",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/nushell__nushell-18863--xhigh-control/receipt.json": "7d77c092eb609d3ba6b77014dfc939a80715473899cbbb0f6c4738af9395e809",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--low-contract/receipt.json": "78c8ebf7d4b47285314b19cb17968c0572534f6ad7e0321274807ea720b642c0",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--low-control/receipt.json": "1d704798b38c1699956e1487f0d0f88dff53d23f800d938ecda0e2052c367f53",
+    "/home/marius/.cache/codescout-resident/codescout/semantic-contract-runtime-20261106/prepared/arms/rust-lang__rust-analyzer-22992--xhigh-control/receipt.json": "c18a513cd7826863245076795b73b14051960bd1be3ec80a7c1ee22eba0e56c3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/receipt.json": "6dc0854462e28b1ad1376b96dd17b978a9c08c7487a4448cfec1114d7b9613e3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/challenge/native/receipt.json": "b349d474237c924290083753378ef2bba416a663e379c60537f6085804f4e8a7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/investigate/native/receipt.json": "db3dcb4fd13ca9dda3491da6f22b5052c762f6bddf7598955c8b74aa780a08e5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/01-R/repair/native/receipt.json": "78b1b61e6f6f03ada0e9599979a5904c65dac493a7d98bb7f02fa4e669e3405b",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/challenge/native/receipt.json": "18edbd14e773cde24bed2619954ab467d2e41f296568799ae39bc39779c043d4",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/investigate/native/receipt.json": "97a1bf8060f5e2f6fae20bf1869f418e6d83d71cf83853655d856d0276d9c1df",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/02-P/repair/native/receipt.json": "41144a4d6c4fa24b7887b429e5a408175fd89e5fb12f645ae7aa71c077199185",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/receipt.json": "834f59420cd997ed5a77e15aa7af626ac375ce4eedb087a006d1ab963480dd74",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/receipt.json": "dc56875b59c186e7f586c6cc217aac911ce326d5128a68272862e6a708f5d1e5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/challenge/native/receipt.json": "7ca78524eecc0a104ffeac5aeb190f183352938485c9af1180454a3b11d51db0",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/investigate/native/receipt.json": "e25eed2bda68d63e28bbc5c9fe3358a1adb659564a195d36c77c06b43a359768",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/05-P/repair/native/receipt.json": "58bdde466c14a3628c58cf2c043a79eef16b3b4eefe02c23d63a8e59df22757d",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/06-R/challenge/native/receipt.json": "b25689e25bbe936c5165b2d15867c2b395637c8403a5a8bba7ac49861ea1bb43",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/06-R/investigate/native/receipt.json": "9dd966e21a4c02d1b18d97422bfddbcdf0d92fa4903ab58c0ce9288f1cd6d98e",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/06-R/repair/native/receipt.json": "9b9848845270baa0d77a3512ef5601e87a1b01306ed7e0b6629d4a4043dda552",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/07-L/repair/native/receipt.json": "0109a8fe5c0ce409918715c3958042d43bbdc6ff8e41781fc03d95a242530705",
+    "/var/tmp/ep11-01a15/paid-campaign-path-v2/attempts/00-L/repair/native/receipt.json": "a8e1156ca2ab49cbc144ea7a7e9a00a319eb1caec3069dca808d9ed3deb2f339",
+    "/var/tmp/ep11-01a15/paid-campaign-path-v2/attempts/01-R/investigate/native/receipt.json": "09b522b38417963536408f9b77a1464c4e75c52c439cfc97c0e3ae349a61a372"
+  },
+  "schema": "client-ledger-reconciliation-v1",
+  "unresolved_reserve_usd": "4"
+}

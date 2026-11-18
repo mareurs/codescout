@@ -1,0 +1,483 @@
+{
+  "all_members_reopened": true,
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/producers-v4.tar.gz",
+  "archive_bytes": 163878,
+  "archive_sha256": "f12d18d6010237d643b9bdb92a69c7ab35ccd032431c5755c0ff55118848dadb",
+  "client_model_calls": 0,
+  "members": {
+    "main/ArrowCleanBase.Dockerfile": {
+      "bytes": 2852,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/ArrowCleanBase.Dockerfile",
+      "sha256": "5f7189ccc81b8d4e23a02b2ad2df144397ac9714f37e93b6d52a5f116f130918"
+    },
+    "main/ArrowCleanBaseTrace.Dockerfile": {
+      "bytes": 2853,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/ArrowCleanBaseTrace.Dockerfile",
+      "sha256": "cc2eb1257857de36c629ff5e3500c18cd1104314662fd3dd0810f6c90823df89"
+    },
+    "main/ArrowCleanBaseTreeDiff.Dockerfile": {
+      "bytes": 3011,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/ArrowCleanBaseTreeDiff.Dockerfile",
+      "sha256": "f150e9739d886361f7dff95d9b197bc72cdc9da965095732c1998644cf09fabf"
+    },
+    "main/ArrowDependencies.Dockerfile": {
+      "bytes": 316,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/ArrowDependencies.Dockerfile",
+      "sha256": "b25d8c9520a3725a1b11e9d3ff97c36b7eee566cc5972148b2c23f6517598cbc"
+    },
+    "main/ArrowGitlinkBase.Dockerfile": {
+      "bytes": 3124,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/ArrowGitlinkBase.Dockerfile",
+      "sha256": "69cf9ac900cb633bfecb323c9383b91f87925e0539b74867890a7f1cd31436d1"
+    },
+    "main/ArrowReadableDependencies.Dockerfile": {
+      "bytes": 176,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/ArrowReadableDependencies.Dockerfile",
+      "sha256": "f37b788a18efaea1646231fbd107c839ebf9e5a33546d8a4798cd0b380646f03"
+    },
+    "main/audit_arrow_source_image.py": {
+      "bytes": 3614,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/audit_arrow_source_image.py",
+      "sha256": "e0466f4cde27f5bf7d0b2ffef178be2fa03e94a47e4bd22d29d48e650d4795fe"
+    },
+    "main/audit_arrow_source_image_v4.py": {
+      "bytes": 3588,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/audit_arrow_source_image_v4.py",
+      "sha256": "b8193c0e9755a96efc8ee8057e7f8deed93b2129ed4e564e631b941006469aee"
+    },
+    "main/build_arrow_common_v3.py": {
+      "bytes": 2278,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/build_arrow_common_v3.py",
+      "sha256": "c550f0d9e81ab056aa0148882362848a97a2330c23ee5a6a57ae547a825d2a7d"
+    },
+    "main/build_arrow_private_ownership.py": {
+      "bytes": 2754,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/build_arrow_private_ownership.py",
+      "sha256": "bb70b4a5615f9c272dc65e245932051a5a49e1ebb5a568f28bd163c32632db23"
+    },
+    "main/build_skim_private_clean_image.py": {
+      "bytes": 4597,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/build_skim_private_clean_image.py",
+      "sha256": "5a39be2dcb92f5ec30d187979b83ffbf6cd164d40db5f32cb66aba0a627869aa"
+    },
+    "main/checkpoint_preparation_producers.py": {
+      "bytes": 3028,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/checkpoint_preparation_producers.py",
+      "sha256": "3a616bcf827742ae0dd5501b6c0df3f5832da000a4df5b4f0d8ac8c305264255"
+    },
+    "main/checkpoint_preparation_producers_v3.py": {
+      "bytes": 3028,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/checkpoint_preparation_producers_v3.py",
+      "sha256": "863ff0b125f8db84abfe637be92cf8d11b4c80a56655e17adf7a84673cc50baf"
+    },
+    "main/checkpoint_preparation_producers_v3b.py": {
+      "bytes": 3028,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/checkpoint_preparation_producers_v3b.py",
+      "sha256": "af9028eda730bef8cd94bb560235af584d321c6f3011e5a4fde1b2d13d511920"
+    },
+    "main/checkpoint_preparation_producers_v4.py": {
+      "bytes": 3028,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/checkpoint_preparation_producers_v4.py",
+      "sha256": "8c2afdce27d0b6901c5e4a93248dd9bb0f2a025a5a0834ef8aa09066d67767cf"
+    },
+    "main/checkpoint_source.py": {
+      "bytes": 2530,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/checkpoint_source.py",
+      "sha256": "1200d675d4d99b73bfcb2095994564712e53362a7953ac44dac7aecc8bac3ff2"
+    },
+    "main/checkpoint_source_v2.py": {
+      "bytes": 2652,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/checkpoint_source_v2.py",
+      "sha256": "28704334c95e9c13e2d53c34d679463c4fe347a2f20bbba2006d235e9578e720"
+    },
+    "main/export_arrow_base.py": {
+      "bytes": 5845,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/export_arrow_base.py",
+      "sha256": "cf662586f0d24b7e233f99994b91390552f2e122a0e9a211c0cf22465dcf3034"
+    },
+    "main/export_arrow_submodules.py": {
+      "bytes": 5386,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/export_arrow_submodules.py",
+      "sha256": "1b2543adf33850cb3f59742e8d682f78593f8ee4d960b3ae45dd7f90c07de5e9"
+    },
+    "main/export_public_git_base.py": {
+      "bytes": 6449,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/export_public_git_base.py",
+      "sha256": "c7bf6406ab739ea64b3e3e44773b9b321d1cde24c56e5eb8b93f7f2d9dc7c256"
+    },
+    "main/export_skim_base.py": {
+      "bytes": 5840,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/export_skim_base.py",
+      "sha256": "f5450e7e841d0fd8f5f6956a6c8c7b00085f867287d43adb4996e013917e6e0b"
+    },
+    "main/finalize_arrow_context.py": {
+      "bytes": 4915,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/finalize_arrow_context.py",
+      "sha256": "d8bdddd0c7e68000a46da0f358128fae32404c21d5284b107e0896e6be8e22e4"
+    },
+    "main/freeze_population.py": {
+      "bytes": 8240,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/freeze_population.py",
+      "sha256": "6380c1a0aafa6f3ecf3d8e5406841bc83f0e7cb9e4c3a899763bb56f4c1fe27b"
+    },
+    "main/frozen-command-capture.py": {
+      "bytes": 7895,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/frozen-command-capture.py",
+      "sha256": "b963d3c34ffd2920dd5d818b8e764300a046d0bcd4b3df1f9fae8a6f38f59df5"
+    },
+    "main/frozen-grade-policy.py": {
+      "bytes": 12604,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/frozen-grade-policy.py",
+      "sha256": "698a952160494a082bca549a90715ff4df21f050f9f74f71e42dc24caccc1bed"
+    },
+    "main/frozen-multilang-control.py": {
+      "bytes": 28784,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/frozen-multilang-control.py",
+      "sha256": "57d1e1155b559dd0373b7a59ba2cbd04801e2359b4b5f4a83d2a938aa9c0b2d7"
+    },
+    "main/frozen-multilang-tasks.py": {
+      "bytes": 49331,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/frozen-multilang-tasks.py",
+      "sha256": "6acb079db001ee3c88bfde85d2e91f0b98396a1a9b2f45d6e7a1fd90bfac5e78"
+    },
+    "main/frozen-stream-evidence.py": {
+      "bytes": 9311,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/frozen-stream-evidence.py",
+      "sha256": "3df36e833a96b586466305729c80e199a3f2aa1aa2e3cb0a6771f5c051efe62a"
+    },
+    "main/frozen_multilang_grade.py": {
+      "bytes": 8935,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/frozen_multilang_grade.py",
+      "sha256": "2e2d73339cc385f7b4b512ef3168456e4143b505c4f6a61ab7692489901b7682"
+    },
+    "main/index_arrow_all_members_v3.py": {
+      "bytes": 6712,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/index_arrow_all_members_v3.py",
+      "sha256": "10fba1eaea8ec23adea6995cfd82c0e4a531222403e7f930456e2a61c3cbc218"
+    },
+    "main/index_arrow_context.py": {
+      "bytes": 5145,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/index_arrow_context.py",
+      "sha256": "858fcee2b99b318028e893751fb6d46f9c65cb0d6dae6b7569ed2190486b2477"
+    },
+    "main/index_skim_context.py": {
+      "bytes": 5142,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/index_skim_context.py",
+      "sha256": "516bdd318e1d1446017238bf648ca87c3598583ae2e3a4bec769f04e78c47602"
+    },
+    "main/materialize_arrow_public_data.py": {
+      "bytes": 3063,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/materialize_arrow_public_data.py",
+      "sha256": "693ee101afce3b7baa15f45f5b1adb5229b39a82684234b2e8ea57fd6c9d945f"
+    },
+    "main/pin_cached_toolchain_image.py": {
+      "bytes": 4685,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/pin_cached_toolchain_image.py",
+      "sha256": "8a4653e63d0259f703f8db12aa70626b8631f0ed388f1708d9f64a04c967c6ae"
+    },
+    "main/prepare_arrow_context.py": {
+      "bytes": 5091,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_arrow_context.py",
+      "sha256": "f21914f0af82744d6f047738882586597d9044936f6ff6e0fb69710fc1fb88e4"
+    },
+    "main/prepare_arrow_lock.py": {
+      "bytes": 4650,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_arrow_lock.py",
+      "sha256": "3953295da2a8476a02dce7abf49fe90bfd1924dc12eb72415a1001648e78f4f7"
+    },
+    "main/prepare_arrow_private_v2.py": {
+      "bytes": 7866,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_arrow_private_v2.py",
+      "sha256": "5a3dcc4d46a7adb76739444b6c9c4319f3dc4c5f78006c799718020119913e8e"
+    },
+    "main/prepare_arrow_private_v4.py": {
+      "bytes": 7875,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_arrow_private_v4.py",
+      "sha256": "20c2f4e6cd33e7a1529642bb37df220540ce1a7f182fe481112f052e0b2a8dd0"
+    },
+    "main/prepare_arrow_reference.py": {
+      "bytes": 3595,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_arrow_reference.py",
+      "sha256": "271103ed44b146bb371ea180969e85d801ebcb5c1124dfb8caa0f69c8cd6b4a0"
+    },
+    "main/prepare_arrow_template_v2.py": {
+      "bytes": 3925,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_arrow_template_v2.py",
+      "sha256": "5bf76ec4eb8e32fdebb3f5e237288fcc4485a8b38f3a83fc2689ce90930bb28c"
+    },
+    "main/prepare_arrow_template_v3.py": {
+      "bytes": 4778,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_arrow_template_v3.py",
+      "sha256": "71eb9d5b902aee358d30d11a01e4fdbd17f38daa5401a6f08744e15d9197da88"
+    },
+    "main/prepare_public_source_context.py": {
+      "bytes": 9194,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_public_source_context.py",
+      "sha256": "c070e86dd0f1483b3214de69e8d23cafee2920b9151583c8793817b0cbafda9f"
+    },
+    "main/prepare_readable_registry_image.py": {
+      "bytes": 5952,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_readable_registry_image.py",
+      "sha256": "de7d401dd28fefa953d405b804e146c870a8e2abacc10ae11513832e7ecb0618"
+    },
+    "main/preserve_baseline.py": {
+      "bytes": 4130,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/preserve_baseline.py",
+      "sha256": "5a4a816ccee80d36892f1229b75f850f6e47066e34d32a158f039b95d599d91e"
+    },
+    "main/prior_export_public_baseline_v2.py": {
+      "bytes": 4821,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prior_export_public_baseline_v2.py",
+      "sha256": "d9080e2740b182377de238c963d175adb273dd31655d9d593a0e5fff5d5603e4"
+    },
+    "main/prior_index_public_corpus.py": {
+      "bytes": 9738,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prior_index_public_corpus.py",
+      "sha256": "bb1f96afa090361f25532a26c59e6431ef1b7f11d747e9a32d41948884a4779c"
+    },
+    "main/prior_prepare_native.py": {
+      "bytes": 9920,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prior_prepare_native.py",
+      "sha256": "3928d9b6d34a9ab1a3d5271f17150639b7ba58dc7179c042cc52ccd225db93f0"
+    },
+    "main/prior_prepare_public_corpus_v2.py": {
+      "bytes": 6376,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prior_prepare_public_corpus_v2.py",
+      "sha256": "2ec209e72fc6f889c2a57fbe88201feeb90824da5c286d7caadc7bf872e03a0f"
+    },
+    "main/prior_qualify_source_images_v2.py": {
+      "bytes": 4114,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prior_qualify_source_images_v2.py",
+      "sha256": "1602ec04881beedb87cebc8bf0088e17c5d251d7ae7fc72e34e4b269b52ce63d"
+    },
+    "main/private_grade_policy.py": {
+      "bytes": 12604,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/private_grade_policy.py",
+      "sha256": "698a952160494a082bca549a90715ff4df21f050f9f74f71e42dc24caccc1bed"
+    },
+    "main/private_multilang_control.py": {
+      "bytes": 28784,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/private_multilang_control.py",
+      "sha256": "57d1e1155b559dd0373b7a59ba2cbd04801e2359b4b5f4a83d2a938aa9c0b2d7"
+    },
+    "main/private_multilang_tasks.py": {
+      "bytes": 49331,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/private_multilang_tasks.py",
+      "sha256": "6acb079db001ee3c88bfde85d2e91f0b98396a1a9b2f45d6e7a1fd90bfac5e78"
+    },
+    "main/private_stream_evidence.py": {
+      "bytes": 9311,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/private_stream_evidence.py",
+      "sha256": "3df36e833a96b586466305729c80e199a3f2aa1aa2e3cb0a6771f5c051efe62a"
+    },
+    "main/private_tasks.py": {
+      "bytes": 71589,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/private_tasks.py",
+      "sha256": "363c8896c84f94ab291114944001f9b04d31bc2ceaf814c48649599a671ff10c"
+    },
+    "main/probe_arrow_gitlinks.py": {
+      "bytes": 2814,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_arrow_gitlinks.py",
+      "sha256": "a689fe2e3cb1a71d1776fc2cff108ca5abce1821f754c43690836e18928b7aff"
+    },
+    "main/probe_arrow_lsp_v4.py": {
+      "bytes": 3514,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_arrow_lsp_v4.py",
+      "sha256": "bd02ecb3db4413c9b46cc67734aaf651442279631adf28a60fe090a5fb895d6c"
+    },
+    "main/probe_arrow_member_index.py": {
+      "bytes": 5286,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_arrow_member_index.py",
+      "sha256": "adb956b216e4f6c868a649914e8944fa7230df638b3e665fbb6f8c6d7cfca9fd"
+    },
+    "main/probe_arrow_member_v3.py": {
+      "bytes": 6572,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_arrow_member_v3.py",
+      "sha256": "533c86ac4b8ee838cc25c336e2f7da0b6c4afd1c5444d152cfd7a711d185234a"
+    },
+    "main/probe_arrow_tool_surface_v4.py": {
+      "bytes": 2580,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_arrow_tool_surface_v4.py",
+      "sha256": "4c353187890cdb966650af821acd252f0389a6b34c82d4ceef55bcf225368b77"
+    },
+    "main/probe_frozen_test_restore_scope.py": {
+      "bytes": 3876,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_frozen_test_restore_scope.py",
+      "sha256": "4680eb88b52e0f4a661fedd5eee6dcf72fbb07048e2098a1b09cb1c84578dc4d"
+    },
+    "main/probe_insta_readonly_oracles.py": {
+      "bytes": 7518,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_insta_readonly_oracles.py",
+      "sha256": "c047f942486ead03a5d2a38ee64b44793717d44ebb8f15735d39580b7e01e678"
+    },
+    "main/probe_native_closed.py": {
+      "bytes": 3980,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_native_closed.py",
+      "sha256": "d98aa352381201d65a562d7c9cd17d3caea87975ace4b030a54f2b0ee90403bb"
+    },
+    "main/probe_nextest_junit_host_diagnostics.py": {
+      "bytes": 9851,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_nextest_junit_host_diagnostics.py",
+      "sha256": "d4513523563ea43cc9d9310012e97a4d3e20e0134171407b50a44e40354c9141"
+    },
+    "main/probe_nextest_junit_host_diagnostics_v2.py": {
+      "bytes": 11043,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_nextest_junit_host_diagnostics_v2.py",
+      "sha256": "23525216ec6c66d456a0a6689a215eaba9a5eda3a94dc7f28d329c741870e51f"
+    },
+    "main/probe_nextest_stream_compatibility.py": {
+      "bytes": 6824,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_nextest_stream_compatibility.py",
+      "sha256": "6d534f473449d4c90d975dde9227e369b4035960779b7d2ba157dc049a99ea88"
+    },
+    "main/probe_nextest_stream_compatibility_v2.py": {
+      "bytes": 6913,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_nextest_stream_compatibility_v2.py",
+      "sha256": "c057ce575f1948ba0b7aa6c6f45577a218291829ffabc7e746dd508e57e967e6"
+    },
+    "main/probe_trusted_input_container.py": {
+      "bytes": 5080,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_trusted_input_container.py",
+      "sha256": "07b65d7d20c03597f6487a5d75410189e3f59603566ff93a77db83af770ae965"
+    },
+    "main/probe_trusted_input_container_v2.py": {
+      "bytes": 5072,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_trusted_input_container_v2.py",
+      "sha256": "29c436a2e07562a43852c806dd687476a132c70c26ea477274ef854077909999"
+    },
+    "main/probe_trusted_input_container_v3.py": {
+      "bytes": 5586,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_trusted_input_container_v3.py",
+      "sha256": "67228f6670b3ec250b97f3e103ab5ba1148d39b6b2544e7cef1858ff45591342"
+    },
+    "main/probe_trusted_input_container_v4.py": {
+      "bytes": 5586,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_trusted_input_container_v4.py",
+      "sha256": "3bb4a43878eb9f4e6a987189626c705db34c4c3959e07857c3a33b1965aee958"
+    },
+    "main/project_volume_free_image.py": {
+      "bytes": 7357,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/project_volume_free_image.py",
+      "sha256": "39383114062edef518f7329506793c74ea9e432353ccd25ed70d2b8422369dc9"
+    },
+    "main/qualify_accounting.py": {
+      "bytes": 6401,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_accounting.py",
+      "sha256": "3a1a9397cb822e1997463c5ee41561a4a8aad54d9ca61c7ab1f7dabfa5307509"
+    },
+    "main/qualify_arrow_public.py": {
+      "bytes": 3772,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_arrow_public.py",
+      "sha256": "ddfb5867a252fd68a98c6915d5cfdfccadfe044c6d9c72fd94f160893a398154"
+    },
+    "main/qualify_arrow_public_v2.py": {
+      "bytes": 3935,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_arrow_public_v2.py",
+      "sha256": "f6af32478d74e48bfc4e236e13c231216e735ec9d6ed6c3fdc7e595c24a780e6"
+    },
+    "main/qualify_nextest_junit_profile.py": {
+      "bytes": 6355,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_nextest_junit_profile.py",
+      "sha256": "c09804fe686699649fbb716640b5bd6627486d03490dca978c00379bd3f06306"
+    },
+    "main/reconcile_history.py": {
+      "bytes": 6687,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/reconcile_history.py",
+      "sha256": "a98b1010fbc986feb25921ecb758ff938ca4e994efea5265d7b68890966fe2d9"
+    },
+    "main/reconcile_history_anchored.py": {
+      "bytes": 2028,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/reconcile_history_anchored.py",
+      "sha256": "07ed832e7f891f3e481c44c38a1e1f532a4cbe7ae585dacc5ce4fe8011fe8f03"
+    },
+    "main/render_arrow_clean_image.py": {
+      "bytes": 3032,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/render_arrow_clean_image.py",
+      "sha256": "265cc0851874dbf141819dc9bafceefab5d7c52d3be38b0c61d2295346d25e44"
+    },
+    "main/render_arrow_gitlink_image.py": {
+      "bytes": 4252,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/render_arrow_gitlink_image.py",
+      "sha256": "114e42fc13b81fcef0bab68755ea86d93ec24bb9974aac3513dddcc807bc420d"
+    },
+    "main/run_arrow_private_controls_v3.py": {
+      "bytes": 3683,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/run_arrow_private_controls_v3.py",
+      "sha256": "c36677d47294089a351367a88b5ccd45b2fdc1958d17eff00a3a8eb6dec23edc"
+    },
+    "main/run_arrow_private_controls_v4.py": {
+      "bytes": 3683,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/run_arrow_private_controls_v4.py",
+      "sha256": "85b31df3d75e2a690c60dd419b72b8bb4b01e6e2f8e96c6c3340d6289d5eedc7"
+    },
+    "main/run_public_controls.py": {
+      "bytes": 4266,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/run_public_controls.py",
+      "sha256": "60363a678a01d540993a670f1d31cbed2082d80cca54e4af2b41a4886856974b"
+    },
+    "main/seal_closure_probe.py": {
+      "bytes": 3790,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/seal_closure_probe.py",
+      "sha256": "ad7dfec4aaea6b2439c77f63d243d76d18e65638e179d3b9408381794709f231"
+    },
+    "main/seal_skim_trusted_inputs.py": {
+      "bytes": 3767,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/seal_skim_trusted_inputs.py",
+      "sha256": "99b1836c43e1008088c9962a3f82742bba14eccaf157a7a8437dd7fe3980c9a5"
+    },
+    "main/skim-original-log-parser.py": {
+      "bytes": 4172,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/skim-original-log-parser.py",
+      "sha256": "215bf749cb5f02dea5457a7bd04385daa230e933b1f29686f79bf6c8c001d9da"
+    },
+    "main/verify_volume_free_git.py": {
+      "bytes": 5401,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/verify_volume_free_git.py",
+      "sha256": "996a20a99c7ff026b2e7ead47e935ea67716926e06f14ad22aa59fb71e3de730"
+    },
+    "scratch/clean-base-gitlinks-v1/context/control/feedback_gitlinks.py": {
+      "bytes": 4980,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/clean-base-gitlinks-v1/context/control/feedback_gitlinks.py",
+      "sha256": "1e36e2bc291935ef76459d3b0d9472b47df1aeaf0686f30d52c1090bf66e7f0b"
+    },
+    "scratch/clean-base-gitlinks-v1/producer-original.py": {
+      "bytes": 4219,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/clean-base-gitlinks-v1/producer-original.py",
+      "sha256": "f0e260bbb4230ef2932adb9ad2018478bc64ddf7c66b8a5d78f0871bf50f7e91"
+    },
+    "scratch/clean-base-image-v1/producer-original.py": {
+      "bytes": 2999,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/clean-base-image-v1/producer-original.py",
+      "sha256": "36aee4e1e32667223b66d58fcb2dd63bfa4949c4e5c27da4d02c0359ea48fdb8"
+    },
+    "scratch/common-preparation-v3/corrected-first-member-v1/producer-original.py": {
+      "bytes": 5998,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-preparation-v3/corrected-first-member-v1/producer-original.py",
+      "sha256": "cca4cb799d95d5db9ec48d99c590bed8f3b08a2c851cb0883f9e62c944637eda"
+    },
+    "scratch/common-preparation-v3/image-context/Dockerfile": {
+      "bytes": 135,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-preparation-v3/image-context/Dockerfile",
+      "sha256": "b3d602b3a514c3827d14b10982ba2fd5d47d5862e6acb828496738eed40aa295"
+    },
+    "scratch/common-preparation-v3/image-context/Dockerfile.v2": {
+      "bytes": 116,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-preparation-v3/image-context/Dockerfile.v2",
+      "sha256": "253031b024d6411ab0449e19ecf90b5cde36caea72b9d5d7bcfdaddafa4f7a56"
+    },
+    "scratch/common-preparation-v3/image-root-ownership-v1/context/Dockerfile": {
+      "bytes": 208,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/common-preparation-v3/image-root-ownership-v1/context/Dockerfile",
+      "sha256": "666794d6df011ad1731cc29959d0a8949b38246095ef5c4f8db8f6dffdfdebb7"
+    },
+    "scratch/private-preparation-v2/producer-original.py": {
+      "bytes": 7851,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/apache__arrow-rs-7783/private-preparation-v2/producer-original.py",
+      "sha256": "8829e5a500680dc69953414c22607fe578e368e741713a7be7a951efd87f07e8"
+    }
+  },
+  "paid_ready": false,
+  "schema": "feedback-preparation-producer-custody-v4",
+  "scope": "Selected current/failed producers and generated recipes only; not all runtime/private control evidence or admission.",
+  "selected_producer_members": 94
+}

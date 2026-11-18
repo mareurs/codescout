@@ -1,0 +1,11 @@
+{
+  "scope": "main-tracker",
+  "source_root": "/home/marius/work/claude/codescout",
+  "path": "docs/trackers/effort-steering/evidence/paid-budget-stop-20261111/evidence.tar.gz",
+  "type": "file",
+  "bytes": 503072529,
+  "mode": 420,
+  "sha256": "18c1665382759b1e8cb27c7663aa6da63f4b9c40a1c43588b0c54d2afe82a014",
+  "storage": "external",
+  "destination": "/home/marius/archives/codescout/effort-steering-20261118/capsules/docs/trackers/effort-steering/evidence/paid-budget-stop-20261111/evidence.tar.gz"
+}

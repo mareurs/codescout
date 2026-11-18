@@ -1,0 +1,102 @@
+{
+  "899f870563c8ebfa0dd3679dbcdf8ba98f0c1c4fd4a01b34a5101c2c0b8c2485": {
+    "reason": "Filename or slug substring (task-/disk-/mask-); inspected surrounding path, not a credential.",
+    "example_payload": "archive/effort-steering-20261118/catalog-snapshot.json"
+  },
+  "bfa3a08e500469d18adc72ea3588ea8877a1950deb7ca27df43c0d85be6d6fe3": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "archive/effort-steering-20261118/main-sdd-recipes.tar.gz!.superpowers/sdd/2026-11-11-native-public-feedback-transfer/native-closed-mutation/clone/tools/agent_lifecycle/qualify.py"
+  },
+  "d4907655f4ae8db8f14933fee07620cb359d2cf3c033e4a24bd0f731a09d5812": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "archive/effort-steering-20261118/main-sdd-recipes.tar.gz!.superpowers/sdd/2026-11-11-native-public-feedback-transfer/native-closed-mutation/clone/tools/agent_lifecycle/test_native_stdio.py"
+  },
+  "c6e202ec7703275a5ef79cf9cb71f0add411b459f40d1b10a1739fa594755546": {
+    "reason": "Filename or slug substring (task-/disk-/mask-); inspected surrounding path, not a credential.",
+    "example_payload": "archive/effort-steering-20261118/research-tree.txt"
+  },
+  "fdde67d06f1a5883c9055c388d23c13c443c9b4dbcb912777ea7c20991543073": {
+    "reason": "Filename or slug substring (task-/disk-/mask-); inspected surrounding path, not a credential.",
+    "example_payload": "archive/effort-steering-20261118/research-tree.txt"
+  },
+  "e4f1dc7aef3e298f0a7c39ddf3d319bdab2d69ef230ce70c076ea00647fbd984": {
+    "reason": "Filename or slug substring (task-/disk-/mask-); inspected surrounding path, not a credential.",
+    "example_payload": "archive/effort-steering-20261118/research-tree.txt"
+  },
+  "446765f89e41a6d8d8bb8e956ee77bd8ed31bee0d5008da17e9d92881a29c4c3": {
+    "reason": "Filename or slug substring (task-/disk-/mask-); inspected surrounding path, not a credential.",
+    "example_payload": "archive/effort-steering-20261118/research-tree.txt"
+  },
+  "03d104c669e3c7b6be7f989db8b12c8b910d3be8c1e2a73c9369d3cc0ba803b5": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd"
+  },
+  "0dc0b80404653b616db8f9050ee41704ab41dc7cf2f1309fd0e272c5b0233948": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/40df751e2a0a7297b513b81fffa7584fe1d123cf8ee1778616e5ba80e9af1efd"
+  },
+  "b361da217a18d59ff6bb156e736c284c12a0bbb6ac91338b507bd3975fad9ace": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/459115f89658a486c399ee13cdf31bd886c099dda3ef90dff68eae48c805a5b4"
+  },
+  "fc4529b657c196b67bdeaed9c30c2272c83833dd354909149a6b1f50d8c49574": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/campaign-bound-source-20261111/source.tar.gz!objects/a5e8af417ce7d5df46a939ed749de69871b10781e6e0a2b593c912fe8b53ae29"
+  },
+  "fb45a236090bf2f6b5805fb0159314f786afffaa91b4c48a1bfefacff449d6db": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/complete-capture-20261110/verification.tar.gz!ledger/effort-wire-v3/probe_effort_wire.py"
+  },
+  "aa653bedc651e5bb579c7154e0e6d42224b92eec235acc0e992912bf52b11a2d": {
+    "reason": "Filename or slug substring (task-/disk-/mask-); inspected surrounding path, not a credential.",
+    "example_payload": "docs/trackers/effort-steering/evidence/grader-policy-integration-20261109/verification.tar.gz!integration-source-before.json"
+  },
+  "4e416a93bf604054779286980f5cba471529f243d9ef7cbd8dbf165de33d62d4": {
+    "reason": "Filename or slug substring (task-/disk-/mask-); inspected surrounding path, not a credential.",
+    "example_payload": "docs/trackers/effort-steering/evidence/grader-policy-integration-20261109/verification.tar.gz!integration-source-before.json"
+  },
+  "6ec359a75c2ee8ad4448fca89533d17e4978c4d0fc979f931dd18658bf329dcf": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/addons/runtime.rs"
+  },
+  "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/claim_extractor.rs"
+  },
+  "1a5d44a2dca19669d72edf4c4f1c27c4c1ca4b4408fbb17f6ce4ad452d78ddb3": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/claim_extractor.rs"
+  },
+  "02d41c2e58900657c03c400f7698d93f55edb7558ba2819d0b66df821505df52": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/context_package/skills.rs"
+  },
+  "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs"
+  },
+  "2dfacb4231b34bb49d21078789671c29b3e07f980cef969882a56ebe4450589b": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs"
+  },
+  "f419886e26c74511ac3a28b1f9f8a7dff3ad6196518b8445d5b441c565b917e2": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs"
+  },
+  "b4f384f56881fcbb587d1908c1f64a28abf1008a1ef5590405f27033b7b6851b": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/redaction.rs"
+  },
+  "33ea101ddbe7c33be8f143a2779736d0264a4f4c8f323331a4aa9a1f72d8ab2a": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs"
+  },
+  "705248bd2146e242c39f500581e5b336767a88c35b7ba60f72a065b3f751791b": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/secret_detection.rs"
+  },
+  "fc25e1a8a3075e9f2e1a457f7b25351671610c2115c3b4d5633458a55e478823": {
+    "reason": "Synthetic secret-detection/redaction test string or local mock-provider credential; inspected source context. No operational credential found in this match.",
+    "example_payload": "docs/trackers/effort-steering/evidence/public-ledger-diagnosis-20261111/evidence.tar.gz!commands/baseline/input/rust/src/core/sensitivity/classify.rs"
+  }
+}

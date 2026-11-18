@@ -1,0 +1,137 @@
+{
+  "session_id": "b52d3798-ce62-494d-aa8b-f90d29bea00a",
+  "scripted": false,
+  "cost_usd": "1.0476432",
+  "exit_code": -9,
+  "terminal": {
+    "is_error": false,
+    "subtype": "success"
+  },
+  "wall_s": 829.1008009739962,
+  "requests": 41,
+  "forwarded": 41,
+  "transport_errors": [],
+  "campaign_available_usd": "9",
+  "budget_stop": null,
+  "upper_usage_cost": "1.15240752",
+  "unknown_provider_cost": false,
+  "cost_coverage": {
+    "forwarded_at_terminal": 41,
+    "forwarded_total": 41
+  },
+  "cli_turn_success": true,
+  "lifecycle": {
+    "status": "incomplete",
+    "error": "ValueError: continuation limit reached with undelivered jobs",
+    "session_id": "b52d3798-ce62-494d-aa8b-f90d29bea00a",
+    "client_pid": 3444558,
+    "exit_code": -9,
+    "continuations": 2,
+    "cost_usd": "1.0476432",
+    "cost_is_final": false,
+    "turns": 3,
+    "jobs": [
+      {
+        "handle": "@bg_00000003",
+        "record": "/tmp/codescout-bg/7-b542594e-bg_00000003.json",
+        "delivered": true,
+        "outcome": {
+          "handle": "@bg_00000003",
+          "state": "exited",
+          "exit_code": 0,
+          "error": null,
+          "command": "cargo test --lib --offline -- ocla_cache_bridge response_cache"
+        }
+      },
+      {
+        "handle": "@bg_00000004",
+        "record": "/tmp/codescout-bg/7-b542594e-bg_00000004.json",
+        "delivered": true,
+        "outcome": {
+          "handle": "@bg_00000004",
+          "state": "exited",
+          "exit_code": 0,
+          "error": null,
+          "command": "cargo test --offline --test ocla_integration_suite"
+        }
+      },
+      {
+        "handle": "@bg_00000005",
+        "record": "/tmp/codescout-bg/7-b542594e-bg_00000005.json",
+        "delivered": true,
+        "outcome": {
+          "handle": "@bg_00000005",
+          "state": "exited",
+          "exit_code": 0,
+          "error": null,
+          "command": "cargo test --lib --offline -- cached_upstream_error_replays_with_original_status ocla_cache_bridge"
+        }
+      },
+      {
+        "handle": "@bg_00000006",
+        "record": "/tmp/codescout-bg/7-b542594e-bg_00000006.json",
+        "delivered": false
+      }
+    ],
+    "all_jobs_succeeded": false
+  },
+  "public_verification": null,
+  "cleanup_error": null,
+  "supervision_error": null,
+  "background_evidence": {
+    "complete": true,
+    "logs": [
+      {
+        "native_path": "/tmp/codescout-bg-3dd5a2.log",
+        "saved_path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/0.log",
+        "container_id": "3ea261e8ea38f0f2a19f8819998c95d97c780003c93b6cf8a2f1f46cf8e472ae",
+        "bytes_saved": 877,
+        "sha256": "b85e30f82abeb2306c2e37e30f2290f359c00ab6a12dfbd5c5003b4c6b0542d6",
+        "truncated": false,
+        "observed_job_state": "exited"
+      },
+      {
+        "native_path": "/tmp/codescout-bg-SdZaAc.log",
+        "saved_path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/1.log",
+        "container_id": "3ea261e8ea38f0f2a19f8819998c95d97c780003c93b6cf8a2f1f46cf8e472ae",
+        "bytes_saved": 16487,
+        "sha256": "5a6d1edcd58d764b581c7ef2bc04847ae4cf6f0357d63bf4b9a374d84930e68c",
+        "truncated": false,
+        "observed_job_state": "exited"
+      },
+      {
+        "native_path": "/tmp/codescout-bg-rCp9c1.log",
+        "saved_path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/background-logs/2.log",
+        "container_id": "3ea261e8ea38f0f2a19f8819998c95d97c780003c93b6cf8a2f1f46cf8e472ae",
+        "bytes_saved": 709,
+        "sha256": "984947a04ab6f516fe83ab043ec9a1fbb03fb3366327800c73832c3a94f72402",
+        "truncated": false,
+        "observed_job_state": "exited"
+      }
+    ],
+    "errors": []
+  },
+  "artifact_evidence": {
+    "complete": true,
+    "container_id": "3ea261e8ea38f0f2a19f8819998c95d97c780003c93b6cf8a2f1f46cf8e472ae",
+    "image": "sha256:b72f902d24c0a54516e4ef242d8218805f0ea3dc1d26ac809140979ba1f51d56",
+    "baseline_commit": "6a12cabfae751d1372d4bc473a1d0c0a9ab03194",
+    "edited": [
+      "rust/src/core/ocla/response_cache.rs",
+      "rust/src/proxy/forward/mod.rs",
+      "rust/src/proxy/forward/tests.rs",
+      "rust/src/proxy/forward/transport.rs",
+      "rust/src/proxy/ocla_cache_bridge.rs",
+      "rust/tests/ocla_integration_suite.rs"
+    ],
+    "bytes": 11133,
+    "sha256": "9f198d54feaa394ff1151ba6c3d6b4a2e62e17085c1361549736b5a2818822b8",
+    "path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/candidate.patch",
+    "required": true
+  },
+  "workflow_completed": false,
+  "hint_then_edit": false,
+  "scripted_steps": 0,
+  "actor": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/03-X/repair/native/actor",
+  "context_valid": true
+}

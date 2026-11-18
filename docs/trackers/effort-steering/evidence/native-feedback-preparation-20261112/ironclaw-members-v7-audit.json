@@ -1,0 +1,72 @@
+{
+  "additional_onboarding_calls": 0,
+  "client_model_calls": 0,
+  "continuation_payload_rows": 2,
+  "embedding_compute_cost_usd": null,
+  "fresh_absence": [
+    {
+      "id": "8398b4eade98f0ec7fbb289f5dc4956ca0461792f08c9b63816e68bdb49f4335",
+      "kind": "container",
+      "returncode": 1,
+      "stderr_sha256": "097eb52977240dbc0ef8a2d31017b3cb8e417baa45ba89048122ea40c5f02093"
+    },
+    {
+      "id": "0710bca392277a38283fc5dfc6e4a44c2d25d4f48cc12d13006477d80a30c0e4",
+      "kind": "container",
+      "returncode": 1,
+      "stderr_sha256": "06d6b4a52b216ca7de9d55a810c805406157cbf72267f402c0fd7ba764098cf0"
+    },
+    {
+      "id": "16943cf3452182bf6c06a61c33fd9b94d99270986380330d7204f7eeb7d92ab7",
+      "kind": "network",
+      "returncode": 1,
+      "stderr_sha256": "8f140c4acf49a93edf25a3624100b6e69d49e869638c507fe2e0fd438d58dfab"
+    }
+  ],
+  "member_namespaces": 74,
+  "new_v7_index_commands": 61,
+  "no_duplicate_member_index_commands": true,
+  "one_original_onboarding_reused": true,
+  "paid_ready": false,
+  "public_source_sha256": "de59c3139d0330b0fb914158b525644449128c1aac7600567a76e806e48c55aa",
+  "raw_semantic_rpc_responses": 74,
+  "reader_sha256": "52c5c5deb84e334a6b450de0cd13be2b366b4525ce4e7dcddd2fc4cb2d45fe49",
+  "returned_payload_rows_reopened": 221,
+  "reused_v6_index_commands": 13,
+  "root_index_coverage": {
+    "coverage": "all_non_ascii_whitespace_eligible_files",
+    "empty_missing_files": [
+      {
+        "path": "scripts/workflow_canary/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "scripts/workflow_canary/scenarios/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "tests/e2e/scenarios/__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "expected_eligible_files": 3305,
+    "native_verdict": "incomplete",
+    "stored_files": 3300,
+    "whitespace_missing_files": [
+      {
+        "bytes": 1,
+        "path": "scripts/__init__.py",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      },
+      {
+        "bytes": 1,
+        "path": "scripts/live_canary/__init__.py",
+        "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+      }
+    ]
+  },
+  "root_review_compute_cost_usd": null,
+  "schema": "ironclaw-member-control-audit-v1",
+  "scope": "Actual74 member namespaces, raw returned payload provenance, protected root omission interpretation and owned cleanup only; no actor CLI/LSP or repair efficacy.",
+  "source_and_bound_code_unchanged": true
+}

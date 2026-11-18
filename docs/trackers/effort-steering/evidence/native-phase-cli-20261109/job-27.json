@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "handle": "@bg_00000027",
+  "command": "TMPDIR=/var/tmp/ep9-01a15 FILE_PROVENANCE_ROOTS=/var/tmp/ep9-01a15/empty-history FILE_PROVENANCE_CODEX_ROOTS_JSON='[]' ./scripts/with-slot.sh cargo test --workspace --lib a_red_ -- --nocapture > /home/marius/.cache/codescout-resident/codescout/effort-protocol-verification-20261109-01a15ca9/logs/gate-attribution-empty-history.log 2>&1",
+  "server_pid": 337215,
+  "job_pid": 745877,
+  "state": "exited",
+  "exit_code": 0,
+  "error": null,
+  "started_at": "2026-11-09T13:06:26.970927314+00:00",
+  "finished_at": "2026-11-09T13:09:08.568385750+00:00",
+  "log_path": "/tmp/codescout-bg-JHNK28.log"
+}

@@ -1,0 +1,425 @@
+{
+  "client_model_calls": 0,
+  "controls": [
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "container": "c25f47ee2ea2f5ddbef03f634b538cdd6b5cc620d5f041a5a285fdb0bb179b14",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "source_role": "baseline",
+      "source_sha256": "52d34ed35793e99bab0826373b617d471168f77d20174e2f36bbc98d11055836",
+      "task": "DioxusLabs__dioxus-5384"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "container": "1a75218c5b19d9c407ad0a655b326290270a25be5ec9017a4d45e975fae170ce",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "source_role": "baseline",
+      "source_sha256": "52d34ed35793e99bab0826373b617d471168f77d20174e2f36bbc98d11055836",
+      "task": "DioxusLabs__dioxus-5384"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "container": "bbfc6f8177ef7e610a7f1512954b06f9a8a0d297e3d277131384698ddcd40444",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "source_role": "reference",
+      "source_sha256": "1144e48d8d984a831280e0d17c6b605a85510d251e41cdbdc64b181f0fad2346",
+      "task": "DioxusLabs__dioxus-5384"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "container": "438a73cdfb1e84174749254ccfe48cdc67c1d3169fccedccb65cf39363962f8f",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "source_role": "reference",
+      "source_sha256": "1144e48d8d984a831280e0d17c6b605a85510d251e41cdbdc64b181f0fad2346",
+      "task": "DioxusLabs__dioxus-5384"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "container": "029dab84ed49d9148c39eec9c92dde4dcbda0467fd7fa048d552aacb5b58d8e5",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "source_role": "baseline",
+      "source_sha256": "de59c3139d0330b0fb914158b525644449128c1aac7600567a76e806e48c55aa",
+      "task": "nearai__ironclaw-6724"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "container": "06ddf78973e58c3f8c126a1bc2ecbdc63e34471959d8c651f24e58af507b1d9c",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "source_role": "baseline",
+      "source_sha256": "de59c3139d0330b0fb914158b525644449128c1aac7600567a76e806e48c55aa",
+      "task": "nearai__ironclaw-6724"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "container": "7d57c9ccb31fd80c417f73bcf8e1159af68d502f4431fb38a702fca0ffb2333e",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "source_role": "reference",
+      "source_sha256": "0f9fad7709e9b1644249f152de41ed189def1d87f217598908d4b4e83e65245e",
+      "task": "nearai__ironclaw-6724"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "container": "56c27de02953147bc9682414590a8bf7d6440e6dce9ba30273b1e7f6430f1b6a",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "source_role": "reference",
+      "source_sha256": "0f9fad7709e9b1644249f152de41ed189def1d87f217598908d4b4e83e65245e",
+      "task": "nearai__ironclaw-6724"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "container": "abdb5c321571389b626938def423f6edbd6043b9b12703bb033ae8c27a0c12f5",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "source_role": "baseline",
+      "source_sha256": "13514f532d6dd7181b8919ed0e0773e133bd01b0ea06360d064bb4de5cb246b0",
+      "task": "apache__arrow-rs-7783"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "container": "24cb38ca1a2c67e4292f1f9fa94d41ecc2cb0f61057b7bab6c76332e3e996ba0",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "source_role": "baseline",
+      "source_sha256": "13514f532d6dd7181b8919ed0e0773e133bd01b0ea06360d064bb4de5cb246b0",
+      "task": "apache__arrow-rs-7783"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "container": "ff77684ac0b361dc00ac449c974135c759b7a8fa4dac3480bc8967572a26839a",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "source_role": "reference",
+      "source_sha256": "681302c69a8e774b1b5a8d0f9f8708ffdb07dbf778c1effc0f2dbd66d736fbc2",
+      "task": "apache__arrow-rs-7783"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "container": "00d0e64d6ec9ba16003bb1fa5886500704850e44464dc1fdbb2b85208d348b52",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "source_role": "reference",
+      "source_sha256": "681302c69a8e774b1b5a8d0f9f8708ffdb07dbf778c1effc0f2dbd66d736fbc2",
+      "task": "apache__arrow-rs-7783"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "container": "3e5cf5101bebcd438c20499ca9d2faa740edade4e25e7a42bb8996fca610319d",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "source_role": "baseline",
+      "source_sha256": "87d685fd6a90a6c24ae0f6bcd13154599b1336b5830667cb3155d72103c36ef2",
+      "task": "skim-rs__skim-1044"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "container": "d2d3acd4fd3753f5e40ea7679012679b8dbf38021286583bda43cf8c2a59d659",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "source_role": "baseline",
+      "source_sha256": "87d685fd6a90a6c24ae0f6bcd13154599b1336b5830667cb3155d72103c36ef2",
+      "task": "skim-rs__skim-1044"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace"
+      ],
+      "container": "ca22a61f238830d6cc13272699a401baafa825e5c6d58597146448cdb39dd51d",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "ordinary",
+      "source_role": "reference",
+      "source_sha256": "5e401699e0b3101ecfab354a1dfcb70177789462aff8b61c6ab3b1ca87c8db55",
+      "task": "skim-rs__skim-1044"
+    },
+    {
+      "argv": [
+        "cargo",
+        "check",
+        "--offline",
+        "--workspace",
+        "--all-targets"
+      ],
+      "container": "81021c058a46df1c6cc26a51ec2ea1b919e104afc305decbca815ffe129a6bbb",
+      "exit_code": 0,
+      "fresh_absence": true,
+      "kind": "broader",
+      "source_role": "reference",
+      "source_sha256": "5e401699e0b3101ecfab354a1dfcb70177789462aff8b61c6ab3b1ca87c8db55",
+      "task": "skim-rs__skim-1044"
+    }
+  ],
+  "evidence_bindings": {
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/preparation.json": "9a42a5fdce41f64b5cb8b534dce27f99f9c47c2fc1d76397cc9bb84949fe3610",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/broader/commands/public-broader/container-after.json": "878c2df64f949d2e5efe4fedb7c58226c61683bec66411a77964726b5d058113",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/broader/commands/public-broader/container-before.json": "f3f16fcdc9c57b4cf722aaacae91ff718a128d089e3ba55f44566cac8dc0862a",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/broader/registration.json": "5bb0c5d0b779c518b3306840a88cf7e17be25cfc15ca22a23b4d956d0e0d3e3d",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/broader/result.json": "b5787a0ec34086775dad096d338c21fbf87919684575fb5d84c83accefd98a2d",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/ordinary/commands/public-ordinary/container-after.json": "f002898f43fc421b27b93647cb10318585575be64c54004ba4fb04b683e21779",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/ordinary/commands/public-ordinary/container-before.json": "a43c78bc8de3f3665d371c7dea55682464ab9cec593eea3aeab7e6318d1a8b26",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/ordinary/registration.json": "848390b4fa7f8c1c2fb6b7d0fd7dfdc5fac22b02d5bbf86b0fe97ffcd34d058a",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/baseline/ordinary/result.json": "5f7803174c05ca5159c6aa024bca06292a6aaba7864a374b52e63704ba83723a",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/evidence.json": "c2b532e28773429db7cd14c54af94d71a2b42c15f0391fd03af406a076a81902",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/broader/commands/public-broader/container-after.json": "7273f0124523a05bee17c15afadb7f32d4aa8724e2a1f8dda107b2dbb6d2d0fc",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/broader/commands/public-broader/container-before.json": "456635d143deab9c0db8e6cf4623723d11b389b759edbd630721ae5015745a7c",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/broader/registration.json": "fe9510ae05cdbba7948d8409aef928d2113ad9a724af64f5cfeaf12c9643ecd4",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/broader/result.json": "18fbd22fb6f6bc8c9e406ac0e67bbc3a557c2e5542d647ee41217cb358537af7",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/ordinary/commands/public-ordinary/container-after.json": "fb4c0f2a2d780f0a1bc43984b37321432c18306d20c274504a5f751a22a83ecf",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/ordinary/commands/public-ordinary/container-before.json": "40f6322b7da972c016e80bb91159a269051de3b9c06b67b7e58f492c6a939d88",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/ordinary/registration.json": "7097e8c9c1f161ffa7df3d59b33b75eac4ed4caa63c68f0756c51268d255bff1",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/reference/ordinary/result.json": "ef8247afbec521dc01a4f5855ec2b6e3f5988b5aac72fb947303269f199d9bb1",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/registration.json": "e834ba1abb534fe01634bee967d3cbe230f21616bfe05fd0c30c1e6389e5eb1e",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/DioxusLabs__dioxus-5384/runtime/result.json": "730fc97fee43847de4b09fb91d46c278cd5befcc151e8cd4d9a5ac9a0d4a0e63",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/preparation.json": "d0264193746665fe73b4f5d385566ff8ba414e62fdfdd6afd0daa93627159161",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/broader/commands/public-broader/container-after.json": "b2588ed28ede71133facb6382a0863593159f61a85e8a003fad253f417ce2ed9",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/broader/commands/public-broader/container-before.json": "a9771f5ea09a30641d5ef8e3fdc2f8e4c953815f9c26d4753f603a770a33f1af",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/broader/registration.json": "211d9a53b8de8b87a5182eb11059f83e3065b7b590cbd7ccc476cea04d289f7b",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/broader/result.json": "7ef8209a9e8d7be7eae5402aca44c48d553d4a2071f53946a04ec61e247973f5",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/ordinary/commands/public-ordinary/container-after.json": "51785bfc81d37ab511a98d412cfcc24e9229e78db4e35c59d8c20f1516527d9e",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/ordinary/commands/public-ordinary/container-before.json": "74a0f563efcccb9064a566f8cbe9d795dda7efbc63dc26b69c6628f4acdac82a",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/ordinary/registration.json": "939c2bc307f1bf19693f59d2fabb758f948efa222b5163322659fdbcf9c84fbb",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/baseline/ordinary/result.json": "db441ee921a7e801768625ff2843748f89c62d8deba684cb3818048afbd3c818",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/evidence.json": "1e9fc89433e52073400e9d9b6f5d51f7b62316545b24882d93b2abfe6e8e654d",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/broader/commands/public-broader/container-after.json": "e80bc1dac0a31ef268735afa2d22c8809ab6e956e013d9b7a838fb71a6e2a9f8",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/broader/commands/public-broader/container-before.json": "6591f0be351c691be52d7a751a64de2eb0f2f7a7e04b7f1384d7aeffca975ebe",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/broader/registration.json": "87cde5b38243f66494d1f1124d662b0d3efa9201495f74c674aee91b4718011b",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/broader/result.json": "28aa20a39c19694e4e3d0adecf12662c66515142f2e2b06b2e1843224a098690",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/ordinary/commands/public-ordinary/container-after.json": "20f41656879c1072d9a876fd2143ce6e054434bc53f6146ca928d6a2f32f4683",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/ordinary/commands/public-ordinary/container-before.json": "11db487cd4d65e358fcdf02da79e0ead9d5564c53f43c7ce9d9aabf85e25b6d2",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/ordinary/registration.json": "24e2ac3befe23e71b8e2e6da5a33a39e82098a65951e56607d2068bdafb855c3",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/reference/ordinary/result.json": "ce0472941fff1d1a21516a2d7a4d6013bf92abb75335234cfdd7043bf592f8b0",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/registration.json": "a239c091f922494a37b730eebb6df1d61de43188ee701c70859ac7005dc43a64",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/apache__arrow-rs-7783/runtime/result.json": "c25ae777d412a5e283803154f3a092d36e2e29e1a65b9b444e9972802b70c0e1",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/preparation.json": "d3b8465fd7de3a25816083fe0b92b9306ab9e4dc3d62881428031dfb0111fa6b",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/broader/commands/public-broader/container-after.json": "a155dafedbb4e414a12b8ab9fdb99b7c70b5a9197fbe88668eefc3c73c87651f",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/broader/commands/public-broader/container-before.json": "37832a257ac17a15703f7b177bac9c7ae794cc351414b8ddf59f7753fb7b4b0c",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/broader/registration.json": "ad405928b24c11a2b6162f5675d27a5f6b1b5ce88f0286529656016f9a64954a",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/broader/result.json": "734bfb291a18a9faf8c09f5aafb1a46c0c3590c262df4254f9ce50490e0e98c0",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/ordinary/commands/public-ordinary/container-after.json": "09ea8d3f88d2d46c9c7d7b0c6750655c96fc0d68693e3a328fcdf39f865302f3",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/ordinary/commands/public-ordinary/container-before.json": "672081d7d5e1eb33d9e715fb3207fe4ecd1e1ee64f120705c250e859675c92ac",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/ordinary/registration.json": "5cd477121e03f0d767a0fd359708fc165e4db83e88f474548607f2d5c01faa95",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/baseline/ordinary/result.json": "1b958ab23e9275e6721a8d0f511893c8050f61fccbf9f05ddefac5859185a439",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/evidence.json": "f9d9db7d72ae44d56974c0c451a491b3f5da459a5261fc85c4f3ea5f2b76f1b3",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/broader/commands/public-broader/container-after.json": "2f68601394bc200f262806f86ab9f96f64330ba0081cab977930addb6f034783",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/broader/commands/public-broader/container-before.json": "24b2fe46a59aec34ff6e63449b148963de4f361eb85452a3fd9b8920f8635188",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/broader/registration.json": "842677030ff4466275e537fd10e40673453d6152034772e6d4af19ed519e3984",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/broader/result.json": "a278dbcd44097d4dd8a9669c9a36c4fe71091ecb397c1225da3714af65a467a8",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/ordinary/commands/public-ordinary/container-after.json": "4a39e9c8e2d1a768e5be3ecb40e070b6fd39290ff9142d456d90e731c4a54705",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/ordinary/commands/public-ordinary/container-before.json": "c77fafda021696a36811821c8e811f5b4030fbb29fb50b013f2adc60167559e5",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/ordinary/registration.json": "e72ec26e14f34b7068420c3b51401f6f88ed79b045ad701dfe2e505b767f787e",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/reference/ordinary/result.json": "e26903a466de626131c5d8329127fcbc23f5208e9068ea9d0a2dd264728c13db",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/registration.json": "f4bd31ca2402acb9bf3182e70fd70e405f3c64bbf5a9ff0f0c41d5e304beafb2",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/nearai__ironclaw-6724/runtime/result.json": "97b253f6a64654ba8cf847ae75152d26595ae0da9ed2e9105689734864299fb7",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/preparation.json": "a18ae252c63110979b510280c1796ed9ff1311269d11ff757a62311dc9d9e3fa",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/preparation.json": "b18155b0b5582bab4051b2ea31af6b78c691ac1f33043758f3bd83b0c7460383",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/broader/commands/public-broader/container-after.json": "0418727c9d340207bc4041380bede235b23aaec72b1fd96e18333f00755e99b9",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/broader/commands/public-broader/container-before.json": "6eb9100d1b0c62834572b3d962ca83ea4fbc60fdc552cf1ae4ee7519372965db",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/broader/registration.json": "fec88059cbd89cfbf88559b267613b19bf1fbb419284671bee4a7d871f3e556a",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/broader/result.json": "5e480feb66b7b8443b6b6dc97ca72ac5cabda429ee7cf8bf0c92a65332296330",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/ordinary/commands/public-ordinary/container-after.json": "29e9478fca8cdb04ce54aa572339ca297779ac80456478aff75a5f7a61b25dab",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/ordinary/commands/public-ordinary/container-before.json": "fb174a5423feeeae78296e3a03e9f205eae8356444b5c3aa62390437bfa971ce",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/ordinary/registration.json": "b8278527d9da2248f7bf3e288ffea151b974990f1e003766fdf5ebd971c0be1e",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/baseline/ordinary/result.json": "85ec54d7fb8fc3c233661240fef7cd399be9902604fededa64be0731d5571609",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/evidence.json": "30e880e3383c8a9862b5a57db25b1fee5a521bb8bcb275791d97e4cc4dcd7479",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/broader/commands/public-broader/container-after.json": "e615e12852f12f8f660a7c6a70dac20858f49bb4d9b11f70db748df82b7ec918",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/broader/commands/public-broader/container-before.json": "38ba42d8eebb7ce4de122817f67faba6aec07d8e72bba42ef3b104f80ba18fce",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/broader/registration.json": "710f3f9a137f6195e38351981d70a0b1562838698db359dcdf9875f80cbd27e2",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/broader/result.json": "e04527d584abbe3c7fb392031cf56c8b2ed501a9fa342f396caebef16318b44f",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/ordinary/commands/public-ordinary/container-after.json": "34ceef526b5b07522579ca09112b204bfcdda98e46dd642030121a6c17839ffb",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/ordinary/commands/public-ordinary/container-before.json": "b86dd204f16f9096d786f995e7df3d8de8961f6b193ec5f340dedf0b7349428f",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/ordinary/registration.json": "ca3336190fda81170a406bd74516ea71c7a5b143ce7f9f76bcf1b8cec3b20639",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/reference/ordinary/result.json": "a2d4209bb7d50ac52712423a8865d3dbbb8ed22d8e87cfc633f9c1a58635080b",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/registration.json": "81483c1f9ee53c52de35bad82cca63475ded9515c3e6a91afe0a511e5f939a0f",
+    "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/fixture-complete-controls-v1/skim-rs__skim-1044/runtime/result.json": "49e780c8a2182674f1decf8d7d092ab5499d6e0123445cb56b7e04f049cc33c3"
+  },
+  "paid_ready": false,
+  "producer_sha256": "9e5010e90becbf9ec14098f4b847e7d30963c548f2e9b5a67bc8d24f214ad668",
+  "schema": "fixture-complete-reference-control-audit-v1",
+  "scope": "Actual current mandatory four-task complete-reference reader, unchanged actor baselines, both exact public scopes, generated dependency/raw receipt readback and16distinct freshly absent containers. No actor CLI or efficacy claim.",
+  "source_binding_files_reopened": 82,
+  "tasks": [
+    "DioxusLabs__dioxus-5384",
+    "nearai__ironclaw-6724",
+    "apache__arrow-rs-7783",
+    "skim-rs__skim-1044"
+  ],
+  "verified": {
+    "DioxusLabs__dioxus-5384": {
+      "baseline": {
+        "source_sha256": "52d34ed35793e99bab0826373b617d471168f77d20174e2f36bbc98d11055836",
+        "verified_commands": 2
+      },
+      "closure": {
+        "baseline_sha256": "52d34ed35793e99bab0826373b617d471168f77d20174e2f36bbc98d11055836",
+        "complete": true,
+        "protected_entries_verified": 212,
+        "reference_sha256": "1144e48d8d984a831280e0d17c6b605a85510d251e41cdbdc64b181f0fad2346",
+        "role": "private-reference-only",
+        "schema": "private-reference-inputs-v1"
+      },
+      "record_sha256": "54e410452e048fa94fbafb4ab7df5b0f3970059d67cf720851eb329a7b4563e6",
+      "reference": {
+        "source_sha256": "1144e48d8d984a831280e0d17c6b605a85510d251e41cdbdc64b181f0fad2346",
+        "verified_commands": 2
+      }
+    },
+    "apache__arrow-rs-7783": {
+      "baseline": {
+        "source_sha256": "13514f532d6dd7181b8919ed0e0773e133bd01b0ea06360d064bb4de5cb246b0",
+        "verified_commands": 2
+      },
+      "closure": {
+        "baseline_sha256": "13514f532d6dd7181b8919ed0e0773e133bd01b0ea06360d064bb4de5cb246b0",
+        "complete": true,
+        "protected_entries_verified": 706,
+        "reference_sha256": "681302c69a8e774b1b5a8d0f9f8708ffdb07dbf778c1effc0f2dbd66d736fbc2",
+        "role": "private-reference-only",
+        "schema": "private-reference-inputs-v1"
+      },
+      "record_sha256": "f344578556432a5a9d407be58bd993bb15fd45100378d69a3f53fb4a5d546ed6",
+      "reference": {
+        "source_sha256": "681302c69a8e774b1b5a8d0f9f8708ffdb07dbf778c1effc0f2dbd66d736fbc2",
+        "verified_commands": 2
+      }
+    },
+    "nearai__ironclaw-6724": {
+      "baseline": {
+        "source_sha256": "de59c3139d0330b0fb914158b525644449128c1aac7600567a76e806e48c55aa",
+        "verified_commands": 2
+      },
+      "closure": {
+        "baseline_sha256": "de59c3139d0330b0fb914158b525644449128c1aac7600567a76e806e48c55aa",
+        "complete": true,
+        "protected_entries_verified": 1018,
+        "reference_sha256": "0f9fad7709e9b1644249f152de41ed189def1d87f217598908d4b4e83e65245e",
+        "role": "private-reference-only",
+        "schema": "private-reference-inputs-v1"
+      },
+      "record_sha256": "33694c0b974c97c29c5d9396619fb8e0c15968fa60a60712d2e8771ec30ff8ce",
+      "reference": {
+        "source_sha256": "0f9fad7709e9b1644249f152de41ed189def1d87f217598908d4b4e83e65245e",
+        "verified_commands": 2
+      }
+    },
+    "skim-rs__skim-1044": {
+      "baseline": {
+        "source_sha256": "87d685fd6a90a6c24ae0f6bcd13154599b1336b5830667cb3155d72103c36ef2",
+        "verified_commands": 2
+      },
+      "closure": {
+        "baseline_sha256": "87d685fd6a90a6c24ae0f6bcd13154599b1336b5830667cb3155d72103c36ef2",
+        "complete": true,
+        "protected_entries_verified": 553,
+        "reference_sha256": "5e401699e0b3101ecfab354a1dfcb70177789462aff8b61c6ab3b1ca87c8db55",
+        "role": "private-reference-only",
+        "schema": "private-reference-inputs-v1"
+      },
+      "record_sha256": "1aa4ff0b526af45ca3cb795799c523b987c3838b3007f5b52a73a9e1ca640f4b",
+      "reference": {
+        "source_sha256": "5e401699e0b3101ecfab354a1dfcb70177789462aff8b61c6ab3b1ca87c8db55",
+        "verified_commands": 2
+      }
+    }
+  }
+}

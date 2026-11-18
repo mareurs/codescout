@@ -1,0 +1,1545 @@
+{
+  "dataset_path": "/home/marius/work/claude/setup-ab-data/live/multilang-rust.jsonl",
+  "dataset_sha256": "bf2dd8252a07d0f275663ef8f6ab87571dd9bc4ce386abf9ec98d3cd6bb51a81",
+  "tasks": [
+    {
+      "base_commit": "0ab72bdd0860471f4d88ac86e7b97c09eefc6ad4",
+      "created_at": "2025-08-13T03:22:40Z",
+      "id": "Automattic__harper-1737",
+      "image": "starryzhang/sweb.eval.x86_64.automattic_1776_harper-1737",
+      "language": "rust",
+      "public_issue_sha256": "8e9223d30d519072b78426f1bcad155608d40a695dee9b2d7f6d1292a264731e",
+      "repo": "Automattic/harper"
+    },
+    {
+      "base_commit": "a297b59a44e4e2d6c15704c1dffa4aae711ac23e",
+      "created_at": "2026-03-18T23:05:55Z",
+      "id": "Automattic__harper-2962",
+      "image": "starryzhang/sweb.eval.x86_64.automattic_1776_harper-2962",
+      "language": "rust",
+      "public_issue_sha256": "d2b46b495586dddd9fdaa1b8137eee37961339590195291c03be4533e6d717eb",
+      "repo": "Automattic/harper"
+    },
+    {
+      "base_commit": "a297b59a44e4e2d6c15704c1dffa4aae711ac23e",
+      "created_at": "2026-03-19T12:43:35Z",
+      "id": "Automattic__harper-2973",
+      "image": "starryzhang/sweb.eval.x86_64.automattic_1776_harper-2973",
+      "language": "rust",
+      "public_issue_sha256": "6e789f915003001d61c53a8e8f6ef9365a5a3b310b586d4d09066db34eb3b688",
+      "repo": "Automattic/harper"
+    },
+    {
+      "base_commit": "feed915c535ca37bb117c6bce0f6a73d653987ea",
+      "created_at": "2026-03-19T16:15:12Z",
+      "id": "Automattic__harper-2976",
+      "image": "starryzhang/sweb.eval.x86_64.automattic_1776_harper-2976",
+      "language": "rust",
+      "public_issue_sha256": "d6c7cbc4a2cd06ae0e1868de932735f4c6d5c0dc48b2d756d55d57f0fb18a5be",
+      "repo": "Automattic/harper"
+    },
+    {
+      "base_commit": "2e0ab60381f833d0c48536471dcdef4c8f1028ae",
+      "created_at": "2026-04-04T03:48:14Z",
+      "id": "Automattic__harper-3112",
+      "image": "starryzhang/sweb.eval.x86_64.automattic_1776_harper-3112",
+      "language": "rust",
+      "public_issue_sha256": "47ad06a26e0cf594e97e3fc73b28b6860d8d6096913ff1a98c2cc5400b52bdd3",
+      "repo": "Automattic/harper"
+    },
+    {
+      "base_commit": "6a3add79d0af78306b5557f22900b9b5ba2e81c7",
+      "created_at": "2026-04-10T15:27:33Z",
+      "id": "Automattic__harper-3150",
+      "image": "starryzhang/sweb.eval.x86_64.automattic_1776_harper-3150",
+      "language": "rust",
+      "public_issue_sha256": "36d425aa1ce84f968524a4c318aa53a52be16755093b9d56fe1e6672159cad07",
+      "repo": "Automattic/harper"
+    },
+    {
+      "base_commit": "232a8dc83dc0a999dc9a0b4c4fc4b5f5bb93d6d8",
+      "created_at": "2026-03-17T23:24:32Z",
+      "id": "DioxusLabs__dioxus-5384",
+      "image": "starryzhang/sweb.eval.x86_64.dioxuslabs_1776_dioxus-5384",
+      "language": "rust",
+      "public_issue_sha256": "008d471c7d8623a02aaccf499f7954225c68666a2d2e7a8f2f60b16eeef35756",
+      "repo": "DioxusLabs/dioxus"
+    },
+    {
+      "base_commit": "71df8c790f0790ea1d2d87d14d094000c0fa2a45",
+      "created_at": "2026-04-08T11:38:38Z",
+      "id": "DioxusLabs__dioxus-5464",
+      "image": "starryzhang/sweb.eval.x86_64.dioxuslabs_1776_dioxus-5464",
+      "language": "rust",
+      "public_issue_sha256": "4bc50c9aa8e6c42b7b88524a23d616d597ce3cd63cbd85dd80aaf4e01c03e0fc",
+      "repo": "DioxusLabs/dioxus"
+    },
+    {
+      "base_commit": "6f47e983c29ce4477d426a82abed2df5c8127249",
+      "created_at": "2026-03-20T10:33:51Z",
+      "id": "GitoxideLabs__gitoxide-2476",
+      "image": "starryzhang/sweb.eval.x86_64.gitoxidelabs_1776_gitoxide-2476",
+      "language": "rust",
+      "public_issue_sha256": "7fdcded33f2f99f4bc8c9f80a803a312b02df0a912143efaa7fdb9e051008c8c",
+      "repo": "GitoxideLabs/gitoxide"
+    },
+    {
+      "base_commit": "e7eb6678866b76aa13362835759f6ce9ce1acda8",
+      "created_at": "2026-03-19T07:13:45Z",
+      "id": "J-F-Liu__lopdf-481",
+      "image": "starryzhang/sweb.eval.x86_64.j-f-liu_1776_lopdf-481",
+      "language": "rust",
+      "public_issue_sha256": "4e495d43ab9375e2943498cf87b8d3b49da972b8b0fee5f028d95c08ca66b0b2",
+      "repo": "J-F-Liu/lopdf"
+    },
+    {
+      "base_commit": "ed74a19a6112dbde2555d27870fd70254247a8a1",
+      "created_at": "2026-03-31T06:20:24Z",
+      "id": "NVIDIA__OpenShell-695",
+      "image": "starryzhang/sweb.eval.x86_64.nvidia_1776_openshell-695",
+      "language": "rust",
+      "public_issue_sha256": "df851da0792ebdb25422535e8780f2f136a00897b4ac36864b6977832e2a7349",
+      "repo": "NVIDIA/OpenShell"
+    },
+    {
+      "base_commit": "3dd6d51c26a338bee3a7f7017ad4121d0adef529",
+      "created_at": "2026-04-10T22:38:49Z",
+      "id": "NVIDIA__OpenShell-810",
+      "image": "starryzhang/sweb.eval.x86_64.nvidia_1776_openshell-810",
+      "language": "rust",
+      "public_issue_sha256": "9e330c7093f88556c24d9be2b42c4e9a39e86aacd4043235465068f324026cdd",
+      "repo": "NVIDIA/OpenShell"
+    },
+    {
+      "base_commit": "2b1269964beaeab789a1512d0089fe42d9336e14",
+      "created_at": "2026-07-12T11:25:25Z",
+      "id": "NVlabs__cuda-oxide-381",
+      "image": "starryzhang/sweb.eval.x86_64.nvlabs_1776_cuda-oxide-381",
+      "language": "rust",
+      "public_issue_sha256": "e937227114c23093e950d7b23696aa27b6572ffa84f20e295584e1a1eeb769d3",
+      "repo": "NVlabs/cuda-oxide"
+    },
+    {
+      "base_commit": "24dc62fc9dffebbb9c053c0e867eb80403aae659",
+      "created_at": "2025-08-25T21:10:27Z",
+      "id": "ProvableHQ__leo-28814",
+      "image": "starryzhang/sweb.eval.x86_64.provablehq_1776_leo-28814",
+      "language": "rust",
+      "public_issue_sha256": "35ceb4322229250cd30b4f3404cd382372952a68d16a62c1851135e9a7fd1009",
+      "repo": "ProvableHQ/leo"
+    },
+    {
+      "base_commit": "65c782ba5fe057a25e004a10a32473da933e6131",
+      "created_at": "2026-03-30T15:35:40Z",
+      "id": "ProvableHQ__leo-29265",
+      "image": "starryzhang/sweb.eval.x86_64.provablehq_1776_leo-29265",
+      "language": "rust",
+      "public_issue_sha256": "90e7dfc37f4156f9b2d9117927d52c6f8ca8a3f50b35e47ceb9b457dd21bca26",
+      "repo": "ProvableHQ/leo"
+    },
+    {
+      "base_commit": "7baeb757491322824502dec4ec9c9d34e762b670",
+      "created_at": "2026-04-01T20:02:30Z",
+      "id": "ProvableHQ__leo-29291",
+      "image": "starryzhang/sweb.eval.x86_64.provablehq_1776_leo-29291",
+      "language": "rust",
+      "public_issue_sha256": "6fa0ccb86fbc041db1cb5e7890e57d7703f7cda1783f002b7d539c6da701a322",
+      "repo": "ProvableHQ/leo"
+    },
+    {
+      "base_commit": "e14d968c391d015dc2bc66ee29a2d7e4f61740f0",
+      "created_at": "2026-04-14T17:29:31Z",
+      "id": "ProvableHQ__leo-29334",
+      "image": "starryzhang/sweb.eval.x86_64.provablehq_1776_leo-29334",
+      "language": "rust",
+      "public_issue_sha256": "b56f708e915908bd61eb67573760853f45ce90246a9ef87f38e42461954300aa",
+      "repo": "ProvableHQ/leo"
+    },
+    {
+      "base_commit": "9ecac6b834c426ee5ea5b78adbf072c1dc66e36e",
+      "created_at": "2025-07-28T01:20:45Z",
+      "id": "SeaQL__sea-query-920",
+      "image": "starryzhang/sweb.eval.x86_64.seaql_1776_sea-query-920",
+      "language": "rust",
+      "public_issue_sha256": "6a0c0eeac4951cdeb414c3d5c1db61ba2fabf38131b1614d95a6048ed6361cf0",
+      "repo": "SeaQL/sea-query"
+    },
+    {
+      "base_commit": "481b19d1e7150946bd9846b9b827a764fb3507f8",
+      "created_at": "2026-06-24T22:57:02Z",
+      "id": "agentgateway__agentgateway-2313",
+      "image": "starryzhang/sweb.eval.x86_64.agentgateway_1776_agentgateway-2313",
+      "language": "rust",
+      "public_issue_sha256": "a7b669ebae98318a0ca5f950e095b34f2adb3239a8feb58ee4b904bc0ce5c996",
+      "repo": "agentgateway/agentgateway"
+    },
+    {
+      "base_commit": "c9f9951af24dcbffeab6e837b8960692e3028c73",
+      "created_at": "2026-07-07T17:40:48Z",
+      "id": "agentgateway__agentgateway-2452",
+      "image": "starryzhang/sweb.eval.x86_64.agentgateway_1776_agentgateway-2452",
+      "language": "rust",
+      "public_issue_sha256": "3f01ebee163a1d4e958fc46fc00d4ad1484248faf1448a52a5624c1d890fb2cd",
+      "repo": "agentgateway/agentgateway"
+    },
+    {
+      "base_commit": "91199c7190f1c5b931f1d0b6bcc6ccdd86a4c5c0",
+      "created_at": "2025-06-25T21:46:16Z",
+      "id": "apache__arrow-rs-7783",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_arrow-rs-7783",
+      "language": "rust",
+      "public_issue_sha256": "025222396a5feac09f6b53a68e2aa5561cea397d143ebceaedb40f14751f6bba",
+      "repo": "apache/arrow-rs"
+    },
+    {
+      "base_commit": "6874ffa14d265c2df9de5928c99a1e44f0f8a32c",
+      "created_at": "2025-07-01T14:42:17Z",
+      "id": "apache__arrow-rs-7841",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_arrow-rs-7841",
+      "language": "rust",
+      "public_issue_sha256": "90c2d2ae218127590d6d396398aee2b9bfcad536ad3af636e001a0d3e177b5c3",
+      "repo": "apache/arrow-rs"
+    },
+    {
+      "base_commit": "7360b3b42e8d0cfdaa6e524602f76dd5b20575e1",
+      "created_at": "2025-08-23T11:07:37Z",
+      "id": "apache__arrow-rs-8214",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_arrow-rs-8214",
+      "language": "rust",
+      "public_issue_sha256": "408dd7ae6808b8465e22b761b6e554c89b477f106eb1f981692d621ac1c71fa4",
+      "repo": "apache/arrow-rs"
+    },
+    {
+      "base_commit": "1c0dcad2d8e02d2f32a926427fa479af7b3f4698",
+      "created_at": "2025-06-29T02:25:11Z",
+      "id": "apache__datafusion-16610",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-16610",
+      "language": "rust",
+      "public_issue_sha256": "d81da608223b414705ba3c444b088eb3a100baa04e4a0519c1f843f0dcc822d3",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "18a30ceac590428259a2428aee9d1b4a91afdd5b",
+      "created_at": "2025-07-09T12:49:42Z",
+      "id": "apache__datafusion-16726",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-16726",
+      "language": "rust",
+      "public_issue_sha256": "c805e7c72dc89aea4eeb1e302d84ff488962e91af8ce8a9dc63577c1849b12ed",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "9264bb88ab73ce64873dd1797df39453e41c2aad",
+      "created_at": "2025-08-08T09:16:30Z",
+      "id": "apache__datafusion-17081",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-17081",
+      "language": "rust",
+      "public_issue_sha256": "38e52f9f08ba654b372cbb945883d6d29696e48f19a50319e806892814d08a1c",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "8494a3967a413ef263a50b87ce8b5924eb1aa948",
+      "created_at": "2025-08-11T19:50:24Z",
+      "id": "apache__datafusion-17130",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-17130",
+      "language": "rust",
+      "public_issue_sha256": "06c9b9e088919bd6879ddffc1435a63a5006540d4d098e919f3a520061b1d038",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "7d5214512740b4dfb742b6b3d91ed9affcc2c9d0",
+      "created_at": "2025-08-12T09:29:17Z",
+      "id": "apache__datafusion-17139",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-17139",
+      "language": "rust",
+      "public_issue_sha256": "7fb80cb0bce040b8c2e6b3e1dfb709190054518e5771b41006f8273098e659ef",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "92d516cc9b1bb8912f7b9c4f122903491c0c9a85",
+      "created_at": "2025-08-15T05:18:14Z",
+      "id": "apache__datafusion-17201",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-17201",
+      "language": "rust",
+      "public_issue_sha256": "91f5085fe8c0c0194d543da2971253341df30a9a0e1c4b6987503d55be217e03",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "92d516cc9b1bb8912f7b9c4f122903491c0c9a85",
+      "created_at": "2025-08-18T21:37:21Z",
+      "id": "apache__datafusion-17233",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-17233",
+      "language": "rust",
+      "public_issue_sha256": "af596c615d02f7473a3eb2276b13d2f195dc70fdc3a27b4ef7d785ca8719cde7",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "4a7330fa309f5fd1614a032f87b9507c211b7d28",
+      "created_at": "2026-03-23T17:12:48Z",
+      "id": "apache__datafusion-21121",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-21121",
+      "language": "rust",
+      "public_issue_sha256": "2803b3a4b49c2628130136595c1e7c552c311aa96d443c6a950b17195839ab4e",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "32d3d3a0e3ec69cdc1795240d7a0ba0f2b9c38b0",
+      "created_at": "2026-06-26T07:56:00Z",
+      "id": "apache__datafusion-23201",
+      "image": "starryzhang/sweb.eval.x86_64.apache_1776_datafusion-23201",
+      "language": "rust",
+      "public_issue_sha256": "5a9afee0d45319cdefe18007934e354e43a4d4e50188bfb58613cdbf0f5f7114",
+      "repo": "apache/datafusion"
+    },
+    {
+      "base_commit": "a29381347c67205ba52731d11eaa52f7a875696a",
+      "created_at": "2026-04-12T13:02:02Z",
+      "id": "astral-sh__uv-18976",
+      "image": "starryzhang/sweb.eval.x86_64.astral-sh_1776_uv-18976",
+      "language": "rust",
+      "public_issue_sha256": "dbb7301b5315aec2e6a4a22e086a9d81a4a95442c12654c4c864df7d6138b47d",
+      "repo": "astral-sh/uv"
+    },
+    {
+      "base_commit": "1e7dbfcd4e55fe4df0b2f6bf71b8248a21f18da6",
+      "created_at": "2026-06-26T07:41:52Z",
+      "id": "biomejs__biome-10767",
+      "image": "starryzhang/sweb.eval.x86_64.biomejs_1776_biome-10767",
+      "language": "rust",
+      "public_issue_sha256": "31a7b204f4b3a6d42043e7193196c94230f8c01020eafc0b96cec730d3cef1c7",
+      "repo": "biomejs/biome"
+    },
+    {
+      "base_commit": "36d5aa77d751bf33485cd2c92d89e4c5764e1e50",
+      "created_at": "2026-06-27T00:24:30Z",
+      "id": "biomejs__biome-10773",
+      "image": "starryzhang/sweb.eval.x86_64.biomejs_1776_biome-10773",
+      "language": "rust",
+      "public_issue_sha256": "5d8098fbf41916e0d53b32fda60581bccef8af33083d1b5dc50b37db5f51c868",
+      "repo": "biomejs/biome"
+    },
+    {
+      "base_commit": "f1d3877b1377e6efffcebac6ac4d3e858332aa2d",
+      "created_at": "2026-07-02T04:48:54Z",
+      "id": "biomejs__biome-10827",
+      "image": "starryzhang/sweb.eval.x86_64.biomejs_1776_biome-10827",
+      "language": "rust",
+      "public_issue_sha256": "bbb4b484f793af87e629259d334dfdfaf66b2f8ad130bb3c137b9eede34d8278",
+      "repo": "biomejs/biome"
+    },
+    {
+      "base_commit": "dec3c22d62683781c0368bea62fc55638aa2b1e9",
+      "created_at": "2026-07-04T22:25:00Z",
+      "id": "biomejs__biome-10853",
+      "image": "starryzhang/sweb.eval.x86_64.biomejs_1776_biome-10853",
+      "language": "rust",
+      "public_issue_sha256": "f7a90f1e5d12fb24e01c4130c42b6c4045e207608ab080662b8466d990f2328c",
+      "repo": "biomejs/biome"
+    },
+    {
+      "base_commit": "ab45b9fd83a8582bee730e5d9fb8b084a3db7546",
+      "created_at": "2026-07-06T17:23:39Z",
+      "id": "biomejs__biome-10867",
+      "image": "starryzhang/sweb.eval.x86_64.biomejs_1776_biome-10867",
+      "language": "rust",
+      "public_issue_sha256": "5ac7c1e0d63f98f03653b0be443b7b951a6e028e750ada2bffc7d235b5364f05",
+      "repo": "biomejs/biome"
+    },
+    {
+      "base_commit": "3518d04912b8c427419b128c81d12d34da2a1dc9",
+      "created_at": "2026-07-07T12:04:30Z",
+      "id": "biomejs__biome-10875",
+      "image": "starryzhang/sweb.eval.x86_64.biomejs_1776_biome-10875",
+      "language": "rust",
+      "public_issue_sha256": "08a70685583a56e6edb31aefda6a8d6b21e8dc58cd2ec72e393ce6e7ba61f1b3",
+      "repo": "biomejs/biome"
+    },
+    {
+      "base_commit": "13c496689b98c3421d2b511a632373bb72fd157b",
+      "created_at": "2026-07-08T19:45:34Z",
+      "id": "biomejs__biome-10886",
+      "image": "starryzhang/sweb.eval.x86_64.biomejs_1776_biome-10886",
+      "language": "rust",
+      "public_issue_sha256": "9bda42f72f4b385b53a0f40a458045ca132670a0b5cebe80e4fe15f037c85b7d",
+      "repo": "biomejs/biome"
+    },
+    {
+      "base_commit": "15276a5d0951cb99a0435834bebc28cde24e88d0",
+      "created_at": "2026-04-15T12:28:08Z",
+      "id": "biomejs__biome-9995",
+      "image": "starryzhang/sweb.eval.x86_64.biomejs_1776_biome-9995",
+      "language": "rust",
+      "public_issue_sha256": "030714d59e3f552efc1411af59931edc52b453c86f598bd19f93fdd2f523058f",
+      "repo": "biomejs/biome"
+    },
+    {
+      "base_commit": "0514c2c45436f6c8b3efc93ee914665e5e5c73ae",
+      "created_at": "2025-06-20T13:01:15Z",
+      "id": "casey__just-2785",
+      "image": "starryzhang/sweb.eval.x86_64.casey_1776_just-2785",
+      "language": "rust",
+      "public_issue_sha256": "2ae4b53d6ed4736a1d1b7ee8c94842ca357736fc81cfc7453567b210a285ae28",
+      "repo": "casey/just"
+    },
+    {
+      "base_commit": "503511ba132ccc46db7f83fd7b91e5e5c493439b",
+      "created_at": "2025-07-24T23:10:28Z",
+      "id": "casey__just-2835",
+      "image": "starryzhang/sweb.eval.x86_64.casey_1776_just-2835",
+      "language": "rust",
+      "public_issue_sha256": "b6e969f98de1d5088d5e76d9c884f75e3f033a0a2fc113c92d645912669a76d8",
+      "repo": "casey/just"
+    },
+    {
+      "base_commit": "c8c7d82b8fd7977f6e1fd89f1697ead74dd3c0c5",
+      "created_at": "2026-03-26T08:33:21Z",
+      "id": "casey__just-3200",
+      "image": "starryzhang/sweb.eval.x86_64.casey_1776_just-3200",
+      "language": "rust",
+      "public_issue_sha256": "c01594f85d280ef1160fb41ac897c4eb77f87e2de7ed8b1afe422f6645a59db9",
+      "repo": "casey/just"
+    },
+    {
+      "base_commit": "7f164521b29e547cef396608246f977edbe3b616",
+      "created_at": "2025-07-09T23:01:54Z",
+      "id": "clap-rs__clap-6068",
+      "image": "starryzhang/sweb.eval.x86_64.clap-rs_1776_clap-6068",
+      "language": "rust",
+      "public_issue_sha256": "7fbe7ff718dbf9cd9e99604a6982f3c8c234023b8cd2751d17f78dc57f75cade",
+      "repo": "clap-rs/clap"
+    },
+    {
+      "base_commit": "0bb2d6bc7d058c10870c4e275827639b172e813f",
+      "created_at": "2026-04-03T15:49:30Z",
+      "id": "delta-io__delta-rs-4333",
+      "image": "starryzhang/sweb.eval.x86_64.delta-io_1776_delta-rs-4333",
+      "language": "rust",
+      "public_issue_sha256": "1211057492ad83e659cf647df19227b2a2afbac5798dfc256959599badc5b465",
+      "repo": "delta-io/delta-rs"
+    },
+    {
+      "base_commit": "2e4ca5b6f79b1c9257c86b0dc143b393abfd4bae",
+      "created_at": "2026-04-11T18:17:38Z",
+      "id": "delta-io__delta-rs-4357",
+      "image": "starryzhang/sweb.eval.x86_64.delta-io_1776_delta-rs-4357",
+      "language": "rust",
+      "public_issue_sha256": "bfd62581911c2a7803abc1b114c3bb357a612bcc8c5a60309d3203eb12daacb6",
+      "repo": "delta-io/delta-rs"
+    },
+    {
+      "base_commit": "b1cb1388f35f2700616021cbe49120a82f90e2fe",
+      "created_at": "2026-04-11T23:13:07Z",
+      "id": "delta-io__delta-rs-4358",
+      "image": "starryzhang/sweb.eval.x86_64.delta-io_1776_delta-rs-4358",
+      "language": "rust",
+      "public_issue_sha256": "bb49994a30645d28b45874302c2c2e541a0db3624c8666669435acd85b70ef29",
+      "repo": "delta-io/delta-rs"
+    },
+    {
+      "base_commit": "1e82e8630401272fbac3ffe1d4bc71bdc436df74",
+      "created_at": "2025-11-06T14:58:15Z",
+      "id": "eza-community__eza-1664",
+      "image": "starryzhang/sweb.eval.x86_64.eza-community_1776_eza-1664",
+      "language": "rust",
+      "public_issue_sha256": "c7bd83cd1e2685bf4ac5fdc577384697ee9ac65a7c564ed62bf254d313f49c20",
+      "repo": "eza-community/eza"
+    },
+    {
+      "base_commit": "05a11f4cc8a8c96d961381d95bf1137a2653de81",
+      "created_at": "2026-03-25T05:08:59Z",
+      "id": "gfx-rs__wgpu-9298",
+      "image": "starryzhang/sweb.eval.x86_64.gfx-rs_1776_wgpu-9298",
+      "language": "rust",
+      "public_issue_sha256": "1f688335c65a571e831166abcb53771a3be54404c678eede836ba4b3ac7b5574",
+      "repo": "gfx-rs/wgpu"
+    },
+    {
+      "base_commit": "41bb9cbd25fca25b398c0ccb203164fe1ff8c0b8",
+      "created_at": "2026-04-03T09:27:24Z",
+      "id": "gfx-rs__wgpu-9367",
+      "image": "starryzhang/sweb.eval.x86_64.gfx-rs_1776_wgpu-9367",
+      "language": "rust",
+      "public_issue_sha256": "7857de445dae0ef8992a96cda106e122deb4c27f80f7367c39c0953f70ba373b",
+      "repo": "gfx-rs/wgpu"
+    },
+    {
+      "base_commit": "5966bae7f365022258ae76a97d5e39a627fbb440",
+      "created_at": "2026-07-22T08:58:17Z",
+      "id": "gitbutlerapp__gitbutler-14920",
+      "image": "starryzhang/sweb.eval.x86_64.gitbutlerapp_1776_gitbutler-14920",
+      "language": "rust",
+      "public_issue_sha256": "39ea48ef23943bfbd8f339bf23692cbe410fa0e9e4622e1fc3a860aa5d7ec96c",
+      "repo": "gitbutlerapp/gitbutler"
+    },
+    {
+      "base_commit": "82f0718edc91208de41ced8690883a3f2319faed",
+      "created_at": "2025-06-22T13:02:27Z",
+      "id": "gleam-lang__gleam-4708",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-4708",
+      "language": "rust",
+      "public_issue_sha256": "38e5f8cf84fc229f915644fcc7ca21b39a975965bf9a6f3e6d54cfbeeaf26f86",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "157111df6070643addae3f2fd70a888c508f6973",
+      "created_at": "2025-08-14T11:37:01Z",
+      "id": "gleam-lang__gleam-4854",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-4854",
+      "language": "rust",
+      "public_issue_sha256": "59bfa0b5d1982e19278c9648b4f759c76358cfea71c9146e023dafde1770b96b",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "56c224a84420e1d3b4cf30e934c684128f5f8d7b",
+      "created_at": "2026-03-19T12:31:50Z",
+      "id": "gleam-lang__gleam-5482",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-5482",
+      "language": "rust",
+      "public_issue_sha256": "1c2a6c7263c85aae4f582e1f98603ed62f7a5f00ee59348738f1f0f628297026",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "2a56ee9a83cb60f93f7d95c70071d505ec15a9ad",
+      "created_at": "2026-03-21T18:03:21Z",
+      "id": "gleam-lang__gleam-5493",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-5493",
+      "language": "rust",
+      "public_issue_sha256": "9819040070892b3e0e336a40a035d1374420fde22b2a5809a0130e8ad1bdf7c1",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "51801a38bd18c8676057183baa94e9bebe477d04",
+      "created_at": "2026-03-25T19:25:37Z",
+      "id": "gleam-lang__gleam-5510",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-5510",
+      "language": "rust",
+      "public_issue_sha256": "a9c5822d38eee722c24ea9441e4b6bc7a804f8d1e83ef94b6062e10b7860c3fa",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "2a56ee9a83cb60f93f7d95c70071d505ec15a9ad",
+      "created_at": "2026-03-29T15:44:56Z",
+      "id": "gleam-lang__gleam-5532",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-5532",
+      "language": "rust",
+      "public_issue_sha256": "9de3202624fb10d7915c95146ff90166b1e4ee38f43d87c74fdd3c902178de33",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "f7280f1b8f997d5927565af2a69d27dd066ae1f2",
+      "created_at": "2026-07-02T13:08:43Z",
+      "id": "gleam-lang__gleam-5938",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-5938",
+      "language": "rust",
+      "public_issue_sha256": "5266bd09857b50fab034625d13b48e8eae3fb08e5641d1b39949220832ed00f7",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "6a6ee27847b5a82a92f2b94db90cb4c2bdaf84ca",
+      "created_at": "2026-07-09T17:33:35Z",
+      "id": "gleam-lang__gleam-5958",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-5958",
+      "language": "rust",
+      "public_issue_sha256": "4ef0cf4c65ec89576fb9c4232f65c15a3a0f5120972d7a011495e5978da63123",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "5c775ced3933879dfcddb139bf7fc534ea6c6000",
+      "created_at": "2026-07-15T12:13:40Z",
+      "id": "gleam-lang__gleam-5971",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-5971",
+      "language": "rust",
+      "public_issue_sha256": "d4929772dbf47f275cf9bf4e86f272a47c6b4d79cb2593a36aa17a2ed9d68afc",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "9130e2b6010c9b9753fad1a9544247b678532035",
+      "created_at": "2026-07-16T14:14:10Z",
+      "id": "gleam-lang__gleam-5982",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-5982",
+      "language": "rust",
+      "public_issue_sha256": "8c0f6b1a605e794a4e3a2b353fcb32ee855fabe4d7f87d6529756f69eec6d9d8",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "e39f20deeb74d1914001b6cf5b4c2450f9129126",
+      "created_at": "2026-07-21T22:01:29Z",
+      "id": "gleam-lang__gleam-6021",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-6021",
+      "language": "rust",
+      "public_issue_sha256": "fca00972696ffaa433cd310300ebbec29a126dd7645e4af6aad7cb24c09d6376",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "6e6af3a6fe9b09fe6b84f4714b04c4b43d488847",
+      "created_at": "2026-07-23T16:20:13Z",
+      "id": "gleam-lang__gleam-6030",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-6030",
+      "language": "rust",
+      "public_issue_sha256": "d5dcf0dfc893f22d6a97e2a1b8107aa5592fb5a6243a18d5af03a1007d2cf965",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "5cfee9810268dab79281b7c66edb9331bc08b278",
+      "created_at": "2026-07-27T09:41:40Z",
+      "id": "gleam-lang__gleam-6049",
+      "image": "starryzhang/sweb.eval.x86_64.gleam-lang_1776_gleam-6049",
+      "language": "rust",
+      "public_issue_sha256": "e19363b337e669ef128ceb328bafb47877adafe81668cfa06bf9448ac59a62c9",
+      "repo": "gleam-lang/gleam"
+    },
+    {
+      "base_commit": "50e66320b0842d2844ce298957a335a6bed95c4d",
+      "created_at": "2026-07-12T01:57:56Z",
+      "id": "h4ckf0r0day__obscura-390",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-390",
+      "language": "rust",
+      "public_issue_sha256": "bcdf98f8524290fbfd66668091602920d04bae236aaebcea130e2e8cab4cc60b",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "50e66320b0842d2844ce298957a335a6bed95c4d",
+      "created_at": "2026-07-12T03:21:10Z",
+      "id": "h4ckf0r0day__obscura-392",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-392",
+      "language": "rust",
+      "public_issue_sha256": "5a7cac378fdf47cb09cb781e42a933c2ec1e4b01e67598001ebe46205407a3ed",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "a92166897f4b3d5f3910101d9380796fc2ce15bf",
+      "created_at": "2026-07-14T12:13:19Z",
+      "id": "h4ckf0r0day__obscura-412",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-412",
+      "language": "rust",
+      "public_issue_sha256": "0925716f7ca4a6284e9cd75b66411dbead34d0529945cfc00152f49fc2679381",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "5ada3b404bca92672e079b8e1ea44efcf15536ce",
+      "created_at": "2026-07-14T12:23:22Z",
+      "id": "h4ckf0r0day__obscura-413",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-413",
+      "language": "rust",
+      "public_issue_sha256": "4c380028f75e24bf349533edf9f509c19fd2a670c32574285e065a8fc28bca1d",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "99ece0e12dd2cace768b5caa76fcbe1b5233f0f6",
+      "created_at": "2026-07-14T13:23:35Z",
+      "id": "h4ckf0r0day__obscura-414",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-414",
+      "language": "rust",
+      "public_issue_sha256": "f58b7923f69e965b924f7f5df65849acb65d408dc4e246231b3ca780f54cfad0",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "99ece0e12dd2cace768b5caa76fcbe1b5233f0f6",
+      "created_at": "2026-07-14T16:12:18Z",
+      "id": "h4ckf0r0day__obscura-421",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-421",
+      "language": "rust",
+      "public_issue_sha256": "79cf2a33b1618355b0f5cb68e92683859c9435c1fb9d0846450d8b0b0e926479",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "99ece0e12dd2cace768b5caa76fcbe1b5233f0f6",
+      "created_at": "2026-07-15T06:47:17Z",
+      "id": "h4ckf0r0day__obscura-426",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-426",
+      "language": "rust",
+      "public_issue_sha256": "d118cc1af391de7cc07d685757f91a05281dcce042e8d2c5429cdb6604c7bf2e",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "b2e4bb49a7723619527fd0cbb9f2c2acbc58f851",
+      "created_at": "2026-07-17T06:43:26Z",
+      "id": "h4ckf0r0day__obscura-440",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-440",
+      "language": "rust",
+      "public_issue_sha256": "452c68593be6491dc9b6ff2c25593cfff4970ec59524a2f22202320c96f0e345",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "29e20ae9700121acff379e63b1a040e82f82ca31",
+      "created_at": "2026-07-19T19:49:52Z",
+      "id": "h4ckf0r0day__obscura-447",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-447",
+      "language": "rust",
+      "public_issue_sha256": "13e55f8e8bc39b1835acaf039ddde161bc20981e419be86b06821d9a54fd84b3",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "485497393d4b8b1d082f34acb9cf096a8702b252",
+      "created_at": "2026-07-24T07:04:52Z",
+      "id": "h4ckf0r0day__obscura-477",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-477",
+      "language": "rust",
+      "public_issue_sha256": "6a67c4faab067e5eca646c757bfbf0b46370aa18e2b3c22ae079640001000867",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "485497393d4b8b1d082f34acb9cf096a8702b252",
+      "created_at": "2026-07-24T07:45:15Z",
+      "id": "h4ckf0r0day__obscura-479",
+      "image": "starryzhang/sweb.eval.x86_64.h4ckf0r0day_1776_obscura-479",
+      "language": "rust",
+      "public_issue_sha256": "04c8d83b8e67e13a03f985719308fcd5ab76fdfbf395393f89b23e677b6a0485",
+      "repo": "h4ckf0r0day/obscura"
+    },
+    {
+      "base_commit": "290e366477454399f773c2e66ad6bceea4ca5160",
+      "created_at": "2025-08-13T06:59:31Z",
+      "id": "immunant__c2rust-1322",
+      "image": "starryzhang/sweb.eval.x86_64.immunant_1776_c2rust-1322",
+      "language": "rust",
+      "public_issue_sha256": "837ebfb2d679f1777567b18e1d49e11939a64345e9cb00315f424d912ef1afce",
+      "repo": "immunant/c2rust"
+    },
+    {
+      "base_commit": "3b32b88e6cb449a74578626c570f5969817ab652",
+      "created_at": "2025-06-09T14:58:23Z",
+      "id": "jj-vcs__jj-6728",
+      "image": "starryzhang/sweb.eval.x86_64.jj-vcs_1776_jj-6728",
+      "language": "rust",
+      "public_issue_sha256": "3a5608950a9581eb7afbcf4d06a9cfd6ac0596125bfcd486b07fbae20b1853f7",
+      "repo": "jj-vcs/jj"
+    },
+    {
+      "base_commit": "b89cce9162da036d233215612c960d0de030aadf",
+      "created_at": "2025-08-16T11:50:48Z",
+      "id": "jj-vcs__jj-7269",
+      "image": "starryzhang/sweb.eval.x86_64.jj-vcs_1776_jj-7269",
+      "language": "rust",
+      "public_issue_sha256": "7cbfaa631b6b21e7c3dbdbaf259a7468329357e8bc475c074db8cb195de79747",
+      "repo": "jj-vcs/jj"
+    },
+    {
+      "base_commit": "730e44ff76d0e1234be64a7f64c8f5603a999561",
+      "created_at": "2025-07-06T07:42:02Z",
+      "id": "jtroo__kanata-1681",
+      "image": "starryzhang/sweb.eval.x86_64.jtroo_1776_kanata-1681",
+      "language": "rust",
+      "public_issue_sha256": "cbd09dccbc8adba94dfa4b19547aa7a8eadba4eac6f902c4635f49e2159dc55e",
+      "repo": "jtroo/kanata"
+    },
+    {
+      "base_commit": "52caae91dff4485141f9e6a0fa2c240b13d73a87",
+      "created_at": "2026-07-23T21:14:02Z",
+      "id": "lakehq__sail-2284",
+      "image": "starryzhang/sweb.eval.x86_64.lakehq_1776_sail-2284",
+      "language": "rust",
+      "public_issue_sha256": "17c2a9d4bcc069f6d672f8e22edd19ac3a3c263773c5d8ef179cbd716e8652ef",
+      "repo": "lakehq/sail"
+    },
+    {
+      "base_commit": "6fdd8154a41fd22b9e8231493bff6f1f2080210a",
+      "created_at": "2026-07-26T09:32:34Z",
+      "id": "lakehq__sail-2292",
+      "image": "starryzhang/sweb.eval.x86_64.lakehq_1776_sail-2292",
+      "language": "rust",
+      "public_issue_sha256": "e4b208e2d91c8640ea3c0dd4293c873bc5f641ff5c8934a28f7324e325e2ebbe",
+      "repo": "lakehq/sail"
+    },
+    {
+      "base_commit": "21f605036a45223139707ce35dcbd02166d2b0d7",
+      "created_at": "2025-07-09T07:34:32Z",
+      "id": "lalrpop__lalrpop-1076",
+      "image": "starryzhang/sweb.eval.x86_64.lalrpop_1776_lalrpop-1076",
+      "language": "rust",
+      "public_issue_sha256": "cc1c5c7de8462999bc0fbd1538727ab2e09080d602daf862853f5096e92fd647",
+      "repo": "lalrpop/lalrpop"
+    },
+    {
+      "base_commit": "be55555c6ea7d1fd8dc71f8620574f78e689f230",
+      "created_at": "2026-06-30T20:17:58Z",
+      "id": "lance-format__lance-7545",
+      "image": "starryzhang/sweb.eval.x86_64.lance-format_1776_lance-7545",
+      "language": "rust",
+      "public_issue_sha256": "d570812d8c0ca701ebb0e1c7ca00a914750700d55f71a9d3060fb74dc87c1553",
+      "repo": "lance-format/lance"
+    },
+    {
+      "base_commit": "45eb977518e10cf178d1e27b62458c2e6bbb0651",
+      "created_at": "2026-07-01T20:27:49Z",
+      "id": "lance-format__lance-7565",
+      "image": "starryzhang/sweb.eval.x86_64.lance-format_1776_lance-7565",
+      "language": "rust",
+      "public_issue_sha256": "41a876d3aac4311acb868d402921f489bece2d64de09aa989869b6228a1462d1",
+      "repo": "lance-format/lance"
+    },
+    {
+      "base_commit": "3a914d9237aa36804c580618fd1d0f55b89d39aa",
+      "created_at": "2026-07-03T16:47:54Z",
+      "id": "lance-format__lance-7618",
+      "image": "starryzhang/sweb.eval.x86_64.lance-format_1776_lance-7618",
+      "language": "rust",
+      "public_issue_sha256": "6fde2554fe31e12428bdfaf970509f9ec5ac508143647b2ca51672a9bb635386",
+      "repo": "lance-format/lance"
+    },
+    {
+      "base_commit": "da5ef9050111c863ffbf19df090914faf97fe5c8",
+      "created_at": "2026-07-17T23:47:01Z",
+      "id": "lance-format__lance-7835",
+      "image": "starryzhang/sweb.eval.x86_64.lance-format_1776_lance-7835",
+      "language": "rust",
+      "public_issue_sha256": "6efe70b518352e49b81c566cc2b846e394d480d45c236b16148ba051bfa648e8",
+      "repo": "lance-format/lance"
+    },
+    {
+      "base_commit": "e98930a661016f9d47abe9d70d1593bcd0f5f208",
+      "created_at": "2026-07-28T11:45:04Z",
+      "id": "lance-format__lance-8049",
+      "image": "starryzhang/sweb.eval.x86_64.lance-format_1776_lance-8049",
+      "language": "rust",
+      "public_issue_sha256": "f2ea25ef8c21fb185d413fcdac622128a556ab9fdcfc6617055aa4b166a866e3",
+      "repo": "lance-format/lance"
+    },
+    {
+      "base_commit": "ecf6b282dba01e5dc50e9463b87b6baeccdb3094",
+      "created_at": "2025-07-15T08:30:10Z",
+      "id": "linebender__vello-1100",
+      "image": "starryzhang/sweb.eval.x86_64.linebender_1776_vello-1100",
+      "language": "rust",
+      "public_issue_sha256": "30843bd7d4ea3214783422483fe2b0786eedec8341f05e3586adcc8dd66bf932",
+      "repo": "linebender/vello"
+    },
+    {
+      "base_commit": "c824769743707f729e3c42017f18669d0b94f8e1",
+      "created_at": "2025-07-29T12:32:40Z",
+      "id": "linebender__vello-1132",
+      "image": "starryzhang/sweb.eval.x86_64.linebender_1776_vello-1132",
+      "language": "rust",
+      "public_issue_sha256": "17f9cbe13e027cdcc0c4241c13144aca46f0fe407bbeb6a4cc823ead15943615",
+      "repo": "linebender/vello"
+    },
+    {
+      "base_commit": "471e3c340c0c98418fc3c0384c07ecc763d9d596",
+      "created_at": "2025-07-13T16:03:41Z",
+      "id": "matrix-org__matrix-rust-sdk-5395",
+      "image": "starryzhang/sweb.eval.x86_64.matrix-org_1776_matrix-rust-sdk-5395",
+      "language": "rust",
+      "public_issue_sha256": "d04da11d8f810051e9c98b3083aa41e91be6a8b0a08ea07ab9181c81440ebdb0",
+      "repo": "matrix-org/matrix-rust-sdk"
+    },
+    {
+      "base_commit": "1eb8f6ac161fbf1c773a7ddb8243d7378489fdc8",
+      "created_at": "2025-08-12T15:53:21Z",
+      "id": "matrix-org__matrix-rust-sdk-5522",
+      "image": "starryzhang/sweb.eval.x86_64.matrix-org_1776_matrix-rust-sdk-5522",
+      "language": "rust",
+      "public_issue_sha256": "7f68645175a918fafdf1d498e31227c7430ea30df0a20d63b905f2625ffc16d1",
+      "repo": "matrix-org/matrix-rust-sdk"
+    },
+    {
+      "base_commit": "bc2c5f3c4a0bfdd91be6c3a49957dc4868a35321",
+      "created_at": "2026-07-17T13:27:42Z",
+      "id": "modelcontextprotocol__rust-sdk-1005",
+      "image": "starryzhang/sweb.eval.x86_64.modelcontextprotocol_1776_rust-sdk-1005",
+      "language": "rust",
+      "public_issue_sha256": "bf99d8a152686513cff11b2ae1140e5a60cece5c620a8c16aebe2d15595d095e",
+      "repo": "modelcontextprotocol/rust-sdk"
+    },
+    {
+      "base_commit": "4e36fd9531f20ab33cabd562ff19355db7426496",
+      "created_at": "2026-07-21T16:39:51Z",
+      "id": "modelcontextprotocol__rust-sdk-1021",
+      "image": "starryzhang/sweb.eval.x86_64.modelcontextprotocol_1776_rust-sdk-1021",
+      "language": "rust",
+      "public_issue_sha256": "1e627959b236f686f563d2098cafa9ffdcea1a465b2389084847b0a101c0fac3",
+      "repo": "modelcontextprotocol/rust-sdk"
+    },
+    {
+      "base_commit": "14298b72e0b25473ea79d5465fe186e22eb86397",
+      "created_at": "2026-07-24T02:53:56Z",
+      "id": "modelcontextprotocol__rust-sdk-1044",
+      "image": "starryzhang/sweb.eval.x86_64.modelcontextprotocol_1776_rust-sdk-1044",
+      "language": "rust",
+      "public_issue_sha256": "6b9a0d2b5a0e27088aecf41502f0f04db424a90a0a8f429827f44c8aa2062401",
+      "repo": "modelcontextprotocol/rust-sdk"
+    },
+    {
+      "base_commit": "251ebec098fe3ffb1ae5d744a4776bbd27be5dd2",
+      "created_at": "2026-03-19T18:39:32Z",
+      "id": "modelcontextprotocol__rust-sdk-760",
+      "image": "starryzhang/sweb.eval.x86_64.modelcontextprotocol_1776_rust-sdk-760",
+      "language": "rust",
+      "public_issue_sha256": "993b674b454f2ec0ad62e652f062e9cf6934348a6155d4b26999c7fbd4ec9f4d",
+      "repo": "modelcontextprotocol/rust-sdk"
+    },
+    {
+      "base_commit": "3549e86d28fb69debc3088fefbf3bc52dd534ff0",
+      "created_at": "2026-07-15T19:24:13Z",
+      "id": "modelcontextprotocol__rust-sdk-996",
+      "image": "starryzhang/sweb.eval.x86_64.modelcontextprotocol_1776_rust-sdk-996",
+      "language": "rust",
+      "public_issue_sha256": "1fe8f384b2acf7015effcca6e74a0088991b3202cdd370ed80c7a11b2bd15cd8",
+      "repo": "modelcontextprotocol/rust-sdk"
+    },
+    {
+      "base_commit": "1e30088198611f63a91c5328b3a1ad9aad46c90d",
+      "created_at": "2025-07-18T14:25:39Z",
+      "id": "napi-rs__napi-rs-2784",
+      "image": "starryzhang/sweb.eval.x86_64.napi-rs_1776_napi-rs-2784",
+      "language": "rust",
+      "public_issue_sha256": "d734cf031f85883cb620e45261317ac3d97272229da612725959ff1589a99291",
+      "repo": "napi-rs/napi-rs"
+    },
+    {
+      "base_commit": "6f930f2bc039f93a2d79c269a48eec8e5296240b",
+      "created_at": "2026-07-27T11:31:18Z",
+      "id": "nearai__ironclaw-6706",
+      "image": "starryzhang/sweb.eval.x86_64.nearai_1776_ironclaw-6706",
+      "language": "rust",
+      "public_issue_sha256": "6cc7c4d5844448fe0a562c059269f75b9f5e0ee92dc6c0b037d2c6e5173b0d1e",
+      "repo": "nearai/ironclaw"
+    },
+    {
+      "base_commit": "6f930f2bc039f93a2d79c269a48eec8e5296240b",
+      "created_at": "2026-07-27T12:39:22Z",
+      "id": "nearai__ironclaw-6712",
+      "image": "starryzhang/sweb.eval.x86_64.nearai_1776_ironclaw-6712",
+      "language": "rust",
+      "public_issue_sha256": "b20378c09aafde28b962c0b9d5305d8bdb52a6ff156821479b5fa9d2ffb1fbf2",
+      "repo": "nearai/ironclaw"
+    },
+    {
+      "base_commit": "8e49628c6b993588dd5956ad3be2d3ac6c688dba",
+      "created_at": "2026-07-27T15:31:45Z",
+      "id": "nearai__ironclaw-6724",
+      "image": "starryzhang/sweb.eval.x86_64.nearai_1776_ironclaw-6724",
+      "language": "rust",
+      "public_issue_sha256": "49a0b7f3d9d67eb817b2302e76700dfac08fbcd6dab5ec3495120edadd2cd4a0",
+      "repo": "nearai/ironclaw"
+    },
+    {
+      "base_commit": "80b04ec8eab3ca74fc6c9457ca1fd8828044675d",
+      "created_at": "2025-07-18T15:26:06Z",
+      "id": "noir-lang__noir-9250",
+      "image": "starryzhang/sweb.eval.x86_64.noir-lang_1776_noir-9250",
+      "language": "rust",
+      "public_issue_sha256": "05d421f7c5ec922720b118309f70ceb224502bd6a5518cd7a7b8a6c544b14cc8",
+      "repo": "noir-lang/noir"
+    },
+    {
+      "base_commit": "e7fb7f3bf083de9fc6d430e7c30a571ea94534e4",
+      "created_at": "2025-07-25T12:01:30Z",
+      "id": "noir-lang__noir-9323",
+      "image": "starryzhang/sweb.eval.x86_64.noir-lang_1776_noir-9323",
+      "language": "rust",
+      "public_issue_sha256": "d086870afeef96ddd524cf776063703a1a90a95fc0722b904324bbe4e683b9c2",
+      "repo": "noir-lang/noir"
+    },
+    {
+      "base_commit": "394ef18bebf0063c717ff7ea7387d36dacaf2c1c",
+      "created_at": "2025-07-16T08:58:41Z",
+      "id": "notify-rs__notify-700",
+      "image": "starryzhang/sweb.eval.x86_64.notify-rs_1776_notify-700",
+      "language": "rust",
+      "public_issue_sha256": "25f87908fa863d86afb18677534fce49fb1d5eaa061fc2270d65e3fb1057a0e9",
+      "repo": "notify-rs/notify"
+    },
+    {
+      "base_commit": "e36d54e94d2c364478f99f1d3b62245ed2ad2926",
+      "created_at": "2025-07-16T11:25:19Z",
+      "id": "notify-rs__notify-701",
+      "image": "starryzhang/sweb.eval.x86_64.notify-rs_1776_notify-701",
+      "language": "rust",
+      "public_issue_sha256": "077726504336761e90e1e2926b63d78c2abfeb62180d7c81e22a2392d70e33af",
+      "repo": "notify-rs/notify"
+    },
+    {
+      "base_commit": "6171217cfe7e53b23f0e1d2f05967dc023b62b58",
+      "created_at": "2026-03-27T18:27:10Z",
+      "id": "oxc-project__oxc-20810",
+      "image": "starryzhang/sweb.eval.x86_64.oxc-project_1776_oxc-20810",
+      "language": "rust",
+      "public_issue_sha256": "276e2d9c9211c00864fcca8485620afba9acbbe5cc6711a7a906eb00780c9827",
+      "repo": "oxc-project/oxc"
+    },
+    {
+      "base_commit": "c9cd809e5064bc258235daa12fd07fc08cd8a5b0",
+      "created_at": "2026-03-30T05:38:58Z",
+      "id": "oxc-project__oxc-20857",
+      "image": "starryzhang/sweb.eval.x86_64.oxc-project_1776_oxc-20857",
+      "language": "rust",
+      "public_issue_sha256": "d9d398c4fd4ef1fdb8a89d4d9b2e2fbf0f897c158918af69808f3daa084e0882",
+      "repo": "oxc-project/oxc"
+    },
+    {
+      "base_commit": "59e10917aac2c68157cf431eed510ae43ab82220",
+      "created_at": "2026-04-02T16:18:51Z",
+      "id": "oxc-project__oxc-20976",
+      "image": "starryzhang/sweb.eval.x86_64.oxc-project_1776_oxc-20976",
+      "language": "rust",
+      "public_issue_sha256": "d9c27c9799499c377057e6010fa1f082576802fcd74942ff6dc948985d9e1f37",
+      "repo": "oxc-project/oxc"
+    },
+    {
+      "base_commit": "edd08654feb04effa0c5477bafbf3e939b1d39ea",
+      "created_at": "2026-04-06T15:21:40Z",
+      "id": "oxc-project__oxc-21092",
+      "image": "starryzhang/sweb.eval.x86_64.oxc-project_1776_oxc-21092",
+      "language": "rust",
+      "public_issue_sha256": "5e59dbacea1e9db1dae9252490a0bf29d4d0708731821ed3009daeae1d45df78",
+      "repo": "oxc-project/oxc"
+    },
+    {
+      "base_commit": "8e2ed83efd88806872d9ebb48960e3018fbea9c2",
+      "created_at": "2026-04-08T08:40:25Z",
+      "id": "oxc-project__oxc-21163",
+      "image": "starryzhang/sweb.eval.x86_64.oxc-project_1776_oxc-21163",
+      "language": "rust",
+      "public_issue_sha256": "397523596c9824c4ccff6ed28e15acaed5d6861846be4f82584825260ca25d14",
+      "repo": "oxc-project/oxc"
+    },
+    {
+      "base_commit": "c2e3b4c52c1c12e4dadae4f53c1ca83e76bf3475",
+      "created_at": "2026-04-11T11:57:01Z",
+      "id": "oxc-project__oxc-21330",
+      "image": "starryzhang/sweb.eval.x86_64.oxc-project_1776_oxc-21330",
+      "language": "rust",
+      "public_issue_sha256": "07750bacef80ee1d4ca59d73b6228a80985eb8997d77eeaadb614157d5fe43b8",
+      "repo": "oxc-project/oxc"
+    },
+    {
+      "base_commit": "65f9195ff84edb9cf1d3a04c8e58103712b080c3",
+      "created_at": "2026-04-18T23:51:27Z",
+      "id": "oxc-project__oxc-21546",
+      "image": "starryzhang/sweb.eval.x86_64.oxc-project_1776_oxc-21546",
+      "language": "rust",
+      "public_issue_sha256": "09dbd3926d7acdcbb9f0e8429003576b492747c1b3869a71fe2fc371f1a4191d",
+      "repo": "oxc-project/oxc"
+    },
+    {
+      "base_commit": "fecfe8334b47f0acb742a4d78f8cc9e50c64c52b",
+      "created_at": "2026-07-09T16:44:48Z",
+      "id": "pnpm__pnpm-12879",
+      "image": "starryzhang/sweb.eval.x86_64.pnpm_1776_pnpm-12879",
+      "language": "rust",
+      "public_issue_sha256": "da3c35284bee5fb9ba295e6bb63275fbaa32c03bafb795fbef970451116c8dbb",
+      "repo": "pnpm/pnpm"
+    },
+    {
+      "base_commit": "bcedb9518ba8b4fce9232f99585d83baa04103f3",
+      "created_at": "2026-07-09T22:14:38Z",
+      "id": "pnpm__pnpm-12888",
+      "image": "starryzhang/sweb.eval.x86_64.pnpm_1776_pnpm-12888",
+      "language": "rust",
+      "public_issue_sha256": "5552a1a9e0db213bf052e5e4434574442eeea6c0561ed1e890e56acd4528da66",
+      "repo": "pnpm/pnpm"
+    },
+    {
+      "base_commit": "a4b544fc6e499f57752adc1df9c44252728bfb5b",
+      "created_at": "2026-07-11T07:14:16Z",
+      "id": "pnpm__pnpm-12935",
+      "image": "starryzhang/sweb.eval.x86_64.pnpm_1776_pnpm-12935",
+      "language": "rust",
+      "public_issue_sha256": "20c9686897d9da0cf4ea70592c2785cca076914e615c263ae91136a158cca47e",
+      "repo": "pnpm/pnpm"
+    },
+    {
+      "base_commit": "1a384cf99d62a852e1e6c28644d635c77ab26701",
+      "created_at": "2026-07-22T14:36:14Z",
+      "id": "pola-rs__polars-28484",
+      "image": "starryzhang/sweb.eval.x86_64.pola-rs_1776_polars-28484",
+      "language": "rust",
+      "public_issue_sha256": "fd6d468ac45a34ee581978b3ff4276cd45fe807508c168f8acd2d6422b693ffa",
+      "repo": "pola-rs/polars"
+    },
+    {
+      "base_commit": "50b152b48df24d7b0d33a360451b0c52dadcbd5d",
+      "created_at": "2026-04-08T12:28:09Z",
+      "id": "prefix-dev__pixi-5850",
+      "image": "starryzhang/sweb.eval.x86_64.prefix-dev_1776_pixi-5850",
+      "language": "rust",
+      "public_issue_sha256": "172246415c51108f24f5a1ac57f80d73a88bdae4fdb4494d32456fbd6daae4db",
+      "repo": "prefix-dev/pixi"
+    },
+    {
+      "base_commit": "2b29da3f16e0c19665c8269aaca16942a9376cfb",
+      "created_at": "2026-06-10T14:30:40Z",
+      "id": "prefix-dev__pixi-6335",
+      "image": "starryzhang/sweb.eval.x86_64.prefix-dev_1776_pixi-6335",
+      "language": "rust",
+      "public_issue_sha256": "79d469fb690e05d36c37e24d4ea7ff0f96a4e40ee2ac39e2da86fb6101d4144f",
+      "repo": "prefix-dev/pixi"
+    },
+    {
+      "base_commit": "797aec7c5e3d8d6cc43c74fe1a810fd4deabceca",
+      "created_at": "2026-06-26T11:26:00Z",
+      "id": "prefix-dev__pixi-6457",
+      "image": "starryzhang/sweb.eval.x86_64.prefix-dev_1776_pixi-6457",
+      "language": "rust",
+      "public_issue_sha256": "2f9a916efcd46e9ecb044e8de6206fa49f511010d0314051ed19e86bd082b4bb",
+      "repo": "prefix-dev/pixi"
+    },
+    {
+      "base_commit": "c2813611ae8fdabcceb8dcd7745b46018dac1674",
+      "created_at": "2026-07-02T09:38:17Z",
+      "id": "prefix-dev__pixi-6500",
+      "image": "starryzhang/sweb.eval.x86_64.prefix-dev_1776_pixi-6500",
+      "language": "rust",
+      "public_issue_sha256": "d961c5fd1a837d24bd4e9966b77a7592935e7b1a99e8a8fd2dae666d18b9299f",
+      "repo": "prefix-dev/pixi"
+    },
+    {
+      "base_commit": "c2813611ae8fdabcceb8dcd7745b46018dac1674",
+      "created_at": "2026-07-03T10:02:09Z",
+      "id": "prefix-dev__pixi-6518",
+      "image": "starryzhang/sweb.eval.x86_64.prefix-dev_1776_pixi-6518",
+      "language": "rust",
+      "public_issue_sha256": "74e9b532a12c80c4a85f2d28b17bbfca7265a73d1357150ee8c5dcb4454b4385",
+      "repo": "prefix-dev/pixi"
+    },
+    {
+      "base_commit": "a90bc4c6eaed13f9063f2fbbb917ee7b102a368f",
+      "created_at": "2026-07-05T15:59:29Z",
+      "id": "prefix-dev__pixi-6529",
+      "image": "starryzhang/sweb.eval.x86_64.prefix-dev_1776_pixi-6529",
+      "language": "rust",
+      "public_issue_sha256": "4c15150c943a0adcb5993f190a07875520e8f1cc488414cd80bfe9bba823e57a",
+      "repo": "prefix-dev/pixi"
+    },
+    {
+      "base_commit": "5df58555d65356855d2118df510712aaf2341a8d",
+      "created_at": "2025-07-13T11:19:16Z",
+      "id": "redis-rs__redis-rs-1721",
+      "image": "starryzhang/sweb.eval.x86_64.redis-rs_1776_redis-rs-1721",
+      "language": "rust",
+      "public_issue_sha256": "b30f2bd1411974533a5fd014a84c2c90542092c46ec9cf2e1f0c6760fa19c168",
+      "repo": "redis-rs/redis-rs"
+    },
+    {
+      "base_commit": "ee9b3312f2f5952967d68fccc1add2bdcd5e3c7e",
+      "created_at": "2026-03-07T16:34:13Z",
+      "id": "ruffle-rs__ruffle-23197",
+      "image": "starryzhang/sweb.eval.x86_64.ruffle-rs_1776_ruffle-23197",
+      "language": "rust",
+      "public_issue_sha256": "3b7c779e74c36692f534d4b99ac33a6ff751a502cde7fbcf2cb75dfba4cd135c",
+      "repo": "ruffle-rs/ruffle"
+    },
+    {
+      "base_commit": "da71cf20be0adad562c907f4e9f0c800f359b65d",
+      "created_at": "2026-03-26T16:53:32Z",
+      "id": "ruffle-rs__ruffle-23330",
+      "image": "starryzhang/sweb.eval.x86_64.ruffle-rs_1776_ruffle-23330",
+      "language": "rust",
+      "public_issue_sha256": "7efc48f9f1fbfb93cc46d11e9c0196653e69da969fec0408128e32d7ce00e21a",
+      "repo": "ruffle-rs/ruffle"
+    },
+    {
+      "base_commit": "4bac54883b63f98b61db0826b7bf25d67adbf295",
+      "created_at": "2025-08-16T19:27:25Z",
+      "id": "rust-lang__mdBook-2796",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_mdbook-2796",
+      "language": "rust",
+      "public_issue_sha256": "4cdb43b3112e176c7bbe402660a15673e913794d4e0b7f301d4a21666ab662c9",
+      "repo": "rust-lang/mdBook"
+    },
+    {
+      "base_commit": "dbb51d32dbff7a71231dfa9f8c883a2b2738dbe4",
+      "created_at": "2025-08-18T23:29:21Z",
+      "id": "rust-lang__mdBook-2806",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_mdbook-2806",
+      "language": "rust",
+      "public_issue_sha256": "2553e45d1ad050ab59db74d0e9f1c33cb874fd8f4b563ad635d97f3cdd57d3c6",
+      "repo": "rust-lang/mdBook"
+    },
+    {
+      "base_commit": "2d518c73d9a9de0dc96d013db7fd98b964f3a7de",
+      "created_at": "2025-07-06T00:22:04Z",
+      "id": "rust-lang__rust-analyzer-20180",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-20180",
+      "language": "rust",
+      "public_issue_sha256": "d6686cdb2f97b873046a3d99b4be75e7c5ed6a3b5c1ed73e34df7b2669992ab7",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "0ac65592a833bf40238831dd10e15283d63c46d5",
+      "created_at": "2025-07-06T11:35:33Z",
+      "id": "rust-lang__rust-analyzer-20185",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-20185",
+      "language": "rust",
+      "public_issue_sha256": "67300849d777f842d16e9666f1a785d95f844459f2e51e035b5a817763c85cbf",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "8d75311400a108d7ffe17dc9c38182c566952e6e",
+      "created_at": "2025-08-04T12:54:39Z",
+      "id": "rust-lang__rust-analyzer-20381",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-20381",
+      "language": "rust",
+      "public_issue_sha256": "bb23a30f23dd8bb1be9074895158f792d9ef8d1acc026045fefe6cfa20f171e0",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "17d028e9d7161cf6ebf21e21d3c4a1835099e039",
+      "created_at": "2026-04-14T16:17:11Z",
+      "id": "rust-lang__rust-analyzer-22046",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22046",
+      "language": "rust",
+      "public_issue_sha256": "b9ad428eec07c011a5efa5beafbe898078d2e12c192d88bc02674275382909eb",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "064046069f65d07277e5b38b1bef4e558d709086",
+      "created_at": "2026-04-16T06:27:41Z",
+      "id": "rust-lang__rust-analyzer-22061",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22061",
+      "language": "rust",
+      "public_issue_sha256": "fa70daa281eb481010e7f76dc387bea1479c054caba5200bc2ea805467c08cc6",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "a1949dcc3f10d766bbea06ec86f924959694f01b",
+      "created_at": "2026-07-09T17:40:03Z",
+      "id": "rust-lang__rust-analyzer-22751",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22751",
+      "language": "rust",
+      "public_issue_sha256": "a5eabd0d5cd21600bf36ebaf6efde928b813700f17e0129ccccf0c7689ab6a31",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "711ead6ca0e0f59210ddf8363ff52fdf3328dd8d",
+      "created_at": "2026-07-14T11:40:08Z",
+      "id": "rust-lang__rust-analyzer-22789",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22789",
+      "language": "rust",
+      "public_issue_sha256": "e1700585aa287dd5d3873342b283c464ca6b2c0264487bd3fc3d1f6b6bffae8a",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "3061c4d11509546ed2250f0dda6d66aa60b0a18d",
+      "created_at": "2026-07-14T20:27:38Z",
+      "id": "rust-lang__rust-analyzer-22804",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22804",
+      "language": "rust",
+      "public_issue_sha256": "9204ed9c86cce8b084cb44f698672df08bd12ac4d8d4eb432c86be8cf85fb5db",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "51cb2bc2fd0542ed15560e158f738520e91f21de",
+      "created_at": "2026-07-15T20:29:05Z",
+      "id": "rust-lang__rust-analyzer-22822",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22822",
+      "language": "rust",
+      "public_issue_sha256": "e06ef7f63cda20c9c2c856fa5abf9f83376c3f587306158e4fe62fab9d517eba",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "1b7da4272d8d27c78774f42a6e1ea66a4c1fe984",
+      "created_at": "2026-07-16T00:33:57Z",
+      "id": "rust-lang__rust-analyzer-22827",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22827",
+      "language": "rust",
+      "public_issue_sha256": "a3414c42e4ccf6d5d7923c7d8e745556a5b40b0fdd730ff0f5116079fe9dc73d",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "1649637a9c68a8f371d2e1326bbd15d36a8a74a8",
+      "created_at": "2026-07-18T08:24:11Z",
+      "id": "rust-lang__rust-analyzer-22849",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22849",
+      "language": "rust",
+      "public_issue_sha256": "a5388f1c03b35202f1ac1208745eb7f3606e3ca38d67e0e63403104a48ce33ae",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "878510343ae5181f33b5e21b844b747495344c89",
+      "created_at": "2026-07-19T09:49:55Z",
+      "id": "rust-lang__rust-analyzer-22855",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-analyzer-22855",
+      "language": "rust",
+      "public_issue_sha256": "e40b0a02a23eebf0d98dfba09cd0394fb7141afdebee48210914eaf31b346712",
+      "repo": "rust-lang/rust-analyzer"
+    },
+    {
+      "base_commit": "2048231f45c87cd65d7891f55090aac81cc0d66b",
+      "created_at": "2026-06-06T11:53:26Z",
+      "id": "rust-lang__rust-bindgen-3382",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-bindgen-3382",
+      "language": "rust",
+      "public_issue_sha256": "53c535f8460f421e450f17f4d5921f1ce197ce11c68a8e80ce085bd21c7cc6af",
+      "repo": "rust-lang/rust-bindgen"
+    },
+    {
+      "base_commit": "4609f3fdd5d4c66ea67a6103a7850989c612273e",
+      "created_at": "2026-07-07T02:03:31Z",
+      "id": "rust-lang__rust-bindgen-3390",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-bindgen-3390",
+      "language": "rust",
+      "public_issue_sha256": "3a8d5d580930668727cf220de7a97fec7ead75a698c595b7cf8cab907d542856",
+      "repo": "rust-lang/rust-bindgen"
+    },
+    {
+      "base_commit": "4609f3fdd5d4c66ea67a6103a7850989c612273e",
+      "created_at": "2026-07-07T04:11:06Z",
+      "id": "rust-lang__rust-bindgen-3391",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rust-bindgen-3391",
+      "language": "rust",
+      "public_issue_sha256": "8e9693f71c902f6de88eaca5f14a1ea9a00c90530b83e661a012b9d2ddc08dc0",
+      "repo": "rust-lang/rust-bindgen"
+    },
+    {
+      "base_commit": "bdab1017c6bf9291654fa5cd15163d011c8194b6",
+      "created_at": "2026-03-24T07:11:12Z",
+      "id": "rust-lang__rustfmt-6840",
+      "image": "starryzhang/sweb.eval.x86_64.rust-lang_1776_rustfmt-6840",
+      "language": "rust",
+      "public_issue_sha256": "67ee5efcb7441579e327ea9b7096bcf176863fcab993ed13bb5887b4072f32a8",
+      "repo": "rust-lang/rustfmt"
+    },
+    {
+      "base_commit": "867bdb43bf570bed2a247c894b8d9a03ff27f98f",
+      "created_at": "2026-07-06T13:58:50Z",
+      "id": "servo__servo-46309",
+      "image": "starryzhang/sweb.eval.x86_64.servo_1776_servo-46309",
+      "language": "rust",
+      "public_issue_sha256": "4c207205cdceb48a62a711420db436cc45b8d1b9d91de2ec0dc500c4b1114425",
+      "repo": "servo/servo"
+    },
+    {
+      "base_commit": "439078fb35e69d1cb00439828fe2361c252bfb97",
+      "created_at": "2026-04-20T13:59:40Z",
+      "id": "sinelaw__fresh-1642",
+      "image": "starryzhang/sweb.eval.x86_64.sinelaw_1776_fresh-1642",
+      "language": "rust",
+      "public_issue_sha256": "518708bb8c32064a44e64fe7663ccba0c788a4f9f5ae05676f30ffae0f59c55f",
+      "repo": "sinelaw/fresh"
+    },
+    {
+      "base_commit": "e531182a2bf132d3d2aa085a7557580f76ecc578",
+      "created_at": "2026-04-10T14:15:20Z",
+      "id": "skim-rs__skim-1044",
+      "image": "starryzhang/sweb.eval.x86_64.skim-rs_1776_skim-1044",
+      "language": "rust",
+      "public_issue_sha256": "3e72320722e97bf9da6d9695e8329a943c99415e8e3196a2e6df1914abe422a3",
+      "repo": "skim-rs/skim"
+    },
+    {
+      "base_commit": "ca3f628a5b1488c36172ad520c88527782bc6fa7",
+      "created_at": "2026-03-29T19:00:52Z",
+      "id": "slatedb__slatedb-1461",
+      "image": "starryzhang/sweb.eval.x86_64.slatedb_1776_slatedb-1461",
+      "language": "rust",
+      "public_issue_sha256": "a74c7725909c4ddd784f22181e90a4b76095abc0390a9125fb74a46f8f1bbbef",
+      "repo": "slatedb/slatedb"
+    },
+    {
+      "base_commit": "ae22a4afa12d6b65238403ed043e8cd90056b0ad",
+      "created_at": "2026-07-29T12:41:59Z",
+      "id": "tursodatabase__turso-8102",
+      "image": "starryzhang/sweb.eval.x86_64.tursodatabase_1776_turso-8102",
+      "language": "rust",
+      "public_issue_sha256": "34be24ff6c064779e3f9d90ca15b29190801ce93c075134bb3aa8330c4ec1644",
+      "repo": "tursodatabase/turso"
+    },
+    {
+      "base_commit": "fb2399f56b0c040582ffbe712f785f029f40aacb",
+      "created_at": "2025-06-11T02:08:52Z",
+      "id": "uutils__coreutils-8149",
+      "image": "starryzhang/sweb.eval.x86_64.uutils_1776_coreutils-8149",
+      "language": "rust",
+      "public_issue_sha256": "95227c21ea57578e62963aa9635c9906d965bada212a0f3e479e50dca0a220ba",
+      "repo": "uutils/coreutils"
+    },
+    {
+      "base_commit": "fb2399f56b0c040582ffbe712f785f029f40aacb",
+      "created_at": "2025-06-16T02:13:11Z",
+      "id": "uutils__coreutils-8197",
+      "image": "starryzhang/sweb.eval.x86_64.uutils_1776_coreutils-8197",
+      "language": "rust",
+      "public_issue_sha256": "8c19092b8f5da204f45adfe2469886ffa92c0d98b52e0495cb184976ecf5c62e",
+      "repo": "uutils/coreutils"
+    },
+    {
+      "base_commit": "2ba3a33b7324e83b4c687eb0e5c09e459969e0ea",
+      "created_at": "2025-07-03T18:39:51Z",
+      "id": "uutils__coreutils-8310",
+      "image": "starryzhang/sweb.eval.x86_64.uutils_1776_coreutils-8310",
+      "language": "rust",
+      "public_issue_sha256": "a983940cfca4a0a572bb1bb4c8e21a3a25fed7dbc872c4e5914a9ee3256c8015",
+      "repo": "uutils/coreutils"
+    },
+    {
+      "base_commit": "0c669c83dbf994b46124c8f36df403ecfe9fdfa9",
+      "created_at": "2025-07-12T13:42:34Z",
+      "id": "uutils__coreutils-8336",
+      "image": "starryzhang/sweb.eval.x86_64.uutils_1776_coreutils-8336",
+      "language": "rust",
+      "public_issue_sha256": "5a9e94ba716892379755207053fdfc8f869fd05e3b6f5e6f91f4f08cf425a45e",
+      "repo": "uutils/coreutils"
+    },
+    {
+      "base_commit": "7d730bf1ea0b35ea23bf7441dac26674b8ab0bf5",
+      "created_at": "2025-08-05T05:30:48Z",
+      "id": "uutils__coreutils-8433",
+      "image": "starryzhang/sweb.eval.x86_64.uutils_1776_coreutils-8433",
+      "language": "rust",
+      "public_issue_sha256": "74ef828799f53691620db7e3a5a85b7e654b1f8a8b63884687752279a01d229a",
+      "repo": "uutils/coreutils"
+    },
+    {
+      "base_commit": "51600a2f100c5ea5f9c669c1a43f0153b31a31c8",
+      "created_at": "2025-08-07T15:41:03Z",
+      "id": "uutils__coreutils-8447",
+      "image": "starryzhang/sweb.eval.x86_64.uutils_1776_coreutils-8447",
+      "language": "rust",
+      "public_issue_sha256": "81e2007761fec939d790b15afd96eba072fdf735913d27dbc5f9073c4c48222c",
+      "repo": "uutils/coreutils"
+    },
+    {
+      "base_commit": "1a7e6c05ce02762ea3db28e3aca207922d768b1a",
+      "created_at": "2025-08-30T03:22:29Z",
+      "id": "uutils__coreutils-8528",
+      "image": "starryzhang/sweb.eval.x86_64.uutils_1776_coreutils-8528",
+      "language": "rust",
+      "public_issue_sha256": "6f314ed9824ce4d24f00852cacddabafdf30063c81bd8028ed49a14b1e1d5568",
+      "repo": "uutils/coreutils"
+    },
+    {
+      "base_commit": "59a42a5dcb5a59dcc62a1e5d6fb6f1372c6fc74e",
+      "created_at": "2026-03-31T17:32:06Z",
+      "id": "vercel__turborepo-12516",
+      "image": "starryzhang/sweb.eval.x86_64.vercel_1776_turborepo-12516",
+      "language": "rust",
+      "public_issue_sha256": "b7cc4c5af8c7de1c4fddd95c2411bacf6126ed4e33d970c889a4fa3f3e152419",
+      "repo": "vercel/turborepo"
+    },
+    {
+      "base_commit": "50d7bcf81c7f768d469a6f84e7bc503cdb52a31d",
+      "created_at": "2026-04-10T17:12:58Z",
+      "id": "vercel__turborepo-12599",
+      "image": "starryzhang/sweb.eval.x86_64.vercel_1776_turborepo-12599",
+      "language": "rust",
+      "public_issue_sha256": "052553b8b324316794d1d28daf3ca3d00f1d8e80bb508972cd0ca4297921c17b",
+      "repo": "vercel/turborepo"
+    },
+    {
+      "base_commit": "6e3e7eafe328ab94e1ceed356a88c88252056d5b",
+      "created_at": "2026-03-24T23:06:43Z",
+      "id": "wasm-bindgen__wasm-bindgen-5051",
+      "image": "starryzhang/sweb.eval.x86_64.wasm-bindgen_1776_wasm-bindgen-5051",
+      "language": "rust",
+      "public_issue_sha256": "d8c8dc8b3b869fd9751897a53ef7a985842831b062b464c4fb9df682383d8325",
+      "repo": "wasm-bindgen/wasm-bindgen"
+    },
+    {
+      "base_commit": "03080baf9f8e6aa9781836f9645b3d9b2355324c",
+      "created_at": "2026-07-15T03:38:14Z",
+      "id": "web-infra-dev__rspack-14794",
+      "image": "starryzhang/sweb.eval.x86_64.web-infra-dev_1776_rspack-14794",
+      "language": "rust",
+      "public_issue_sha256": "3fd64fb3702f07bb176b466be5c679323da69a2de9bb590885141f059b886b41",
+      "repo": "web-infra-dev/rspack"
+    },
+    {
+      "base_commit": "b8e3594be0bd1dc7ff7ae7e30099b2eaed522b7b",
+      "created_at": "2026-07-15T18:04:18Z",
+      "id": "web-infra-dev__rspack-14803",
+      "image": "starryzhang/sweb.eval.x86_64.web-infra-dev_1776_rspack-14803",
+      "language": "rust",
+      "public_issue_sha256": "df856dda9511d352de8ff58bdd13f0d39551345416bc3fe543a37322f08dcb90",
+      "repo": "web-infra-dev/rspack"
+    },
+    {
+      "base_commit": "b1e3dbaeafe11130575edf3df371edada1d05f7c",
+      "created_at": "2026-07-16T05:25:07Z",
+      "id": "web-infra-dev__rspack-14806",
+      "image": "starryzhang/sweb.eval.x86_64.web-infra-dev_1776_rspack-14806",
+      "language": "rust",
+      "public_issue_sha256": "46f418e20e5177f298da0555fb7d99100060fe1ccb90bee68e7b26f00178a3aa",
+      "repo": "web-infra-dev/rspack"
+    },
+    {
+      "base_commit": "439df0f525021e12f2e276ca1aece09b1e642852",
+      "created_at": "2026-07-20T22:45:34Z",
+      "id": "web-infra-dev__rspack-14882",
+      "image": "starryzhang/sweb.eval.x86_64.web-infra-dev_1776_rspack-14882",
+      "language": "rust",
+      "public_issue_sha256": "af98858c83e95814bd411d4bc89a3a2a855061f2d8b17f166b3f6f525d6ce5ac",
+      "repo": "web-infra-dev/rspack"
+    },
+    {
+      "base_commit": "01a4f16ce92cba1575ce95f8361243c7fe45eede",
+      "created_at": "2026-07-22T08:23:50Z",
+      "id": "yvgude__lean-ctx-1164",
+      "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-1164",
+      "language": "rust",
+      "public_issue_sha256": "5da666939f8d6f80059f7ae24457e2ae890afac5e0602bd83b4d76ab1ce1f248",
+      "repo": "yvgude/lean-ctx"
+    },
+    {
+      "base_commit": "9910a9f08627360ab6c6c784bd496ca4d5cfbee8",
+      "created_at": "2026-07-22T09:01:35Z",
+      "id": "yvgude__lean-ctx-1168",
+      "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-1168",
+      "language": "rust",
+      "public_issue_sha256": "f684330004ce3be2e133f8851e35fd8fb66f36b1d53047d4f7b5f6a9d310f4fd",
+      "repo": "yvgude/lean-ctx"
+    },
+    {
+      "base_commit": "6cfd456dbbe00020fc8c6855ac434166b17674d8",
+      "created_at": "2026-07-22T14:31:08Z",
+      "id": "yvgude__lean-ctx-1179",
+      "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-1179",
+      "language": "rust",
+      "public_issue_sha256": "ebf94f1526ded6ad8a1bc35c492a36b8aacd348503e5a425710052604768af1a",
+      "repo": "yvgude/lean-ctx"
+    },
+    {
+      "base_commit": "6cfd456dbbe00020fc8c6855ac434166b17674d8",
+      "created_at": "2026-07-22T14:42:17Z",
+      "id": "yvgude__lean-ctx-1180",
+      "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-1180",
+      "language": "rust",
+      "public_issue_sha256": "f5b61692e49e042952b1078a2594ef6478ec1ba13974038cf2def2d0847a769c",
+      "repo": "yvgude/lean-ctx"
+    },
+    {
+      "base_commit": "453a1ae6a6c2462b610dcf83531a1141d112aac9",
+      "created_at": "2026-06-30T23:12:06Z",
+      "id": "yvgude__lean-ctx-632",
+      "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-632",
+      "language": "rust",
+      "public_issue_sha256": "bfa4ce4a3784f23c0a1455945d7bc9fcb03d2f89fb96dc1270281ac16b0071ec",
+      "repo": "yvgude/lean-ctx"
+    },
+    {
+      "base_commit": "10cad4830e6f1965202eeec669d1d171f2dd631b",
+      "created_at": "2026-07-14T19:19:23Z",
+      "id": "yvgude__lean-ctx-816",
+      "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-816",
+      "language": "rust",
+      "public_issue_sha256": "b39900c44e8f5559bbe69a4695f77291f864e5e8a632c48d875445e5a7f8e609",
+      "repo": "yvgude/lean-ctx"
+    },
+    {
+      "base_commit": "e810f5fcd1e7bf24b838abff589c0d1ea0ed0730",
+      "created_at": "2026-07-16T12:56:28Z",
+      "id": "yvgude__lean-ctx-927",
+      "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-927",
+      "language": "rust",
+      "public_issue_sha256": "f7e19c982c97445ffec23c7047ac77ae7e2eeecb3a62026c14583600f73a05aa",
+      "repo": "yvgude/lean-ctx"
+    },
+    {
+      "base_commit": "11e0c6797b5b408afec6e6134e67661376db0417",
+      "created_at": "2026-07-17T00:09:51Z",
+      "id": "yvgude__lean-ctx-969",
+      "image": "starryzhang/sweb.eval.x86_64.yvgude_1776_lean-ctx-969",
+      "language": "rust",
+      "public_issue_sha256": "db2b75ceb27d7104c75662dcc5e0e90c459563bee48bbbf3d3e623782a191e0a",
+      "repo": "yvgude/lean-ctx"
+    },
+    {
+      "base_commit": "6cfe4592edd8107fa17a75d29c058cba72faf170",
+      "created_at": "2026-04-02T01:20:56Z",
+      "id": "zeroclaw-labs__zeroclaw-5165",
+      "image": "starryzhang/sweb.eval.x86_64.zeroclaw-labs_1776_zeroclaw-5165",
+      "language": "rust",
+      "public_issue_sha256": "445691418257cab38dd80cb212825cf3046974b47225027de3ea64161f60413a",
+      "repo": "zeroclaw-labs/zeroclaw"
+    }
+  ]
+}

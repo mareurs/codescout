@@ -1,0 +1,19 @@
+{
+  "client_model_calls": 0,
+  "paid_ready": false,
+  "reopened_scopes": [
+    {
+      "exit_code": 0,
+      "fresh_absence": true,
+      "scope": "ordinary",
+      "source_sha256": "c13e29f6df990ad3cf901035f2d589d46bf7ab716977b996e7815cbdf6dea671"
+    },
+    {
+      "exit_code": 0,
+      "fresh_absence": true,
+      "scope": "broader",
+      "source_sha256": "c13e29f6df990ad3cf901035f2d589d46bf7ab716977b996e7815cbdf6dea671"
+    }
+  ],
+  "scope": "Two original baseline public scopes only; diagnostic registration lacks full transitive producer bindings."
+}

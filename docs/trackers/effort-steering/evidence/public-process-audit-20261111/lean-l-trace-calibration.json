@@ -1,0 +1,85 @@
+{
+  "schema": "effort-public-trace-calibration-v1",
+  "captured_at": "2026-11-11T17:07:47.880163+00:00",
+  "scope": "One closed L native stream and all its captured request histories; no private verdict read.",
+  "source_bindings": {
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/stream.jsonl": "93da4b940d5d6e4a88b3f644a550b9e55036c7993f1f4ab1eebbc5497cc675f1",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/receipt.json": "6dc0854462e28b1ad1376b96dd17b978a9c08c7487a4448cfec1114d7b9613e3",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/invocation.json": "3f9463382cd5a56bc9aca307e14bcbadbcf77edf5040c67df5e4965f15934c13",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-0.json": "a0d8d9eea394a29b434bc1090d42357ff4d89a1a4f9ac0f6b0f99f8e999e2429",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-1.json": "b8ef4566a604143650f7c4d34046b1e690e49a6a0ed5c7ea8aa6f4c3a9a755f9",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-10.json": "325bf368a35ac020d0b0b7ac1089efe8a988462d9748f8c4f611961ca1615be5",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-11.json": "514f9460d6ad971d5c5750ed9523dc3af4e801d1c4e98e6530ac05c1dd903b7c",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-2.json": "6f4a4040d492b0983a4db0b435eb0340d09dbf83468610748b15699522281106",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-3.json": "eb25556a567fe0e6e5db77c44584fb8a56ab4e1c41463faa92fb29b814093b85",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-4.json": "fc9169a72c39dd1d1af6cb030a096a2efcd422850d232e13cedd6eaba8f79df7",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-5.json": "275562b4979ee29b78e3cfe4a1aa72ebc426900b408f87ea89cd3a4bcccecc6a",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-6.json": "cbc4d18d16f707ffa86f61e58a510b269d2e842f45485b2e8deaf8a543cef872",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-7.json": "5b94dbf69f747961500e76d3e1d0bace4a6af1468923f148824450dd3fe19b51",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-8.json": "265291dab50e9fcb5a7362f34aa37a553dceb2de073ad72ec6c35d244d978968",
+    "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/00-L/repair/native/request-9.json": "85cd709f40deec712743c991e418cb1211eb0270d40b977ed14b8fc4778dd541"
+  },
+  "jsonl_records": 55,
+  "raw_stream_tool_use_blocks": 20,
+  "stream_unique_tool_ids": 20,
+  "stream_unique_result_ids": 20,
+  "request_history_unique_tool_ids": 20,
+  "request_history_unique_result_ids": 20,
+  "same_parsed_tool_names_and_inputs": true,
+  "all_stream_tool_ids_have_results": true,
+  "tool_name_counts": {
+    "ToolSearch": 2,
+    "mcp__codescout__grep": 4,
+    "mcp__codescout__symbols": 1,
+    "mcp__codescout__read_file": 5,
+    "mcp__codescout__edit_file": 8
+  },
+  "recorded_request_capture_files": 12,
+  "native_receipt_forwarded": 12,
+  "actual_effort_capture_counts": [
+    {
+      "value": "low",
+      "captures": 12
+    }
+  ],
+  "actual_model_capture_counts": [
+    {
+      "value": "claude-sonnet-5-5",
+      "captures": 12
+    }
+  ],
+  "native_runtime_actor_turns": 1,
+  "cli_result_metadata": [
+    {
+      "num_turns": 21,
+      "is_error": false,
+      "subtype": "success",
+      "stop_reason": "end_turn",
+      "subagent_stats": {
+        "spawned": 0,
+        "requested": {
+          "background": 0,
+          "foreground": 0,
+          "unset": 0
+        },
+        "started_in_background": 0,
+        "max_depth": 0,
+        "spawned_by_subagents": 0,
+        "completed": 0,
+        "failed": 0,
+        "killed": {
+          "parent": 0,
+          "user": 0,
+          "system": 0
+        },
+        "refused": {
+          "depth_limit": 0,
+          "concurrency_limit": 0,
+          "budget": 0
+        },
+        "by_type": {}
+      }
+    }
+  ],
+  "count_semantics": "Tool-use/result IDs are literal recorded ID sets, not proof that each tool result was semantically successful. CLI num_turns, native runtime continuations, and model request counts are distinct units. No test-execution or repair-quality conclusion is inferred from these counts."
+}

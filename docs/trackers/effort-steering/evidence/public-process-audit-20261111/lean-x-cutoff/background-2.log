@@ -1,0 +1,16 @@
+   Compiling lean-ctx v3.9.12 (/testbed/rust)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 24s
+     Running tests/ocla_integration_suite.rs (/tmp/target/debug/deps/ocla_integration_suite-d76cff92737ef0f5)
+
+running 8 tests
+test full_capsule_lifecycle ... ok
+test test_budget_blocks_over_limit ... ok
+test test_capsule_fork_and_resolve ... ignored, chain/budget fields not yet implemented on ContextCapsuleV1
+test test_dlq_lifecycle ... ok
+test test_tracing_spans ... ok
+test health_reports_all_components ... ok
+test test_full_pipeline ... ok
+test all_endpoints_return_valid_status ... ok
+
+test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

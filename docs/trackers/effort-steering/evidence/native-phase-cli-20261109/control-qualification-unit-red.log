@@ -1,0 +1,17 @@
+test_control_plan_keeps_the_repair_without_protocol_artifact_creation (test_qualification_cleanup.QualificationCleanupTests.test_control_plan_keeps_the_repair_without_protocol_artifact_creation) ... FAIL
+test_nested_readonly_mountpoints_are_owned_before_docker_starts (test_qualification_cleanup.QualificationCleanupTests.test_nested_readonly_mountpoints_are_owned_before_docker_starts) ... ok
+test_trace_write_failure_still_stops_client_and_removes_owned_worker (test_qualification_cleanup.QualificationCleanupTests.test_trace_write_failure_still_stops_client_and_removes_owned_worker) ... ok
+
+======================================================================
+FAIL: test_control_plan_keeps_the_repair_without_protocol_artifact_creation (test_qualification_cleanup.QualificationCleanupTests.test_control_plan_keeps_the_repair_without_protocol_artifact_creation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/marius/.codex/worktrees/cf66/codescout/tools/effort_protocol/test_qualification_cleanup.py", line 79, in test_control_plan_keeps_the_repair_without_protocol_artifact_creation
+    self.assertTrue(callable(function), "control qualification plan is not implemented")
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : control qualification plan is not implemented
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.006s
+
+FAILED (failures=1)

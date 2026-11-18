@@ -1,0 +1,40 @@
+{
+  "additional_onboarding_calls": 0,
+  "client_model_calls": 0,
+  "definition_and_lsp_call_edge_verified": true,
+  "embedding_compute_cost_usd": null,
+  "image": "sha256:338d956b2271853f58da5b29ed6be9acebd1d2a1fdb4f020135446e890185876",
+  "index_expected_files": 130,
+  "index_stored_files": 130,
+  "memory_document_bytes": 5999,
+  "memory_files_covered": 5,
+  "native_and_embedding_cleanup": true,
+  "native_tools_exposed": 21,
+  "original_template_unchanged": true,
+  "paid_ready": false,
+  "producer_sha256": "5a7b448c5f0ac3540e0de5ce90d420bb5fb10b22e6148ab0f22229c6a6550352",
+  "public_checks": [
+    {
+      "exact_public_checks": 2,
+      "scope": "final-baseline-public-v1",
+      "source_unchanged": true
+    },
+    {
+      "exact_public_checks": 2,
+      "scope": "final-reference-public-v1",
+      "source_unchanged": true
+    }
+  ],
+  "public_source_sha256": "87d685fd6a90a6c24ae0f6bcd13154599b1336b5830667cb3155d72103c36ef2",
+  "returned_reference_rows_source_checked": 10,
+  "returned_semantic_hit_rows_source_checked": 11,
+  "schema": "projected-native-component-audit-v1",
+  "scope": "Actual projection/source/guidance/index/navigation facts; first author request/all16 slots, librarian artifacts and semantic usefulness are not qualified.",
+  "semantic_broad_query_hits_only_test_attributes": true,
+  "semantic_quality_issue": "d25024261adb4d7c",
+  "semantic_relevance_or_repair_quality_claim": false,
+  "static_knowledge_sha256": "7e22793933a441b04957a0fa00b80eeae0af4ae1f7149a9727eba633dc71c990",
+  "stored_chunks_exactly_test_attribute": 208,
+  "stored_code_chunks": 3738,
+  "task": "skim-rs__skim-1044"
+}

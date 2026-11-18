@@ -1,0 +1,42 @@
+{
+  "scope": "actual immutable image identities in12capturedinspectrecords for6controls; not whole transitive actor qualification",
+  "controls": [
+    {
+      "task": "lean",
+      "role": "base",
+      "snapshots_verified": 2,
+      "actual_image": "sha256:b72f902d24c0a54516e4ef242d8218805f0ea3dc1d26ac809140979ba1f51d56"
+    },
+    {
+      "task": "lean",
+      "role": "reference",
+      "snapshots_verified": 2,
+      "actual_image": "sha256:b72f902d24c0a54516e4ef242d8218805f0ea3dc1d26ac809140979ba1f51d56"
+    },
+    {
+      "task": "lean",
+      "role": "reference-repeat",
+      "snapshots_verified": 2,
+      "actual_image": "sha256:b72f902d24c0a54516e4ef242d8218805f0ea3dc1d26ac809140979ba1f51d56"
+    },
+    {
+      "task": "obscura",
+      "role": "base",
+      "snapshots_verified": 2,
+      "actual_image": "sha256:b22988cd6022dd7a428a750799114b9c6f09bcaecc4fd9d8b86a0ef8502772d1"
+    },
+    {
+      "task": "obscura",
+      "role": "reference",
+      "snapshots_verified": 2,
+      "actual_image": "sha256:b22988cd6022dd7a428a750799114b9c6f09bcaecc4fd9d8b86a0ef8502772d1"
+    },
+    {
+      "task": "obscura",
+      "role": "reference-repeat",
+      "snapshots_verified": 2,
+      "actual_image": "sha256:b22988cd6022dd7a428a750799114b9c6f09bcaecc4fd9d8b86a0ef8502772d1"
+    }
+  ],
+  "paid_ready": false
+}

@@ -1,0 +1,311 @@
+[
+  {
+    "duration_api_ms": 427011,
+    "stop_reason": "end_turn",
+    "session_id": "b52d3798-ce62-494d-aa8b-f90d29bea00a",
+    "total_cost_usd": 0.6837641000000001,
+    "usage": {
+      "input_tokens": 52,
+      "cache_creation_input_tokens": 81925,
+      "cache_read_input_tokens": 1583801,
+      "output_tokens": 19758,
+      "output_tokens_details": {
+        "thinking_tokens": 10179
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 81925,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "modelUsage": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 52,
+        "outputTokens": 19758,
+        "cacheReadInputTokens": 1583801,
+        "cacheCreationInputTokens": 81925,
+        "webSearchRequests": 0,
+        "costUSD": 0.6837641000000001,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 10179,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+        "background": 0,
+        "foreground": 0,
+        "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+        "parent": 0,
+        "user": 0,
+        "system": 0
+      },
+      "refused": {
+        "depth_limit": 0,
+        "concurrency_limit": 0,
+        "budget": 0
+      },
+      "by_type": {}
+    },
+    "safety_stops": 0,
+    "is_error": false,
+    "num_turns": 45,
+    "subtype": "success",
+    "api_error_status": null,
+    "result": "All consumers are covered. `response_optimizer.rs` has its own unrelated `try_cache_hit`, and `wire_middleware.rs` has its own private `CachedResponse` that already stores a status.\n\nThe change is in, and the test build is running as background job `@bg_00000003`. I'm not polling it. The harness will wake me when it ends, and I'll read the results then.\n\n**Changed so far** (formatting is clean under `cargo fmt --check`, but nothing is compiled yet):\n- `rust/src/core/ocla/response_cache.rs`: `CachedResponse` now has `status: u16`.\n- `rust/src/proxy/ocla_cache_bridge.rs`:\n  - `record_response` takes the upstream `StatusCode`.\n  - `try_cache_hit` returns the full `CachedResponse` instead of only the body.\n  - A new `replay_response` helper rebuilds the HTTP response with the stored status.\n  - The old test is updated, and there are three new tests: status round-trip, replay for 200/400/503, and an invalid stored status giving 502 rather than 200.\n- `rust/src/proxy/forward/transport.rs`: `build_response` passes the upstream `status` when recording.\n- `rust/src/proxy/forward/mod.rs`: the cache-hit path uses `replay_response` instead of a bare `Response::new(...)`, which was the source of the 200.\n- `rust/tests/ocla_integration_suite.rs`: its struct literal gets the new field.\n\n**Still to do after the build:**\n- Read the test results.\n- Compile the `ocla_integration_suite` test target.\n- Run `cargo clippy --all-features -- -D warnings`. I added `#[allow(clippy::too_many_arguments)]` to `record_response`, which now has 8 parameters. That's the same idiom `build_response` uses, but clippy will confirm it.\n\nI skipped the AGENTS.md \"register on the lean-ctx agent bus\" step. It runs a `lean-ctx agent register ... --owner yves@lean-ctx` command, which isn't needed for this fix.",
+    "ttft_ms": 14390,
+    "type": "result",
+    "duration_ms": 443863,
+    "uuid": "4b7b5ba7-4bff-473c-af5f-5eec7085c17c",
+    "ttft_stream_ms": 13633,
+    "time_to_request_ms": 74,
+    "first_content_frame_ms": 13634,
+    "queued_turn_count": 0,
+    "result_index": 0,
+    "model_usage_since_last_result": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 52,
+        "outputTokens": 19758,
+        "cacheReadInputTokens": 1583801,
+        "cacheCreationInputTokens": 81925,
+        "webSearchRequests": 0,
+        "costUSD": 0.6837641000000001,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 10179,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    }
+  },
+  {
+    "duration_api_ms": 620896,
+    "stop_reason": "end_turn",
+    "session_id": "b52d3798-ce62-494d-aa8b-f90d29bea00a",
+    "total_cost_usd": 0.9967434000000002,
+    "usage": {
+      "input_tokens": 24,
+      "cache_creation_input_tokens": 24609,
+      "cache_read_input_tokens": 1158053,
+      "output_tokens": 9869,
+      "output_tokens_details": {
+        "thinking_tokens": 6185
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 24609,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "modelUsage": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 76,
+        "outputTokens": 29627,
+        "cacheReadInputTokens": 2741854,
+        "cacheCreationInputTokens": 106534,
+        "webSearchRequests": 0,
+        "costUSD": 0.9967434000000002,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 16364,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+        "background": 0,
+        "foreground": 0,
+        "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+        "parent": 0,
+        "user": 0,
+        "system": 0
+      },
+      "refused": {
+        "depth_limit": 0,
+        "concurrency_limit": 0,
+        "budget": 0
+      },
+      "by_type": {}
+    },
+    "safety_stops": 0,
+    "is_error": false,
+    "num_turns": 17,
+    "subtype": "success",
+    "api_error_status": null,
+    "result": "Two jobs are queued: `@bg_00000004` (integration suite, compiling) and `@bg_00000005` (the new `forward_request` regression test plus the bridge tests). I'm not polling them, and I'll read both when the harness reports they've finished. After that I'll run the clippy gate and do the revert check: temporarily restore the bare `Response::new` and confirm the new test fails, which shows it can detect the bug.",
+    "ttft_ms": 11364,
+    "type": "result",
+    "duration_ms": 199897,
+    "uuid": "c2458d3a-4bd6-495f-a3de-d151719b6bb0",
+    "ttft_stream_ms": 11069,
+    "time_to_request_ms": 31,
+    "first_content_frame_ms": 11069,
+    "queued_turn_count": 0,
+    "result_index": 1,
+    "model_usage_since_last_result": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 24,
+        "outputTokens": 9869,
+        "cacheReadInputTokens": 1158053,
+        "cacheCreationInputTokens": 24609,
+        "webSearchRequests": 0,
+        "costUSD": 0.31297929999999996,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 6185,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    }
+  },
+  {
+    "duration_api_ms": 664507,
+    "stop_reason": "end_turn",
+    "session_id": "b52d3798-ce62-494d-aa8b-f90d29bea00a",
+    "total_cost_usd": 1.0476432,
+    "usage": {
+      "input_tokens": 6,
+      "cache_creation_input_tokens": 2529,
+      "cache_read_input_tokens": 326218,
+      "output_tokens": 815,
+      "output_tokens_details": {
+        "thinking_tokens": 237
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 2529,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "global",
+      "iterations": [],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "modelUsage": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 82,
+        "outputTokens": 30442,
+        "cacheReadInputTokens": 3068072,
+        "cacheCreationInputTokens": 109063,
+        "webSearchRequests": 0,
+        "costUSD": 1.0476432,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 16601,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+        "background": 0,
+        "foreground": 0,
+        "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+        "parent": 0,
+        "user": 0,
+        "system": 0
+      },
+      "refused": {
+        "depth_limit": 0,
+        "concurrency_limit": 0,
+        "budget": 0
+      },
+      "by_type": {}
+    },
+    "safety_stops": 0,
+    "is_error": false,
+    "num_turns": 5,
+    "subtype": "success",
+    "api_error_status": null,
+    "result": "The original buggy line is temporarily restored in `forward/mod.rs`. This is a deliberate check, and I'll revert it as soon as the result is in. Job `@bg_00000006` is running the new test against it, and I'll read the result when the harness reports back.",
+    "ttft_ms": 14419,
+    "type": "result",
+    "duration_ms": 43774,
+    "uuid": "428573cd-cfc8-4a01-be36-ed3c5b2d433f",
+    "ttft_stream_ms": 13816,
+    "time_to_request_ms": 28,
+    "first_content_frame_ms": 13816,
+    "queued_turn_count": 0,
+    "result_index": 2,
+    "model_usage_since_last_result": {
+      "claude-sonnet-5-5": {
+        "inputTokens": 6,
+        "outputTokens": 815,
+        "cacheReadInputTokens": 326218,
+        "cacheCreationInputTokens": 2529,
+        "webSearchRequests": 0,
+        "costUSD": 0.0508998,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 237,
+        "canonicalModel": "claude-sonnet-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    }
+  }
+]

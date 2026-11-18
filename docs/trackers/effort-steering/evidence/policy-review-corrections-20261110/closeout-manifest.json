@@ -1,0 +1,111 @@
+{
+  "source_commit": "f586d35f4b0d41768931648dd1a9a33f1cdd450f",
+  "archive": "closeout.tar.gz",
+  "archive_bytes": 24132,
+  "archive_sha256": "649f72688e787ce3a1a1bc176038d984f052b75776300fb1af9bb24853912548",
+  "members_verified": 13,
+  "members": [
+    {
+      "path": "canonical/docs/issues/2026-11-07-grade-policy-misattributed-unselected-doctest-compiler-error.md",
+      "bytes": 10027,
+      "sha256": "afb20669e52f7a1a6f24a20f36e48146c3ace7188a90752cc85e54dc19292419"
+    },
+    {
+      "path": "canonical/docs/issues/2026-11-10-grade-policy-captured-output-invalidates-functional-failure.md",
+      "bytes": 3095,
+      "sha256": "1c14ce2c3cb56de667f2e0b24b770340a3fd4bcce07a077aafb3b59ff9b03056"
+    },
+    {
+      "path": "canonical/docs/issues/2026-11-10-grade-policy-malformed-mappings-escape-fail-closed.md",
+      "bytes": 3396,
+      "sha256": "9bbf4daf5e44db22ffba4797ff5953ca84823f53acc4fa4bfab138e174e0e6b8"
+    },
+    {
+      "path": "canonical/docs/issues/2026-11-10-grade-policy-ordinary-linker-failure-unclassified.md",
+      "bytes": 2470,
+      "sha256": "54a9b0415ed1803a273c2c9f42145101ea9381935dc4b1a82d23ec028bb5310c"
+    },
+    {
+      "path": "canonical/docs/issues/2026-11-10-grade-policy-rejects-optional-rebuild-none.md",
+      "bytes": 2730,
+      "sha256": "c5ed285b45079913bdce055da2025ea12b316a202016d3c65a058993a2e5c0e1"
+    },
+    {
+      "path": "canonical/docs/issues/2026-11-10-policy-guard-regressions-missing-coherent-inputs.md",
+      "bytes": 4155,
+      "sha256": "137282cc40d94231af4e06996887faa860be6bce1b221ea6a8241cf56072b6c6"
+    },
+    {
+      "path": "canonical/docs/trackers/effort-steering/README.md",
+      "bytes": 12970,
+      "sha256": "eb0a8ae0d6579b6cfe02a95b8c8360dd811da06fb6e6a4ed4e0adbebcad23914"
+    },
+    {
+      "path": "canonical/docs/trackers/effort-steering/plans/2026-11-10-policy-review-corrections.md",
+      "bytes": 8873,
+      "sha256": "20bb62af7e8b20ca882794310c7fad1d6eb453eac8e0d9c274b6a982a5b948b1"
+    },
+    {
+      "path": "canonical/docs/trackers/effort-steering/reports/2026-11-09-grader-policy-integration.md",
+      "bytes": 6074,
+      "sha256": "b483fccc0c5e1ab75600185772a4bc48899882bcd71b1b6b91ae72178147420c"
+    },
+    {
+      "path": "canonical/docs/trackers/effort-steering/reports/2026-11-10-policy-review-corrections.md",
+      "bytes": 9619,
+      "sha256": "ade5f203909e22d1c9e09faf549e0aaad5c42b631071cfbd55deb40e7a42c0f1"
+    },
+    {
+      "path": "canonical/docs/trackers/effort-steering/reports/README.md",
+      "bytes": 5618,
+      "sha256": "9f470ec899e929cede4356d37bb72df06fcbfcbf503d6eb0ecf178b8a02c3b6e"
+    },
+    {
+      "path": "ledger/progress.md",
+      "bytes": 3116,
+      "sha256": "94480ebfb4783e319e4e47caa9d0bbf5aa6e2c5424c4b618a4eb626e615e2631"
+    },
+    {
+      "path": "postcommit-custody.json",
+      "bytes": 1759,
+      "sha256": "09a8a03af947455c70f78d18a68808c33b000e0eebd771a435b98c085feef0b5"
+    }
+  ],
+  "receipt": {
+    "recorded_at": "2026-11-09T23:10:22.108880+00:00",
+    "source_commit": "f586d35f4b0d41768931648dd1a9a33f1cdd450f",
+    "source_patch_id": "53c4b6e6027c6135823b4fc1b0994c1a719b7301",
+    "source_blobs_reverified": true,
+    "original_capsule_members_reverified": 232,
+    "main_index_modified_by_closeout": false,
+    "canonical_documents": [
+      "docs/trackers/effort-steering/README.md",
+      "docs/trackers/effort-steering/reports/README.md",
+      "docs/trackers/effort-steering/reports/2026-11-09-grader-policy-integration.md",
+      "docs/trackers/effort-steering/reports/2026-11-10-policy-review-corrections.md",
+      "docs/trackers/effort-steering/plans/2026-11-10-policy-review-corrections.md",
+      "docs/issues/2026-11-07-grade-policy-misattributed-unselected-doctest-compiler-error.md",
+      "docs/issues/2026-11-10-grade-policy-captured-output-invalidates-functional-failure.md",
+      "docs/issues/2026-11-10-grade-policy-malformed-mappings-escape-fail-closed.md",
+      "docs/issues/2026-11-10-grade-policy-rejects-optional-rebuild-none.md",
+      "docs/issues/2026-11-10-grade-policy-ordinary-linker-failure-unclassified.md",
+      "docs/issues/2026-11-10-policy-guard-regressions-missing-coherent-inputs.md"
+    ],
+    "doc_ref_audit": {
+      "scope": "seven new correction documents",
+      "scanned": 7,
+      "found": 9,
+      "resolved": 9,
+      "broken": 0,
+      "unknown": 0,
+      "degraded": false,
+      "exit_code": 0
+    },
+    "limits": [
+      "Final documentation is snapshotted as data; this does not commit or integrate its broader live index migration.",
+      "Documentation capsule added after final source gate.",
+      "No merge, push, model call, private grade or historical outcome rewrite.",
+      "No fresh independent approval of correction; F3/F6/F7 unchanged."
+    ]
+  }
+}

@@ -1,0 +1,191 @@
+{
+  "limits": [
+    "Regex discovers explicit opaque identifiers; it is not exhaustive proof that aliases never appeared.",
+    "Named historical pool tasks are excluded conservatively without reading success/failure labels."
+  ],
+  "source_sha256": {
+    "docs/trackers/effort-steering/notes/author-artifacts-20261031.md": "6965ed9d6ceb0398b5e9b61e5442cbde3677cf97c895d14e4c260a2c86e23f0c",
+    "docs/trackers/effort-steering/notes/baseline-first-oracle-20261107.md": "b4e0226421ad2d96e8ccbcce63fce66c5e938e7731046c59ef7d0e751f892dd6",
+    "docs/trackers/effort-steering/notes/containerd-sab-storage-20261101.md": "d3f172d2d1f9f927b77fbbb2a80af0462280371235e42f5a4c27025fcf5667f5",
+    "docs/trackers/effort-steering/notes/differential-oracle-resource-calibration-20261107.md": "98e15236b43ddce83f08b9b14d204f78f450645f6c36dd59b6f12d44df2c4864",
+    "docs/trackers/effort-steering/notes/disk-cleanup-followup-20261106.md": "31fcd288601b7ae36990402f70103a727e3ad192ef60af3ef5673609ce35fb93",
+    "docs/trackers/effort-steering/notes/docker-cache-cleanup-20261101.md": "ca3d9a94ba3c8e35d06c07fbded2b5a096290a5061a44737e7cf10460b6569e4",
+    "docs/trackers/effort-steering/notes/external-prepared-entry-20261105.md": "5c85787c808067ca20e11804044c2883e76fb14110f764aeb4ac36484e1d74c9",
+    "docs/trackers/effort-steering/notes/fixed-checker-loop-20261031.md": "a94d673366904a0dd8a15307413e962c256d6a1196db5cac5d30c09414114a7a",
+    "docs/trackers/effort-steering/notes/fixed-checker-transfer-20261101.md": "012bcd083d05477737d27421c038c7f68b0c43455138d36af0b781fdf0aa304b",
+    "docs/trackers/effort-steering/notes/matched-workflow-20261031.md": "8a0e41d4fda89fd5f55f7ca4fb21255aea8a2a5398a8d63293e90afff58021f6",
+    "docs/trackers/effort-steering/notes/native-runtime-20261104.md": "acd915a770853703fa72460a44880cbe04720f32ce4b6cf988d2f6e00dce79ad",
+    "docs/trackers/effort-steering/notes/onboarding-reuse-20261104.md": "674de9127feb811ae1f46f3ceb755394268e9e0ef6b7c8cd34fd4fbdfa639da9",
+    "docs/trackers/effort-steering/notes/private-grade-audit-20261106.md": "70c71114dc4e68364bbc74fda9b235d02144c6c310903677e48818c8a2e21696",
+    "docs/trackers/effort-steering/notes/semantic-reuse-20261104.md": "da7b8b843cb931d30bd09feee0eaae1b14ca713939858f9e48a8cf5b5c6a8089",
+    "docs/trackers/effort-steering/notes/workflow-transfer-20261030.md": "71eb7b99b79320b491657d1463a784bdbc0aab6ade64757c9b64f981b91986dd",
+    "docs/trackers/effort-steering/plans/2026-11-06-grader-validity-classification.md": "626c44bded3cd4f6aecb28809ba240f544fb1de09f9b9aafd78f97d9fe584ba3",
+    "docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-workflow-transfer.md": "ac636a98fc7e6bd1527e1d6f68e7c7ac97dd261585c06d4b5ca88cfe37ea51da",
+    "docs/trackers/effort-steering/retained-worktrees/research/2026-10-31-fixed-checker-loop.md": "9b0035e9d99a5ff00ad2e1d0cee2444a453f7a094acbe68bd12eeba7a9ca10b5",
+    "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-public-oracle-transfer.md": "0c396344a004df335b66eb519af4923cf9d85f10821e2abbd4e07b7530bddd92",
+    "docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-quality-mechanisms.md": "e1e6042dbd53fa4bee7bdea0c769af873ed3aee08125850e3862b41807225dff",
+    "tools/setup-ab-eval/multilang-pool-fresh-v1.json": "8387ddcac0f560296d148918cafd3d7c88e1bc8dddec996d74cf299e80516773",
+    "tools/setup-ab-eval/multilang-pool-fresh-v2-rep2.json": "d254b070da65ded6e6512ce7bf463bb7fdd4fb4add71292f84f82a54acedf927",
+    "tools/setup-ab-eval/multilang-pool-fresh-v2.json": "90462eb97176ff50c2a8a813152af68515349d6eac6f604ad5aafe82cddbf66b",
+    "tools/setup-ab-eval/multilang-pool-v1.json": "f292f09b69fd3aa81a0ef9d4bbc87d8f33b849640d7db17d4646b894bd347a18",
+    "tools/setup-ab-eval/multilang-pool-v2.json": "2bf50c8075d873bd0cde1ff5a0246ac3f8b436841dda23b541a1996983410ef2",
+    "tools/setup-ab-eval/multilang-pool-v3.json": "06045c454635bfb7d849c5faec539f2b31e04776960d21dc6265192d6ae55ba8",
+    "tools/setup-ab-eval/multilang-pool-v4.json": "cad2a914ae0cba1d571d3b99cd2287f03869566d5a5c7bfe5ecbe03f535ec617"
+  },
+  "tasks": {
+    "BurntSushi__ripgrep-2576": [
+      "operator-thread previously named task/control"
+    ],
+    "Tokio-rs__tokio-4384": [
+      "docs/trackers/effort-steering/notes/matched-workflow-20261031.md"
+    ],
+    "astral-sh__ruff-15394": [
+      "docs/trackers/effort-steering/notes/author-artifacts-20261031.md",
+      "docs/trackers/effort-steering/notes/fixed-checker-loop-20261031.md",
+      "docs/trackers/effort-steering/notes/matched-workflow-20261031.md",
+      "docs/trackers/effort-steering/retained-worktrees/research/2026-10-31-fixed-checker-loop.md",
+      "docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-quality-mechanisms.md"
+    ],
+    "astral-sh__ruff-15626": [
+      "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-public-oracle-transfer.md"
+    ],
+    "gitbutlerapp__gitbutler-14920": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v2.json"
+    ],
+    "h4ckf0r0day__obscura-390": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v3.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v4.json"
+    ],
+    "h4ckf0r0day__obscura-412": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v3.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v4.json"
+    ],
+    "h4ckf0r0day__obscura-414": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v3.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v4.json"
+    ],
+    "h4ckf0r0day__obscura-447": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v3.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v4.json"
+    ],
+    "h4ckf0r0day__obscura-477": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v3.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v4.json"
+    ],
+    "modelcontextprotocol__rust-sdk-1021": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v3.json"
+    ],
+    "nushell__nushell-13831": [
+      "docs/trackers/effort-steering/retained-worktrees/research/2026-11-03-public-oracle-transfer.md"
+    ],
+    "nushell__nushell-18863": [
+      "docs/trackers/effort-steering/notes/baseline-first-oracle-20261107.md",
+      "docs/trackers/effort-steering/notes/differential-oracle-resource-calibration-20261107.md",
+      "docs/trackers/effort-steering/notes/disk-cleanup-followup-20261106.md",
+      "docs/trackers/effort-steering/notes/external-prepared-entry-20261105.md",
+      "docs/trackers/effort-steering/plans/2026-11-06-grader-validity-classification.md",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v2-rep2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v2.json",
+      "operator-thread previously named task/control"
+    ],
+    "nushell__nushell-18976": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v1.json"
+    ],
+    "nushell__nushell-19052": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v2.json"
+    ],
+    "nushell__nushell-19172": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v1.json"
+    ],
+    "nushell__nushell-19283": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v2.json"
+    ],
+    "pola-rs__polars-28484": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json"
+    ],
+    "rust-lang__rust-analyzer-22789": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v3.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-v4.json"
+    ],
+    "rust-lang__rust-analyzer-22992": [
+      "docs/trackers/effort-steering/notes/external-prepared-entry-20261105.md",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v1.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v2-rep2.json",
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v2.json",
+      "operator-thread previously named task/control"
+    ],
+    "rust-lang__rust-analyzer-23115": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v1.json"
+    ],
+    "rust-lang__rust-analyzer-23586": [
+      "conservative prior-pool exclusion: tools/setup-ab-eval/multilang-pool-fresh-v1.json"
+    ],
+    "rust-lang__rust-bindgen-3390": [
+      "docs/trackers/effort-steering/notes/native-runtime-20261104.md",
+      "docs/trackers/effort-steering/notes/onboarding-reuse-20261104.md",
+      "docs/trackers/effort-steering/notes/semantic-reuse-20261104.md"
+    ],
+    "sab-arm-pola-rs__polars-28484": [
+      "docs/trackers/effort-steering/notes/containerd-sab-storage-20261101.md"
+    ],
+    "sab-grade-h4ckf0r0day__obscura-447-empty-57134719": [
+      "docs/trackers/effort-steering/notes/docker-cache-cleanup-20261101.md"
+    ],
+    "sab-grade-h4ckf0r0day__obscura-447-gold-3173": [
+      "docs/trackers/effort-steering/notes/docker-cache-cleanup-20261101.md"
+    ],
+    "sab-grade-nushell__nushell-18863": [
+      "docs/trackers/effort-steering/notes/private-grade-audit-20261106.md"
+    ],
+    "sab-grade-pola-rs__polars-28484-gold-36": [
+      "docs/trackers/effort-steering/notes/containerd-sab-storage-20261101.md"
+    ],
+    "sharkdp__bat-1892": [
+      "operator-thread previously named task/control"
+    ],
+    "tokio-rs__axum-1730": [
+      "docs/trackers/effort-steering/notes/fixed-checker-transfer-20261101.md"
+    ],
+    "tokio-rs__axum-691": [
+      "docs/trackers/effort-steering/notes/workflow-transfer-20261030.md",
+      "docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-workflow-transfer.md",
+      "docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-quality-mechanisms.md",
+      "operator-thread previously named task/control"
+    ],
+    "tokio-rs__tokio-4384": [
+      "docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-quality-mechanisms.md",
+      "operator-thread previously named task/control"
+    ],
+    "tokio-rs__tokio-4867": [
+      "docs/trackers/effort-steering/notes/fixed-checker-transfer-20261101.md"
+    ],
+    "tokio-rs__tokio-6603": [
+      "operator-thread previously named task/control"
+    ],
+    "uutils__coreutils-6575": [
+      "operator-thread previously named task/control"
+    ],
+    "uutils__coreutils-6690": [
+      "docs/trackers/effort-steering/notes/workflow-transfer-20261030.md",
+      "docs/trackers/effort-steering/retained-worktrees/research/2026-10-30-workflow-transfer.md",
+      "docs/trackers/effort-steering/retained-worktrees/trackers/low-effort-quality-mechanisms.md"
+    ]
+  }
+}

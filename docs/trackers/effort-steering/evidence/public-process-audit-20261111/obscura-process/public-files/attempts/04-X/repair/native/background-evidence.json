@@ -1,0 +1,15 @@
+{
+  "complete": true,
+  "logs": [
+    {
+      "native_path": "/tmp/codescout-bg-DyszQ8.log",
+      "saved_path": "/var/tmp/ep11-01a15/paid-campaign-headroom-v3/attempts/04-X/repair/native/background-logs/0.log",
+      "container_id": "80ebac7abcc927cfad1d9583968d4756b8b9494a7c88bbbfd17c96d06ab2041d",
+      "bytes_saved": 7976,
+      "sha256": "b146426e458174b0f44839672cd08395a6356af1e290f630335cbbe789c7ffbe",
+      "truncated": false,
+      "observed_job_state": "exited"
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,132 @@
+{
+  "archive_bytes": 57754,
+  "archive_sha256": "87407b555bf8cdee46f98ba8604af56147571f88bed2544e81e8374eb6167b7c",
+  "client_model_calls_in_preparation": 0,
+  "members": {
+    "ArrowCleanBase.Dockerfile": {
+      "bytes": 2852,
+      "sha256": "5f7189ccc81b8d4e23a02b2ad2df144397ac9714f37e93b6d52a5f116f130918"
+    },
+    "ArrowCleanBaseTrace.Dockerfile": {
+      "bytes": 2853,
+      "sha256": "cc2eb1257857de36c629ff5e3500c18cd1104314662fd3dd0810f6c90823df89"
+    },
+    "ArrowDependencies.Dockerfile": {
+      "bytes": 316,
+      "sha256": "b25d8c9520a3725a1b11e9d3ff97c36b7eee566cc5972148b2c23f6517598cbc"
+    },
+    "ArrowReadableDependencies.Dockerfile": {
+      "bytes": 176,
+      "sha256": "f37b788a18efaea1646231fbd107c839ebf9e5a33546d8a4798cd0b380646f03"
+    },
+    "checkpoint_source.py": {
+      "bytes": 2530,
+      "sha256": "1200d675d4d99b73bfcb2095994564712e53362a7953ac44dac7aecc8bac3ff2"
+    },
+    "export_arrow_base.py": {
+      "bytes": 5845,
+      "sha256": "cf662586f0d24b7e233f99994b91390552f2e122a0e9a211c0cf22465dcf3034"
+    },
+    "finalize_arrow_context.py": {
+      "bytes": 4915,
+      "sha256": "d8bdddd0c7e68000a46da0f358128fae32404c21d5284b107e0896e6be8e22e4"
+    },
+    "freeze_population.py": {
+      "bytes": 8240,
+      "sha256": "6380c1a0aafa6f3ecf3d8e5406841bc83f0e7cb9e4c3a899763bb56f4c1fe27b"
+    },
+    "index_arrow_context.py": {
+      "bytes": 5145,
+      "sha256": "858fcee2b99b318028e893751fb6d46f9c65cb0d6dae6b7569ed2190486b2477"
+    },
+    "prepare_arrow_context.py": {
+      "bytes": 5091,
+      "sha256": "f21914f0af82744d6f047738882586597d9044936f6ff6e0fb69710fc1fb88e4"
+    },
+    "prepare_arrow_lock.py": {
+      "bytes": 4650,
+      "sha256": "3953295da2a8476a02dce7abf49fe90bfd1924dc12eb72415a1001648e78f4f7"
+    },
+    "prepare_arrow_reference.py": {
+      "bytes": 3595,
+      "sha256": "271103ed44b146bb371ea180969e85d801ebcb5c1124dfb8caa0f69c8cd6b4a0"
+    },
+    "preserve_baseline.py": {
+      "bytes": 4130,
+      "sha256": "5a4a816ccee80d36892f1229b75f850f6e47066e34d32a158f039b95d599d91e"
+    },
+    "prior_export_public_baseline_v2.py": {
+      "bytes": 4821,
+      "sha256": "d9080e2740b182377de238c963d175adb273dd31655d9d593a0e5fff5d5603e4"
+    },
+    "prior_index_public_corpus.py": {
+      "bytes": 9738,
+      "sha256": "bb1f96afa090361f25532a26c59e6431ef1b7f11d747e9a32d41948884a4779c"
+    },
+    "prior_prepare_native.py": {
+      "bytes": 9920,
+      "sha256": "3928d9b6d34a9ab1a3d5271f17150639b7ba58dc7179c042cc52ccd225db93f0"
+    },
+    "prior_prepare_public_corpus_v2.py": {
+      "bytes": 6376,
+      "sha256": "2ec209e72fc6f889c2a57fbe88201feeb90824da5c286d7caadc7bf872e03a0f"
+    },
+    "prior_qualify_source_images_v2.py": {
+      "bytes": 4114,
+      "sha256": "1602ec04881beedb87cebc8bf0088e17c5d251d7ae7fc72e34e4b269b52ce63d"
+    },
+    "private_multilang_control.py": {
+      "bytes": 28784,
+      "sha256": "57d1e1155b559dd0373b7a59ba2cbd04801e2359b4b5f4a83d2a938aa9c0b2d7"
+    },
+    "private_multilang_tasks.py": {
+      "bytes": 49331,
+      "sha256": "6acb079db001ee3c88bfde85d2e91f0b98396a1a9b2f45d6e7a1fd90bfac5e78"
+    },
+    "private_stream_evidence.py": {
+      "bytes": 9311,
+      "sha256": "3df36e833a96b586466305729c80e199a3f2aa1aa2e3cb0a6771f5c051efe62a"
+    },
+    "probe_native_closed.py": {
+      "bytes": 3980,
+      "sha256": "d98aa352381201d65a562d7c9cd17d3caea87975ace4b030a54f2b0ee90403bb"
+    },
+    "qualify_accounting.py": {
+      "bytes": 6401,
+      "sha256": "3a1a9397cb822e1997463c5ee41561a4a8aad54d9ca61c7ab1f7dabfa5307509"
+    },
+    "qualify_arrow_public.py": {
+      "bytes": 3772,
+      "sha256": "ddfb5867a252fd68a98c6915d5cfdfccadfe044c6d9c72fd94f160893a398154"
+    },
+    "qualify_arrow_public_v2.py": {
+      "bytes": 3935,
+      "sha256": "f6af32478d74e48bfc4e236e13c231216e735ec9d6ed6c3fdc7e595c24a780e6"
+    },
+    "reconcile_history.py": {
+      "bytes": 6687,
+      "sha256": "a98b1010fbc986feb25921ecb758ff938ca4e994efea5265d7b68890966fe2d9"
+    },
+    "reconcile_history_anchored.py": {
+      "bytes": 2028,
+      "sha256": "07ed832e7f891f3e481c44c38a1e1f532a4cbe7ae585dacc5ce4fe8011fe8f03"
+    },
+    "render_arrow_clean_image.py": {
+      "bytes": 2999,
+      "sha256": "36aee4e1e32667223b66d58fcb2dd63bfa4949c4e5c27da4d02c0359ea48fdb8"
+    },
+    "run_public_controls.py": {
+      "bytes": 4266,
+      "sha256": "60363a678a01d540993a670f1d31cbed2082d80cca54e4af2b41a4886856974b"
+    },
+    "seal_closure_probe.py": {
+      "bytes": 3790,
+      "sha256": "ad7dfec4aaea6b2439c77f63d243d76d18e65638e179d3b9408381794709f231"
+    }
+  },
+  "paid_admitted": false,
+  "reopened_members": 30,
+  "root_review_embedding_compute_costs": "unmeasured",
+  "schema": "native-feedback-preparation-producers-v1",
+  "scope": "Preparation producer source checkpoint only; not a full runtime/corpus/private-control archive or admission proof."
+}

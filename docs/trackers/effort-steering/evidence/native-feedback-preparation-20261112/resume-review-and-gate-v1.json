@@ -1,0 +1,642 @@
+{
+  "all_members_reopened": true,
+  "archive": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/resume-review-and-gate-v1.tar.gz",
+  "archive_bytes": 652541,
+  "archive_sha256": "e1cc03b8ac38cc8c3be89bed336e4177f0c99d4f9cd421218d230a802ebc83eb",
+  "member_count": 126,
+  "members": {
+    "calibration/actual-cli-v5.json": {
+      "bytes": 903,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/resume-observer-cli-v5-calibration.json",
+      "sha256": "24182069b46561875841697e134fcf08e8207e5fa148421e761207dc0130c3e0"
+    },
+    "instruments/audit_dioxus_members_v5.py": {
+      "bytes": 4284,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/audit_dioxus_members_v5.py",
+      "sha256": "8dc06b605b7dfa3e44d3e533447ef5b98565a6bd9abe2b5251ff7d5aa1f133e1"
+    },
+    "instruments/build_private_frontend_owner_v5.py": {
+      "bytes": 6858,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/build_private_frontend_owner_v5.py",
+      "sha256": "1ee4dcfc5b6d6f288f0f91c3df04b4886fcf3dcc2d7d034f4a2f8103b17e4ff8"
+    },
+    "instruments/calibrate_resume_cli_observer_v5.py": {
+      "bytes": 2492,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/calibrate_resume_cli_observer_v5.py",
+      "sha256": "263a67023096bfe8b8677b96d522fb48418507075b5c3f32a4152265625d7cb0"
+    },
+    "instruments/checkpoint_preparation_producers_v5.py": {
+      "bytes": 3028,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/checkpoint_preparation_producers_v5.py",
+      "sha256": "b6a29c0296440aea63d9d10a48825aa13b5e4473136a20b686781c7c198d094c"
+    },
+    "instruments/prepare_native_feedback_resume_v4.py": {
+      "bytes": 2681,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/prepare_native_feedback_resume_v4.py",
+      "sha256": "0180952e9b4c7cbebd8a3190ce164111badc9579488b75c335dc94260733b337"
+    },
+    "instruments/probe_pnpm_offline_writes_v5.py": {
+      "bytes": 9369,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/probe_pnpm_offline_writes_v5.py",
+      "sha256": "0b0952e9955c12e49b89693204768fbd3b2a4adb8bc9e8bdf6dbf808d87bf1f4"
+    },
+    "instruments/qualify_native_feedback_resume_v4.py": {
+      "bytes": 8688,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_native_feedback_resume_v4.py",
+      "sha256": "66d932a505ed1188df67988f01c7e79de8dcbc1666c01a0f4c343e7f64eb5c67"
+    },
+    "instruments/qualify_native_feedback_resume_v5.py": {
+      "bytes": 8314,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_native_feedback_resume_v5.py",
+      "sha256": "90c49cfb6c40ae8eb61c3b7a4c2c71b448b5e250e97e0574fd38d354ec212ef9"
+    },
+    "instruments/qualify_prepared_members_v5.py": {
+      "bytes": 10342,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_prepared_members_v5.py",
+      "sha256": "617c526650a06b0fd56f37a6c5959914d9daf77975e31e3896eecbcb171f523b"
+    },
+    "instruments/qualify_private_captured_format_v5.py": {
+      "bytes": 10816,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_private_captured_format_v5.py",
+      "sha256": "384703bf25400439b6ee354fa86c68f2bc21a32312294e52309e17bf91cfb247"
+    },
+    "instruments/qualify_private_root_write_v5.py": {
+      "bytes": 4896,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/qualify_private_root_write_v5.py",
+      "sha256": "6d5632ff10f538b5bb37884fc5dbdb37d7d6cb6288f30f5b476255d8f59138bd"
+    },
+    "instruments/readback_private_frontend_owner_v5.py": {
+      "bytes": 8628,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/readback_private_frontend_owner_v5.py",
+      "sha256": "ce30f8bc0bd1d2c62be1c7a9e39078630d7dd549621f46277a2505052b3a919f"
+    },
+    "instruments/resume_qualification_instruments_v5.py": {
+      "bytes": 3786,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/resume_qualification_instruments_v5.py",
+      "sha256": "cccd469f5aca137ed1a3fd8bb37dcefaf17b3592ee2e834024ae66aa009cf4dd"
+    },
+    "instruments/test_resume_qualification_v5.py": {
+      "bytes": 6520,
+      "path": "/home/marius/work/claude/codescout/.superpowers/sdd/2026-11-11-native-public-feedback-transfer/test_resume_qualification_v5.py",
+      "sha256": "3cb3e0fc4bff765295e91a2d78a97b26976facfb4af10e38aa8f1a61407fe1d9"
+    },
+    "qualification-v3/final-registration.json": {
+      "bytes": 793808,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/native-feedback-qualification-v3-registration/final-registration.json",
+      "sha256": "482c1bc79ad07782603397f926529d35d9fa926c83493a78db11e2440fdb828d"
+    },
+    "qualification-v3/readback.json": {
+      "bytes": 16702,
+      "path": "/home/marius/work/claude/codescout/docs/trackers/effort-steering/evidence/native-feedback-preparation-20261112/qualification-v3-stopped-v1.json",
+      "sha256": "d7c8f7a3dcc7ec37603f8f330120f51b18c42bb1bd17a1727fb5f30e7db436af"
+    },
+    "qualification-v3/terminal-summary.json": {
+      "bytes": 219,
+      "path": "/home/marius/.cache/codescout-resident/codescout/native-feedback-preparation-20261112/native-feedback-qualification-v3-registration/terminal-summary.json",
+      "sha256": "8c63f8852d8344fb1332e53fd50cebb904cfd46529cc5670417c34175b8741b5"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U01.diff": {
+      "bytes": 646,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U01.diff",
+      "sha256": "9369620ba79d127b763f5ba57b41e51339fce8a4d32d88939cdc4aa9f666ded2"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U01.json": {
+      "bytes": 689,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U01.json",
+      "sha256": "887903d475f2ca79547e2610db1f30d7c1c414b7ae52d39fd398a620b74b34e4"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U01.log": {
+      "bytes": 892,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U01.log",
+      "sha256": "a00f962a5fdcd37c41fe05c6215c7ce95a96f49af71c99218a6e445d90bfcbd8"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U02.diff": {
+      "bytes": 717,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U02.diff",
+      "sha256": "0fcf5802c5398f369f620bdd3c66e6f39a4225d2d477f3a46ea25ca66344209e"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U02.json": {
+      "bytes": 687,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U02.json",
+      "sha256": "545001994a95de7b91a678bbe00a1d959e95e6eb15601a408b36a3f8818f9ef1"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U02.log": {
+      "bytes": 902,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U02.log",
+      "sha256": "97a18ce2a1062ba17f39dfd079c7acf580c2d82bbfaaf784d97b6825348330c0"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U03.diff": {
+      "bytes": 656,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U03.diff",
+      "sha256": "a17a39947cda8ceef85b9059747a2c15e3d15fc132bce4423631df2bf45e0f6d"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U03.json": {
+      "bytes": 690,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U03.json",
+      "sha256": "9fffeb206cee77e37b1f80372dfd1395e9e6d99d3e9a697abe98a4c54271b0f0"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U03.log": {
+      "bytes": 1126,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U03.log",
+      "sha256": "d112bfa300666f0cec5808d591a8c7f114103beb7ef033c9e63ac26daa294808"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U04.diff": {
+      "bytes": 724,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U04.diff",
+      "sha256": "f09f05a180f5bf99650e0a404e7cda0bf070dceb313d26e191ea7b3a32109644"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U04.json": {
+      "bytes": 687,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U04.json",
+      "sha256": "a538327e9200d6391de38d560cf0d15ccef0fdd69004cd94186a173bde80deca"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/U04.log": {
+      "bytes": 170,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/U04.log",
+      "sha256": "fe67889cdda74ecb6284e760ca00825fe51c831ba15c8bb3df4331e389e98f62"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/baseline-result.json": {
+      "bytes": 360,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/baseline-result.json",
+      "sha256": "a8e62dea5c63eb300dffd2082513abf63f68b61a9ebab88017463e72ee2f9b3d"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/baseline.log": {
+      "bytes": 170,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/baseline.log",
+      "sha256": "5da3e8fd51d5d0be4d592bf6efb971edfba75a80422cb4263e4cc696cb4abe4b"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/custody-after.json": {
+      "bytes": 395,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/custody-after.json",
+      "sha256": "0fe514dd273e916aa8139c4da7d930ad1f1274a05893214c5284778bf2a4af15"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/custody-before.json": {
+      "bytes": 17338,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/custody-before.json",
+      "sha256": "d6e0652cee0de9fbda93615a00f02e8dcfafb4da901c4eb7bd347bc196e0f7cc"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/evidence-manifest.json": {
+      "bytes": 2556,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/evidence-manifest.json",
+      "sha256": "475f103e2ddee5a4fc6bd7ad4de8f843270d4547af71b52cb3af702a5a70749e"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/failure-sites.json": {
+      "bytes": 719,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/failure-sites.json",
+      "sha256": "6192dcf9eb2f9619d6666df559bac1085402aecb6dd1edb0487a692d476f008f"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/mutation-results.json": {
+      "bytes": 2891,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/mutation-results.json",
+      "sha256": "f47aaf5179fb608fc359e4681e25ebe9148c58cc1437a269fbef120aa03f8713"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/mutations.json": {
+      "bytes": 1134,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/mutations.json",
+      "sha256": "3c717231989d19257c286a76a5d5b47307dcc48d7e005ae2a19ef508c4b9120a"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/prepare_mutations.py": {
+      "bytes": 1482,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/prepare_mutations.py",
+      "sha256": "b2db85903cd54ae1c1dd777d54d6c5d81e3b0ac579ac1736cf683329864d8d81"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/probe_restore.py": {
+      "bytes": 1235,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/probe_restore.py",
+      "sha256": "5fe5c7f7ad065b9e12d7172cbd6aa816c97a7fc3e710cc919a83a5e40c0cf0d6"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/probe_snapshot.py": {
+      "bytes": 2647,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/probe_snapshot.py",
+      "sha256": "85a7a729c3ab638670ae8300feda6c9c82cb3fb55cc835de3a26d196a0e57cbb"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/restore-probe-results.json": {
+      "bytes": 545,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/restore-probe-results.json",
+      "sha256": "3d195afe4c6333fb2c1eb04f31e8354b2ba78630a84bdff9144a688ca529f3ec"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/review-report.json": {
+      "bytes": 6352,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/review-report.json",
+      "sha256": "edc424bddf5d35b1e40bad9aa53c5bc8562b09f5d5767fb752811db56422285f"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/run_mutations.py": {
+      "bytes": 2313,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/run_mutations.py",
+      "sha256": "d7aa698ff3cc65a569f43cc3c103fe97554f9c7e4e840e728f4ad181877a57ee"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/run_restore_probes.py": {
+      "bytes": 584,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/run_restore_probes.py",
+      "sha256": "b98ec704730eba95dd9d938f1fa7dd1f519fefe93006abe6c33f89714ed2c8fa"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/snapshot-probe-results.json": {
+      "bytes": 520,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/snapshot-probe-results.json",
+      "sha256": "afcbd18101605b3c0312f6414553056078daf1feab7ad3d91cb1b1ecb35f4d37"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/test-modules.json": {
+      "bytes": 103,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/test-modules.json",
+      "sha256": "0e52c9dc289591d174b1b60bbcf98dc7e0265531752ecb08f498ada7658673ab"
+    },
+    "review/native-feedback-resume-review-fbu7mdfe/write_report.py": {
+      "bytes": 5971,
+      "path": "/tmp/native-feedback-resume-review-fbu7mdfe/write_report.py",
+      "sha256": "0220d6a964dddf7ed8552038adfb77a6b8f4ee39ada7d54d7ca844e769bc0f51"
+    },
+    "review/native-resume-guard-replay-mlathqi3/U04.diff": {
+      "bytes": 724,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/U04.diff",
+      "sha256": "f09f05a180f5bf99650e0a404e7cda0bf070dceb313d26e191ea7b3a32109644"
+    },
+    "review/native-resume-guard-replay-mlathqi3/U04.json": {
+      "bytes": 696,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/U04.json",
+      "sha256": "9b782ff683548db809908da82ece787f63e877688f0ac68b9e4fdda2f62224cf"
+    },
+    "review/native-resume-guard-replay-mlathqi3/U04.log": {
+      "bytes": 1740,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/U04.log",
+      "sha256": "97e5b456055661ed6db3db8d956e6d0a1877e3a119b140404b727b071627c525"
+    },
+    "review/native-resume-guard-replay-mlathqi3/U05.diff": {
+      "bytes": 620,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/U05.diff",
+      "sha256": "b22e70030b3c613113d448d2fef6aad7509fc917c42f3745b56024e82f8c32d3"
+    },
+    "review/native-resume-guard-replay-mlathqi3/U05.json": {
+      "bytes": 695,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/U05.json",
+      "sha256": "77d5c983ef6b35fdec9f03826bbcd5571c5929cf51e4c6e20850f4643973eb7b"
+    },
+    "review/native-resume-guard-replay-mlathqi3/U05.log": {
+      "bytes": 975,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/U05.log",
+      "sha256": "a42f955c2e56490ff884e3ef9d316f07b543f399fc5e39d989a0d218d36f964f"
+    },
+    "review/native-resume-guard-replay-mlathqi3/baseline-result.json": {
+      "bytes": 359,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/baseline-result.json",
+      "sha256": "72a64ac7ee9a44ee010cf7f46fce78da53879159ba174406b3dd6493c857929a"
+    },
+    "review/native-resume-guard-replay-mlathqi3/baseline.log": {
+      "bytes": 172,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/baseline.log",
+      "sha256": "c50f91930d386d9d65892cd485be244e78601ccb619ceef9b29b4568218aa3ed"
+    },
+    "review/native-resume-guard-replay-mlathqi3/custody-after.json": {
+      "bytes": 63,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/custody-after.json",
+      "sha256": "bf52c391d97e5354ea4bd945e37bc6a96c9906cb4e8f4b8de5c4dfd639d0af41"
+    },
+    "review/native-resume-guard-replay-mlathqi3/custody-before.json": {
+      "bytes": 15767,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/custody-before.json",
+      "sha256": "215a77b2402d411d5f975a9dd87e5c331634ac6c156dfbe925471aff3dc8577b"
+    },
+    "review/native-resume-guard-replay-mlathqi3/evidence-manifest.json": {
+      "bytes": 1495,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/evidence-manifest.json",
+      "sha256": "148cc2a362a195e598654e9e68caa9fbfcb8669e3e8d093e25de8b87c95ba978"
+    },
+    "review/native-resume-guard-replay-mlathqi3/failure-sites.json": {
+      "bytes": 637,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/failure-sites.json",
+      "sha256": "13bfc7d643cee41667b27bfab5be396df336de4069d4b1d033a5ffff359c8b4c"
+    },
+    "review/native-resume-guard-replay-mlathqi3/mutation-results.json": {
+      "bytes": 1461,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/mutation-results.json",
+      "sha256": "292426abc4de566a846ae2cf46c9f5a6856bcf5bdcfffdd83febfe9bedacf8e7"
+    },
+    "review/native-resume-guard-replay-mlathqi3/mutations.json": {
+      "bytes": 509,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/mutations.json",
+      "sha256": "397bbda36c5c46fb3ec7db0d71f4a4ddad51f1326aff28e96df3f3ea1bd67d61"
+    },
+    "review/native-resume-guard-replay-mlathqi3/review-report.json": {
+      "bytes": 3950,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/review-report.json",
+      "sha256": "1278b10e476c0503a14d5ae418da1f8357ba52fce863467f21e5cdf67c154d7f"
+    },
+    "review/native-resume-guard-replay-mlathqi3/run_mutations.py": {
+      "bytes": 2313,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/run_mutations.py",
+      "sha256": "40ee784d5c08b3805dbcd5451889c41abb811900f72f8cd2cc28ce61277e2f22"
+    },
+    "review/native-resume-guard-replay-mlathqi3/test-modules.json": {
+      "bytes": 103,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/test-modules.json",
+      "sha256": "0e52c9dc289591d174b1b60bbcf98dc7e0265531752ecb08f498ada7658673ab"
+    },
+    "review/native-resume-guard-replay-mlathqi3/write_report.py": {
+      "bytes": 3233,
+      "path": "/tmp/native-resume-guard-replay-mlathqi3/write_report.py",
+      "sha256": "f5ae6703e5cb3ccecaa163fdf4a365a59e42fc504edcecf6dc1aebe4fee002a4"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V01.diff": {
+      "bytes": 417,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V01.diff",
+      "sha256": "66b64cafbae596b6adaf24f929d3122f18915cd6121023a3ad4214a2769d68ff"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V01.json": {
+      "bytes": 651,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V01.json",
+      "sha256": "23373db0124d4bd8904772311ada31588ea2c3d233103bb0389191b2f5b6f53c"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V01.log": {
+      "bytes": 3727,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V01.log",
+      "sha256": "02799fe60600f4631d9b84bdf0d002281e2fc12f63553b21eefb17e19dc61fb1"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V02.diff": {
+      "bytes": 545,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V02.diff",
+      "sha256": "1c0e4f55f6db425efa25543fc40b14204bc4bb76aa5de40095180033e2ea474b"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V02.json": {
+      "bytes": 643,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V02.json",
+      "sha256": "d24c686cc5c827db136468ade220dfa8d66407879f945a99f1402198ef7787a7"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V02.log": {
+      "bytes": 8530,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V02.log",
+      "sha256": "f21e3e9a113564432dc15921899bc67c80fcd56a13800ccb4b5c08cb65799f67"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V03.diff": {
+      "bytes": 519,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V03.diff",
+      "sha256": "c9713971734dfc36baac77d1b5e5e6b12bfcce02210a55fad3b7cd233a93e9fa"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V03.json": {
+      "bytes": 635,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V03.json",
+      "sha256": "50ae9b35de81a935c1cef1cc30e3a9c6355b9932615bc58e6b667e949d71bd2e"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V03.log": {
+      "bytes": 1942,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V03.log",
+      "sha256": "1f05c1bdca96917aa5fccc9acbc03f595b8a9132aad1b8f8cc2373cfaf949d5b"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V04.diff": {
+      "bytes": 430,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V04.diff",
+      "sha256": "1fe33fe414b12df54fbdfa2193538c031071ce1a37b8e78fb03258b50104198a"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V04.json": {
+      "bytes": 638,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V04.json",
+      "sha256": "8a81b894bf9860e455c8bd0484956881838cec76586b102bf208b9a2665aec43"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V04.log": {
+      "bytes": 2362,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V04.log",
+      "sha256": "923b40baf6c82ffd1c1d5771ab53ff2e30af8d8fa3edce96c048395f37a6fe4d"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V05.diff": {
+      "bytes": 481,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V05.diff",
+      "sha256": "eb08beb3966fdc4078174eeea952b29fef2ffd7c44e120c2060c1a1d7ff3fe69"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V05.json": {
+      "bytes": 644,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V05.json",
+      "sha256": "2289c7d0ff1d535990b461c875d41e177236c1fffd345daf5bf3196354079821"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/V05.log": {
+      "bytes": 6073,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/V05.log",
+      "sha256": "47f5c5cf33dd7d7e02b6e3cdf1f5d65d95393b3465e6dbd15849ac220fe5f156"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/baseline-result.json": {
+      "bytes": 1521,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/baseline-result.json",
+      "sha256": "681c5ae253d6af1cc0cccf39cb4cf7460b7e944f0d7ff8f8518bc6e14ee40ec6"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/baseline.log": {
+      "bytes": 1320,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/baseline.log",
+      "sha256": "a7b5fbb0c0ace125a1bda67d0ae943bb1a8462cadf57bbeead91aaa2cdb6a492"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/compiled-scripts.json": {
+      "bytes": 170,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/compiled-scripts.json",
+      "sha256": "2117c4b5eaec8ed657dc2bca725997bcfe7a91676994cee34b317fb7c0ae61de"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/custody-after.json": {
+      "bytes": 552,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/custody-after.json",
+      "sha256": "05a3b5f636bd48817a9bf3d33420411571ac586f43f12a67f4f37f6d9c4d9958"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/custody-before.json": {
+      "bytes": 16206,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/custody-before.json",
+      "sha256": "40320208dd3e3dd575fe40a500ac8bd2e0b673ad891ef3cae9ea7d811a4b5584"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/evidence-manifest.json": {
+      "bytes": 2234,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/evidence-manifest.json",
+      "sha256": "a7e10f25639ad87429ad9d4277186e0ebcbc528ef2bb115826f31912ab6ae268"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/failure-sites.json": {
+      "bytes": 1383,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/failure-sites.json",
+      "sha256": "e610e8b421c077f791c25e486665563d54ae21b931926607865eea9a128fd425"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/mutation-results.json": {
+      "bytes": 3359,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/mutation-results.json",
+      "sha256": "131147e1254e4f4d6680f2296b9ff2bce055b594d489b1502c7a7fd5f586d247"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/mutations.json": {
+      "bytes": 956,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/mutations.json",
+      "sha256": "4fdec77f14bcc1a73e9b660d252f98fbd230142d9eb8acec5db2266d2b5ba075"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/review-report.json": {
+      "bytes": 7358,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/review-report.json",
+      "sha256": "cdd72cf17141cd56c531547d7cccb6fa9b30920ec6d2d3852fb92d0431c44f8f"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/run_mutations.py": {
+      "bytes": 3027,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/run_mutations.py",
+      "sha256": "55c1dba355cc29b1cbb29f2f6b8ddc6efc073f1a1f992625fd02283d082d799c"
+    },
+    "review/native-resume-v5-instrument-replay-vjt2x6zu/write_report.py": {
+      "bytes": 6399,
+      "path": "/tmp/native-resume-v5-instrument-replay-vjt2x6zu/write_report.py",
+      "sha256": "6ac19493cdb9add935a7e4d4ae3ceb3d32bcbe7be996a8a1a5a0bb1682282646"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V01.diff": {
+      "bytes": 417,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V01.diff",
+      "sha256": "66b64cafbae596b6adaf24f929d3122f18915cd6121023a3ad4214a2769d68ff"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V01.json": {
+      "bytes": 651,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V01.json",
+      "sha256": "7c6dfd4415854a79f7dc9a8037881de94b03e25e1816e06aa17212699f4633c2"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V01.log": {
+      "bytes": 2249,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V01.log",
+      "sha256": "5509a14e4674cd84baa1ab80058302efa8c4713c4c2c1139710d351bc94ae49e"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V02.diff": {
+      "bytes": 545,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V02.diff",
+      "sha256": "1c0e4f55f6db425efa25543fc40b14204bc4bb76aa5de40095180033e2ea474b"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V02.json": {
+      "bytes": 643,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V02.json",
+      "sha256": "6ad81675135eb78df5c1c947027feb5b0c1f56bf40beb2ac0eb0502ccf9e2c5c"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V02.log": {
+      "bytes": 4533,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V02.log",
+      "sha256": "d47a3a0d9469cbf30082f25b4c46b146247257c8c7fc4f5ec5a08b92645fb4b3"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V03.diff": {
+      "bytes": 519,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V03.diff",
+      "sha256": "c9713971734dfc36baac77d1b5e5e6b12bfcce02210a55fad3b7cd233a93e9fa"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V03.json": {
+      "bytes": 635,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V03.json",
+      "sha256": "af99a8b940513a09ce8f5e38025332338cd0ecb9103e244cd0eefa8c6f20b32a"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V03.log": {
+      "bytes": 1555,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V03.log",
+      "sha256": "a2e4d8221279553c6e5a615d365d776457e382b3683ef3e489987441586af676"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V04.diff": {
+      "bytes": 430,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V04.diff",
+      "sha256": "1fe33fe414b12df54fbdfa2193538c031071ce1a37b8e78fb03258b50104198a"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V04.json": {
+      "bytes": 623,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V04.json",
+      "sha256": "4ea8fc24edaa79008b38a23653515a4ae09ab461463b19019fd5c19da494fe92"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V04.log": {
+      "bytes": 933,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V04.log",
+      "sha256": "203df2581b673fc20de2dc9ff2b4f35d94c2aa75fb868e71d08d03ad4338af23"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V05.diff": {
+      "bytes": 481,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V05.diff",
+      "sha256": "eb08beb3966fdc4078174eeea952b29fef2ffd7c44e120c2060c1a1d7ff3fe69"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V05.json": {
+      "bytes": 629,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V05.json",
+      "sha256": "d4114c10eff55c54ab6fb826a66e718ee326836dc781d3755961324f9989d7fa"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/V05.log": {
+      "bytes": 933,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/V05.log",
+      "sha256": "87df6c4749413622bc9cdf10ecc151f1afc5abd39d04692cc4cdfe9f07b3aeb4"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/baseline-result.json": {
+      "bytes": 1132,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/baseline-result.json",
+      "sha256": "a41c03bccedc3e1e65b62fb05da79f56b2ede4624886d3c7b8a5edc79c7729ba"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/baseline.log": {
+      "bytes": 933,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/baseline.log",
+      "sha256": "ffae06632705de0b5788fa18402505f6e8f1a84ce2503dfb818f4600b671cccb"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/compiled-scripts.json": {
+      "bytes": 170,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/compiled-scripts.json",
+      "sha256": "4bc2e4322b58b9b6630a4338ad7ae0834877c9f8705d2c1a4441d928100a81a3"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/constructor-probe.json": {
+      "bytes": 172,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/constructor-probe.json",
+      "sha256": "f3616672edfcb4c44e703b2dd5ffb3647986183cd3247eb6c46f36e715662da2"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/consumer-probe-results.json": {
+      "bytes": 1497,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/consumer-probe-results.json",
+      "sha256": "50be614563ed0395548ac2b6cac319b65ebdc19632a1b27c1255cbf103cc4845"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/custody-before.json": {
+      "bytes": 16206,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/custody-before.json",
+      "sha256": "658ddd7c5ed58ea9e6ffae97d03f90f48cc13d4c9bb8c2312072a9e9651a08b1"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/mutation-results.json": {
+      "bytes": 3329,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/mutation-results.json",
+      "sha256": "c3335eaccd106fb6b83f1e73c664f55e006208af5f0d2bb7e55dd3127ce208e9"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/mutations.json": {
+      "bytes": 956,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/mutations.json",
+      "sha256": "4fdec77f14bcc1a73e9b660d252f98fbd230142d9eb8acec5db2266d2b5ba075"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/probe_survivors.py": {
+      "bytes": 1268,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/probe_survivors.py",
+      "sha256": "daa47c3ec1ba101ffe8660a43fd2cd85f9578ecb6aeb91a59da3bfa25061c6bc"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/run_mutations.py": {
+      "bytes": 3027,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/run_mutations.py",
+      "sha256": "0d7575074d3240277b34bbd4dd856ca8f98937c4b7df281300bb9f2624f88599"
+    },
+    "review/native-resume-v5-instrument-review-rzfkkq5q/run_probes.py": {
+      "bytes": 656,
+      "path": "/tmp/native-resume-v5-instrument-review-rzfkkq5q/run_probes.py",
+      "sha256": "84772d76663412bb9c7ac5e9f43be1d0c3165118f973249f643c4b43885e9577"
+    },
+    "verification/full-protocol-receipt-binding-v2.log": {
+      "bytes": 27296,
+      "path": "/home/marius/.codex/worktrees/2aa6/codescout/.superpowers/sdd/2026-11-12-blinded-assertion-boundary/full-protocol-receipt-binding-v2.log",
+      "sha256": "c80ea60c3f459e9300b839b52741559c0beea37d443e5cc6638f382b452ae7f6"
+    },
+    "verification/full-protocol-receipt-binding-v3.log": {
+      "bytes": 1101,
+      "path": "/home/marius/.codex/worktrees/2aa6/codescout/.superpowers/sdd/2026-11-12-blinded-assertion-boundary/full-protocol-receipt-binding-v3.log",
+      "sha256": "ed618000ab58fbfe381fb10e5d3c8de23a0a2bc2ff6dc7db22c14e517d0db254"
+    },
+    "verification/project-gate-openssl35-v2.log": {
+      "bytes": 1212448,
+      "path": "/home/marius/.codex/worktrees/2aa6/codescout/.superpowers/sdd/2026-11-12-blinded-assertion-boundary/project-gate-openssl35-v2.log",
+      "sha256": "cf6bd9d0735cd43998379a99c3fa96172e957ead6f8b3f665453fa6ac143e3ff"
+    },
+    "verification/project-gate-private-tmp-v3.log": {
+      "bytes": 1293031,
+      "path": "/home/marius/.codex/worktrees/2aa6/codescout/.superpowers/sdd/2026-11-12-blinded-assertion-boundary/project-gate-private-tmp-v3.log",
+      "sha256": "c89a04d877737c1987ece515b1e51e073b2f4850f6ebd5de75a679f3bf785b35"
+    },
+    "verification/receipt-binding-regressions-v1.log": {
+      "bytes": 3767,
+      "path": "/home/marius/.codex/worktrees/2aa6/codescout/.superpowers/sdd/2026-11-12-blinded-assertion-boundary/receipt-binding-regressions-v1.log",
+      "sha256": "ee0b7b0234b24a8189afa911632dd9d382b9a623320edb7af64294fcd2b64a18"
+    },
+    "verification/receipt-binding-regressions-v2.log": {
+      "bytes": 2285,
+      "path": "/home/marius/.codex/worktrees/2aa6/codescout/.superpowers/sdd/2026-11-12-blinded-assertion-boundary/receipt-binding-regressions-v2.log",
+      "sha256": "dd794ddf003a6095a28a4418bdc21c19000dad63cae7adddad61395b9d68df71"
+    },
+    "verification/symlink-private-tmp-control-v1.log": {
+      "bytes": 558,
+      "path": "/home/marius/.codex/worktrees/2aa6/codescout/.superpowers/sdd/2026-11-12-blinded-assertion-boundary/symlink-private-tmp-control-v1.log",
+      "sha256": "aa91b4f1edb9dc39c88f599319e11dfccaaf154fbe3b66c03302e59a044fc3c5"
+    }
+  },
+  "paid_admission": false,
+  "schema": "selected-resume-review-gate-custody-v1",
+  "scope": "Selected evidence only, not all runtime source/private artifacts; actual resume remains unrun."
+}

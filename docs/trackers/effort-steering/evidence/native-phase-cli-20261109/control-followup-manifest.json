@@ -1,0 +1,102 @@
+{
+  "scope": "post-review R prompt/arm-identity correction; actual native R not qualified",
+  "archive_sha256": "93f49b71bac709d273a7b9589c5b4d34020caddcadcc4be96ac6c379fa249cae",
+  "file_members_read_back": 19,
+  "members": [
+    {
+      "member": "source/README.md",
+      "bytes": 2336,
+      "sha256": "06b222956dea7c6f46f16120a035f6355a56bd62e5f8cc16ae46ecc674e484b2"
+    },
+    {
+      "member": "source/adapter.py",
+      "bytes": 12437,
+      "sha256": "b20eaabea9bba14033b6b57afa3724f3e87eb41b6372db32e42f239e84a17c43"
+    },
+    {
+      "member": "source/executor.py",
+      "bytes": 12128,
+      "sha256": "8899724cfaed13be2bd955d5896546320acbb8ae064b09b603979f993a4fc1e2"
+    },
+    {
+      "member": "source/native_executor.py",
+      "bytes": 9959,
+      "sha256": "0a13a3d0a8443e83d4e34da0711d9fa4ebb7d516d715f6af12a6801dfc447149"
+    },
+    {
+      "member": "source/policy.py",
+      "bytes": 5594,
+      "sha256": "ec1626cc8ddfb79ccb75e634ecbdc3831d5837e1ba2638a6a3f928ad1f0bef23"
+    },
+    {
+      "member": "source/prompts.json",
+      "bytes": 1979,
+      "sha256": "38cb0716231cb035cb846292ea7b9ddbc50746b8c4459f2725bc7615263e8544"
+    },
+    {
+      "member": "source/qualify_native.py",
+      "bytes": 16512,
+      "sha256": "0dd764d6f72d3070c88005d11e6162612be4e9abd2a82694de0ea88ad98f7e53"
+    },
+    {
+      "member": "source/readiness.py",
+      "bytes": 7586,
+      "sha256": "7c87721bc6e37a209db95dbfa12d6b6cbc41588526f983023fb66ed3bc490910"
+    },
+    {
+      "member": "source/receipts.py",
+      "bytes": 6770,
+      "sha256": "566d6bf99a4e9b8fce9db5828c6cf3d536f4b644eed80bc9832777eb2f7774c5"
+    },
+    {
+      "member": "source/test_adapter.py",
+      "bytes": 11632,
+      "sha256": "00d57b07eef5f8a95cc86940fac7daa805e31776d2dff85a9aa7ae76d8d0c514"
+    },
+    {
+      "member": "source/test_executor.py",
+      "bytes": 9415,
+      "sha256": "623f755d2c97af9549630105c3ffa1abb652eab0807c3a55b1354ee5ca13a720"
+    },
+    {
+      "member": "source/test_native.py",
+      "bytes": 2150,
+      "sha256": "2a429eeeded7812fc0d6ba3e4aa0a08b168d79fa42c8ff7e13aff017021ef62d"
+    },
+    {
+      "member": "source/test_native_executor.py",
+      "bytes": 16189,
+      "sha256": "fb6d44e291e53cbdbffbbccbea5a913f94db1445f73b3d79ce856a0c9523e059"
+    },
+    {
+      "member": "source/test_policy.py",
+      "bytes": 6096,
+      "sha256": "fe31b2d218ebed843e3a1066453259e69f57d44eec1ef0b0946f5472f5ed2a9c"
+    },
+    {
+      "member": "source/test_qualification_cleanup.py",
+      "bytes": 3771,
+      "sha256": "89bbce338471e542619b7aaf00748ef9844341cc38d8610e72b0e9703931f747"
+    },
+    {
+      "member": "source/test_readiness.py",
+      "bytes": 6507,
+      "sha256": "2f5691256f42f7d4e94a8907b20de21f1628c5d15ad0351d2fac6829a5619cad"
+    },
+    {
+      "member": "source/test_receipts.py",
+      "bytes": 6878,
+      "sha256": "9bd708e710ed105c49fcca208618b7ee0210552987d2bc4d1140e5dc189d6cf4"
+    },
+    {
+      "member": "logs/control-arm-red.log",
+      "bytes": 4800,
+      "sha256": "29171ab02cddff1ff11182edfc061314fbc9117aee5676f0c071122c52de6ce9"
+    },
+    {
+      "member": "logs/control-arm-green.log",
+      "bytes": 3279,
+      "sha256": "968018b82e9bc2ef12abaf24e270bc4ca01143d0d909eb019bee932331d74342"
+    }
+  ]
+}

@@ -1,0 +1,157 @@
+diff --git a/rust/src/core/ocla/response_cache.rs b/rust/src/core/ocla/response_cache.rs
+index ea002ca..13052e7 100644
+--- a/rust/src/core/ocla/response_cache.rs
++++ b/rust/src/core/ocla/response_cache.rs
+@@ -65,6 +65,8 @@ impl ResponseCacheKey {
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct CachedResponse {
+     pub body: Vec<u8>,
++    /// Original upstream HTTP status, replayed on cache hits.
++    pub status: u16,
+     pub tokens: u64,
+     pub created_at: Instant,
+     pub ttl: Duration,
+@@ -265,6 +267,7 @@ mod tests {
+     fn response(body: &[u8], created_at: Instant, ttl: Duration) -> CachedResponse {
+         CachedResponse {
+             body: body.to_vec(),
++            status: 200,
+             tokens: body.len() as u64,
+             created_at,
+             ttl,
+diff --git a/rust/src/proxy/forward/mod.rs b/rust/src/proxy/forward/mod.rs
+index 51327d3..9bb71e5 100644
+--- a/rust/src/proxy/forward/mod.rs
++++ b/rust/src/proxy/forward/mod.rs
+@@ -211,9 +211,11 @@ pub async fn forward_request(
+         .and_then(|m| m.as_str());
+     let cache_prompt_hash = super::ocla_cache_bridge::prompt_hash(&body_bytes);
+     if let (Some(cache), Some(model)) = (&state.ocla_cache, model)
+-        && let Some(body) = cache.try_cache_hit(model, &cache_prompt_hash, 0.0, 0)
++        && let Some((status, body)) =
++            cache.try_cache_hit_with_status(model, &cache_prompt_hash, 0.0, 0)
+     {
+         let mut response = Response::new(Body::from(body));
++        *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
+         trace_id::inject_trace_id(&mut response, &trace_id);
+         return Ok(response);
+     }
+diff --git a/rust/src/proxy/forward/transport.rs b/rust/src/proxy/forward/transport.rs
+index 4f7301f..566d112 100644
+--- a/rust/src/proxy/forward/transport.rs
++++ b/rust/src/proxy/forward/transport.rs
+@@ -167,11 +167,12 @@ pub(crate) async fn build_response(
+         resp_bytes.to_vec()
+     };
+     if let (Some(cache), Some(model)) = (cache, model) {
+-        cache.record_response(
++        cache.record_response_with_status(
+             model,
+             cache_prompt_hash,
+             0.0,
+             0,
++            status.as_u16(),
+             &resp_bytes,
+             measured_output_tokens,
+         );
+diff --git a/rust/src/proxy/ocla_cache_bridge.rs b/rust/src/proxy/ocla_cache_bridge.rs
+index 7da5505..ec92502 100644
+--- a/rust/src/proxy/ocla_cache_bridge.rs
++++ b/rust/src/proxy/ocla_cache_bridge.rs
+@@ -25,12 +25,24 @@ impl OclaCacheBridge {
+         temp: f32,
+         max_tokens: u32,
+     ) -> Option<Vec<u8>> {
++        self.try_cache_hit_with_status(model, prompt_hash, temp, max_tokens)
++            .map(|(_, body)| body)
++    }
++
++    /// Returns the cached upstream status and body for matching request fields.
++    pub fn try_cache_hit_with_status(
++        &self,
++        model: &str,
++        prompt_hash: &str,
++        temp: f32,
++        max_tokens: u32,
++    ) -> Option<(u16, Vec<u8>)> {
+         self.cache
+             .get(&cache_key(model, prompt_hash, temp, max_tokens))
+-            .map(|response| response.body)
++            .map(|response| (response.status, response.body))
+     }
+ 
+-    /// Records a response for matching request fields.
++    /// Records a successful (200) response for matching request fields.
+     pub fn record_response(
+         &self,
+         model: &str,
+@@ -39,11 +51,27 @@ impl OclaCacheBridge {
+         max_tokens: u32,
+         body: &[u8],
+         tokens: u64,
++    ) {
++        self.record_response_with_status(model, prompt_hash, temp, max_tokens, 200, body, tokens);
++    }
++
++    /// Records a response together with its upstream HTTP status.
++    #[allow(clippy::too_many_arguments)]
++    pub fn record_response_with_status(
++        &self,
++        model: &str,
++        prompt_hash: &str,
++        temp: f32,
++        max_tokens: u32,
++        status: u16,
++        body: &[u8],
++        tokens: u64,
+     ) {
+         self.cache.put(
+             cache_key(model, prompt_hash, temp, max_tokens),
+             CachedResponse {
+                 body: body.to_vec(),
++                status,
+                 tokens,
+                 created_at: Instant::now(),
+                 ttl: Duration::ZERO,
+@@ -98,4 +126,22 @@ mod tests {
+                 .is_none()
+         );
+     }
++
++    #[test]
++    fn bridge_replays_original_upstream_status() {
++        let bridge = OclaCacheBridge::new(Arc::new(ResponseCache::new(4, Duration::from_mins(1))));
++        let hash = prompt_hash(br#"{"prompt":"hello"}"#);
++
++        bridge.record_response_with_status("model", &hash, 0.4, 128, 429, b"slow down", 0);
++        bridge.record_response("model", &hash, 0.2, 128, b"answer", 7);
++
++        assert_eq!(
++            bridge.try_cache_hit_with_status("model", &hash, 0.4, 128),
++            Some((429, b"slow down".to_vec()))
++        );
++        assert_eq!(
++            bridge.try_cache_hit_with_status("model", &hash, 0.2, 128),
++            Some((200, b"answer".to_vec()))
++        );
++    }
+ }
+diff --git a/rust/tests/ocla_integration_suite.rs b/rust/tests/ocla_integration_suite.rs
+index 088cd92..6e7c70c 100644
+--- a/rust/tests/ocla_integration_suite.rs
++++ b/rust/tests/ocla_integration_suite.rs
+@@ -182,6 +182,7 @@ fn test_full_pipeline() {
+         key.clone(),
+         CachedResponse {
+             body: b"cached response".to_vec(),
++            status: 200,
+             tokens: 40,
+             created_at: Instant::now(),
+             ttl: Duration::ZERO,
+diff --git a/submission.json b/submission.json
+new file mode 100644
+index 0000000..a40a7ac
+--- /dev/null
++++ b/submission.json
+@@ -0,0 +1 @@
++{"status":"submitted","clauses":[{"id":"req-status","kind":"requirement","role":"reproduction","receipts":["lib-ocla","bridge-tests"],"statement":"Source: CachedResponse now carries status; transport.rs records status.as_u16() via record_response_with_status and forward/mod.rs replays it via try_cache_hit_with_status. Observation: bridge_replays_original_upstream_status passes (429 replays as 429)."},{"id":"pres-boundary","kind":"preservation","role":"legitimate","receipts":["lib-ocla","integration-suite"],"statement":"Boundary probe: the change is confined to the cache struct, bridge, and the two call sites; try_cache_hit/record_response keep signatures (record defaults to 200), so the existing key-match/miss test and the 200 replay path are unchanged. Observation: all 223 ocla-filtered lib tests and the 7 ocla_integration_suite tests (which constructs CachedResponse) pass. wire_middleware's separate CachedResponse is untouched. No revision to the patch was justified."},{"id":"unc-scope","kind":"uncertainty","role":"reproduction","receipts":["bridge-tests"],"unresolved":true,"statement":"Unresolved: error responses are still cached (existing behavior, now replayed with status), which may be broader than desired; response headers like content-type are not replayed; forward/mod.rs and transport.rs have no end-to-end test. Not verified by any command here."}],"commands":[{"id":"bridge-tests","argv":["cargo","test","--offline","--manifest-path","rust/Cargo.toml","--lib","ocla_cache_bridge"],"cwd":".","test_files":["rust/src/proxy/ocla_cache_bridge.rs"]},{"id":"lib-ocla","argv":["cargo","test","--offline","--manifest-path","rust/Cargo.toml","--lib","ocla"],"cwd":".","test_files":["rust/src/proxy/ocla_cache_bridge.rs"]},{"id":"integration-suite","argv":["cargo","test","--offline","--manifest-path","rust/Cargo.toml","--test","ocla_integration_suite"],"cwd":".","test_files":["rust/tests/ocla_integration_suite.rs"]}]}

@@ -1,0 +1,56 @@
+[
+  {
+    "path": "/home/marius/work/claude/setup-ab-data/fresh-build/records.jsonl",
+    "sha256": "1495980cbd12b72972c8b96ec49023790f2e4a954800414f0f177e20cc699f75",
+    "listed_rows": 10,
+    "exact_ids": [
+      "nushell__nushell-18863",
+      "nushell__nushell-18976",
+      "nushell__nushell-18979",
+      "nushell__nushell-19052",
+      "nushell__nushell-19172",
+      "nushell__nushell-19283",
+      "rust-lang__rust-analyzer-22992",
+      "rust-lang__rust-analyzer-23096",
+      "rust-lang__rust-analyzer-23115",
+      "rust-lang__rust-analyzer-23586"
+    ],
+    "rule": "conservatively exclude all listed IDs,without reading actor outcomes"
+  },
+  {
+    "path": "/home/marius/work/claude/setup-ab-data/fresh-build-v2/pool/records.jsonl",
+    "sha256": "1061fad3808e28505026fa692fc4e9fd498b40edfb00c2e5d0862cbcb3b0e347",
+    "listed_rows": 4,
+    "exact_ids": [
+      "nushell__nushell-18863",
+      "nushell__nushell-19052",
+      "nushell__nushell-19283",
+      "rust-lang__rust-analyzer-22992"
+    ],
+    "rule": "conservatively exclude all listed IDs,without reading actor outcomes"
+  },
+  {
+    "path": "/home/marius/work/claude/setup-ab-data/fresh-screen-v2/live-screen/screen-plan.json",
+    "sha256": "fc6fa116249888d21a2823f11b2320b5a2f7e5e245d6242d51677d34b275e699",
+    "listed_rows": 8,
+    "exact_ids": [
+      "nushell__nushell-18863",
+      "nushell__nushell-19052",
+      "nushell__nushell-19283",
+      "rust-lang__rust-analyzer-22992"
+    ],
+    "rule": "conservatively exclude all listed IDs,without reading actor outcomes"
+  },
+  {
+    "path": "/home/marius/work/claude/setup-ab-data/fresh-screen-v2-cs/live-screen-cs/screen-plan.json",
+    "sha256": "778826a401844126b33190051f0945c85d73fa36806070f3e0482c23e37de092",
+    "listed_rows": 16,
+    "exact_ids": [
+      "nushell__nushell-18863",
+      "nushell__nushell-19052",
+      "nushell__nushell-19283",
+      "rust-lang__rust-analyzer-22992"
+    ],
+    "rule": "conservatively exclude all listed IDs,without reading actor outcomes"
+  }
+]

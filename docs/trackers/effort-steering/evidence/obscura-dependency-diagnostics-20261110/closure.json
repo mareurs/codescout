@@ -1,0 +1,72 @@
+{
+  "archive": {
+    "bytes": 552113,
+    "every_member_reopened_byte_equal": true,
+    "regular_members": 104,
+    "sha256": "02554d841828661ce9b9a3c7aa164006179276f3e656511c6e547dd4c45096af",
+    "source_files_unchanged_during_seal": true
+  },
+  "controls": [
+    {
+      "expected": 331,
+      "f2p_statuses": {
+        "obscura-cdp::structured_clone_crypto_parity$structured_clone_handles_circular_error_cause": "pass",
+        "obscura-cdp::structured_clone_crypto_parity$structured_clone_reproduces_own_proto_property": "pass"
+      },
+      "fresh_container_absence": true,
+      "log_sha256": "b8623da47ac04a69c5fbaf7dcd9306b0d139f3a6274c6d4335ea76a180ba46f5",
+      "missing": 0,
+      "name": "reference-network-positive",
+      "not_passing": 1,
+      "series": "trusted-reference-network-positive-v1",
+      "source_hashes_unchanged": true,
+      "wall_seconds": 118.6
+    },
+    {
+      "expected": 1,
+      "f2p_statuses": {
+        "obscura-cli::mcp_client$test_wait_for_selector": "fail"
+      },
+      "fresh_container_absence": true,
+      "log_sha256": "768f8726d00a4f838788691739d06ed0861120a81cdc005c85211c132b892d6d",
+      "missing": 0,
+      "name": "reference-navigation-trace",
+      "not_passing": 1,
+      "series": "obscura-navigation-trace-v1",
+      "source_hashes_unchanged": true,
+      "wall_seconds": 29.8
+    },
+    {
+      "expected": 1,
+      "f2p_statuses": {
+        "obscura-cli::mcp_client$test_wait_for_selector": "fail"
+      },
+      "fresh_container_absence": true,
+      "log_sha256": "09f0e3cc723899b1955703a5f36b6d8880f5b0275b36b3f724f03762641b5153",
+      "missing": 0,
+      "name": "reference-dom-trace",
+      "not_passing": 1,
+      "series": "obscura-dom-trace-v1",
+      "source_hashes_unchanged": true,
+      "wall_seconds": 36.6
+    }
+  ],
+  "experimental_model_repair_calls": 0,
+  "findings": [
+    "bridge resolves navigation/snapshot and title P2P; selector wait still fails",
+    "successful navigation followed by actual DOM h1=false and timeout",
+    "independent host raw HTML response has zero literal h1 start tags"
+  ],
+  "limits": [
+    "diagnostic helper read calls may perturb timing",
+    "current service responses do not prove historic content",
+    "no hermetic service fixture qualified",
+    "no candidate/model networking authorization",
+    "no complete all-arm environment or efficacy qualification"
+  ],
+  "original_expected_sets_changed": false,
+  "paid_ready": false,
+  "schema": 1,
+  "scope": "trusted-reference diagnostics only",
+  "tasks_replaced": false
+}
